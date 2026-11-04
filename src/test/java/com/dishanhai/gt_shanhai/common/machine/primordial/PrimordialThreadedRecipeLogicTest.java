@@ -3,6 +3,8 @@ package com.dishanhai.gt_shanhai.common.machine.primordial;
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
+import com.dishanhai.gt_shanhai.api.machine.part.IRecipeThreadSource;
+import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.generator.PrimordialOmegaVoidInductionArmatureLogic;
 import com.dishanhai.gt_shanhai.mixin.PrimordialRecipeThreadStateAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
@@ -535,6 +537,23 @@ class PrimordialThreadedRecipeLogicTest {
         assertEquals(1, logic.inputTransactions);
     }
 
+    @Test void attachedCapacityUsesTheStrongestSourceAndKeepsTheWholeMachineParallelLimit() throws Exception {
+        Probe logic = probe();
+        logic.module.attached = List.of(sourcePart(10L), sourcePart(7L));
+        assertEquals(10L, logic.getRecipeThreadCapacity());
+        logic.module.attached = List.of(sourcePart(Long.MAX_VALUE));
+        assertEquals(64L, logic.getRecipeThreadCapacity(), "執行緒容量不能增加整機並行");
+        logic.module.attached = List.of(sourcePart(1L));
+        assertEquals(4L, logic.getRecipeThreadCapacity(), "關閉附屬能力保留原初內建來源");
+    }
+
+    private static IMultiPart sourcePart(long capacity) {
+        return (IMultiPart) java.lang.reflect.Proxy.newProxyInstance(
+                PrimordialThreadedRecipeLogicTest.class.getClassLoader(),
+                new Class<?>[]{IMultiPart.class, IRecipeThreadSource.class},
+                (proxy, method, arguments) -> method.getName().equals("getRecipeThreadCapacity") ? capacity : null);
+    }
+
     private static void tick(Probe logic, long now) {
         logic.module.now = now;
         logic.serverTick();
@@ -566,10 +585,12 @@ class PrimordialThreadedRecipeLogicTest {
         long configuredThreads;
         boolean formed;
         boolean suspendAfterFinish;
+        List<IMultiPart> attached;
         Probe logic;
         Module() { super(null); }
         @Override public long getOffsetTimer() { return now; }
         @Override public boolean isFormed() { return formed; }
+        @Override public List<IMultiPart> getParts() { return attached == null ? List.of() : attached; }
         @Override protected boolean canModuleWork() { return formed; }
         @Override public long getParallelRecipeThreadCount() { return configuredThreads; }
         @Override public Probe getRecipeLogic() { return logic; }

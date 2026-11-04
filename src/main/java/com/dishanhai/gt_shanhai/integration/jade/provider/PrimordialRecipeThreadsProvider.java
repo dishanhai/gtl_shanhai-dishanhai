@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.integration.jade.provider;
 
 // Author: dishanhai
-import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadedRecipeLogic;
+import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
 import com.gregtechceu.gtceu.api.blockentity.MetaMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import net.minecraft.ChatFormatting;
@@ -37,7 +37,8 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
     @Override public void appendServerData(CompoundTag data, BlockAccessor accessor) {
         if (!(accessor.getBlockEntity() instanceof MetaMachineBlockEntity holder)
                 || !(holder.getMetaMachine() instanceof IRecipeLogicMachine machine)
-                || !(machine.getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic)) return;
+                || !(machine.getRecipeLogic() instanceof IRecipeThreadDisplay logic)
+                || !logic.isRecipeThreadDisplayAvailable()) return;
         int count = logic.getActiveRecipeThreadCount();
         int pages = Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
         int page = (int) Math.floorMod(machine.self().getOffsetTimer() / 100L, (long) pages);
@@ -51,7 +52,7 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
         if (!accessor.getServerData().contains(DATA)) return;
         CompoundTag data = accessor.getServerData().getCompound(DATA);
         var helper = tooltip.getElementHelper();
-        addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.panel_title")
+        addThreadText(tooltip, Component.translatable("gt_shanhai.recipe_threads.panel_title")
                 .withStyle(ChatFormatting.AQUA));
         addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.summary", data.getInt("active"),
                 capacityText(data.getLong("capacity"))).withStyle(ChatFormatting.AQUA));

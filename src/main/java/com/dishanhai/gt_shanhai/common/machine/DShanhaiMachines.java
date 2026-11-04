@@ -71,6 +71,7 @@ import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiMaintenanceHatchItem;
 import com.dishanhai.gt_shanhai.common.item.SeventyTwoChangesItem;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.RecipeThreadHatchPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.CosmicCleanGravityMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiDivergenceEngineMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiOverclockHatchMachine;
@@ -147,6 +148,7 @@ public class DShanhaiMachines {
     public static MachineDefinition INPUT_DUAL_HATCH;
     public static MachineDefinition ME_STELLAR_STOCK_PART;
     public static MachineDefinition MAINTENANCE_HATCH;
+    public static MachineDefinition RECIPE_THREAD_HATCH;
     public static MachineDefinition COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH;
     public static MachineDefinition[] PROGRAMMABLE_HATCH = new MachineDefinition[GTValues.MAX + 1];
     public static MachineDefinition[] OVERCLOCK_HATCH = new MachineDefinition[GTValues.MAX + 1];
@@ -1343,6 +1345,27 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§6可共享：§c✕"));
         });
 
+        // 山海：配方執行緒倉可安裝於並行倉及物品輸入倉位，配置物不參與配方輸入。
+        RECIPE_THREAD_HATCH = MachineBuilder.create(
+                GTDishanhaiRegistration.REGISTRATE,
+                "recipe_thread_hatch",
+                MachineDefinition::createDefinition,
+                RecipeThreadHatchPartMachine::new,
+                MetaMachineBlock::new,
+                MetaMachineItem::new,
+                MetaMachineBlockEntity::createBlockEntity)
+                .rotationState(RotationState.ALL)
+                .abilities(PartAbility.PARALLEL_HATCH, PartAbility.IMPORT_ITEMS)
+                .renderer(() -> new WorkableCasingMachineRenderer(
+                        new ResourceLocation(MOD_ID, "block/casings/hub_casing"),
+                        new ResourceLocation(MOD_ID, "block/machine/part/recipe_thread_hatch")))
+                .register();
+        RECIPE_THREAD_HATCH.setTooltipBuilder((stack, tooltips) -> {
+            for (int line = 0; line < 5; line++) {
+                tooltips.add(Component.translatable("gt_shanhai.recipe_threads.hatch.tooltip." + line));
+            }
+        });
+
         // ========== 山海维护仓 ==========
         MAINTENANCE_HATCH = MachineBuilder.create(
                 GTDishanhaiRegistration.REGISTRATE,
@@ -1926,16 +1949,8 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createAuroraText("天界星云零点虹吸枢纽"));
             tooltips.add(DShanhaiTextUtil.createNeonText("以多维星穹为引，从宇宙真空中聚合零点能驱动基础物质合成"));
             tooltips.add(Component.literal(""));
-            tooltips.add(Component.literal("§7消耗特定流体提升并行处理能力："));
-            tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createWaterText("真空零点能"))
-                    .append(Component.literal(" §7→ ").append(DShanhaiTextUtil.createElectricText("1,024")).append(Component.literal(" §7并行"))));
-            tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createNatureText("初级物质流"))
-                    .append(Component.literal(" §7→ ").append(DShanhaiTextUtil.createElectricText("2,048")).append(Component.literal(" §7并行"))));
-            tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createLavaText("高级物质流"))
-                    .append(Component.literal(" §7→ ").append(DShanhaiTextUtil.createUltimateRainbow("10,240")).append(Component.literal(" §7并行"))));
+            tooltips.add(Component.literal("§7消耗特定流体提升并行处理能力，每 5 刻消耗 250 mB，只取最高一档："));
+            NebulaSiphonMachine.appendBoostTooltip(tooltips);
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§7直接从电网取电，无需 EU 输入仓"));
             tooltips.add(DShanhaiTextUtil.createAuroraText("配方类型：多维星穹零点聚合"));

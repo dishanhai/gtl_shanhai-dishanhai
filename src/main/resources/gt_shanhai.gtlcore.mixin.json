@@ -7,6 +7,8 @@
     "GravityConditionMaintenanceMixin",
     "ParallelOutputChanceBypassMixin",
     "MultipleRecipesLogicThreadMixin",
+    "RecipeThreadMultipleLogicMixin",
+    "RecipeThreadInputObservationMixin",
     "StellarPatternCoreParallelObservationMixin",
     "HarmonyMachineBypassMixin",
     "SuprachronalModuleDisplayMixin",

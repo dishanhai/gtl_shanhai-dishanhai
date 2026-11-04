@@ -5,6 +5,9 @@
   "compatibilityLevel": "JAVA_17",
   "mixins": [
     "PrimordialRecipeThreadStateAccessor",
+    "RecipeThreadStateAccessor",
+    "RecipeThreadLogicMixin",
+    "RecipeThreadParallelMixin",
     "ShanhaiAeSteamEnergyHandlerMixin",
     "DShanhaiAutoPowerRegistryMixin",
     "DShanhaiBatchPartMixin",
@@ -23,6 +26,7 @@
     "GTLAddWirelessRecipeLoadWarmupMixin",
     "SimplePredicateFilterMixin",
     "MultiblockStateCacheInitMixin",
+    "StructureFormGetPartsMixin",
     "SearchRecipeTempMixin",
     "CoilTypeOverrideMixin",
     "EBFDisplayMixin",

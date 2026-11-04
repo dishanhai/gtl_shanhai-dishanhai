@@ -12,13 +12,13 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 
 /** 山海：保留真實已扣料來源，DUMMY 僅是運行包裝，不能作為 Jade 的配方身份。 */
-final class PrimordialThreadRecipeIdentity {
-    static final String KEY = "sh_primordial_source_recipes";
+public final class PrimordialThreadRecipeIdentity {
+    public static final String KEY = "sh_primordial_source_recipes";
     private static final ResourceLocation DUMMY = new ResourceLocation("gtceu", "dummy");
 
     private PrimordialThreadRecipeIdentity() {}
 
-    record Identity(String recipeType, String recipeId) {
+    public record Identity(String recipeType, String recipeId) {
         CompoundTag save() {
             CompoundTag tag = new CompoundTag();
             tag.putString("recipeType", recipeType);
@@ -27,7 +27,7 @@ final class PrimordialThreadRecipeIdentity {
         }
     }
 
-    static Identity fromRecipe(GTRecipe recipe) {
+    public static Identity fromRecipe(GTRecipe recipe) {
         if (recipe == null) return null;
         String taggedType = recipe.data.getString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE);
         ResourceLocation type = taggedType.isBlank() ? null : ResourceLocation.tryParse(taggedType);
@@ -39,7 +39,7 @@ final class PrimordialThreadRecipeIdentity {
         return id == null ? null : new Identity(type.toString(), id.toString());
     }
 
-    static void store(GTRecipe result, Collection<Identity> sources) {
+    public static void store(GTRecipe result, Collection<Identity> sources) {
         if (result == null || sources.isEmpty()) return;
         ListTag list = new ListTag();
         for (Identity identity : new LinkedHashSet<>(sources)) {
@@ -49,7 +49,7 @@ final class PrimordialThreadRecipeIdentity {
         result.data.put(KEY, list);
     }
 
-    static void appendDisplay(CompoundTag row, GTRecipe recipe) {
+    public static void appendDisplay(CompoundTag row, GTRecipe recipe) {
         if (recipe == null) return;
         ListTag sources = recipe.data.getList(KEY, 10);
         if (sources.isEmpty()) {

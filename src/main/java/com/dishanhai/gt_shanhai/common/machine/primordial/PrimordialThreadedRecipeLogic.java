@@ -34,7 +34,8 @@ import java.util.LinkedHashSet;
 import java.util.function.Predicate;
 
 /** 山海：原初批次的多线程并行。所有庫存及能源交易仍在伺服器執行緒執行。 */
-public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
+public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeTypeSetRecipeLogic
+        implements com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay {
     private static final String SAVE_KEY = "sh_primordial_recipe_threads";
     private static final ManagedFieldHolder THREAD_FIELDS =
             new ManagedFieldHolder(PrimordialThreadedRecipeLogic.class, MANAGED_FIELD_HOLDER);
@@ -86,13 +87,14 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     protected final boolean isThreadRecipeLookupAllowed() { return !tickingThreads || admission; }
     public final int getActiveRecipeThreadCount() { return activeRecipeThreads; }
+    public final boolean isRecipeThreadDisplayAvailable() { return true; }
     public final long getReservedThreadParallel() { return reservedThreadParallel; }
 
     /** Jade 唯讀快照：不切換 frame、不查配方、不交易庫存，僅分頁傳送有限的批次。 */
     public final CompoundTag getRecipeThreadDisplay(int first, int maximum) {
         CompoundTag data = new CompoundTag();
         var lanes = threads.lanes();
-        int limit = Math.max(1, Math.min(8, maximum));
+        int limit = Math.max(0, Math.min(8, maximum));
         int offset = Math.max(0, Math.min(first, Math.max(0, lanes.size() - 1)));
         boolean enabled = threads.isEnabled() && !isSuspend();
         boolean available = enabled
@@ -173,7 +175,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         return data;
     }
 
-    private static String formatThreadEnergy(BigInteger value) {
+    public static String formatThreadEnergy(BigInteger value) {
         if (value.bitLength() <= 256) return value.toString();
         int bits = value.bitLength();
         double log = Math.log10(value.shiftRight(bits - 53).doubleValue()) + (bits - 53) * Math.log10(2);
@@ -181,7 +183,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         return String.format(java.util.Locale.ROOT, "%.3fE%d", Math.pow(10, log - exponent), exponent);
     }
 
-    private static void appendThreadOutputs(CompoundTag row, GTRecipe recipe) {
+    public static void appendThreadOutputs(CompoundTag row, GTRecipe recipe) {
         if (recipe == null || recipe.outputs.isEmpty()) return;
         ListTag outputs = new ListTag();
         int total = 0;
@@ -214,6 +216,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                 ? module.getParallelRecipeThreadCount()
                 : getMachine() instanceof PrimordialOmegaEngineMachine host
                 ? host.getParallelRecipeThreadCount() : 1L;
+        configured = com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadSources.capacity(machine, configured);
         return Math.min(Math.max(0L, getUnreservedTotalParallelLimit()), configured);
     }
 

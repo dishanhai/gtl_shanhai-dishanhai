@@ -37,7 +37,7 @@ import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
-import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadedRecipeLogic;
+import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
 import com.dishanhai.gt_shanhai.mixin.MEPatternBufferSlot2PatternAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
@@ -380,11 +380,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return accepted;
     }
 
-    /** 山海：成功推送才喚醒所屬原初主機，不另行預取或重複扣除樣板材料。 */
+    /** 山海：成功推送才喚醒所屬批次主機，不另行預取或重複扣除樣板材料。 */
     private void notifyParallelRecipeThreads() {
         for (IMultiController controller : getControllers()) {
             if (controller.self() instanceof IRecipeLogicMachine host
-                    && host.getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+                    && host.getRecipeLogic() instanceof IRecipeThreadDisplay logic) {
                 logic.onThreadInputsChanged();
             }
         }

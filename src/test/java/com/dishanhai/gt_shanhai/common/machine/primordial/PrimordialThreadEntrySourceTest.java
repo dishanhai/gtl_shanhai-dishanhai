@@ -40,7 +40,7 @@ class PrimordialThreadEntrySourceTest {
         String body = source.substring(helper, source.indexOf("private final class StellarPatternBufferInternalSlot", helper));
         assertTrue(body.contains("getControllers()"));
         assertTrue(body.contains("controller.self() instanceof IRecipeLogicMachine host"));
-        assertTrue(body.contains("instanceof PrimordialThreadedRecipeLogic logic"));
+        assertTrue(body.contains("instanceof IRecipeThreadDisplay logic"));
         assertTrue(body.contains("logic.onThreadInputsChanged()"));
         assertFalse(body.contains("getAllLevels"));
     }

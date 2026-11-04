@@ -12,7 +12,6 @@ import com.gregtechceu.gtceu.api.capability.IDataAccessHatch;
 import com.gregtechceu.gtceu.api.capability.IParallelHatch;
 import com.gregtechceu.gtceu.api.capability.recipe.CWURecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.EURecipeCapability;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;
@@ -22,6 +21,9 @@ import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
 
 import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.api.machine.part.IMaintenanceBypassPart;
+import com.dishanhai.gt_shanhai.api.machine.part.IRecipeThreadSource;
+import com.dishanhai.gt_shanhai.common.machine.part.ui.RecipeThreadConfigurationPage;
+import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadSources;
 import com.dishanhai.gt_shanhai.common.machine.trait.InfiniteCWUContainer;
 import com.gregtechceu.gtceu.api.GTValues;
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
@@ -47,7 +49,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
                    IAutoConfigurationMaintenanceHatch, IMaintenanceMachine,
                    IParallelHatch, IThreadModifierPart, IDataAccessHatch,
                    com.dishanhai.gt_shanhai.api.machine.IDShanhaiBatchToggle,
-                   IOutputMultiplierSource {
+                   IOutputMultiplierSource, IRecipeThreadSource {
 
     private static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             DShanhaiMaintenanceHatchMachine.class, MultiblockPartMachine.MANAGED_FIELD_HOLDER);
@@ -128,6 +130,8 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         return GTValues.VN[tier];
     }
     @Persisted private boolean threadEnabled = true;
+    // 独立配方批次开关，与原有跨配方名额开关互不影响。
+    @Persisted private boolean recipeThreadsEnabled = true;
     // 批处理：装本枢纽的多方块，<20t 配方在修饰链尾合并为 ≥20t（DShanhaiBatchPartMixin 消费）
     @Persisted private boolean batchEnabled = true;
 
@@ -204,6 +208,33 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
     /** 获取线程增强槽 */
     public ItemStackTransfer getThreadBoostSlot() { return threadBoostSlot; }
+
+    public boolean isRecipeThreadsEnabled() { return recipeThreadsEnabled; }
+
+    public void setRecipeThreadsEnabled(boolean enabled) {
+        if (recipeThreadsEnabled == enabled) return;
+        recipeThreadsEnabled = enabled;
+        markDirty();
+        RecipeThreadSources.changed(this);
+    }
+
+    @Override
+    public long getRecipeThreadCapacity() {
+        return RecipeThreadHatchPartMachine.capacityForBoost(recipeThreadsEnabled,
+                com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase
+                        .getThreadBoostForStack(threadBoostSlot.getStackInSlot(0)));
+    }
+
+    @Override
+    public void attachSideTabs(com.gregtechceu.gtceu.api.gui.fancy.TabsWidget tabsWidget) {
+        super.attachSideTabs(tabsWidget);
+        tabsWidget.attachSubTab(new RecipeThreadConfigurationPage(this));
+    }
+
+    @Override
+    public com.lowdragmc.lowdraglib.gui.modular.ModularUI createUI(net.minecraft.world.entity.player.Player player) {
+        return RecipeThreadConfigurationPage.createUI(this, player);
+    }
 
     /** 获取星阵/世线信标槽 */
     public ItemStackTransfer getAstralSlot() { return astralSlot; }
@@ -317,6 +348,10 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     }
 
     private void onThreadBoostChanged() {
+        if (getLevel() != null && !isRemote()) {
+            markDirty();
+            RecipeThreadSources.changed(this);
+        }
         // 线程槽变动后强制通知主机重新读取线程数
         if (getControllers() != null) {
             for (var controller : getControllers()) {
@@ -502,6 +537,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     @Override
     public void addedToController(IMultiController controller) {
         super.addedToController(controller);
+        RecipeThreadSources.changed(this);
         THREAD_LOG.debug("addedToController: {} isThreadModifier={}",
                 controller.getClass().getSimpleName(), controller instanceof IThreadModifierMachine);
         if (controller instanceof IThreadModifierMachine tm) {
@@ -512,6 +548,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
     @Override
     public void removedFromController(IMultiController controller) {
+        RecipeThreadSources.changed(this);
         super.removedFromController(controller);
         if (controller instanceof IThreadModifierMachine tm && tm.getThreadPartMachine() == this) {
             tm.setThreadPartMachine(null);
@@ -614,6 +651,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         tag.putBoolean("BypassChance", bypassChance);
         tag.putBoolean("BypassTemperature", bypassTemperature);
         tag.putBoolean("ThreadEnabled", threadEnabled);
+        tag.putBoolean("RecipeThreadsEnabled", recipeThreadsEnabled);
         tag.putBoolean("BatchEnabled", batchEnabled);
         tag.putLong("ThreadCount", threadCount);
         tag.putLong("ThreadMax", threadMax);
@@ -661,6 +699,9 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         if (tag.contains("ThreadEnabled")) {
             threadEnabled = tag.getBoolean("ThreadEnabled");
         }
+        if (tag.contains("RecipeThreadsEnabled")) {
+            recipeThreadsEnabled = tag.getBoolean("RecipeThreadsEnabled");
+        }
         if (tag.contains("ThreadCount")) {
             threadCount = tag.getLong("ThreadCount");
         }
@@ -689,7 +730,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         updateThreadCount();
     }
 
-    // ========== UI（原版 gtlcore 风格） ==========
+    // ========== UI ==========
 
     @Override
     public Widget createUIWidget() {
@@ -697,7 +738,6 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
         // 上方文字区
         var scrollGroup = new DraggableScrollableWidgetGroup(4, 4, 212, 160);
-        scrollGroup.setBackground(GuiTextures.DISPLAY);
 
         var textPanel = new ComponentPanelWidget(4, 5, this::buildText);
         textPanel.setMaxWidthLimit(196);
@@ -815,7 +855,6 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
                 Component.literal("§7§6超限器同时锁定线程为 Long.MAX_VALUE"));
         group.addWidget(boostSlotWidget);
 
-        group.setBackground(GuiTextures.BACKGROUND_INVERSE);
         return group;
     }
 
