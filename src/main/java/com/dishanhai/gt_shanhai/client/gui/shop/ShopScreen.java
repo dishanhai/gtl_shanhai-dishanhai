@@ -185,6 +185,14 @@ public class ShopScreen extends ScaledScreen {
     // 按键即时反馈：压下/回弹、连发、等待回执与结果闪色（见 ButtonFeedback）；hover 仍是上面的 hoverButtons。
     private final ButtonFeedback buttonFeedback = new ButtonFeedback(hoverButtons);
     private final ShopTooltipMotion tooltipMotion = new ShopTooltipMotion();
+    private final ShopTipCarousel<FormattedCharSequence> tipCarousel = new ShopTipCarousel<>();
+    private final List<Long> tipEntryKeys = new ArrayList<>();
+    private final Map<Long, ShopEntry> tipSourceEntries = new HashMap<>();
+    private final List<ShopTipCarousel.Tip> tipDescriptions = new ArrayList<>();
+    private ShopTipCarousel.Page<FormattedCharSequence> hoveredTipPage;
+    private String tipTooltipText = "";
+    private int tipTooltipWidth = -1;
+    private List<FormattedCharSequence> tipTooltipLines = List.of();
     private static final int DETAIL_GUIDE = 1, DETAIL_AUTO_CRAFT = 2, DETAIL_BOOKMARK = 3;
     private long detailTipKey;
     private long previewTipKey;
@@ -1434,6 +1442,7 @@ public class ShopScreen extends ScaledScreen {
                 restoreStableId = selected.getStableId();
             }
             observedCatalogRevision = ClientShopCatalog.revision();
+            resetTipSources();
             clearSelection();
             snapGridScroll(0);
         }
@@ -1692,6 +1701,7 @@ public class ShopScreen extends ScaledScreen {
         boolean motionBusy = !openMotion.settled()
                 || (gridSwitchAtMs > 0L && nowMs - gridSwitchAtMs < GuiRenderUtil.MOTION_MS);
         ClientShopCatalog.pumpMaterialization(motionBusy ? LOAD_PUMP_MOTION_NS : LOAD_PUMP_SETTLED_NS);
+        refreshTipDescriptions();
         ShopGridViewport.Range loadRange = preloadGridRange();
         frameLoadKeys.clear();
         for (int i = loadRange.fromInclusive(); i < loadRange.toExclusive(); i++) {
@@ -1728,6 +1738,8 @@ public class ShopScreen extends ScaledScreen {
                 if (k >= 0L) frameLoadKeys.add(k);
             }
         }
+        // 小提示不依賴目前分類；併入同一次請求，保留可視商品與提示共用的 pinned chunks。
+        frameLoadKeys.addAll(tipEntryKeys);
         ClientShopCatalog.ensureLoadedRange(frameLoadKeys, 0, frameLoadKeys.size());
         syncOpenMotionWidgets();
         float openScale = GuiMotion.panelScale(openMotion.value());
@@ -1835,7 +1847,7 @@ public class ShopScreen extends ScaledScreen {
         // drawGrid 内部会发 LOADING 请求；同帧后一条主请求覆盖前一条，SWAP 要压过它，所以放在 drawGrid 之后。
         float gridT = GuiRenderUtil.popAnimProgress(gridSwitchAtMs, GuiRenderUtil.MOTION_MS);
         if (gridT < 1f) requestGroupSwitchGauss(1f - GuiRenderUtil.easeOut(gridT));
-        drawGridHint(g);
+        drawGridHint(g, mx, my);
 
         // 详情列一直在。换商品只换文字和数据，不再次缩放。
         drawDetail(g, mx, my);
@@ -3004,20 +3016,81 @@ public class ShopScreen extends ScaledScreen {
         descOverlayScroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * maxScroll);
     }
 
-    private void drawGridHint(GuiGraphics g) {
+    /** 目錄 revision 更新時清除舊描述，沿用 initScaled 的既有 revision 邊界。 */
+    private void resetTipSources() {
+        tipEntryKeys.clear();
+        tipSourceEntries.clear();
+        tipDescriptions.clear();
+        tipCarousel.clear();
+        hoveredTipPage = null;
+        tipTooltipText = "";
+        tipTooltipLines = List.of();
+        for (var stub : ClientShopCatalog.stubs()) {
+            if (ShopTipCarousel.isTipCategory(stub.hidden(), stub.top(), stub.sub(), stub.sub2(), stub.sub3())) {
+                tipEntryKeys.add(stub.entryKey());
+            }
+        }
+    }
+
+    /** 只巡覽提示 keys；分塊到貨後才重建文字快照，切分類不會重置輪播。 */
+    private void refreshTipDescriptions() {
+        boolean changed = false;
+        for (long key : tipEntryKeys) {
+            ShopEntry entry = ClientShopCatalog.get(key);
+            if (entry != null && tipSourceEntries.get(key) != entry) {
+                tipSourceEntries.put(key, entry);
+                changed = true;
+            }
+        }
+        if (!changed) return;
+        tipDescriptions.clear();
+        for (long key : tipEntryKeys) {
+            ShopEntry entry = tipSourceEntries.get(key);
+            if (entry == null) continue;
+            var tip = new ShopTipCarousel.Tip(key, entry.getDescription());
+            if (tip.hasText()) tipDescriptions.add(tip);
+        }
+    }
+
+    private void drawGridHint(GuiGraphics g, int mx, int my) {
+        hoveredTipPage = null;
         List<String> hints = operationHints();
         if (hints.isEmpty()) return;
         int base = (int) ((System.currentTimeMillis() / GRID_HINT_ROTATE_MS) % hints.size());
         int y = contentTop() + gridHeight() + 1;
         String page = "§8" + (base + 1) + "/" + hints.size();
         int pageW = this.font.width(page);
-        int maxW = Math.max(8, listWidth() - pageW - 10);
+        if (!tipDescriptions.isEmpty()) {
+            // 總項數取 manifest 上界，另固定保留五位頁碼；分塊到貨不改文字區寬度與計時。
+            int count = tipEntryKeys.size();
+            pageW = Math.max(pageW, this.font.width(count + "/" + count + " 99999/99999"));
+        }
+        var layout = ShopTipCarousel.layout(listLeft(), listWidth(), pageW, !tipDescriptions.isEmpty());
+        int maxW = Math.max(1, layout.operationWidth());
         int lines = Math.min(2, hints.size());
         for (int i = 0; i < lines; i++) {
             String text = GuiRenderUtil.trimText(this.font, "§8" + hints.get((base + i) % hints.size()), maxW);
-            g.drawString(this.font, text, listLeft() + 4, y + i * 10, GRAY, false);
+            g.drawString(this.font, text, layout.operationX(), y + i * 10, GRAY, false);
         }
-        g.drawString(this.font, page, listLeft() + listWidth() - pageW - 2, y, GRAY, false);
+        g.drawString(this.font, page, listLeft() + listWidth() - this.font.width(page) - 2, y, GRAY, false);
+
+        tipCarousel.setTips(tipDescriptions, Math.max(1, layout.tipWidth()),
+                text -> this.font.split(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(text)),
+                        Math.max(1, layout.tipWidth())));
+        boolean obscured = ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen;
+        boolean hovered = !obscured && mx >= layout.tipX() && mx < layout.tipX() + layout.tipWidth()
+                && my >= y && my < y + 20;
+        tipCarousel.tick(net.minecraft.Util.getMillis(), hovered || obscured || layout.tipWidth() <= 0 || !openMotion.settled());
+        var tipPage = tipCarousel.page();
+        if (tipPage == null || layout.tipWidth() <= 0) return;
+        for (int i = 0; i < tipPage.lines().size(); i++) {
+            g.drawString(this.font, tipPage.lines().get(i), layout.tipX(), y + i * 10, GRAY, false);
+        }
+        String counter = "§7" + (tipPage.tipIndex() + 1) + "/" + tipPage.tipCount()
+                + " " + (tipPage.pageIndex() + 1) + "/" + tipPage.pageCount();
+        counter = GuiRenderUtil.trimText(this.font, counter, pageW);
+        g.drawString(this.font, counter, listLeft() + listWidth() - this.font.width(counter) - 2, y + 10, GRAY, false);
+        if (hovered) hoveredTipPage = tipPage;
     }
 
     /** 网格为空时的下一步，避免玩家对着空白分类不知道该换页、清搜索还是先收藏。 */
@@ -4625,6 +4698,9 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     public void removed() {
+        // 子畫面關閉後會返回同一實例，離開商店期間不消耗本頁剩餘閱讀時間。
+        tipCarousel.tick(net.minecraft.Util.getMillis(), true);
+        hoveredTipPage = null;
         tooltipMotion.reset();
         balanceMotion.clear();
         balanceNoticeReserve = 96;
@@ -7257,6 +7333,19 @@ public class ShopScreen extends ScaledScreen {
         g.pose().translate(0.0f, 0.0f, 600.0f);
         try {
             if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
+            if (hoveredTipPage != null) {
+                String text = "§b小提示 " + (hoveredTipPage.tipIndex() + 1) + "/" + hoveredTipPage.tipCount()
+                        + "\n§7" + GuiRenderUtil.translateAmpCodes(hoveredTipPage.tip().text());
+                int wrapWidth = Math.max(80, Math.min(360, this.width - 32));
+                if (!text.equals(tipTooltipText) || wrapWidth != tipTooltipWidth) {
+                    tipTooltipText = text;
+                    tipTooltipWidth = wrapWidth;
+                    tipTooltipLines = this.font.split(Component.literal(text), wrapWidth);
+                }
+                animateTooltip(g, List.of("shop-tip", observedCatalogRevision, hoveredTipPage.tip().key()), mx, my,
+                        () -> g.renderTooltip(this.font, tipTooltipLines, mx, my));
+                return;
+            }
             List<Component> topTip = topButtonTip(smx, smy);
             if (topTip != null) {
                 animateTooltip(g, List.of("top", topTip.get(0).getString()), mx, my,
