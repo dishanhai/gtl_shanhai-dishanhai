@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial;
 
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
-import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiExtraMountGate;
@@ -48,7 +47,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.LongPredicate;
 
-public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
+public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedRecipeLogic {
 
     /** 山海：成功批次的實際並行診斷值；AR 的配置容量另讀 getParallelCapacity()。 */
     public static final String ACTUAL_PARALLEL_KEY = "sh_primordial_actual_parallel";
@@ -162,13 +161,14 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
      */
     public void onModuleLevelChanged() {
         invalidateModuleConditionCaches();
-        invalidateLookupSetCache();
+        onThreadInputsChanged();
         amplifiedRecipeCache.clear();
         matchableScaledRecipeCache.clear();
     }
 
     @Override
     public GTRecipe getGTRecipe() {
+        if (!isThreadRecipeLookupAllowed()) return null;
         // 山海：在候選查找、配方縮放與扣料之前阻擋未由歸墟接管的高階模組。
         if (getMachine() instanceof PrimordialOmegaEngineModuleBase mod && mod.isGuixuHostBlocked()) return null;
         // 歸墟遏制場坍縮鎖定：不開新批次（提示由 addHostStatusDisplay 顯示）。
@@ -214,8 +214,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     /**
      * 原初模块的"高级产出"不做基类那种"总池按 recipes.size() 均分再水位填补"的公平分配——
-     * 同时选中多个配方类型时，每个配方各自独立吃满自己的 getMaxParallel(recipe, totalParallel)
-     * 上限（超限模式下即 Long.MAX_VALUE 级），互不挤占，而不是从一个共享池里分蛋糕。
+     * 同時選中多個配方類型時，各配方共用目前執行緒的預留份額。
+     * 每次分配後扣除 remaining，避免同一批內或不同執行緒重複占用整機並行上限。
      */
     @Override
     @Nullable
@@ -236,18 +236,20 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return null;
         }
         long[] parallels = new long[recipes.size()];
+        long remaining = totalParallel;
         int index = 0;
         ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(recipes.size());
         long crossTypeThreads = getMachine() instanceof PrimordialOmegaEngineModuleBase module
                 && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : Long.MAX_VALUE;
         for (GTRecipe recipe : recipes) {
-            if (recipeList.size() >= crossTypeThreads) break;
-            long parallel = getMaxParallel(recipe, totalParallel);
+            if (remaining <= 0L || recipeList.size() >= crossTypeThreads) break;
+            long parallel = getMaxParallel(recipe, remaining);
             if (parallel <= 0L) {
                 continue;
             }
             recipeList.add(recipe);
             parallels[index] = parallel;
+            remaining -= parallel;
             index++;
         }
         if (recipeList.isEmpty()) {
@@ -258,10 +260,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         // 讓 buildFinalWirelessRecipe 進入真實扣料分支。GTLAdd 的 helper 在空餘配額為
         // 0 時固定回傳 shouldProcess=false；直接使用該結果會只收集輸出而跳過扣料。
         stellarLastAllocatedRecipes = recipeList.size();
-        return new ParallelData((List<GTRecipe>) recipeList, parallels, true, null);
+        return new ParallelData((List<GTRecipe>) recipeList, java.util.Arrays.copyOf(parallels, index), true, null);
     }
 
-    /** 山海星律：本邏輯逐配方獨立並行，真正競爭的是同時容納幾個配方。 */
+    /** 山海：保留批次內候選名額診斷；星律的在途占用另讀多執行緒調度器。 */
     @Override
     public long gtShanhai$getStuckWatchParallelLimit() {
         return getMachine() instanceof PrimordialOmegaEngineModuleBase module && module.isCrossTypeParallelActive()
@@ -274,19 +276,19 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     @Override
-    protected long getTotalParallelLimit() {
+    protected long getUnreservedTotalParallelLimit() {
         MetaMachine machine = getMachine();
         if (machine instanceof PrimordialOmegaEngineModuleBase mod && mod.hasParallelOverdriver()) {
-            // 超限器的契約是每個配方獨立 Long.MAX_VALUE 並行；不能依賴
+            // 超限器供給整機共享 Long.MAX_VALUE 並行；不能依賴
             // getAdditionalThread() 的 int 轉型或 GTLAdd 的固定執行緒上限。
             return Long.MAX_VALUE;
         }
-        return containmentBonus().scaleParallel(super.getTotalParallelLimit());
+        return containmentBonus().scaleParallel(getBaseParallelCapacity());
     }
 
     /** 山海：給 UI／AR 的當前可用上限，與分配共用公式，不觸發配方搜尋或扣料。 */
     public long getParallelCapacity() {
-        return getTotalParallelLimit();
+        return getUnreservedTotalParallelLimit();
     }
 
     private void invalidateLookupSetCacheIfConfigured() {

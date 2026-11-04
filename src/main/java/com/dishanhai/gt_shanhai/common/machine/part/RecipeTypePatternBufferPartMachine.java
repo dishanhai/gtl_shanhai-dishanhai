@@ -37,6 +37,7 @@ import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadedRecipeLogic;
 import com.dishanhai.gt_shanhai.mixin.MEPatternBufferSlot2PatternAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
@@ -359,6 +360,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public boolean pushPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder) {
         Integer slotIndex = getSlotIndexForPattern(patternDetails);
         boolean accepted = super.pushPattern(patternDetails, inputHolder);
+        if (accepted && !isRemote()) {
+            notifyParallelRecipeThreads();
+        }
         if (accepted && slotIndex != null && gtShanhai$isRuntimeTrackableSlot(slotIndex) && !isRemote()) {
             int slot = slotIndex;
             gtShanhai$clearPatternSlotRuntimeWarning(slot);
@@ -374,6 +378,16 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     StellarPatternCraftingContext.currentAePlayerId());
         }
         return accepted;
+    }
+
+    /** 山海：成功推送才喚醒所屬原初主機，不另行預取或重複扣除樣板材料。 */
+    private void notifyParallelRecipeThreads() {
+        for (IMultiController controller : getControllers()) {
+            if (controller.self() instanceof IRecipeLogicMachine host
+                    && host.getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+                logic.onThreadInputsChanged();
+            }
+        }
     }
 
     private final class StellarPatternBufferInternalSlot extends StockingPatternBufferInternalSlot {

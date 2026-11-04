@@ -38,6 +38,7 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
 
     @Override
     public GTRecipe getGTRecipe() {
+        if (!isThreadRecipeLookupAllowed()) return null;
         GuixuContainmentBonus bonus = containmentBonus();
         // 山海：AE 提取會消耗待回傳任務，必須在提取前檢查全體遏制場鎖定。
         if (bonus.locked()) return null;
@@ -57,7 +58,7 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
         logIdleState("extract-attempt", module);
         // 使用原生支持的正数上限。部分整合兼容模组会在 HEAD 无条件接管 extractGTRecipe，
         // 将 Long.MIN_VALUE 当成不可提取数量并直接返回 null，不能依赖 GTLAdd 的负数哨兵 Mixin。
-        GTRecipe raw = handler.extractGTRecipe(Long.MAX_VALUE, 1);
+        GTRecipe raw = handler.extractGTRecipe(getThreadParallelAllowance(), 1);
         if (raw == null) {
             logIdleState("extract-empty", module);
             return null;
@@ -141,6 +142,13 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
                     getStatus(), progress, duration, describeRecipe(lastRecipe),
                     beforeRecipe != lastRecipe, beforeStatus != getStatus());
         }
+    }
+
+    @Override
+    protected boolean canFinishThreadBatch(GTRecipe recipe) {
+        // 分子組裝走 AE 任務回傳協定，不使用物品／流體輸出倉。
+        return getMachine() instanceof PrimordialMolecularAssemblerModule module
+                && module.getMolecularAssemblerHandler() != null;
     }
 
     @Override

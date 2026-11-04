@@ -61,6 +61,7 @@ public class PrimordialMyriadProliferationCoreLogic extends PrimordialModuleReci
             result = super.buildFinalWirelessRecipe(parallelData, wirelessTrait);
             return result;
         } finally {
+            if (result != null && selected != null) result.data.putString("sh_thread_myriad_type", selected.toString());
             setOutputMultiplierState(result == null ? null : selected, false);
         }
     }
@@ -109,11 +110,22 @@ public class PrimordialMyriadProliferationCoreLogic extends PrimordialModuleReci
     }
 
     boolean isOutputMultiplierActive() {
-        return buildingFinalWirelessRecipe || isWorking() || activeRecipeTypeId != null && isWaiting();
+        return buildingFinalWirelessRecipe || !getRunningThreadRecipes().isEmpty()
+                || isWorking() || activeRecipeTypeId != null && isWaiting();
     }
 
     @Nullable
     ResourceLocation getActiveRecipeTypeId() {
+        if (!buildingFinalWirelessRecipe) {
+            ResourceLocation strongest = null;
+            for (GTRecipe recipe : getRunningThreadRecipes()) {
+                if (recipe == null || !recipe.data.contains("sh_thread_myriad_type")) continue;
+                ResourceLocation type = ResourceLocation.tryParse(recipe.data.getString("sh_thread_myriad_type"));
+                if (PrimordialMyriadRecipeTypes.TIER_1_ID.equals(type)) return type;
+                if (strongest == null || PrimordialMyriadRecipeTypes.TIER_2_ID.equals(type)) strongest = type;
+            }
+            if (strongest != null) return strongest;
+        }
         return activeRecipeTypeId;
     }
 }

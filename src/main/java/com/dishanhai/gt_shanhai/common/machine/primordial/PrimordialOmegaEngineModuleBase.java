@@ -175,6 +175,14 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return 0L;
     }
 
+    /** 山海：主機與模組共用同一線程物品註冊表及堆疊飽和運算。 */
+    public static long getThreadBoostForStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0L;
+        long base = getThreadBoostForItem(stack.getItem());
+        return base <= 0L ? 0L : base > Long.MAX_VALUE / stack.getCount()
+                ? Long.MAX_VALUE : base * stack.getCount();
+    }
+
     /** 获取线程倍率（已乘以堆叠数量） */
     public long getThreadBoost() {
         long tick = getOffsetTimer();
@@ -182,18 +190,13 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             return cachedThreadBoost;
         }
         cachedThreadBoostTick = tick;
-        var stack = threadBoostSlot.storage.getStackInSlot(0);
-        if (!stack.isEmpty()) {
-            long base = getThreadBoostForItem(stack.getItem());
-            // 饱和乘法：寰宇并行超限器的注册倍率就是 Long.MAX_VALUE，堆叠数量>1 时
-            // base*count 会 long 溢出成负数，导致下游并行直接归零，这里钳到 Long.MAX_VALUE。
-            cachedThreadBoost = base > 0 && base <= Long.MAX_VALUE / stack.getCount()
-                    ? base * stack.getCount()
-                    : (base > 0 ? Long.MAX_VALUE : 0L);
-            return cachedThreadBoost;
-        }
-        cachedThreadBoost = 0L;
+        cachedThreadBoost = getThreadBoostForStack(threadBoostSlot.storage.getStackInSlot(0));
         return cachedThreadBoost;
+    }
+
+    /** 山海：「多线程并行」的批次數獨立於物質模組提供的跨配方名額。 */
+    public long getParallelRecipeThreadCount() {
+        return PrimordialThreadScheduler.threadCount(getThreadBoost());
     }
 
     // ========== 通用线程倍率槽 ==========
@@ -203,7 +206,16 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     public PrimordialOmegaEngineModuleBase(IMachineBlockEntity holder, Object... args) {
         super(holder, null, args);
-        threadBoostSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH);
+        threadBoostSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH) {
+            @Override
+            public void onContentsChanged() {
+                super.onContentsChanged();
+                cachedThreadBoostTick = Long.MIN_VALUE;
+                if (!isRemote() && getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+                    logic.onThreadInputsChanged();
+                }
+            }
+        };
         threadBoostSlot.setFilter(stack -> {
             if (stack == null || stack.isEmpty()) return true;
             return getThreadBoostForItem(stack.getItem()) > 0;
@@ -892,6 +904,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     public void saveCustomPersistedData(net.minecraft.nbt.CompoundTag tag, boolean forSyncing) {
         super.saveCustomPersistedData(tag, forSyncing);
         if (forSyncing) return;
+        if (getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+            logic.saveRecipeThreads(tag);
+        }
         tag.put(KEY_MODULE_SLOT, moduleSlot.storage.serializeNBT());
         tag.put(KEY_THREAD_SLOT, threadBoostSlot.storage.serializeNBT());
         tag.put(KEY_EXTRA_MOUNT_SLOT, extraMountSlots.storage.serializeNBT());
@@ -914,6 +929,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     @Override
     public void loadCustomPersistedData(net.minecraft.nbt.CompoundTag tag) {
         super.loadCustomPersistedData(tag);
+        if (getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+            logic.loadRecipeThreads(tag);
+        }
         if (tag.contains(KEY_MODULE_SLOT)) {
             moduleSlot.storage.deserializeNBT(tag.getCompound(KEY_MODULE_SLOT));
         }
@@ -1002,7 +1020,15 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                     Component.literal("§d§l线程倍率槽"),
                     Component.literal("§7放入已注册的线程倍率物品"),
                     Component.literal("§7提升本模块的跨配方线程数"),
+                    Component.literal("§7多线程并行：增加独立运行批次数，共享整机并行上限"),
                     Component.literal("§7§6寰宇并行超限器 §7可启用超限模式"));
+        } else {
+            // 質能核心／零點感應銜鐵的下方槽與按鈕保持原位，僅補上方線程入口。
+            addLabeledStorageSlot(page, threadBoostSlot.storage, page.getSize().width - 30,
+                    page.getSize().height - 88, "§d线程",
+                    Component.literal("§d§l多线程并行"),
+                    Component.literal("§7放入已注册的线程倍率物品增加独立运行批次数"),
+                    Component.literal("§7各线程预留份额，共享整机并行上限"));
         }
         return page;
     }
@@ -1305,6 +1331,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         textList.add(Component.literal("")
                 .append(Component.literal("跨配方线程: "))
                 .append(threadText));
+        addParallelRecipeThreadDisplay(textList);
         if (boost > 0) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createElectricText("线程倍率: "))
@@ -1313,7 +1340,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (hasParallelOverdriver()) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("◆ 超限模式 · 已激活"))
-                    .append(Component.literal(" §7每个配方独立 Long.MAX_VALUE 并行")));
+                    .append(Component.literal(" §7整机共享 Long.MAX_VALUE 并行")));
         }
         if (hasDarkEnergyMultiplierMounted()) {
             textList.add(Component.literal("§b◆ 暗能量倍增器 · 配方 EU 消耗 -50%"));
@@ -1345,6 +1372,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         textList.add(Component.literal("")
                 .append(DShanhaiTextUtil.createElectricText("跨配方线程: "))
                 .append(threadCountText(getRecipeLogicThreadMultiplier())));
+        addParallelRecipeThreadDisplay(textList);
         if (boost > 0) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createElectricText("线程倍率: "))
@@ -1353,7 +1381,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (hasParallelOverdriver()) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("◆ 超限模式 · 已激活"))
-                    .append(Component.literal(" §7每个配方独立 Long.MAX_VALUE 并行")));
+                    .append(Component.literal(" §7整机共享 Long.MAX_VALUE 并行")));
         }
         if (hasDarkEnergyMultiplierMounted()) {
             textList.add(Component.literal("§b◆ 暗能量倍增器 · 配方 EU 消耗 -50%"));
@@ -1366,6 +1394,16 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (hasHyperstableBlackHoleSeedMounted()) {
             textList.add(Component.literal("§d◆ 超稳态黑洞种子 · 输出端可写时吞噬溢出产物"));
         }
+    }
+
+    /** 山海：顯示邏輯執行緒占用，不把批次內配方數當作執行緒數。 */
+    protected void addParallelRecipeThreadDisplay(List<Component> textList) {
+        int active = getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic
+                ? logic.getActiveRecipeThreadCount() : 0;
+        textList.add(Component.literal("多线程并行: ")
+                .append(Component.literal(Integer.toString(active)))
+                .append(Component.literal(" / "))
+                .append(threadCountText(getParallelRecipeThreadCount())));
     }
 
     private static Component threadCountText(long threads) {

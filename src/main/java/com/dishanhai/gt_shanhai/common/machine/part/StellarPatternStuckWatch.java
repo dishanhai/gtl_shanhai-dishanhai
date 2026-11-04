@@ -15,6 +15,7 @@ import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadedRecipeLogic;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.PrimordialCoinForgeModule;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.CoinForgeMintGate;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -209,7 +210,10 @@ public final class StellarPatternStuckWatch {
             }
             long capacity = -1L;
             long threads = 1L;
-            if (logic instanceof SelectableRecipeTypeSetRecipeLogic selectable) {
+            if (logic instanceof PrimordialThreadedRecipeLogic threaded) {
+                capacity = threaded.getRecipeThreadCapacity();
+                threads = capacity;
+            } else if (logic instanceof SelectableRecipeTypeSetRecipeLogic selectable) {
                 capacity = selectable.gtShanhai$getStuckWatchParallelLimit();
                 threads = selectable.getMultipleThreads();
             } else if (logic instanceof GTLAddMultipleRecipesLogic multiple) {
@@ -224,7 +228,9 @@ public final class StellarPatternStuckWatch {
             GTRecipe batch = logic.getLastRecipe();
             long allocated = 0L;
             if (host.isActive() && batch != null) {
-                allocated = logic instanceof SelectableRecipeTypeSetRecipeLogic selectable
+                allocated = logic instanceof PrimordialThreadedRecipeLogic threaded
+                        ? threaded.getActiveRecipeThreadCount()
+                        : logic instanceof SelectableRecipeTypeSetRecipeLogic selectable
                         ? selectable.gtShanhai$getLastAllocatedParallel()
                         : logic instanceof StellarPatternParallelState observed
                                 ? observed.gtShanhai$getObservedAllocatedParallel() : -1L;
@@ -242,7 +248,7 @@ public final class StellarPatternStuckWatch {
                 RecipeResult work = status.getWorkingStatus();
                 failed |= work != null && !work.isSuccess();
             }
-            String capacityLabel = logic instanceof PrimordialModuleRecipeLogic ? "并发配方容量" : "总并行";
+            String capacityLabel = logic instanceof PrimordialThreadedRecipeLogic ? "多线程并行容量" : "总并行";
             hosts.add(new HostAssessment(controller.self(), types, capacityLabel, capacity, threads, allocated, queued,
                     logic.isWorking() && host.isWorkingEnabled(), failed,
                     logic.getProgress(), logic.getDuration(), logic.getTotalContinuousRunningTime(), batch));

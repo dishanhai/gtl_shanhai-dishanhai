@@ -48,13 +48,17 @@ class StellarPatternParallelWaitSourceTest {
         assertFalse(watch.contains("batch.parallels"), "聚合raw output的parallels不是實際分配量");
     }
 
-    @Test void independentRecipeModulesAndVisionCoreExposeTheirOwnAllocationSemantics() throws Exception {
+    @Test void threadedRecipeModulesAndVisionCoreExposeTheirOwnAllocationSemantics() throws Exception {
         String module = Files.readString(MAIN.resolve("common/machine/primordial/PrimordialModuleRecipeLogic.java"));
         assertTrue(module.contains("public long gtShanhai$getStuckWatchParallelLimit()"),
-                "逐配方獨立並行的模組必須以跨配方容量評估，不能冒用共享池");
+                "保留原初批次內候選名額的診斷入口");
         assertTrue(module.contains("stellarLastAllocatedRecipes = recipeList.size()"));
         String vision = Files.readString(MAIN.resolve("common/machine/primordial/guixu/GuixuVisionCoreRecipeLogic.java"));
         assertTrue(vision.contains("public long gtShanhai$getLastAllocatedParallel()"));
+        String watch = Files.readString(MAIN.resolve("common/machine/part/StellarPatternStuckWatch.java"));
+        assertTrue(watch.contains("threaded.getRecipeThreadCapacity()"));
+        assertTrue(watch.contains("threaded.getActiveRecipeThreadCount()"),
+                "星律必須讀全部在途執行緒，而非最後一次搜尋提案");
     }
 
     @Test void completeWarningUsesUnclippedStrongMatchDetails() throws Exception {

@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial;
 
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
-import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuContainmentBonus;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
@@ -17,7 +16,7 @@ import java.math.BigInteger;
 
 import java.util.Set;
 
-public class PrimordialOmegaEngineRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
+public class PrimordialOmegaEngineRecipeLogic extends PrimordialThreadedRecipeLogic {
 
     private static final long ACTIVE_LOOKUP_CACHE_TICKS = 100L;
 
@@ -66,8 +65,8 @@ public class PrimordialOmegaEngineRecipeLogic extends SelectableRecipeTypeSetRec
     }
 
     @Override
-    protected long getTotalParallelLimit() {
-        return linkedContainmentBonus().scaleParallel(super.getTotalParallelLimit());
+    protected long getUnreservedTotalParallelLimit() {
+        return linkedContainmentBonus().scaleParallel(getBaseParallelCapacity());
     }
 
     @Override

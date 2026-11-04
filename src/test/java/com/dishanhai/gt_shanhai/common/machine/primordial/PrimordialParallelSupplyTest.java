@@ -70,27 +70,28 @@ class PrimordialParallelSupplyTest {
         assertEquals(128L, available(module));
     }
 
-    @Test void selectedRecipeTypesReceiveIndependentLongMaxBatchesWithHighMatterModules() throws Exception {
+    @Test void highMatterModulesShareOneLongMaxBudgetAcrossTheBatch() throws Exception {
         for (int level : List.of(16, 17)) {
             Module module = module(level, 0L);
             assertEquals(Long.MAX_VALUE, module.getRecipeLogicThreadMultiplier());
             module.parallel = level == 17 ? Long.MAX_VALUE : 6_917_529_027_641_081_855L;
             ParallelData allocation = module.logic.calculateParallels();
             assertNotNull(allocation);
-            assertEquals(3, allocation.getOriginRecipeList().size(), "不可只收第一種配方");
+            assertEquals(1, allocation.getOriginRecipeList().size(), "第一個配方用滿份額後不可再超額分配");
             assertTrue(allocation.getShouldProcess(), "必須保留最終實際扣料路徑");
-            assertArrayEquals(new long[] {Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE},
+            assertArrayEquals(new long[] {Long.MAX_VALUE},
                     allocation.getParallels());
-            assertEquals(3L, module.logic.gtShanhai$getLastAllocatedParallel());
+            assertEquals(1L, module.logic.gtShanhai$getLastAllocatedParallel());
         }
     }
 
     @Test void ordinaryCrossTypeThreadsStillLimitTheBatchAndRecoverAfterSupplyChanges() throws Exception {
         String source = java.nio.file.Files.readString(java.nio.file.Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialModuleRecipeLogic.java"));
-        assertTrue(source.contains("long parallel = getMaxParallel(recipe, totalParallel);"),
+        assertTrue(source.contains("long parallel = getMaxParallel(recipe, remaining);"),
                 "分配必須復用公開的可行並行查詢；JUnit 不載入 GTLCore ContentModifier Mixin");
         Module module = module(15, 0L);
+        module.logic.recipeLimit = 1L;
         assertEquals(1, module.logic.calculateParallels().getOriginRecipeList().size());
         module.boost = 2L;
         assertEquals(2, module.logic.calculateParallels().getOriginRecipeList().size());
@@ -103,6 +104,7 @@ class PrimordialParallelSupplyTest {
 
     @Test void blockedCandidatesDoNotConsumeThreadsAndNextBatchRecomputesAvailability() throws Exception {
         Module module = module(17, 0L);
+        module.logic.recipeLimit = 1L;
         GTRecipe first = module.logic.recipes.iterator().next();
         module.logic.blocked = first;
         ParallelData batch = module.logic.calculateParallels();
@@ -113,6 +115,20 @@ class PrimordialParallelSupplyTest {
         batch = module.logic.calculateParallels();
         assertEquals(3, batch.getOriginRecipeList().size());
         assertArrayEquals(new long[] {7L, 7L, 7L}, batch.getParallels());
+    }
+
+    @Test void aThreadBatchSplitsItsReservationAcrossAllIncludedRecipes() throws Exception {
+        Module module = module(17, 0L);
+        module.logic.recipeLimit = 30L;
+        Field admission = PrimordialThreadedRecipeLogic.class.getDeclaredField("admission");
+        admission.setAccessible(true);
+        admission.setBoolean(module.logic, true);
+        Field allowance = PrimordialThreadedRecipeLogic.class.getDeclaredField("allowance");
+        allowance.setAccessible(true);
+        allowance.setLong(module.logic, 64L);
+        ParallelData batch = module.logic.calculateParallels();
+        assertArrayEquals(new long[] {30L, 30L, 4L}, batch.getParallels());
+        assertEquals(64L, java.util.Arrays.stream(batch.getParallels()).sum());
     }
 
     @Test void uiUsesIntegerThresholdForParallelAndThreadInfinity() throws Exception {

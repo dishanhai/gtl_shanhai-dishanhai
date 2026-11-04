@@ -182,6 +182,9 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     private final NotifiableItemStackHandler matterBonusSlot;
 
     @Persisted
+    private final NotifiableItemStackHandler recipeThreadSlot;
+
+    @Persisted
     @DescSynced
     private int matterBonusLevel;
 
@@ -197,6 +200,39 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             }
         };
         matterBonusSlot.setFilter(PrimordialOmegaEngineMachine::isMatterModuleStack);
+        recipeThreadSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH) {
+            @Override
+            public void onContentsChanged() {
+                super.onContentsChanged();
+                if (!isRemote() && getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+                    logic.onThreadInputsChanged();
+                }
+            }
+        };
+        recipeThreadSlot.setFilter(stack -> stack == null || stack.isEmpty()
+                || PrimordialOmegaEngineModuleBase.getThreadBoostForStack(stack) > 0L);
+    }
+
+    /** 山海：與模組共用線程物品入口，無物品時保留一個配方執行緒。 */
+    public long getParallelRecipeThreadCount() {
+        return PrimordialThreadScheduler.threadCount(
+                PrimordialOmegaEngineModuleBase.getThreadBoostForStack(recipeThreadSlot.storage.getStackInSlot(0)));
+    }
+
+    @Override
+    public void saveCustomPersistedData(net.minecraft.nbt.CompoundTag tag, boolean forSyncing) {
+        super.saveCustomPersistedData(tag, forSyncing);
+        if (!forSyncing && getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+            logic.saveRecipeThreads(tag);
+        }
+    }
+
+    @Override
+    public void loadCustomPersistedData(net.minecraft.nbt.CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        if (getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic) {
+            logic.loadRecipeThreads(tag);
+        }
     }
 
     // ========== 配方逻辑 ==========
@@ -355,6 +391,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         syncRingVisibility(false);
         super.onMachineRemoved();
         clearInventory(matterBonusSlot.storage);
+        clearInventory(recipeThreadSlot.storage);
     }
 
     protected void syncRingVisibility(boolean hide) {
@@ -664,6 +701,15 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
                     Component.literal("§7必须放满 §b64§7 个同种模块才生效"),
                     Component.literal("§7生效后：中子星半径与颜色随等级变化"));
             group.addWidget(bonusSlot);
+            // 歸墟在 height-48 有等級覆寫槽，線程槽放在物質槽上方。
+            SlotWidget threadSlot = new SlotWidget(recipeThreadSlot.storage, 0,
+                    size.width - 30, size.height - 88, true, true);
+            threadSlot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
+            threadSlot.setHoverTooltips(
+                    Component.literal("§d§l多线程并行"),
+                    Component.literal("§7放入已注册的线程倍率物品增加独立运行批次数"),
+                    Component.literal("§7各线程预留份额，共享整机并行上限"));
+            group.addWidget(threadSlot);
         }
         return widget;
     }
@@ -792,6 +838,12 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             addEnergyDisplay(textList);
             addMachineModeDisplay(textList);
             addParallelDisplay(textList);
+            int active = getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic
+                    ? logic.getActiveRecipeThreadCount() : 0;
+            long threads = getParallelRecipeThreadCount();
+            textList.add(Component.literal("多线程并行: " + active + " / ")
+                    .append(threads >= Integer.MAX_VALUE ? DShanhaiTextUtil.createUltimateRainbow("无限")
+                            : Component.literal(String.format("%,d", threads))));
             addWorkingStatus(textList);
             // 显示已安装模块数（读不可变快照，免锁）
             int moduleCount = moduleSnapshot.size();

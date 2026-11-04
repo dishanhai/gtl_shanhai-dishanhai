@@ -18,8 +18,8 @@ class PrimordialMolecularAssemblerModuleSourceTest {
     void extractionUsesPositiveNativeLimitInsteadOfMixinSentinel() throws Exception {
         String source = Files.readString(LOGIC);
 
-        assertTrue(source.contains("handler.extractGTRecipe(Long.MAX_VALUE, 1)"),
-                "原初分子模块必须使用所有 MECraftHandler 实现都支持的正数提取上限");
+        assertTrue(source.contains("handler.extractGTRecipe(getThreadParallelAllowance(), 1)"),
+                "分子組裝必須使用該執行緒的正數預留份額，不能取走其他執行緒的額度");
         assertFalse(source.contains("handler.extractGTRecipe(Long.MIN_VALUE, 1)"),
                 "Long.MIN_VALUE 会被 extendedae_plus_gtladd 的 HEAD Mixin 当作不可提取数量");
     }

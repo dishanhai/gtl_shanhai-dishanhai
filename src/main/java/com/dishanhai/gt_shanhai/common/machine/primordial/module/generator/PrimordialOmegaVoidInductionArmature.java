@@ -222,6 +222,9 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
     public boolean onWorking() {
         boolean working = super.onWorking();
         if (!working || !circuitFound) return working;
+        long workingTick = getOffsetTimer();
+        if (lastThreadGenerationTick == workingTick) return working;
+        lastThreadGenerationTick = workingTick;
         var host = getHost();
         UUID targetUuid = host != null && host.getUuid() != null ? host.getUuid() : getUuid();
         if (targetUuid == null) return working;
@@ -236,6 +239,9 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
         }
         return working;
     }
+
+    // 山海：這是機器級額外發電，多個配方執行緒仍然每機器 tick 只發一次。
+    private long lastThreadGenerationTick = Long.MIN_VALUE;
 
     /** 当前电路号（由 StartupUpdate 从编程电路自动读取） */
     public int getCircuitNumber() {
