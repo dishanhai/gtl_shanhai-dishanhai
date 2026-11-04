@@ -60,6 +60,7 @@ Thumbs.db
 !src/**/*.mb
 !src/**/*.txt
 !src/test/python/generate_cosmic_clean_gravity_hatch_texture.py
+!src/test/python/generate_recipe_thread_hatch_texture.py
 !config/**/*.md
 /.gradle-task/
 /.gradle-task17/
