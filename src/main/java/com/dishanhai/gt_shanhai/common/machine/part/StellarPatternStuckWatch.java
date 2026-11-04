@@ -27,6 +27,8 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gtladd.gtladditions.api.machine.logic.GTLAddMultipleRecipesLogic;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -154,7 +156,9 @@ public final class StellarPatternStuckWatch {
         machine.gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids);
         machine.gtShanhai$logStuckDiagnosis(watch.slot);
         String reason = collectStuckReason(machine, watch.slot);
-        var diagnosis = new StellarPatternStuckReport.Diagnosis(String.join("\n", collectHostStatuses(machine)),
+        List<Component> hostLines = collectHostStatuses(machine);
+        var diagnosis = new StellarPatternStuckReport.Diagnosis(
+                hostLines.isEmpty() ? "" : StellarPatternWarningText.store(StellarPatternWarningText.join(hostLines)),
                 collectMintDetails(watch, assessment), watch.parallelAssessment);
         int slot = watch.slot;
         String slotLabel = machine.gtShanhai$describeStuckSlot(slot);
@@ -167,6 +171,7 @@ public final class StellarPatternStuckWatch {
                 reason, stuckInputs, stuckOutputs, watch.hostRecipeTypeIds,
                 watch.patternRecipeTypeId, watch.patternRecipeId, classifyCause(machine, watch, assessment), diagnosis,
                 watch.order == null ? StellarPatternOrderInfo.UNKNOWN : watch.order.snapshot(server));
+        StellarPatternOrderMonitor.watch(watch.order);
     }
 
     private static StellarPatternStuckReport.Cause classifyCause(RecipeTypePatternBufferPartMachine machine,
@@ -248,7 +253,7 @@ public final class StellarPatternStuckWatch {
                 RecipeResult work = status.getWorkingStatus();
                 failed |= work != null && !work.isSuccess();
             }
-            String capacityLabel = logic instanceof PrimordialThreadedRecipeLogic ? "多线程并行容量" : "总并行";
+            String capacityLabel = logic instanceof PrimordialThreadedRecipeLogic ? "capacity_threads" : "capacity_total";
             hosts.add(new HostAssessment(controller.self(), types, capacityLabel, capacity, threads, allocated, queued,
                     logic.isWorking() && host.isWorkingEnabled(), failed,
                     logic.getProgress(), logic.getDuration(), logic.getTotalContinuousRunningTime(), batch));
@@ -269,7 +274,7 @@ public final class StellarPatternStuckWatch {
         watch.mintRestrictions.clear();
         GTRecipe mintRecipe = null;
         boolean resolvedMintRecipe = false;
-        List<String> details = new ArrayList<>();
+        List<Component> details = new ArrayList<>();
         for (HostAssessment host : assessment.hosts) {
             if (!supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
             boolean mintFailure = false;
@@ -289,33 +294,56 @@ public final class StellarPatternStuckWatch {
                     host.working, host.failed || strongFailure || mintFailure, host.progress, host.successfulTicks, host.duration, host.batch);
             waiting |= deferred;
             if (deferred) watch.warningTick = Math.max(watch.warningTick, policy.progressDeadline(watch.timeout));
-            details.add("主机: [" + host.machine.getPos().toShortString() + "]\n" + host.capacityLabel + ": "
-                    + (host.capacity == Long.MAX_VALUE ? "不限" : host.capacity > 0L ? host.capacity : "未知")
-                    + "\n线程倍率: " + host.threads
-                    + "\n本轮分配: " + (host.allocated >= 0L ? host.allocated : "未知")
-                    + "\n等待槽位: " + host.queued
-                    + "\n运行进度: " + host.progress + " / " + host.duration
-                    + "\n评估结果: " + (mintFailure ? "铸币权限拒绝，不能按并行等待处理"
-                            : deferred ? "正在等待可用并行" : "未满足并行等待条件"));
+            String assessmentKey = mintFailure ? "assessment_mint" : deferred ? "assessment_wait" : "assessment_none";
+            details.add(StellarPatternWarningText.join(List.of(
+                    StellarPatternWarningText.line("host_pos", host.machine.getPos().toShortString()),
+                    StellarPatternWarningText.line("capacity_value",
+                            StellarPatternWarningText.line(host.capacityLabel), amountText(host.capacity)),
+                    StellarPatternWarningText.line("thread_multiplier", host.threads),
+                    StellarPatternWarningText.line("allocated", host.allocated >= 0L
+                            ? Component.literal(Long.toString(host.allocated)) : StellarPatternWarningText.line("unknown")),
+                    StellarPatternWarningText.line("queued_slots", host.queued),
+                    StellarPatternWarningText.line("progress", host.progress, host.duration),
+                    StellarPatternWarningText.line(assessmentKey))));
         }
-        watch.parallelAssessment = details.isEmpty() ? "无可用的对应配方主机" : String.join("\n\n", details);
+        watch.parallelAssessment = StellarPatternWarningText.store(details.isEmpty()
+                ? StellarPatternWarningText.line("no_host")
+                : joinBlocks(details));
         return waiting;
     }
 
     private static String collectMintDetails(Watch watch, MachineAssessment assessment) {
-        List<String> details = new ArrayList<>();
+        List<Component> details = new ArrayList<>();
         for (HostAssessment host : assessment.hosts) {
             if (!(host.machine instanceof PrimordialCoinForgeModule forge)
                     || !supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
             String restriction = watch.mintRestrictions.get(host.machine);
-            details.add("主机: [" + host.machine.getPos().toShortString() + "]\n"
-                    + (restriction != null ? restriction : "当前物质模块: Lv." + forge.getModuleLevel()
-                            + "\n铸币权限: " + CoinForgeMintGate.permissionText(forge.getModuleLevel()))
-                    + "\n铸币基础并行（已折算）: " + forge.getCurrentParallel()
-                    + "\n每配方有效上限: " + forge.getRecipeLogic().getMintParallelLimit()
-                    + "\n并行规则: " + (forge.hasParallelOverdriver() ? "已搭载寰宇超限器，不受 1/4 限制" : "正常并行的 1/4"));
+            Component body = restriction != null ? StellarPatternWarningText.show(restriction)
+                    : StellarPatternWarningText.join(List.of(
+                    StellarPatternWarningText.line("mint_module", forge.getModuleLevel()),
+                    StellarPatternWarningText.line("mint_permission", CoinForgeMintGate.permissionComponent(forge.getModuleLevel())),
+                    StellarPatternWarningText.line("mint_base_parallel", forge.getCurrentParallel()),
+                    StellarPatternWarningText.line("mint_limit", forge.getRecipeLogic().getMintParallelLimit()),
+                    StellarPatternWarningText.line(forge.hasParallelOverdriver() ? "mint_rule_overdrive" : "mint_rule_quarter")));
+            details.add(StellarPatternWarningText.join(List.of(
+                    StellarPatternWarningText.line("host_pos", host.machine.getPos().toShortString()), body)));
         }
-        return String.join("\n\n", details);
+        return details.isEmpty() ? "" : StellarPatternWarningText.store(joinBlocks(details));
+    }
+
+    private static Component amountText(long amount) {
+        if (amount == Long.MAX_VALUE) return StellarPatternWarningText.line("unlimited");
+        if (amount > 0L) return Component.literal(Long.toString(amount));
+        return StellarPatternWarningText.line("unknown");
+    }
+
+    private static Component joinBlocks(List<Component> blocks) {
+        MutableComponent out = Component.empty();
+        for (int index = 0; index < blocks.size(); index++) {
+            if (index > 0) out.append("\n\n");
+            out.append(blocks.get(index));
+        }
+        return out;
     }
 
     private record MachineKey(ResourceKey<Level> dimension, BlockPos pos) {}
@@ -326,9 +354,9 @@ public final class StellarPatternStuckWatch {
 
     public static String currentHostStatus(RecipeTypePatternBufferPartMachine machine) {
         if (machine == null) return "";
-        List<String> statuses = collectHostStatuses(machine);
+        List<Component> statuses = collectHostStatuses(machine);
         if (statuses.isEmpty()) return "";
-        return String.join(" | ", statuses);
+        return StellarPatternWarningText.store(StellarPatternWarningText.join(statuses));
     }
 
     private static Object2LongMap<AEItemKey> copyItemSnapshot(@Nullable Object2LongMap<AEItemKey> source) {
@@ -366,50 +394,49 @@ public final class StellarPatternStuckWatch {
 
     private static String collectStuckReason(RecipeTypePatternBufferPartMachine machine, int slot) {
         String strong = machine.gtShanhai$fullStrongMatchReason(slot);
-        String base = "原料仍停留在星律槽位，"
-                + DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get()
-                + " 秒内未被主机取用";
+        MutableComponent base = StellarPatternWarningText.line("unconsumed",
+                DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get());
         if (strong != null && !strong.isEmpty()) {
-            base = strong + "\n" + base;
+            base = Component.literal(strong).append("\n").append(base);
         }
-        return base;
+        return StellarPatternWarningText.store(base);
     }
 
-    private static List<String> collectHostStatuses(RecipeTypePatternBufferPartMachine machine) {
-        List<String> result = new ArrayList<>();
+    private static List<Component> collectHostStatuses(RecipeTypePatternBufferPartMachine machine) {
+        List<Component> result = new ArrayList<>();
         for (IMultiController controller : machine.getControllers()) {
             if (!(controller.self() instanceof IRecipeLogicMachine logicMachine)) continue;
-            result.add("主机: [" + controller.self().getPos().toShortString() + "]");
+            result.add(StellarPatternWarningText.line("host_pos", controller.self().getPos().toShortString()));
             appendRecipeLogicState(result, logicMachine);
             if (logicMachine instanceof PrimordialOmegaEngineModuleBase module) {
-                appendPlain(result, "挂载", module.getModuleConditionError());
+                appendPlain(result, "mount", module.getModuleConditionError());
             }
             if (logicMachine.getRecipeLogic() instanceof IRecipeStatus status) {
-                appendStatus(result, "配方", status.getRecipeStatus());
-                appendStatus(result, "工作", status.getWorkingStatus());
+                appendStatus(result, "recipe_status", status.getRecipeStatus());
+                appendStatus(result, "work_status", status.getWorkingStatus());
             }
         }
         return result;
     }
 
-    private static void appendRecipeLogicState(List<String> result, IRecipeLogicMachine logicMachine) {
+    private static void appendRecipeLogicState(List<Component> result, IRecipeLogicMachine logicMachine) {
         if (!logicMachine.isWorkingEnabled()) {
-            result.add("工作=已暂停工作");
+            result.add(StellarPatternWarningText.line("work_paused"));
         } else if (!logicMachine.isActive()) {
-            result.add("工作=未运行");
+            result.add(StellarPatternWarningText.line("work_idle"));
         } else {
-            result.add("工作=正在运行");
+            result.add(StellarPatternWarningText.line("work_running"));
         }
     }
 
-    private static void appendStatus(List<String> result, String label, @Nullable RecipeResult status) {
+    private static void appendStatus(List<Component> result, String key, @Nullable RecipeResult status) {
         if (status == null || status.isSuccess() || status.reason() == null) return;
-        appendPlain(result, label, status.reason().getString());
+        appendPlain(result, key, status.reason().getString());
     }
 
-    private static void appendPlain(List<String> result, String label, @Nullable String text) {
+    private static void appendPlain(List<Component> result, String key, @Nullable String text) {
         if (text == null || text.isBlank()) return;
-        result.add(label + ": " + text);
+        result.add(StellarPatternWarningText.line(key, text));
     }
 
     private static final class Snapshot {

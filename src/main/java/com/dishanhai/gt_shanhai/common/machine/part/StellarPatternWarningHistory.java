@@ -22,6 +22,10 @@ public final class StellarPatternWarningHistory extends SavedData {
     }
     private final Map<MachineKey, Log> machines = new LinkedHashMap<>();
     private final Map<String, Set<MachineKey>> byOrder = new HashMap<>();
+    /** 告警還沒寫入時先到的完成／取消。寫入告警時套上，避免只靠當時的連結旗標。 */
+    private final Map<String, Outcome> early = new HashMap<>();
+
+    private record Outcome(StellarPatternOrderInfo.State state, long remaining) {}
 
     public static StellarPatternWarningHistory get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(StellarPatternWarningHistory::load,
@@ -31,8 +35,13 @@ public final class StellarPatternWarningHistory extends SavedData {
     public void record(ResourceLocation dimension, BlockPos pos, StellarPatternStuckReport.Entry entry, Integer requester) {
         MachineKey key = new MachineKey(dimension, pos);
         Log log = machines.computeIfAbsent(key, ignored -> new Log());
-        String incident = entry.order().id() + ":slot:" + entry.slot();
+        String incident = incidentOf(entry);
         var previous = log.entries.get(incident);
+        Outcome pending = entry.order().id().isBlank() ? null : early.remove(entry.order().id());
+        if (pending != null && !entry.order().state().terminal()) {
+            long remain = pending.remaining < 0L ? entry.order().remaining() : pending.remaining;
+            entry = entry.withOrder(entry.order().withOutcome(pending.state, remain));
+        }
         if (previous != null && previous.order().state().terminal()) entry = entry.withOrder(previous.order());
         log.entries.put(incident, entry);
         if (requester != null) log.requesters.add(requester);
@@ -46,9 +55,14 @@ public final class StellarPatternWarningHistory extends SavedData {
     }
 
     public Set<MachineKey> updateOrder(String id, StellarPatternOrderInfo.State state, long remaining) {
-        if (!state.terminal()) return Set.of();
+        if (id == null || id.isBlank() || state == null || !state.terminal()) return Set.of();
+        Set<MachineKey> indexed = byOrder.get(id);
+        if (indexed == null || indexed.isEmpty()) {
+            early.put(id, new Outcome(state, remaining));
+            return Set.of();
+        }
         Set<MachineKey> changed = new HashSet<>();
-        for (MachineKey key : Set.copyOf(byOrder.getOrDefault(id, Set.of()))) {
+        for (MachineKey key : Set.copyOf(indexed)) {
             Log log = machines.get(key);
             if (log == null) continue;
             log.entries.replaceAll((incident, entry) -> {
@@ -60,23 +74,59 @@ public final class StellarPatternWarningHistory extends SavedData {
             });
         }
         byOrder.remove(id);
+        early.remove(id);
         if (!changed.isEmpty()) setDirty();
         return changed;
     }
 
     public static void observeTerminal(MinecraftServer server, appeng.api.networking.crafting.ICraftingLink link, long remaining) {
+        observeTerminal(server, link, null, remaining);
+    }
+
+    /** {@code signal} 補上連結旗標還沒寫上的完成或取消。已寫上的取消優先於完成。 */
+    public static void observeTerminal(MinecraftServer server, appeng.api.networking.crafting.ICraftingLink link,
+            StellarPatternOrderInfo.State signal, long remaining) {
         if (server == null || link == null) return;
+        if (!server.isSameThread()) {
+            long amount = remaining;
+            server.execute(() -> observeTerminal(server, link, signal, amount));
+            return;
+        }
         try {
-            var state = StellarPatternOrderInfo.stateOf(link);
-            if (!state.terminal()) return;
+            var observed = StellarPatternOrderInfo.stateOf(link);
+            var state = observed == StellarPatternOrderInfo.State.CANCELLED ? observed
+                    : observed.terminal() ? observed : signal;
+            if (state == null || !state.terminal()) return;
             var history = get(server);
-            for (MachineKey key : history.updateOrder(link.getCraftingID().toString(), state, remaining)) {
+            String id = link.getCraftingID() == null ? "" : link.getCraftingID().toString();
+            for (MachineKey key : history.updateOrder(id, state, remaining)) {
                 StellarPatternStuckNotifier.refreshHistory(server, key);
             }
         } catch (RuntimeException error) {
             // 告警紀錄失敗不能中斷 AE 原本的完成／取消與物品退回流程。
             com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.error("[StellarHistory] Unable to record AE order outcome", error);
         }
+    }
+
+    public static String incidentOf(StellarPatternStuckReport.Entry entry) {
+        return entry.order().id() + ":slot:" + entry.slot();
+    }
+
+    /** 從歷史詳情移除一條告警。已移除或不存在時回傳 -1。 */
+    public int dismiss(ResourceLocation dimension, BlockPos pos, String incident) {
+        if (dimension == null || pos == null || incident == null || incident.isBlank() || incident.length() > 160) return -1;
+        MachineKey key = new MachineKey(dimension, pos);
+        Log log = machines.get(key);
+        if (log == null) return -1;
+        StellarPatternStuckReport.Entry removed = log.entries.remove(incident);
+        if (removed == null) return -1;
+        byOrder.entrySet().removeIf(indexed -> {
+            indexed.getValue().remove(key);
+            return indexed.getValue().isEmpty();
+        });
+        for (var entry : log.entries.values()) index(key, entry);
+        setDirty();
+        return removed.slot();
     }
 
     public List<StellarPatternStuckReport.Entry> entries(ResourceLocation dimension, BlockPos pos) {

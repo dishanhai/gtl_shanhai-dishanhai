@@ -17,14 +17,16 @@ public final class StellarPatternCraftingContext {
                         java.util.function.LongSupplier remaining, Integer playerId, String cpu) {
         public StellarPatternOrderInfo snapshot(net.minecraft.server.MinecraftServer server) {
             if (link == null) return StellarPatternOrderInfo.UNKNOWN;
-            String requester = "自动任务";
+            net.minecraft.network.chat.Component requester = StellarPatternWarningText.line("auto_task");
             if (playerId != null) {
                 var player = appeng.api.features.IPlayerRegistry.getConnected(server, playerId);
                 var uuid = appeng.api.features.IPlayerRegistry.getMapping(server).getProfileId(playerId);
-                requester = (player == null ? "离线玩家" : player.getGameProfile().getName())
-                        + " (AE #" + playerId + (uuid == null ? "" : ", " + uuid) + ")";
+                requester = StellarPatternWarningText.line("requester",
+                        player == null ? StellarPatternWarningText.line("offline_player")
+                                : net.minecraft.network.chat.Component.literal(player.getGameProfile().getName()),
+                        playerId, uuid == null ? "" : ", " + uuid);
             }
-            return new StellarPatternOrderInfo(link.getCraftingID().toString(), requester, cpu,
+            return new StellarPatternOrderInfo(link.getCraftingID().toString(), StellarPatternWarningText.store(requester), cpu,
                     output == null ? "<unknown>" : output.what().getDisplayName().getString(),
                     output == null ? "<unknown>" : output.what().getId().toString(),
                     output == null ? 0 : output.amount(), remaining == null ? 0 : remaining.getAsLong(),

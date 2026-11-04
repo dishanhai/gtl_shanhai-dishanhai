@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternParallelCapture;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadedRecipeLogic;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
@@ -18,6 +19,7 @@ public abstract class StellarPatternInputParallelObservationMixin {
                                                            CallbackInfoReturnable<Boolean> cir) {
         if (machine == null || recipe == null || !Boolean.TRUE.equals(cir.getReturnValue())) return;
         var logic = machine.getRecipeLogic();
+        if (logic instanceof PrimordialThreadedRecipeLogic threaded) threaded.onThreadRecipeInputHandled(recipe);
         if (!StellarPatternParallelCapture.isObserving(logic)) return;
         StellarPatternParallelCapture.record(logic, ((IGTRecipe) recipe).getRealParallels(), true);
     }

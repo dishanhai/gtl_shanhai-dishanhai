@@ -19,9 +19,11 @@ class StellarPatternStuckReportSourceTest {
     @Test
     void cancellingTheLinkIsObservedEvenBeforeTheCpuProcessesItsNextTick() throws IOException {
         String source = read("mixin/StellarPatternCraftingLinkStateMixin.java");
-        assertTrue(source.contains("\"cancel\", \"markDone\""));
-        assertTrue(source.contains("server.isSameThread()"));
+        assertTrue(source.contains("method = \"cancel\""));
+        assertTrue(source.contains("method = \"markDone\""));
         assertTrue(source.contains("StellarPatternWarningHistory.observeTerminal("));
+        assertTrue(read("common/machine/part/StellarPatternWarningHistory.java").contains("server.isSameThread()"),
+                "非伺服器執行緒的完成或取消必須排回伺服器執行緒再寫入告警");
     }
 
     @Test
@@ -88,7 +90,7 @@ class StellarPatternStuckReportSourceTest {
         assertTrue(source.contains("Component name = Component.translatable(PREFIX + \"slot_summary\""),
                 "收起列也要顯示槽號與簡短原因");
         assertTrue(source.contains("entry.cause().summary()"), "摘要必須顯示實際原因分類");
-        assertTrue(source.contains("section(details, \"reason\", Component.literal(entry.reason())"), "完整原因須獨立分區保留");
+        assertTrue(source.contains("section(details, \"reason\", StellarPatternWarningText.show(entry.reason())"), "完整原因須獨立分區保留");
         assertTrue(source.contains("entry.diagnosis().hostStatus()") && source.contains("entry.diagnosis().parallel()"));
         for (String language : new String[]{"zh_cn", "en_us"}) {
             String lang = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/lang/" + language + ".json"));

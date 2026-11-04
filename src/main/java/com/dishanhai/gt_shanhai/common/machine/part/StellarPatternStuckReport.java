@@ -141,7 +141,10 @@ public final class StellarPatternStuckReport {
         for (Entry entry : entries.stream().sorted(Comparator.comparingInt((Entry e) -> e.order().state().ordinal())
                 .thenComparingInt(e -> e.cause().ordinal())
                 .thenComparingInt(Entry::slot)).toList()) {
-            Component name = Component.translatable(PREFIX + "slot_summary", entry.displaySlot(),
+            Object slotName = entry.slotLabel().isBlank()
+                    ? Integer.toString(entry.slot() + 1)
+                    : StellarPatternWarningText.show(entry.slotLabel());
+            Component name = Component.translatable(PREFIX + "slot_summary", slotName,
                     entry.cause().summary());
             name = action(name, "/shanhai stellar_slot " + target + " " + entry.slot(), "slot_open_hint");
             name = name.copy().append("\n").append(action(Component.translatable(PREFIX + "open_main"),
@@ -152,22 +155,22 @@ public final class StellarPatternStuckReport {
                     Component.translatable(PREFIX + "order_id_short", entry.order().id()).withStyle(style -> style.withUnderlined(false)));
             MutableComponent details = Component.empty();
             section(details, "location", Component.translatable(PREFIX + "detail_location",
-                    entry.displaySlot(), dimension.toString(), coordinates), 0x78C8F0);
-            section(details, "reason", Component.literal(entry.reason()), entry.cause().color());
+                    slotName, dimension.toString(), coordinates), 0x78C8F0);
+            section(details, "reason", StellarPatternWarningText.show(entry.reason()), entry.cause().color());
             section(details, "order", orderDetails(entry.order()), orderColor(entry));
             if (!entry.diagnosis().hostStatus().isBlank())
-                section(details, "host", Component.literal(entry.diagnosis().hostStatus()), 0x78C8F0);
+                section(details, "host", StellarPatternWarningText.show(entry.diagnosis().hostStatus()), 0x78C8F0);
             if (!entry.diagnosis().minting().isBlank())
-                section(details, "mint", Component.literal(entry.diagnosis().minting()), 0xF0C878);
+                section(details, "mint", StellarPatternWarningText.show(entry.diagnosis().minting()), 0xF0C878);
             if (!entry.diagnosis().parallel().isBlank())
-                section(details, "parallel", Component.literal(entry.diagnosis().parallel()), 0x78C8F0);
+                section(details, "parallel", StellarPatternWarningText.show(entry.diagnosis().parallel()), 0x78C8F0);
             section(details, "recipe", Component.translatable(PREFIX + "detail_recipe",
                     entry.patternRecipeId(), recipeTypeName(entry.patternRecipeTypeId()), recipeTypeNames(entry.hostRecipeTypes())), 0x78C8F0);
             section(details, "materials", Component.translatable(PREFIX + "detail_materials", entry.inputs(), entry.outputs()), 0x78C8F0);
             Component category = Component.translatable(PREFIX + "order_state_" + entry.order().state().name().toLowerCase(java.util.Locale.ROOT))
                     .append(" · ").append(entry.cause().label());
             report.add(pos, "stellar_" + entry.order().state().name() + "_" + entry.cause().name(), category, orderColor(entry),
-                    name, List.of(), details);
+                    name, List.of(), details, dimension + "\n" + StellarPatternWarningHistory.incidentOf(entry));
         }
         return report.build();
     }
@@ -184,7 +187,8 @@ public final class StellarPatternStuckReport {
         if (order.state() == StellarPatternOrderInfo.State.UNTRACKED) return Component.translatable(PREFIX + "order_untracked");
         return Component.translatable(PREFIX + "detail_order", order.id(),
                 Component.translatable(PREFIX + "order_state_" + order.state().name().toLowerCase(java.util.Locale.ROOT)),
-                order.requester(), order.cpu(), order.output(), order.outputId(), order.requested(), order.remaining());
+                StellarPatternWarningText.show(order.requester()), StellarPatternWarningText.show(order.cpu()),
+                order.output(), order.outputId(), order.requested(), order.remaining());
     }
 
     private static void section(MutableComponent details, String key, Component content, int color) {

@@ -75,10 +75,10 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("stillContainsAll(snapshot.fluids"));
         assertTrue(watch.contains("appendRecipeLogicState(result, logicMachine)"));
         assertTrue(watch.contains("!logicMachine.isWorkingEnabled()"));
-        assertTrue(watch.contains("工作=已暂停工作"));
+        assertTrue(watch.contains("work_paused"));
         assertTrue(watch.contains("module.getModuleConditionError()"),
                 "样板卡死必须带上原初模块的额外挂载失败原因");
-        assertTrue(watch.contains("appendPlain(result, \"挂载\""));
+        assertTrue(watch.contains("appendPlain(result, \"mount\""));
         assertTrue(watch.contains("collectStuckReason(machine, watch.slot)"),
                 "卡死原因必须带上槽位，才能写入该槽的强匹配报错");
         assertTrue(watch.contains("machine.gtShanhai$fullStrongMatchReason(slot)"),
@@ -122,7 +122,7 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(notifier.contains("ClickEvent.Action.RUN_COMMAND"));
         assertTrue(notifier.contains("/shanhai stellar_tp "));
         assertTrue(notifier.contains("slot + 1"));
-        assertTrue(notifier.contains("displaySlot(slot, slotLabel)"),
+        assertTrue(notifier.contains("slotComponent(slot, slotLabel)"),
                 "通配展开槽要用展开序号，普通槽仍显示 slot + 1");
         assertTrue(machine.contains("gtShanhai$describeStuckSlot(int slot)"));
         assertTrue(watch.contains("machine.gtShanhai$describeStuckSlot(slot)"));

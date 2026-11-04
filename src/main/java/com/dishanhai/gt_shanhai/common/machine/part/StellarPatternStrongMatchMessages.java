@@ -63,7 +63,7 @@ public final class StellarPatternStrongMatchMessages {
             if (maxDetail > 0 && one.length() > maxDetail) {
                 one = one.substring(0, maxDetail);
             }
-            return head + "：" + one;
+            return Component.translatable("gt_shanhai.stellar.strong_match.with_detail", head, one).getString();
         }
 
         public void addTooltip(List<Component> lines) {

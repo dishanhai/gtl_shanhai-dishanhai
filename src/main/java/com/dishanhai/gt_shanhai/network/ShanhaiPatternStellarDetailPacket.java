@@ -46,9 +46,9 @@ public final class ShanhaiPatternStellarDetailPacket {
             buffer.writeInt(detail.hostX());
             buffer.writeInt(detail.hostY());
             buffer.writeInt(detail.hostZ());
-            buffer.writeUtf(detail.hostStatus(), 180);
+            buffer.writeUtf(detail.hostStatus(), 8192);
             buffer.writeUtf(detail.hostRecipeTypes(), 120);
-            buffer.writeUtf(detail.stuckBroadcast(), 960);
+            buffer.writeUtf(detail.stuckBroadcast(), 16384);
             buffer.writeVarInt(detail.proxyCount());
             buffer.writeUtf(detail.proxyLines(), 480);
         }
@@ -84,9 +84,9 @@ public final class ShanhaiPatternStellarDetailPacket {
                     buffer.readInt(),
                     buffer.readInt(),
                     buffer.readInt(),
-                    buffer.readUtf(180),
+                    buffer.readUtf(8192),
                     buffer.readUtf(120),
-                    buffer.readUtf(960),
+                    buffer.readUtf(16384),
                     buffer.readVarInt(),
                     buffer.readUtf(480)));
         }

@@ -77,7 +77,8 @@ class StellarStuckReportScreenSourceTest {
         for (String locale : new String[]{"zh_cn", "en_us"}) {
             String language = Files.readString(LANG.resolve(locale + ".json"));
             for (String key : new String[]{"title_stellar_stuck", "counts_stellar_stuck", "expand_details",
-                    "collapse_details", "col_stellar_stuck", "copy_hint_stellar_stuck", "copied_stellar_stuck"}) {
+                    "collapse_details", "col_stellar_stuck", "copy_hint_stellar_stuck", "copied_stellar_stuck",
+                    "dismiss_warning"}) {
                 assertTrue(language.contains("\"gui.gt_shanhai.ultimate_terminal.report." + key + "\":"),
                         locale + ": " + key);
             }

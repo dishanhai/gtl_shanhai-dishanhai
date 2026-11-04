@@ -49,7 +49,10 @@ public abstract class CraftingCpuLogicStellarContextMixin {
         finally {
             if (current != null && cluster.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
                 com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningHistory.observeTerminal(
-                        level.getServer(), current.gtShanhai$getLink(), current.gtShanhai$stellarRemainingAmount());
+                        level.getServer(), current.gtShanhai$getLink(),
+                        success ? com.dishanhai.gt_shanhai.common.machine.part.StellarPatternOrderInfo.State.COMPLETED
+                                : com.dishanhai.gt_shanhai.common.machine.part.StellarPatternOrderInfo.State.CANCELLED,
+                        current.gtShanhai$stellarRemainingAmount());
             }
         }
     }

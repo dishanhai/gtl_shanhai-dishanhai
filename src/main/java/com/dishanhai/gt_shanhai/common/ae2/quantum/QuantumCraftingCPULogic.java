@@ -936,7 +936,10 @@ public class QuantumCraftingCPULogic {
         }
         if (cpu.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
             com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningHistory.observeTerminal(
-                    level.getServer(), job.link, job.remainingAmount);
+                    level.getServer(), job.link,
+                    success ? com.dishanhai.gt_shanhai.common.machine.part.StellarPatternOrderInfo.State.COMPLETED
+                            : com.dishanhai.gt_shanhai.common.machine.part.StellarPatternOrderInfo.State.CANCELLED,
+                    job.remainingAmount);
         }
         job.waitingFor.clear();
         for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> entry : job.tasks.entrySet()) {

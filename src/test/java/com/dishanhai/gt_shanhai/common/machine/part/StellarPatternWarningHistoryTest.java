@@ -9,6 +9,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StellarPatternWarningHistoryTest {
     @Test
+    void dismissedIncidentLeavesTheOtherHistoryEntries() {
+        var history = new StellarPatternWarningHistory();
+        history.record(DIM, POS, warning("job-a", 3), 7);
+        history.record(DIM, POS, warning("job-b", 4), 8);
+        assertEquals(3, history.dismiss(DIM, POS, StellarPatternWarningHistory.incidentOf(history.entries(DIM, POS).getFirst())));
+        assertEquals(List.of("job-b"), history.entries(DIM, POS).stream().map(entry -> entry.order().id()).toList());
+        assertEquals(-1, history.dismiss(DIM, POS, "job-a:slot:3"));
+        assertEquals(1, StellarPatternWarningHistory.load(history.save(new CompoundTag())).entries(DIM, POS).size());
+    }
+
+    @Test
+    void outcomeObservedBeforeTheWarningIsAppliedWhenTheWarningIsRecorded() {
+        var history = new StellarPatternWarningHistory();
+        history.updateOrder("job-a", StellarPatternOrderInfo.State.CANCELLED, 12);
+        history.record(DIM, POS, warning("job-a", 3), 7);
+        assertEquals(StellarPatternOrderInfo.State.CANCELLED, history.entries(DIM, POS).getFirst().order().state());
+        assertEquals(12, history.entries(DIM, POS).getFirst().order().remaining());
+    }
+
+    @Test
     void directLinkCancellationPreservesTheLastObservedQuantityWhenCpuInformationIsUnavailable() {
         var history = new StellarPatternWarningHistory();
         history.record(DIM, POS, warning("job-a", 3), 7);

@@ -93,7 +93,9 @@ public final class StellarPatternStuckNotifier {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || PENDING.isEmpty()) return;
+        if (event.phase != TickEvent.Phase.END) return;
+        StellarPatternOrderMonitor.poll(event.getServer());
+        if (PENDING.isEmpty()) return;
         List<Batch> batches = new ArrayList<>();
         var iterator = PENDING.values().iterator();
         long now = event.getServer().getTickCount();
@@ -112,6 +114,7 @@ public final class StellarPatternStuckNotifier {
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         PENDING.clear();
+        StellarPatternOrderMonitor.clear();
     }
 
     private static void notifyBatch(ServerLevel level, Batch batch) {
@@ -129,14 +132,14 @@ public final class StellarPatternStuckNotifier {
         for (ServerPlayer player : level.players()) {
             if (player.distanceToSqr(x, y, z) > NEARBY_RADIUS_SQUARED) continue;
             if (sent.add(player.getUUID())) {
-                send(player, level, pos, "附近 " + (int) NEARBY_RADIUS + " 格", report, batch.announce);
+                send(player, level, pos, StellarPatternWarningText.line("route_nearby", (int) NEARBY_RADIUS), report, batch.announce);
             }
         }
 
         for (Integer aePlayerId : batch.aePlayerIds) {
             ServerPlayer player = IPlayerRegistry.getConnected(server, aePlayerId);
             if (player != null && sent.add(player.getUUID())) {
-                send(player, level, pos, "AE 下单玩家", report, batch.announce);
+                send(player, level, pos, StellarPatternWarningText.line("route_requester"), report, batch.announce);
             }
         }
     }
@@ -186,7 +189,7 @@ public final class StellarPatternStuckNotifier {
     }
 
     private static void send(ServerPlayer player, ServerLevel level, BlockPos pos,
-            String route, ShanhaiTerminalReport report, boolean announce) {
+            Component route, ShanhaiTerminalReport report, boolean announce) {
         ShanhaiTerminalReportPacket.sendTo(player, report);
         if (!announce) return;
         Component link = Component.translatable(PREFIX + "link_details").withStyle(style -> style
@@ -206,19 +209,19 @@ public final class StellarPatternStuckNotifier {
     public static String broadcastBody(int slot, String slotLabel, String reason, String stuckInputs,
             String stuckOutputs, List<String> hostRecipeTypeIds, String patternRecipeTypeId,
             String patternRecipeId) {
-        String text = "槽位 " + displaySlot(slot, slotLabel)
-                + " 样板ID: " + oneLine(patternRecipeId)
-                + " 样板类型: " + oneLine(patternRecipeTypeId)
-                + " 原因: " + oneLine(reason)
-                + " | 原料: " + oneLine(stuckInputs)
-                + " | 输出: " + oneLine(stuckOutputs)
-                + " | 主机配方: " + oneLine(formatList(hostRecipeTypeIds));
-        return text.length() <= 220 ? text : text.substring(0, 220);
+        return StellarPatternWarningText.store(StellarPatternWarningText.line("broadcast",
+                slotComponent(slot, slotLabel),
+                Component.literal(oneLine(patternRecipeId)),
+                Component.literal(oneLine(patternRecipeTypeId)),
+                StellarPatternWarningText.show(oneLine(reason)),
+                Component.literal(oneLine(stuckInputs)),
+                Component.literal(oneLine(stuckOutputs)),
+                Component.literal(oneLine(formatList(hostRecipeTypeIds)))));
     }
 
-    private static String displaySlot(int slot, String slotLabel) {
-        if (slotLabel != null && !slotLabel.isBlank()) return slotLabel;
-        return String.valueOf(slot + 1);
+    private static Component slotComponent(int slot, String slotLabel) {
+        if (slotLabel != null && !slotLabel.isBlank()) return StellarPatternWarningText.show(slotLabel);
+        return Component.literal(String.valueOf(slot + 1));
     }
 
     private static String oneLine(String text) {
@@ -235,7 +238,7 @@ public final class StellarPatternStuckNotifier {
                 .withUnderlined(true)
                 .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        Component.literal("点击传送到该星律样板总成"))));
+                        Component.translatable(PREFIX + "teleport_hint"))));
     }
 
     private static String formatList(@Nullable List<String> values) {

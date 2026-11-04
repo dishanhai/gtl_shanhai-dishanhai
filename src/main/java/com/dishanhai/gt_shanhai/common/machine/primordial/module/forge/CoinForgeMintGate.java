@@ -3,6 +3,12 @@ package com.dishanhai.gt_shanhai.common.machine.primordial.module.forge;
 import java.util.List;
 import java.util.Locale;
 
+import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningText;
+
+import net.minecraft.network.chat.Component;
+
+import org.jetbrains.annotations.Nullable;
+
 /**
  * 铸币工厂的货币权限与并行折算。阶段顺序与商店 {@code currency_stages.json} 的电压阶一致，
  * 第 1 阶对应入门物质模块。没有写阶段的产出不锁。
@@ -13,21 +19,7 @@ public final class CoinForgeMintGate {
             "ulv", "lv", "mv", "hv", "ev", "iv", "luv", "zpm",
             "uhv", "uev", "uiv", "uxv", "opv", "max");
 
-    private static final List<String> LABELS = List.of(
-            "铜币",
-            "白铜币",
-            "银币",
-            "金币",
-            "铂币",
-            "锇币",
-            "硅岩币",
-            "中子合金币",
-            "衰变铼币",
-            "振动、时空、中子币",
-            "二级币",
-            "无尽、超维币",
-            "混沌至永恒币",
-            "星体、星门币");
+    private static final int TIER_COUNT = 14;
 
     private CoinForgeMintGate() {}
 
@@ -47,11 +39,15 @@ public final class CoinForgeMintGate {
     }
 
     /** 告警與真正的鑄幣權限使用同一等級判斷；未分階段的產物不誤報。 */
+    public static @Nullable Component restrictionComponent(int moduleLevel, int required) {
+        if (allowsRequiredLevel(moduleLevel, required)) return null;
+        return StellarPatternWarningText.line("mint_locked_detail", Math.max(0, moduleLevel),
+                permissionComponent(moduleLevel), required);
+    }
+
     public static String restrictionText(int moduleLevel, int required) {
-        if (allowsRequiredLevel(moduleLevel, required)) return "";
-        return "铸币权限未解锁\n当前物质模块: Lv." + Math.max(0, moduleLevel)
-                + "\n当前铸币范围: " + permissionText(moduleLevel)
-                + "\n本配方最低需求: Lv." + required + " 或以上物质模块";
+        Component component = restrictionComponent(moduleLevel, required);
+        return component == null ? "" : component.getString();
     }
 
     /** 正常并行的 1/4，向下取整；正数并行至少保留 1。 */
@@ -61,9 +57,14 @@ public final class CoinForgeMintGate {
         return quarter <= 0L ? 1L : quarter;
     }
 
+    public static Component permissionComponent(int moduleLevel) {
+        if (moduleLevel <= 0) return StellarPatternWarningText.line("mint_locked");
+        if (moduleLevel >= TIERS.size()) return StellarPatternWarningText.line("mint_all");
+        int tier = Math.min(Math.max(moduleLevel, 1), TIER_COUNT) - 1;
+        return StellarPatternWarningText.line("mint_upto", StellarPatternWarningText.line("mint_tier_" + tier));
+    }
+
     public static String permissionText(int moduleLevel) {
-        if (moduleLevel <= 0) return "未解锁，需搭载入门物质模块";
-        if (moduleLevel >= TIERS.size()) return "全部货币";
-        return LABELS.get(moduleLevel - 1) + "及以下";
+        return permissionComponent(moduleLevel).getString();
     }
 }

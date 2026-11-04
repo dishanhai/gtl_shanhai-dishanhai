@@ -419,9 +419,8 @@ public final class ShanhaiPatternManagementScreen
             String[] parts = detail.stuckBroadcast().split("\n", -1);
             for (int index = 0; index < parts.length; index++) {
                 if (parts[index].isEmpty()) continue;
-                Component stuck = Component.literal(parts[index]);
-                lines.add(new DetailLine(stuck, DETAIL_WARN,
-                        Component.literal(parts[index].replace(" | ", "\n")), false));
+                Component stuck = com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningText.show(parts[index]);
+                lines.add(new DetailLine(stuck, DETAIL_WARN, stuck, false));
             }
         }
         lines.add(new DetailLine(Component.translatable(detail.online()
@@ -433,7 +432,8 @@ public final class ShanhaiPatternManagementScreen
 
     private static Component hostStatusLine(StellarTerminalDetail detail) {
         if (!detail.hostStatus().isEmpty()) {
-            return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_status", detail.hostStatus());
+            return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_status",
+                    com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningText.show(detail.hostStatus()));
         }
         if (!detail.hostFormed()) {
             return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_unformed");

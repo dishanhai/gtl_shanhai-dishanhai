@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur;
 import com.dishanhai.gt_shanhai.client.ShanhaiStructureHighlightClient;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopUiSounds;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
+import com.dishanhai.gt_shanhai.network.StellarWarningDismissPacket;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
 import net.minecraft.ChatFormatting;
@@ -48,8 +49,12 @@ public final class TerminalReportScreen extends ScaledScreen {
     private static final int CELL_COLS = 2, CELL_GAP = 4, CELL_ICON = 20, CELL_MIN_H = 26;
 
     private record Chip(String key, Component text, int category, int x, int y, int w, int h) {}
-    private record Group(int category, int name, List<BlockPos> positions) {
+    private record Group(int category, int name, List<BlockPos> positions, List<String> dismissKeys) {
         long key() { return ((long) category << 32) | name; }
+        boolean dismissable() {
+            for (String key : dismissKeys) if (key != null && !key.isBlank()) return true;
+            return false;
+        }
     }
     private record Cell(ItemStack stack, Component text, int x, int y, int w, int h) {}
     private record Row(Group group, Component kind, List<FormattedCharSequence> detailLines, Component coordsHeader,
@@ -96,11 +101,14 @@ public final class TerminalReportScreen extends ScaledScreen {
         categoryCounts = new int[report.categories().size()];
         Set<BlockPos> distinct = new HashSet<>();
         Map<Long, Group> grouped = new LinkedHashMap<>();
-        for (var line : report.lines()) {
+        for (int index = 0; index < report.lines().size(); index++) {
+            var line = report.lines().get(index);
             categoryCounts[line.category()]++;
             distinct.add(line.pos());
-            grouped.computeIfAbsent(((long) line.category() << 32) | line.name(),
-                    key -> new Group(line.category(), line.name(), new ArrayList<>())).positions().add(line.pos());
+            var group = grouped.computeIfAbsent(((long) line.category() << 32) | line.name(),
+                    key -> new Group(line.category(), line.name(), new ArrayList<>(), new ArrayList<>()));
+            group.positions().add(line.pos());
+            group.dismissKeys().add(index < report.dismissKeys().size() ? report.dismissKeys().get(index) : "");
         }
         groups.addAll(grouped.values());
         // 同類別排在一起；類別內保持掃描出現順序。
@@ -415,6 +423,9 @@ public final class TerminalReportScreen extends ScaledScreen {
                     }
                     if (row.boxable())
                         ui.button(g, "box." + rowIndex, bx, rowY + row.btnY(), btnW(boxLabel()), btnH(), boxLabel(), Math.max(1, btnW(boxLabel()) - 12), true, mx, my, null);
+                    if (row.group().dismissable())
+                        ui.button(g, "dismiss." + rowIndex, dismissX(), rowY + row.btnY(), 18, btnH(),
+                                Component.literal("×"), 12, true, mx, my, null);
                     g.pose().popPose();
                 });
             }
@@ -425,6 +436,7 @@ public final class TerminalReportScreen extends ScaledScreen {
                 : row.open() ? "collapse" : "expand");
     }
     private Component boxLabel() { return tr("show_boxes"); }
+    private int dismissX() { return listX() + CONTENT_W - 22; }
     private int btnW(Component label) { return font.width(label) + 16; }
     private int btnH() { return font.lineHeight + 10; }
     private void drawCells(GuiGraphics g, Row row, int originX, int originY, int mx, int my) {
@@ -512,6 +524,14 @@ public final class TerminalReportScreen extends ScaledScreen {
             if (row.boxable() && hit(mx, my, bx, by, btnW(boxLabel()), btnH())) {
                 ui.feedback.press(("box." + rowIndex).hashCode(), bx, by, btnW(boxLabel()), btnH(), true, now());
                 ShopUiSounds.click(); showBoxes(row.group()); return true;
+            }
+            if (row.group().dismissable() && hit(mx, my, dismissX(), by, 18, btnH())) {
+                ui.feedback.press(("dismiss." + rowIndex).hashCode(), dismissX(), by, 18, btnH(), true, now());
+                ShopUiSounds.click();
+                for (String key : row.group().dismissKeys()) {
+                    if (key != null && !key.isBlank()) StellarWarningDismissPacket.send(report.target(), key);
+                }
+                return true;
             }
             if (isTextReport()) {
                 String text = report.names().get(row.group().name()).getString();

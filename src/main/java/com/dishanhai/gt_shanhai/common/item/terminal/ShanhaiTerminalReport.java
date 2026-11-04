@@ -20,7 +20,7 @@ import net.minecraft.world.item.ItemStack;
 public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] counts, Component summary,
                                     List<Category> categories, List<Component> names,
                                     List<List<Item>> icons, List<Component> details,
-                                    List<Line> lines, int omitted) {
+                                    List<Line> lines, List<String> dismissKeys, int omitted) {
 
     public enum Type { SCAN, MODULES, BUILD, CRAFT, STELLAR_STUCK }
 
@@ -52,6 +52,13 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
         icons = icons.stream().map(List::copyOf).toList();
         details = List.copyOf(details);
         lines = List.copyOf(lines);
+        if (dismissKeys == null || dismissKeys.size() != lines.size()) {
+            var keys = new ArrayList<String>(lines.size());
+            for (int i = 0; i < lines.size(); i++) keys.add(dismissKeys != null && i < dismissKeys.size() ? dismissKeys.get(i) : "");
+            dismissKeys = List.copyOf(keys);
+        } else {
+            dismissKeys = List.copyOf(dismissKeys);
+        }
     }
 
     @Override
@@ -72,6 +79,7 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
         private final List<Component> details = new ArrayList<>();
         private final Map<String, Integer> nameIndex = new HashMap<>();
         private final List<Line> lines = new ArrayList<>();
+        private final List<String> dismissKeys = new ArrayList<>();
         private Component summary = Component.empty();
         private int omitted;
 
@@ -114,6 +122,12 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
         /** {@code detail} 是名稱下方的補充說明（合成報告的缺料清單等），空 Component 表示沒有。 */
         public void add(BlockPos pos, String categoryKey, Component categoryLabel, int color, Component name,
                         List<ItemStack> items, Component detail) {
+            add(pos, categoryKey, categoryLabel, color, name, items, detail, "");
+        }
+
+        /** {@code dismissKey} 只給星律告警歷史使用，客戶端可據此請求伺服器刪掉該條。 */
+        public void add(BlockPos pos, String categoryKey, Component categoryLabel, int color, Component name,
+                        List<ItemStack> items, Component detail, String dismissKey) {
             if (lines.size() >= MAX_LINES) {
                 omitted++;
                 return;
@@ -130,10 +144,11 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
                 return names.size() - 1;
             });
             lines.add(new Line(pos, category, nameId));
+            dismissKeys.add(dismissKey == null ? "" : dismissKey);
         }
 
         public ShanhaiTerminalReport build() {
-            return new ShanhaiTerminalReport(id, type, target, counts, summary, categories, names, icons, details, lines, omitted);
+            return new ShanhaiTerminalReport(id, type, target, counts, summary, categories, names, icons, details, lines, dismissKeys, omitted);
         }
     }
 
@@ -157,10 +172,12 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
         for (Component detail : details) buf.writeComponent(detail);
         buf.writeVarInt(omitted);
         buf.writeVarInt(lines.size());
-        for (Line line : lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            Line line = lines.get(i);
             buf.writeLong(line.pos().asLong());
             buf.writeVarInt(line.category());
             buf.writeVarInt(line.name());
+            buf.writeUtf(i < dismissKeys.size() ? dismissKeys.get(i) : "", 160);
         }
     }
 
@@ -188,13 +205,15 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
         int omitted = Math.max(0, buf.readVarInt());
         int lineCount = checked(buf.readVarInt(), MAX_LINES);
         List<Line> lines = new ArrayList<>(lineCount);
+        List<String> dismissKeys = new ArrayList<>(lineCount);
         for (int i = 0; i < lineCount; i++) {
             BlockPos pos = BlockPos.of(buf.readLong());
             int category = checked(buf.readVarInt(), categoryCount - 1);
             int name = checked(buf.readVarInt(), nameCount - 1);
             lines.add(new Line(pos, category, name));
+            dismissKeys.add(buf.readUtf(160));
         }
-        return new ShanhaiTerminalReport(id, type, target, counts, summary, categories, names, icons, details, lines, omitted);
+        return new ShanhaiTerminalReport(id, type, target, counts, summary, categories, names, icons, details, lines, dismissKeys, omitted);
     }
 
     private static int checked(int value, int max) {
