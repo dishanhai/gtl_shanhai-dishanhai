@@ -12,19 +12,18 @@ final class HostFxGlassArModules {
         final int z = Z_MODLIST;
         final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_MODLIST;
         final int installed = st.installedModules >= 0 ? st.installedModules : st.moduleCount;
-        final int[] slots = HostFxGlassArSort.sameSet(st.moduleSlots, st.moduleOrder)
-                ? st.moduleOrder : st.moduleSlots;
+        final int[] slots = HostFxGlassArSort.order(st.moduleSlots);
         final int total = slots == null ? 0 : slots.length;
-        final int pages = Math.max(1, (total + HostFxGlassArPanel.MODLIST_ROWS - 1) / HostFxGlassArPanel.MODLIST_ROWS);
-        final int page = (int) Math.floorMod(Math.floorDiv(st.modulePageTimeMillis,
-                HostFxGlassArPanel.MODLIST_PAGE_MILLIS), (long) pages);
+        final int pages = HostFxGlassArTouch.modulePageCount(st);
+        final int page = st.modulePages.page(st.modulePageTimeMillis, pages);
         final long remainingMillis = HostFxGlassArPanel.MODLIST_PAGE_MILLIS
                 - Math.floorMod(st.modulePageTimeMillis, HostFxGlassArPanel.MODLIST_PAGE_MILLIS);
         final long remainingSeconds = (remainingMillis + 999L) / 1_000L;
         // ── 表头（一列一个 Txt，和数据行同一套 u 偏移） ─────────────────────────────
         final float yh = px(zo.v + HostFxGlassArPanel.MODLIST_HEAD_V0);
         final String[] head = {"槽", "模块", "进度", "耗能EU/t", "并行", "线程",
-                pages > 1 ? "物品 · " + (page + 1) + "/" + pages + "页 · " + remainingSeconds + "s换页" : "物品"};
+                pages > 1 ? "物品 · " + (page + 1) + "/" + pages + "页 · "
+                        + (st.modulePages.locked() ? "已锁定" : remainingSeconds + "s换页") : "物品"};
         final float[] hu = {
                 HostFxGlassArPanel.MOD_SLOT_U, HostFxGlassArPanel.MOD_NAME_U,
                 HostFxGlassArPanel.MOD_BAR_U, HostFxGlassArPanel.MOD_EU_U,

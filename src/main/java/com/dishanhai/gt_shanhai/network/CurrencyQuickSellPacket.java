@@ -41,6 +41,7 @@ public class CurrencyQuickSellPacket {
 
     private static void apply(CurrencyQuickSellPacket pkt, ServerPlayer player) {
         if (player == null || !WalletItem.isCarrying(player)) return;
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         ShopPurchase.QuickSellResult result = ShopPurchase.quickSellAllCurrencies(player, pkt.includeAe);
         if (result.gained().signum() > 0) {
             String aeHint = pkt.includeAe && result.extracted().signum() > 0

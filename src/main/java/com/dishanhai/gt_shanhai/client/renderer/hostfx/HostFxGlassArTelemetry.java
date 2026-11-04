@@ -17,7 +17,7 @@ final class HostFxGlassArTelemetry {
     }
 
     static int page(State state) {
-        return (int) Math.floorMod(Math.floorDiv(state.modulePageTimeMillis, 10_000L), 4L);
+        return state.infoPages.page(state.modulePageTimeMillis, 4);
     }
 
     static String root(GuixuArStatus status) {

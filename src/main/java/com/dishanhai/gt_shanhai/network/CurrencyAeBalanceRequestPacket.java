@@ -51,6 +51,7 @@ public class CurrencyAeBalanceRequestPacket {
 
     private static void apply(CurrencyAeBalanceRequestPacket pkt, ServerPlayer player) {
         if (player == null || !WalletItem.isCarrying(player)) return;
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (pkt.all) {
             for (ResourceLocation currency : CurrencyRateConfig.getCurrencies()) {
                 sendBalance(player, currency);

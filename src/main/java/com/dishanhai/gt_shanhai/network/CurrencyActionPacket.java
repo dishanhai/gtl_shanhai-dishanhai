@@ -69,6 +69,7 @@ public class CurrencyActionPacket {
     }
 
     private static void apply(CurrencyActionPacket pkt, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (!WalletItem.isCarrying(player)) {
             player.sendSystemMessage(Component.literal("§c[货币中心] 需持有山海钱包（背包/饰品栏任意位置都行）"));
             return;

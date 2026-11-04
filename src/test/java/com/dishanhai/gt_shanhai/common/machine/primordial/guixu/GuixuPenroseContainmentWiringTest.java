@@ -79,7 +79,7 @@ class GuixuPenroseContainmentWiringTest {
     void hostRecipeLogicAppliesBonus() throws Exception {
         String logic = read(GUIXU + "GuixuVisionCoreRecipeLogic.java");
         assertTrue(logic.contains("host.isContainmentLocked()"));
-        assertTrue(logic.contains(".scaleParallel(super.getTotalParallelLimit())"));
+        assertTrue(logic.contains(".scaleParallel(super.getUnreservedTotalParallelLimit())"));
         assertTrue(logic.contains(".scaleEnergy("));
         assertTrue(logic.contains(".scaleDuration(plannedTicks)"));
         assertTrue(logic.contains(".shouldSwallow("));
@@ -89,7 +89,7 @@ class GuixuPenroseContainmentWiringTest {
     void moduleRecipeLogicAppliesBonus() throws Exception {
         String logic = read(PRIMORDIAL + "PrimordialModuleRecipeLogic.java");
         assertTrue(logic.contains("containmentBonus().locked()"));
-        assertTrue(logic.contains("containmentBonus().scaleParallel(super.getTotalParallelLimit())"));
+        assertTrue(logic.contains("containmentBonus().scaleParallel(getBaseParallelCapacity())"));
         assertTrue(logic.contains("containmentBonus().energyFactor(energyConsumer)"));
         assertTrue(logic.contains("int multiplier = module.getHostOutputMultiplier();"),
                 "遏制場增產已由主機彙總，配方邏輯不得再額外加一次");

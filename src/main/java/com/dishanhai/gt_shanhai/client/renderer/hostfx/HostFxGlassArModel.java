@@ -248,8 +248,6 @@ public final class HostFxGlassArModel {
          * <b>不按 0,1,2… 编一批槽位号出来</b>（那会把"未知"画成"有这么几个槽"）。
          */
         public int[] moduleSlots;
-        /** 已驗證置換；不改動 moduleSlots 與名稱對應。 */
-        public int[] moduleOrder;
         public byte[] modReason;
         public String[] moduleReasonLabels = {"", "运行", "缺电", "输出满", "被拦"};
         /** 提交層按當前語言的 Font.width 實測；純模型測試可直接提供。 */
@@ -275,6 +273,9 @@ public final class HostFxGlassArModel {
         public long[] modParallel;
         /** 山海：獨立單調時鐘（毫秒），不隨特效動畫暫停。 */
         public long modulePageTimeMillis;
+        HostFxGlassArTouch.Pages infoPages = new HostFxGlassArTouch.Pages();
+        HostFxGlassArTouch.Pages modulePages = new HostFxGlassArTouch.Pages();
+        int hoverButton = -1;
         /** 每个扫描位"拥有几个跨配方线程"（{@code < 0} = 读不到）。 */
         public int[] modThreads;
         /** 每个扫描位"还有几秒做完"（{@code < 0} = 读不到）。 */
@@ -500,6 +501,7 @@ public final class HostFxGlassArModel {
         HostFxGlassArTelemetry.buildDetails(st, texts);
         buildHost(st, prims, texts);
         HostFxGlassArModules.build(st, prims, texts);
+        HostFxGlassArTouch.build(st, prims, texts);
         final double[] phys = buildPhysics(st.holeRadiusBlocks);
         return new Model(prims, texts, ring % 360.0F, shipUp % 360.0F, shipDown % 360.0F,
                 st.holeRadiusBlocks, phys, ESC_AT_RS_C, st.fxOn, st.textFace);

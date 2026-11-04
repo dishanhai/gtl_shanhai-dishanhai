@@ -24,11 +24,14 @@ public final class ShanhaiNyarlathotepEchoStructure {
             pattern.aisle(aisle);
             for (String row : aisle) for (char symbol : row.toCharArray()) symbols.add(symbol);
         }
+        // C/M 共用同一組 SimplePredicate，讓能源下限／上限按整台機器計數。
+        // 若在符號迴圈內重建，內圈與外框會各自強制要求至少一個能源輸入倉。
+        var hatchAbilities = Predicates.autoAbilities(definition.getRecipeTypes());
         for (char symbol : symbols) {
             if (symbol == ' ' || symbol == 'S') continue;
             var predicate = lazy(ShanhaiNyarlathotepEchoLayout.blockId(symbol));
             if (ShanhaiNyarlathotepEchoLayout.allowsHatch(symbol))
-                predicate = predicate.or(Predicates.autoAbilities(definition.getRecipeTypes()));
+                predicate = predicate.or(hatchAbilities);
             pattern.where(symbol, predicate);
         }
         return pattern.where('S', Predicates.controller(Predicates.blocks(definition.getBlock())))

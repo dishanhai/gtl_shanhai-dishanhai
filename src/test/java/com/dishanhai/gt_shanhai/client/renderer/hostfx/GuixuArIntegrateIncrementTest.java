@@ -18,43 +18,44 @@ class GuixuArIntegrateIncrementTest {
                 .filter(t -> t.slot == 206).findFirst().orElseThrow().text;
         state.modReason = new byte[]{1};
         var texts = HostFxGlassArModel.build(state).texts;
-        assertFalse(texts.stream().anyMatch(t -> t.slot == 207), "運行狀態由進度與排序表示");
+        assertFalse(texts.stream().anyMatch(t -> t.slot == 207), "運行狀態由進度表示，不影響槽號排序");
         assertEquals(withoutLabel, texts.stream().filter(t -> t.slot == 206).findFirst().orElseThrow().text);
     }
 
-    @Test void reorderedSlotsKeepTheirNamesAndAllFortyRemainReachable() throws Exception {
+    @Test void shuffledSlotsSortByIdAndKeepTheirNamesAcrossAllFortySlots() {
         var state = new HostFxGlassArModel.State();
-        state.moduleSlots = IntStream.range(0, 40).toArray();
-        state.moduleNames = IntStream.range(0, 40).mapToObj(i -> "模組" + i).toArray(String[]::new);
         int[] reversed = IntStream.range(0, 40).map(i -> 39 - i).toArray();
-        assertDoesNotThrow(() -> state.getClass().getField("moduleOrder").set(state, reversed));
+        state.moduleSlots = reversed;
+        state.moduleNames = Arrays.stream(reversed).mapToObj(i -> "模組" + i).toArray(String[]::new);
         var seen = new java.util.ArrayList<String>();
         for (int page = 0; page < 6; page++) {
             state.modulePageTimeMillis = page * 10_000L;
             var texts = HostFxGlassArModel.build(state).texts;
             seen.addAll(texts.stream().filter(t -> t.zone == HostFxGlassArModel.Z_MODLIST
                     && t.slot >= 200 && t.slot % 10 == 0).map(t -> t.text).toList());
-            int first = 39 - page * 7;
+            int first = page * 7;
             assertTrue(texts.stream().anyMatch(t -> t.slot == 201 && t.text.equals("模組" + first)));
         }
-        assertEquals(Arrays.stream(reversed).mapToObj(String::valueOf).toList(), seen);
+        assertEquals(IntStream.range(0, 40).mapToObj(String::valueOf).toList(), seen);
+        assertArrayEquals(IntStream.range(0, 40).map(i -> 39 - i).toArray(), state.moduleSlots,
+                "排序不得改動原始槽號與名稱陣列的對應");
     }
 
-    @Test void reasonTakesPrecedenceOverStalledProgressAndHostSwitchClearsHistory() throws Exception {
-        Class<?> type = assertDoesNotThrow(() -> Class.forName(
-                "com.dishanhai.gt_shanhai.client.renderer.hostfx.HostFxGlassArSort$Tracker"));
-        var cache = new HostFxReadingCache();
-        cache.selectHost(new Object());
-        var field = assertDoesNotThrow(() -> HostFxReadingCache.class.getDeclaredField("moduleSort"));
-        field.setAccessible(true);
-        Object tracker = field.get(cache);
-        var observe = type.getMethod("observe", long.class, int[].class, byte[].class, int[].class, byte[].class);
-        var order = type.getMethod("order", int[].class);
-        int[] slots = {0, 1};
-        observe.invoke(tracker, 10L, slots, new byte[]{80, 0}, new int[]{10, 10}, new byte[]{2, 1});
-        assertArrayEquals(new int[]{1, 0}, (int[]) order.invoke(tracker, (Object) slots));
-        cache.selectHost(new Object());
-        assertArrayEquals(slots, (int[]) order.invoke(field.get(cache), (Object) slots));
+    @Test void missingSlotTwoPlacesSlotThreeOnTheSecondRowWithItsOwnData() {
+        var state = new HostFxGlassArModel.State();
+        state.moduleSlots = new int[]{3, 1};
+        state.moduleNames = new String[]{"模組三", "模組一"};
+        state.modProgressPct = new byte[]{-1, 25, -1, 75};
+        var model = HostFxGlassArModel.build(state);
+        assertEquals("1", model.text(HostFxGlassArModel.Z_MODLIST, 200).text);
+        assertEquals("模組一", model.text(HostFxGlassArModel.Z_MODLIST, 201).text);
+        assertEquals("25%", model.text(HostFxGlassArModel.Z_MODLIST, 202).text);
+        assertEquals("3", model.text(HostFxGlassArModel.Z_MODLIST, 210).text);
+        assertEquals("模組三", model.text(HostFxGlassArModel.Z_MODLIST, 211).text);
+        assertEquals("75%", model.text(HostFxGlassArModel.Z_MODLIST, 212).text);
+        assertEquals(HostFxGlassArPanel.px(HostFxGlassArPanel.MODLIST_ROW_DV),
+                model.text(HostFxGlassArModel.Z_MODLIST, 210).y - model.text(HostFxGlassArModel.Z_MODLIST, 200).y,
+                0.0001F);
     }
 
     @Test void knownNoOutputAndUnknownSnapshotUseDifferentText() {
@@ -82,32 +83,23 @@ class GuixuArIntegrateIncrementTest {
         assertEquals(right, label.x + 70, 0.001F);
     }
 
-    @Test void missingAndDuplicateOrdersFallBackToTheCompleteOriginalList() throws Exception {
+    @Test void emptyAndUnknownSlotListsDoNotInventRows() {
         var state = new HostFxGlassArModel.State();
-        state.moduleSlots = new int[]{3, 7, 11};
-        for (int[] invalid : new int[][]{{11, 3}, {11, 11, 3}}) {
-            state.getClass().getField("moduleOrder").set(state, invalid);
-            assertEquals(java.util.List.of("3", "7", "11"), HostFxGlassArModel.build(state).texts.stream()
-                    .filter(t -> t.zone == HostFxGlassArModel.Z_MODLIST && t.slot >= 200 && t.slot % 10 == 0)
-                    .map(t -> t.text).toList());
+        for (int[] slots : new int[][]{null, new int[0]}) {
+            state.moduleSlots = slots;
+            assertTrue(HostFxGlassArModel.build(state).texts.stream()
+                    .noneMatch(t -> t.zone == HostFxGlassArModel.Z_MODLIST && t.slot >= 200));
         }
     }
 
-    @Test void sortingTracksStartAndStopEdgesWithoutInventingUnknownHistory() throws Exception {
-        Class<?> type = Class.forName("com.dishanhai.gt_shanhai.client.renderer.hostfx.HostFxGlassArSort$Tracker");
-        Object tracker = type.getConstructor().newInstance();
-        var observe = type.getMethod("observe", long.class, int[].class, byte[].class, int[].class, byte[].class);
-        var order = type.getMethod("order", int[].class);
-        int[] slots = {0, 1, 2};
-        observe.invoke(tracker, 10L, slots, null, null, new byte[]{1, 0, 0});
-        observe.invoke(tracker, 20L, slots, null, null, new byte[]{1, 1, 0});
-        assertArrayEquals(new int[]{1, 0, 2}, (int[]) order.invoke(tracker, (Object) slots));
-        observe.invoke(tracker, 21L, slots, null, null, new byte[]{-1, -1, -1});
-        assertArrayEquals(new int[]{1, 0, 2}, (int[]) order.invoke(tracker, (Object) slots));
-        observe.invoke(tracker, 22L, slots, null, null, new byte[]{1, 2, 0});
-        assertArrayEquals(new int[]{0, 1, 2}, (int[]) order.invoke(tracker, (Object) slots));
-        observe.invoke(tracker, 23L, new int[]{2}, null, null, new byte[]{0, 0, 0});
-        observe.invoke(tracker, 24L, slots, null, null, new byte[]{0, 0, 0});
-        assertArrayEquals(slots, (int[]) order.invoke(tracker, (Object) slots));
+    @Test void workingStoppedAndUnknownReasonsNeverChangeSlotOrder() {
+        var state = new HostFxGlassArModel.State();
+        state.moduleSlots = new int[]{3, 1, 2};
+        for (byte[] reasons : new byte[][]{{0, 0, 1, 1}, {0, 2, 1, 0}, {-1, -1, -1, -1}}) {
+            state.modReason = reasons;
+            assertEquals(java.util.List.of("1", "2", "3"), HostFxGlassArModel.build(state).texts.stream()
+                    .filter(t -> t.zone == HostFxGlassArModel.Z_MODLIST && t.slot >= 200 && t.slot % 10 == 0)
+                    .map(t -> t.text).toList());
+        }
     }
 }

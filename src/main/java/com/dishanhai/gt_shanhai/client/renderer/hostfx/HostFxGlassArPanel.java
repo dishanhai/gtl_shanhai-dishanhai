@@ -96,14 +96,14 @@ public final class HostFxGlassArPanel {
 
     /** <b>朝环心那一面</b>的本地 x = 63.5（房间在 +X 那侧）。 */
     public static final float FACE_LOCAL_X = 63.5F;
-    /** 文字平面再往环心方向让 0.02 格（防 z-fighting，也让"投影"有厚度感）。 */
-    public static final float TEXT_OFFSET = 0.020F;
+    /** 山海：投影離玻璃外表面 0.12 格，顯示與觸控都在玻璃碰撞箱之前。 */
+    public static final float TEXT_OFFSET = 0.120F;
     /**
      * 几何（线/面）平面再比文字平面往环心让 0.012 格。
      *
      * <p>为什么必须分开：{@code RenderType.text} 与 {@code POSITION_COLOR} 两条层都会写深度，
      * 贴在同一平面上会出现<b>逐像素闪烁</b>（z-fighting）。让几何在后面 0.012 格 ⇒ 从房间里看顺序恒定：
-     * 玻璃（63.5）→ 文字（63.48）→ 几何（63.468）。
+     * 山海：控制室在 +X 側，玻璃佔 [63.5,64.5]；文字在 64.62、幾何在 64.608。
      */
     public static final float GEOM_OFFSET = 0.012F;
     /** 窗口净高：[{@link #WALL_Y0}, {@link #WALL_Y1}]。 */
@@ -435,12 +435,12 @@ public final class HostFxGlassArPanel {
 
     /** 文字平面的本地 x。 */
     public static float textPlaneX() {
-        return FACE_LOCAL_X - TEXT_OFFSET;
+        return textPlaneX(0);
     }
 
     /** 兩側各自偏離玻璃面，避免正反文字重疊造成深度閃爍。 */
     public static float textPlaneX(int face) {
-        return FACE_LOCAL_X + (face == 0 ? -TEXT_OFFSET : TEXT_OFFSET);
+        return FACE_LOCAL_X + (face == 0 ? 1.0F + TEXT_OFFSET : -TEXT_OFFSET);
     }
 
     public static int visibleTextFace(float cameraLocalX) {

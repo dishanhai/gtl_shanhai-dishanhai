@@ -171,6 +171,7 @@ public final class HostFxGlassArText {
         probeBucket = NEVER;
         // 換世界才清繪圖佇列；切換主機只作廢讀數，保留本幀已捕獲的面板。
         HostFxGlassArDeferred.reset();
+        HostFxGlassArInput.reset();
     }
 
     /** 一行摘要（渲染器每 5 秒那条 {@code draw} 日志里带；进游戏 grep {@code 玻璃AR} 就能看到判据读数）。 */
@@ -254,6 +255,7 @@ public final class HostFxGlassArText {
         final var camera = mc.gameRenderer.getMainCamera().getPosition();
         STATE.textFace = HostFxGlassArPanel.visibleTextFace(HostFxBlackHole.cameraLocal(
                 facing, camera.x, camera.y, camera.z, host.getPos())[0]);
+        HostFxGlassArInput.rendered(host, STATE);
 
         final HostFxGlassArModel.Model model = HostFxGlassArModel.build(STATE);
         lastModel = model;
@@ -485,9 +487,6 @@ public final class HostFxGlassArText {
         if (STATE.energyOutCapacity < 0L) {
             STATE.energyOutCapacity = ou == null ? -1L : ou[1];
         }
-        READINGS.moduleSort.observe(tick, STATE.moduleSlots, STATE.modProgressPct,
-                STATE.modRemainSeconds, STATE.modReason);
-        STATE.moduleOrder = READINGS.moduleSort.order(STATE.moduleSlots);
         final Font font = Minecraft.getInstance().font;
         STATE.textWidth = font::width;
         STATE.moduleReasonLabels = new String[]{"",
@@ -970,7 +969,6 @@ public final class HostFxGlassArText {
         STATE.modThreads = null;
         STATE.modRemainSeconds = null;
         STATE.modReason = null;
-        STATE.moduleOrder = null;
         STATE.modOutputs = null;
         STATE.hostProgressPct = -1;
         STATE.hostRemainSeconds = -1;

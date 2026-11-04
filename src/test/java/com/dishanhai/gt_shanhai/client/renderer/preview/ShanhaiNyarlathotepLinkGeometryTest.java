@@ -98,4 +98,87 @@ class ShanhaiNyarlathotepLinkGeometryTest {
         assertTrue(pivot>=0 && portal>pivot && portal<pop,"Portal must use the existing orientation and cell-center pivot");
         assertTrue(host.contains("host.isNyarlathotepLinkReady() && BlackHoleTuning.enabled() && blackHoleVisible"));
     }
+
+    private double dot(ShanhaiInstabilityGeometry.Point a, ShanhaiInstabilityGeometry.Point b) {
+        return a.x()*b.x()+a.y()*b.y()+a.z()*b.z();
+    }
+
+    @Test void portalThroatsHaveVisibleDepthOnBothSidesOfTheDarkCap() throws Exception {
+        for (boolean guixu : new boolean[]{false,true}) {
+            var portal = point("portalCenter",guixu,0,0);
+            var center = guixu ? new ShanhaiInstabilityGeometry.Point(0,0,0) : ShanhaiBlackSunGeometry.CENTER;
+            var normal = portal.add(center.scale(-1)).unit();
+            int front = 0, back = 0;
+            for (var quad : quads(frame(2,guixu,true,false),"glow")) {
+                var delta = quad.a().add(portal.scale(-1));
+                double depth = dot(delta,normal);
+                double radial = Math.sqrt(Math.max(0,dot(delta,delta)-depth*depth));
+                if (radial>1 && radial<4 && Math.abs(depth)>1 && Math.abs(depth)<4) {
+                    if (depth>0) front++; else back++;
+                }
+            }
+            assertTrue(front>=12 && back>=12,"Both dark-cap faces need recessed rings, not a flat spiral: "+front+"/"+back);
+        }
+    }
+
+    @Test void brightRiftsReachFarOutsideTheOriginalPortalRim() throws Exception {
+        for (boolean guixu : new boolean[]{false,true}) {
+            var portal = point("portalCenter",guixu,0,0);
+            var center = guixu ? new ShanhaiInstabilityGeometry.Point(0,0,0) : ShanhaiBlackSunGeometry.CENTER;
+            var normal = portal.add(center.scale(-1)).unit();
+            var u = new ShanhaiInstabilityGeometry.Point(0,1,0).cross(normal).unit();
+            var v = normal.cross(u).unit();
+            double reach = 0;
+            for (var quad : quads(frame(2,guixu,true,false),"glow")) {
+                if (quad.red()<.7 || quad.alpha()<.03) continue;
+                for (var vertex : List.of(quad.a(),quad.b(),quad.c(),quad.d())) {
+                    var delta = vertex.add(portal.scale(-1));
+                    if (Math.abs(dot(delta,normal))>1) continue;
+                    reach = Math.max(reach,Math.hypot(dot(delta,u)/5.1,dot(delta,v)/8.6));
+                }
+            }
+            assertTrue(reach>1.9,"Bright time-space rifts must extend beyond the old short sparks: "+reach);
+        }
+    }
+
+    @Test void pulseFrontsContractAtNyarlathotepAndExpandAtGuixu() throws Exception {
+        var method = assertDoesNotThrow(() -> geometry().getDeclaredMethod("pulsePosition",boolean.class,int.class,
+                double.class,double.class,double.class),"Missing directional crossing pulse path");
+        for (boolean guixu : new boolean[]{false,true}) for (int channel=0;channel<3;channel++) {
+            var portal = point("portalCenter",guixu,channel,0);
+            var first = (ShanhaiInstabilityGeometry.Point)method.invoke(null,guixu,channel,.2,0,9.0);
+            var later = (ShanhaiInstabilityGeometry.Point)method.invoke(null,guixu,channel,.7,0,9.0);
+            if (guixu) assertTrue(distance(portal,later)>distance(portal,first));
+            else assertTrue(distance(portal,later)<distance(portal,first));
+        }
+    }
+
+    @Test void mixedEffectsStayFiniteAndWithinBudgetAcrossSeedsRadiiAndQualityLevels() {
+        for (boolean guixu : new boolean[]{false,true}) for (boolean degraded : new boolean[]{false,true}) {
+            for (long seed : new long[]{0,Long.MIN_VALUE,Long.MAX_VALUE}) for (double radius : new double[]{.1,9,512}) {
+                for (int tick=0;tick<12;tick++) {
+                    var frame = ShanhaiNyarlathotepLinkGeometry.frame(tick*.713,seed,guixu,true,degraded,radius);
+                    assertTrue(frame.opaque().size()+frame.glow().size()<=2048);
+                    for (var quad : frame.glow()) {
+                        assertTrue(Float.isFinite(quad.alpha()) && quad.alpha()>=0 && quad.alpha()<=1);
+                        for (var p : List.of(quad.a(),quad.b(),quad.c(),quad.d()))
+                            assertTrue(Double.isFinite(p.x()) && Double.isFinite(p.y()) && Double.isFinite(p.z()));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test void crossingPulsesFadeOutBeforeWrappingToTheOtherEdge() {
+        for (boolean guixu : new boolean[]{false,true}) {
+            for (double seconds : new double[]{-1e-6,0,1e-6}) {
+                var pulse = ShanhaiNyarlathotepLinkGeometry.frame(seconds,0,guixu,true,false,9).glow().stream()
+                        .filter(q -> q.green()==.95f).findFirst().orElseThrow();
+                assertTrue(pulse.alpha()<1e-8,"Pulse must be invisible on both sides of its phase wrap");
+            }
+            var visible = ShanhaiNyarlathotepLinkGeometry.frame(.5/.42,0,guixu,true,false,9).glow().stream()
+                    .filter(q -> q.green()==.95f).findFirst().orElseThrow();
+            assertTrue(visible.alpha()>.45f,"Pulse must become visible between wrap points");
+        }
+    }
 }

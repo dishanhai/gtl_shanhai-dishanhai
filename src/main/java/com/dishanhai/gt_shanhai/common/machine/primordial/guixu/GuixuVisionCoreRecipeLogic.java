@@ -80,8 +80,8 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     }
 
     @Override
-    protected long getTotalParallelLimit() {
-        return host.getContainmentBonus().scaleParallel(super.getTotalParallelLimit());
+    protected long getUnreservedTotalParallelLimit() {
+        return host.getContainmentBonus().scaleParallel(super.getUnreservedTotalParallelLimit());
     }
 
     /** 先規劃整批共享功率，原生 buildFinalWirelessRecipe 才真正扣料。 */
@@ -160,7 +160,7 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
 
     /** 獨立世界邊界，方向規劃本身只處理精確功率。 */
     protected BigInteger getDirectionalHatchPower(boolean consumer) {
-        return host.getGuixuHatchPower(consumer ? IO.IN : IO.OUT).power();
+        return getThreadPowerBudget(host.getGuixuHatchPower(consumer ? IO.IN : IO.OUT).power(), consumer);
     }
 
     @Override

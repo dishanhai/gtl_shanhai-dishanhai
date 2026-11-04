@@ -27,8 +27,8 @@ class GuixuArTextFaceTest {
     }
 
     @Test void neitherTextFaceLiesOnTheGlassSurface() {
-        assertTrue(HostFxGlassArPanel.textPlaneX(0) < HostFxGlassArPanel.FACE_LOCAL_X);
-        assertTrue(HostFxGlassArPanel.textPlaneX(1) > HostFxGlassArPanel.FACE_LOCAL_X);
+        assertTrue(HostFxGlassArPanel.textPlaneX(0) > HostFxGlassArPanel.FACE_LOCAL_X + 1);
+        assertTrue(HostFxGlassArPanel.textPlaneX(1) < HostFxGlassArPanel.FACE_LOCAL_X);
     }
 
     @Test void bothSidesStartAtTheirOwnWallEdgeAndGeometryStaysBehindText() throws Exception {
@@ -61,7 +61,7 @@ class GuixuArTextFaceTest {
         var oldFront = new org.joml.Matrix4f(oldBase).scale(scale, -scale, -scale)
                 .transformPosition(100, 30, 0, new org.joml.Vector3f());
         var oldBack = new org.joml.Matrix4f(oldBase)
-                .translate(HostFxGlassArPanel.TEXT_OFFSET, 0, 0).scale(scale, -scale, scale)
+                .translate(0.020F, 0, 0).scale(scale, -scale, scale)
                 .transformPosition(100, 30, 0, new org.joml.Vector3f());
         assertEquals(0, oldBack.x - oldFront.x, 0.00001F);
         assertEquals(-scale, oldBack.z - oldFront.z, 0.00001F, "舊路徑會橫向偏移一像素");
@@ -74,7 +74,7 @@ class GuixuArTextFaceTest {
                     .transformPosition(HostFxGlassArPanel.px(HostFxGlassArPanel.WALL_W / 2), 30, 0,
                             new org.joml.Vector3f());
         }
-        assertEquals(2 * HostFxGlassArPanel.TEXT_OFFSET, points[1].x - points[0].x, 0.00001F);
+        assertEquals(1 + 2 * HostFxGlassArPanel.TEXT_OFFSET, points[0].x - points[1].x, 0.00001F);
         assertEquals(points[0].z, points[1].z, 0.00001F);
         assertEquals(points[0].y, points[1].y, 0.00001F);
     }

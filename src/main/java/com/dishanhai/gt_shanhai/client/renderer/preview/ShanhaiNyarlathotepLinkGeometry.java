@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import static com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.*;
 
-/** 山海：黑日送入通道、歸墟通道吐出後吸入黑洞；純幾何，不讀取任何世界。 */
+/** 山海：黑日與歸墟間的立體祭儀通道、分叉時空裂紋及方向性衝擊；不讀取任何世界。 */
 public final class ShanhaiNyarlathotepLinkGeometry {
     public static final int CHANNELS = 3;
     public static final int MAX_QUADS = 2048;
@@ -53,11 +53,12 @@ public final class ShanhaiNyarlathotepLinkGeometry {
     public static Frame frame(double seconds,long seed,boolean guixu,boolean linked,boolean degraded,double horizon) {
         validate(seconds,horizon);
         if(!linked) return EMPTY;
-        int channels=degraded?2:CHANNELS,segments=degraded?32:64;
-        int lanes=degraded?2:4,steps=degraded?20:40,fragments=degraded?8:32;
+        // 正常模式理論上限 2016 面（含每字最多九筆的雙層密文），低特效上限 868 面。
+        int channels=degraded?2:CHANNELS,segments=degraded?24:48;
+        int lanes=degraded?2:4,steps=degraded?16:28,fragments=degraded?6:20;
         double clock=seconds+Math.floorMod(seed^(seed>>>32),65536)/65536.0*9;
         var opaque=new ArrayList<Quad>(channels*32);
-        var glow=new ArrayList<Quad>(channels*400);
+        var glow=new ArrayList<Quad>(channels*640);
         for(int channel=0;channel<channels;channel++) {
             Point portal=portalCenter(guixu,channel,horizon),normal=direction(channel);
             Point u=side(normal),v=normal.cross(u).unit();
@@ -67,23 +68,24 @@ public final class ShanhaiNyarlathotepLinkGeometry {
                 Point first=ellipse(portal,u,v,2.55,4.3,a),second=ellipse(portal,u,v,2.55,4.3,b);
                 opaque.add(new Quad(portal,first,second,portal,.008f,.004f,.018f,1));
             }
-            for(int ring=0;ring<3;ring++) for(int step=0;step<segments;step++) {
-                if(Math.floorMod(step+channel*3+ring*2,13)==0) continue;
-                double a=step*Math.PI*2/segments,b=(step+1)*Math.PI*2/segments;
-                double pulse=1+.035*Math.sin(clock*2+step*.7+channel);
-                double ru=(2.65+ring*.45)*pulse,rv=(4.45+ring*.45)*pulse,width=ring==0?.15:ring==1?.35:.75;
-                Point pa=ellipse(portal,u,v,ru,rv,a),pb=ellipse(portal,u,v,ru,rv,b);
-                Point radial=u.scale(Math.cos((a+b)/2)).add(v.scale(Math.sin((a+b)/2))).scale(width);
-                float alpha=(float)((ring==0?.85:ring==1?.28:.065)*(.72+.28*Math.sin(clock*3+a*5)));
-                strip(glow,pa,pb,radial,ring==0?.55f:.25f,ring==0?.9f:.32f,1,alpha);
+            double ritualWeight=.5+.5*Math.sin(clock*1.4+channel);
+            for(int ring=0;ring<3;ring++) {
+                int ringSegments=ring==2?segments/2:segments;
+                for(int step=0;step<ringSegments;step++) {
+                    if(Math.floorMod(step+channel*3+ring*2,13)==0) continue;
+                    double a=step*Math.PI*2/ringSegments,b=(step+1)*Math.PI*2/ringSegments;
+                    double pulse=1+.035*Math.sin(clock*2+step*.7+channel);
+                    double ru=(2.65+ring*.45)*pulse,rv=(4.45+ring*.45)*pulse,width=ring==0?.15:ring==1?.35:.75;
+                    Point pa=ellipse(portal,u,v,ru,rv,a),pb=ellipse(portal,u,v,ru,rv,b);
+                    Point radial=u.scale(Math.cos((a+b)/2)).add(v.scale(Math.sin((a+b)/2))).scale(width);
+                    float alpha=(float)((ring==0?.85:ring==1?.28:.065)*(.72+.28*Math.sin(clock*3+a*5))
+                            *(1-.35*ritualWeight));
+                    strip(glow,pa,pb,radial,ring==0?.55f:.25f,ring==0?.9f:.32f,1,alpha);
+                }
             }
-            // 裂口內三道旋入暗面的短螺旋，讓通道有喉部深度而非一個平面圈。
-            for(int arm=0;arm<3;arm++) for(int step=0;step<8;step++) {
-                double a=step/8.0,b=(step+1)/8.0,phase=clock*.65+arm*Math.PI*2/3;
-                Point pa=ellipse(portal,u,v,2.3*a,3.8*a,phase+a*3.8);
-                Point pb=ellipse(portal,u,v,2.3*b,3.8*b,phase+b*3.8);
-                strip(glow,pa,pb,u.scale(.06),.32f,.65f,1,(float)(.18*(1-a)));
-            }
+            throat(glow,portal,normal,u,v,clock,channel,degraded);
+            cipherRings(glow,portal,normal,u,v,clock,seed,channel,degraded);
+            crossingPulses(glow,guixu,channel,clock,horizon,u,v,degraded);
             // 四股物質絲沿同一有向路徑流動，端點收束；不畫跨維度長直線。
             for(int lane=0;lane<lanes;lane++) for(int step=0;step<steps;step++) {
                 double a=step/(double)steps,b=(step+1)/(double)steps;
@@ -101,16 +103,117 @@ public final class ShanhaiNyarlathotepLinkGeometry {
                 float alpha=(float)(.75*fade);
                 fragment(glow,p,u,v,normal,size,alpha);
             }
-            // 裂口邊緣的短電弧，讓三個通道具有同源而不同相位的脈動。
-            for(int spark=0;spark<(degraded?6:12);spark++) {
-                double angle=clock*.3+spark*Math.PI/6+channel;
-                Point start=ellipse(portal,u,v,3.2,5,angle);
-                Point end=ellipse(portal,u,v,3.5+.7*Math.sin(clock*4+spark),5.6,angle+.12);
-                strip(glow,start,end,u.scale(.055),.75f,.35f,1,.42f);
-            }
+            rifts(glow,portal,normal,u,v,clock,channel,degraded);
         }
         if(opaque.size()+glow.size()>MAX_QUADS) throw new IllegalStateException("Portal geometry budget exceeded");
         return new Frame(List.copyOf(opaque),List.copyOf(glow));
+    }
+
+    /** 黑色封底兩側均有縱深，繞至背面仍能看到喉部；亮環不藏在封底後。 */
+    private static void throat(List<Quad> out,Point portal,Point normal,Point u,Point v,
+                               double clock,int channel,boolean degraded) {
+        int steps=degraded?4:6;
+        for(int face=-1;face<=1;face+=2) {
+            for(int ring=0;ring<2;ring++) {
+                double depth=(ring+1)/3.0,scale=1-depth*.8;
+                Point center=portal.add(normal.scale(face*depth*3.5));
+                int segments=degraded?12:16;
+                for(int step=0;step<segments;step++) {
+                    double a=step*Math.PI*2/segments+clock*.15*face,b=a+Math.PI*2/segments*.82;
+                    Point pa=ellipse(center,u,v,1.85*scale,3.1*scale,a);
+                    Point pb=ellipse(center,u,v,1.85*scale,3.1*scale,b);
+                    Point width=u.scale(Math.cos((a+b)/2)).add(v.scale(Math.sin((a+b)/2))).scale(.085);
+                    strip(out,pa,pb,width,.4f,.75f,1,(float)(.35*(1-depth)));
+                }
+            }
+            for(int arm=0;arm<3;arm++) for(int step=0;step<steps;step++) {
+                double a=step/(double)steps,b=(step+1)/(double)steps;
+                double phase=face*clock*.9+arm*Math.PI*2/3+channel*.5;
+                Point pa=ellipse(portal.add(normal.scale(face*(.12+3.6*a))),u,v,
+                        2.35*(1-a),3.9*(1-a),phase+a*5);
+                Point pb=ellipse(portal.add(normal.scale(face*(.12+3.6*b))),u,v,
+                        2.35*(1-b),3.9*(1-b),phase+b*5);
+                Point width=u.scale(Math.cos(phase+a*5)).add(v.scale(Math.sin(phase+a*5))).scale(.075);
+                strip(out,pa,pb,width,.38f,.68f,1,(float)(.42*(1-a)));
+            }
+        }
+    }
+
+    private static void cipherRings(List<Quad> out,Point portal,Point normal,Point u,Point v,
+                                    double clock,long seed,int channel,boolean degraded) {
+        int count=degraded?2:4;
+        for(int halo=0;halo<2;halo++) for(int index=0;index<count;index++) {
+            double turn=clock*(halo==0?.16:-.12),angle=index*Math.PI*2/count+turn+channel*.4;
+            Point center=ellipse(portal.add(normal.scale(halo==0?-.18:.18)),u,v,
+                    3.9+halo*.55,5.7+halo*.55,angle);
+            Point tangent=u.scale(-Math.sin(angle)).add(v.scale(Math.cos(angle)));
+            Point radial=u.scale(Math.cos(angle)).add(v.scale(Math.sin(angle)));
+            double cycle=clock/6.5+index*.17+halo*.23+channel*.11;
+            double weight=.55+.45*(.5+.5*Math.sin(clock*1.4+channel));
+            ShanhaiCipherGeometry.glyph(out,center,tangent,radial,1.8,cycle,
+                    (int)(seed^(seed>>>32))+channel*173+halo*101+index*31,weight);
+        }
+    }
+
+    /** 共享的穿越波前：奈亞收縮至裂口，歸墟向外擴散並朝黑洞方向前進。 */
+    static Point pulsePosition(boolean guixu,int channel,double progress,double angle,double horizon) {
+        validate(0,horizon);
+        if(!Double.isFinite(progress) || progress<0 || progress>1 || !Double.isFinite(angle))
+            throw new IllegalArgumentException("Invalid crossing pulse");
+        Point normal=direction(channel),u=side(normal),v=normal.cross(u).unit();
+        double travel=guixu?progress:1-progress,scale=1+1.2*travel;
+        Point center=portalCenter(guixu,channel,horizon).add(normal.scale(-(.35+3.2*travel)));
+        return ellipse(center,u,v,2.7*scale,4.5*scale,angle);
+    }
+
+    private static void crossingPulses(List<Quad> out,boolean guixu,int channel,double clock,
+                                       double horizon,Point u,Point v,boolean degraded) {
+        int rings=degraded?1:2,steps=degraded?12:16;
+        for(int ring=0;ring<rings;ring++) {
+            double life=fract(clock*.42+ring/(double)rings+channel*.173);
+            float alpha=(float)(.5*Math.pow(Math.sin(Math.PI*life),2));
+            for(int step=0;step<steps;step++) {
+                double a=step*Math.PI*2/steps,b=(step+1)*Math.PI*2/steps;
+                Point pa=pulsePosition(guixu,channel,life,a,horizon),pb=pulsePosition(guixu,channel,life,b,horizon);
+                Point width=u.scale(Math.cos((a+b)/2)).add(v.scale(Math.sin((a+b)/2))).scale(.12+.18*life);
+                strip(out,pa,pb,width,.55f,.95f,1,alpha);
+            }
+        }
+    }
+
+    /** 長主幹＋折線分叉，亮芯與寬光暈共用節點；連續變形避免每幀隨機閃斷。 */
+    private static void rifts(List<Quad> out,Point portal,Point normal,Point u,Point v,
+                              double clock,int channel,boolean degraded) {
+        int count=degraded?3:6;
+        for(int bolt=0;bolt<count;bolt++) {
+            double phase=bolt*2.37+channel*1.71;
+            double angle=bolt*Math.PI*2/count+channel*.4+clock*.07;
+            double energy=.35+.65*Math.pow(.5+.5*Math.sin(clock*2.1+phase),3);
+            Point width=u.scale(-Math.sin(angle)).add(v.scale(Math.cos(angle)));
+            for(int step=0;step<4;step++) {
+                Point a=riftPoint(portal,normal,u,v,angle,step/4.0,clock,phase,energy);
+                Point b=riftPoint(portal,normal,u,v,angle,(step+1)/4.0,clock,phase,energy);
+                riftSegment(out,a,b,width,(float)energy);
+            }
+            Point branch=riftPoint(portal,normal,u,v,angle,.5,clock,phase,energy);
+            Point tip=riftPoint(portal,normal,u,v,angle+.22,.92,clock,phase,energy);
+            Point bend=branch.add(tip).scale(.5).add(width.scale(1.1*Math.sin(clock*3+phase)));
+            riftSegment(out,branch,bend,width,(float)(energy*.75));
+            riftSegment(out,bend,tip,width,(float)(energy*.5));
+        }
+    }
+
+    private static Point riftPoint(Point portal,Point normal,Point u,Point v,double angle,
+                                    double progress,double clock,double phase,double energy) {
+        double spread=1+progress*(.85+.3*energy);
+        double kink=Math.sin(Math.PI*progress)*(.16*Math.sin(clock*3.7+phase+progress*19));
+        Point center=portal.add(normal.scale(.35*Math.sin(clock*1.3+phase+progress*8)));
+        return ellipse(center,u,v,3.05*spread,4.65*spread,angle+kink);
+    }
+
+    private static void riftSegment(List<Quad> out,Point a,Point b,Point width,float alpha) {
+        strip(out,a,b,width.scale(.4),.45f,.22f,1,alpha*.4f);
+        strip(out,a,b,width.scale(.085),.9f,.7f,1,alpha);
     }
     private static Point lanePosition(boolean guixu,int channel,int lane,double t,double clock,double horizon) {
         Point n=direction(channel),u=side(n),v=n.cross(u).unit();

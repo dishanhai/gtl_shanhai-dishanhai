@@ -63,7 +63,8 @@ public final class ShanhaiCipherGeometry {
         return new Frame(List.copyOf(out),glyphs);
     }
 
-    private static int glyph(List<Quad> out, Point center, Point u, Point v, double size, double cycle, int seed, double weight) {
+    /** 同包通道環復用字母表、雙層筆畫與生命週期淡出。 */
+    static int glyph(List<Quad> out, Point center, Point u, Point v, double size, double cycle, int seed, double weight) {
         double life = cycle-Math.floor(cycle);
         float alpha = (float)(.7*Math.pow(Math.sin(Math.PI*life),2)*weight);
         if (alpha < .006) return 0;
