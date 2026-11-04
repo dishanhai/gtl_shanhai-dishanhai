@@ -47,6 +47,7 @@ public class ShopCostPreviewRequestPacket {
     }
 
     private static void apply(ShopCostPreviewRequestPacket pkt, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (player == null) return;
         ShopEntry entry = ShopConfig.resolve(pkt.catalogRevision, pkt.entryKey);
         if (entry == null || !entry.isValid()) return;

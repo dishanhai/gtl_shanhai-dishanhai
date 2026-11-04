@@ -38,6 +38,7 @@ public final class ShopStagePreviewRequestPacket {
     }
 
     private static void apply(ShopStagePreviewRequestPacket packet, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (player == null || packet.stagePath.isBlank() || !ShopStageConfig.has(packet.stagePath)) return;
         ShopCost cost = new ShopCost(BigInteger.ZERO, null, ShopStageConfig.get(packet.stagePath));
         ShopPurchase.CostPreview preview = ShopPurchase.previewHave(player, cost, packet.aeMode);

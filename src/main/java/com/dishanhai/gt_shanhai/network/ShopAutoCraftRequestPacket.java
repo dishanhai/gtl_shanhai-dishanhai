@@ -81,6 +81,10 @@ public class ShopAutoCraftRequestPacket {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player == null) return;
+            if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) {
+                ShopAutoCraft.sendPlanFeedback(player, pkt.requestId, false);
+                return;
+            }
             if (pkt.target == Target.STAGE) {
                 ShopAutoCraft.beginStagePlan(player, pkt.stagePath, pkt.aeMode);
                 return;

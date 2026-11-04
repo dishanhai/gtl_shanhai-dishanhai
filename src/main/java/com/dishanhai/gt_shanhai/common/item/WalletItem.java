@@ -54,12 +54,7 @@ public class WalletItem extends Item implements top.theillusivec4.curios.api.typ
         // 服务端侧算好编辑权后发包让客户端打开界面（与 /商店 命令统一），
         // 这样被授权的非 OP 玩家钱包右键也能看到编辑按钮。
         if (!level.isClientSide() && player instanceof net.minecraft.server.level.ServerPlayer sp) {
-            boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(sp);
-            boolean catalogEditUnlocked = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(sp);
-            com.dishanhai.gt_shanhai.network.ShanhaiNetwork.CHANNEL.send(
-                    net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> sp),
-                    new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit, catalogEditUnlocked,
-                            com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
+            com.dishanhai.gt_shanhai.network.ShopOpenPacket.sendTo(sp);
             // 打开钱包即推账户快照，客户端界面/tooltip 立刻有余额（余额已不在 ItemStack NBT）
             com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(sp);
         }

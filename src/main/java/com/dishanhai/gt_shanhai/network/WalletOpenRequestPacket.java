@@ -4,7 +4,6 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
 
 import java.util.function.Supplier;
 
@@ -29,11 +28,7 @@ public class WalletOpenRequestPacket {
                 player.sendSystemMessage(Component.literal("§c请先获得 §6山海钱包 §c（背包或饰品栏任意位置都行）"));
                 return;
             }
-            boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player);
-            boolean catalogEditUnlocked = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player);
-            ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new ShopOpenPacket(canEdit, catalogEditUnlocked,
-                            com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
+            ShopOpenPacket.sendTo(player);
             // 打开商店即推账户快照，客户端界面/tooltip 立刻有余额
             com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
             // 购物车跨重登保留（见反馈），同一时机推回去，客户端一开店就能看到之前留下的候选

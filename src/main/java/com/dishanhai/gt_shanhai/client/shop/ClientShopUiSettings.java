@@ -50,8 +50,22 @@ public final class ClientShopUiSettings {
     private static String shopTheme = THEME_CLASSIC;
     /** 初始化向导（ShopWelcomeScreen）是否已走完或跳过。新客户端没有配置文件 = 未完成；旧配置文件没这个键 = 老玩家，视为已完成。 */
     private static boolean setupDone;
+    /** 山海商店个人禁用，仅保存在本机 config，不影响其他客户端。 */
+    private static boolean shopDisabled = false;
 
     private ClientShopUiSettings() {}
+
+    public static boolean shopDisabled() {
+        ensureLoaded();
+        return shopDisabled;
+    }
+
+    public static synchronized void setShopDisabled(boolean disabled) {
+        ensureLoaded();
+        shopDisabled = disabled;
+        save();
+        ClientShopAvailability.syncPersonal();
+    }
 
     public static boolean setupDone() {
         ensureLoaded();
@@ -212,11 +226,13 @@ public final class ClientShopUiSettings {
         pickerGroupByMod = false;
         shopTheme = THEME_CLASSIC;
         setupDone = false;
+        shopDisabled = false;
         if (!settingsFile().exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
                 new java.io.FileInputStream(settingsFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
             setupDone = !root.has("setupDone") || root.get("setupDone").getAsBoolean();
+            if (root.has("shopDisabled")) shopDisabled = root.get("shopDisabled").getAsBoolean();
             if (root.has("cardWidth")) cardWidth = clampCardWidth(root.get("cardWidth").getAsInt());
             if (root.has("cardHeight")) cardHeight = clampCardHeight(root.get("cardHeight").getAsInt());
             // 没写过这个键的旧文件保持新默认（条形）。只有明确存过 grid 才回到旧版方格。
@@ -275,6 +291,7 @@ public final class ClientShopUiSettings {
             root.addProperty("pickerGroupByMod", pickerGroupByMod);
             root.addProperty("shopTheme", shopTheme);
             root.addProperty("setupDone", setupDone);
+            root.addProperty("shopDisabled", shopDisabled);
             try (OutputStreamWriter writer = new OutputStreamWriter(
                     new FileOutputStream(settingsFile()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));

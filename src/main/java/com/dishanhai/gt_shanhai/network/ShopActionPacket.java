@@ -113,6 +113,10 @@ public class ShopActionPacket {
     }
 
     private static void apply(ShopActionPacket pkt, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) {
+            sendResult(player, pkt, 0L, "商店已禁用，请在商店设置中恢复");
+            return;
+        }
         if (pkt.action != Action.DEPOSIT) {
             ShopCatalogSnapshot current = ShopConfig.snapshot();
             if (current.revision() != pkt.catalogRevision) {

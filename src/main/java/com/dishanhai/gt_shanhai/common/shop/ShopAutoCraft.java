@@ -413,14 +413,24 @@ public final class ShopAutoCraft {
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        if (ShopAvailability.isDisabled()) {
+            CALCULATING.values().forEach(ShopAutoCraft::cancelSession);
+            CALCULATING.clear();
+            READY.clear();
+            return;
+        }
         for (Map.Entry<UUID, Session> entry : READY.entrySet()) {
+            if (ShopAvailability.isPersonallyDisabled(entry.getKey())) {
+                READY.remove(entry.getKey(), entry.getValue());
+                continue;
+            }
             if (++entry.getValue().ticks > READY_TIMEOUT_TICKS) READY.remove(entry.getKey(), entry.getValue());
         }
         for (Map.Entry<UUID, Session> entry : CALCULATING.entrySet()) {
             UUID uuid = entry.getKey();
             Session session = entry.getValue();
             ServerPlayer player = findPlayer(uuid);
-            if (player == null || ShopAeNetwork.findBoundGrid(player) != session.grid) {
+            if (player == null || ShopAvailability.isDisabled(player) || ShopAeNetwork.findBoundGrid(player) != session.grid) {
                 if (CALCULATING.remove(uuid, session)) {
                     cancelSession(session);
                     if (player != null) sendPlanFeedback(player, session.requestId, false);
@@ -526,6 +536,7 @@ public final class ShopAutoCraft {
 
     public static void confirmPlan(ServerPlayer player, UUID planId) {
         if (player == null) return;
+        if (!ShopAvailability.requireEnabled(player)) return;
         Session session = READY.get(player.getUUID());
         if (session == null || !session.planId.equals(planId)) return;
         // 先消費這份方案；重複確認、舊視窗確認均不能提交第二次。

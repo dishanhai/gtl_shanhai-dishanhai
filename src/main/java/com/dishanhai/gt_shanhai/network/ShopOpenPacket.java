@@ -15,6 +15,15 @@ import java.util.function.Supplier;
  */
 public class ShopOpenPacket {
 
+    /** 所有开店入口统一先推服务端禁用状态与 OP 权限。 */
+    public static void sendTo(net.minecraft.server.level.ServerPlayer player) {
+        ShopAvailabilityPacket.sendTo(player);
+        ShanhaiNetwork.CHANNEL.send(net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
+                new ShopOpenPacket(com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player),
+                        com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player),
+                        com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
+    }
+
     private final boolean canEdit;
     private final boolean catalogEditUnlocked;
     private final com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest;

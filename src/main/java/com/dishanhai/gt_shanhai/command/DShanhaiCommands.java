@@ -894,6 +894,7 @@ public class DShanhaiCommands {
             source.sendSuccess(msg("§c此命令须由玩家执行"), false);
             return 0;
         }
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return 0;
         java.math.BigInteger took = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankDeposit(
                 source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
         com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
@@ -909,6 +910,7 @@ public class DShanhaiCommands {
             source.sendSuccess(msg("§c此命令须由玩家执行"), false);
             return 0;
         }
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return 0;
         java.math.BigInteger got = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankWithdraw(
                 source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
         com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
@@ -924,6 +926,7 @@ public class DShanhaiCommands {
             source.sendSuccess(msg("§c此命令须由玩家执行"), false);
             return 0;
         }
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return 0;
         java.math.BigInteger got = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankBorrow(
                 source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
         com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
@@ -943,6 +946,7 @@ public class DShanhaiCommands {
             source.sendSuccess(msg("§c此命令须由玩家执行"), false);
             return 0;
         }
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return 0;
         java.math.BigInteger paid = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankRepay(
                 source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
         com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
@@ -1014,15 +1018,10 @@ public class DShanhaiCommands {
             return 0;
         }
         // 优先主手，其次副手；命中钱包则发包让客户端打开 ShopScreen
-        boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player);
-        boolean catalogEditUnlocked = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player);
         for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
             if (player.getItemInHand(hand).getItem()
                     instanceof com.dishanhai.gt_shanhai.common.item.WalletItem) {
-                com.dishanhai.gt_shanhai.network.ShanhaiNetwork.CHANNEL.send(
-                        net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
-                        new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit, catalogEditUnlocked,
-                                com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
+                com.dishanhai.gt_shanhai.network.ShopOpenPacket.sendTo(player);
                 com.dishanhai.gt_shanhai.network.ShopSubmissionSyncPacket.sync(player);
                 return 1;
             }

@@ -348,6 +348,7 @@ public class ShopEditPacket {
     }
 
     private static void apply(ShopEditPacket pkt, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (!ShopEditPermission.canEdit(player)) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
             return;

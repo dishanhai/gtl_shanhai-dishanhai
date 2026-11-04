@@ -16,16 +16,26 @@ import net.minecraft.resources.ResourceLocation;
  */
 public final class ShopScreenOpener {
 
+    private static ShopScreen currentShop;
+
     private ShopScreenOpener() {}
 
     public static void open(boolean canEdit, boolean catalogEditUnlocked) {
         ShopScreen shop = new ShopScreen(canEdit, catalogEditUnlocked);
+        currentShop = shop;
         // 这台客户端第一次开商店：先走初始化向导（功能介绍 + 偏好），结束后再进商店本体
         Minecraft.getInstance().setScreen(ClientShopUiSettings.setupDone()
                 ? shop : new ShopWelcomeScreen(() -> shop));
     }
 
     /** 复用任务书跳转链路：记录目标后由服务端校验钱包并下发最新目录，再自动定位商品。 */
+    public static void returnToShop() {
+        if (currentShop != null) Minecraft.getInstance().setScreen(currentShop);
+        else open(false, false);
+    }
+
+    public static void clear() { currentShop = null; }
+
     public static void requestOpenAt(long entryKey) {
         ShopCatalogManifest.Stub stub = ClientShopCatalog.stub(entryKey);
         ShopScreen.requestFocus(stub == null ? null : stub.stableId(), entryKey);

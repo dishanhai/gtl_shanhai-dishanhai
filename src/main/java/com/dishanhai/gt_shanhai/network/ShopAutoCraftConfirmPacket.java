@@ -38,6 +38,7 @@ public class ShopAutoCraftConfirmPacket {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player == null) return;
+            if (pkt.confirm && !com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
             if (pkt.confirm) ShopAutoCraft.confirmPlan(player, pkt.planId);
             else ShopAutoCraft.cancel(player, pkt.planId);
         });

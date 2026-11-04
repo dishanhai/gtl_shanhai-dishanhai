@@ -6,6 +6,9 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopAvailability;
+import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
+import com.dishanhai.gt_shanhai.network.ShopAvailabilityPacket;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -17,7 +20,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * 商店初始化向导（山海署名，客户端）：这台客户端第一次打开商店时先弹出，三页功能介绍 + 一页偏好设置。
+ * 商店初始化向导（山海署名，客户端）：三页功能介绍、商店启用页与偏好设置页。
  *
  * <p>偏好页只放最影响观感的几项：界面主题（点选即刻整页预览）、减少动效、商店音效、记住选取与搜索。
  * 「完成」把选择存进 {@link ClientShopUiSettings} 并记下已完成；「跳过」/ESC 只记已完成，不改任何设置。
@@ -57,8 +60,9 @@ public class ShopWelcomeScreen extends ScaledScreen {
                     {"商店设置", "卡片大小、获取预览模式、动效、音效和主题随时可以改；设置页底栏的「新手引导」可以重看本引导。"},
             },
     };
-    private static final int PAGE_SETUP = PAGE_ITEMS.length;
-    private static final int PAGE_COUNT = PAGE_ITEMS.length + 1;
+    private static final int PAGE_ACCESS = PAGE_ITEMS.length;
+    private static final int PAGE_SETUP = PAGE_ITEMS.length + 1;
+    private static final int PAGE_COUNT = PAGE_ITEMS.length + 2;
 
     private static final String[] TOGGLE_HINTS = {
             "§7按钮不缩放、不抖、不走流光，也不画点击波纹；成交结果的颜色闪保留",
@@ -75,6 +79,12 @@ public class ShopWelcomeScreen extends ScaledScreen {
     private boolean reduceMotion = ClientShopUiSettings.reduceMotion();
     private boolean uiSounds = ClientShopUiSettings.uiSounds();
     private boolean rememberView = ClientShopUiSettings.rememberShopView();
+    private boolean personalDisabled = ClientShopUiSettings.shopDisabled();
+    private boolean globalDisabled = ClientShopAvailability.globalDisabled();
+    private boolean globalEdited;
+    private boolean awaitingGlobalSave;
+    private boolean availabilityOnly;
+    private boolean focusGlobalSetting;
     private int left, top, panelWidth, panelHeight;
 
     /** @param next 向导结束后要去的界面（首次打开=商店本体，从设置页重看=回设置页）。 */
@@ -91,6 +101,32 @@ public class ShopWelcomeScreen extends ScaledScreen {
         this.useOffset = false;
         this.minScale = 0.1f;
         this.maxScale = Float.MAX_VALUE;
+        if (Minecraft.getInstance().getConnection() != null) {
+            ShanhaiNetwork.CHANNEL.sendToServer(ShopAvailabilityPacket.query());
+        }
+    }
+
+    /** 已禁用时仍提供恢复入口，跳过介绍，直接打开启用页。 */
+    public static ShopWelcomeScreen availability(Supplier<Screen> next) {
+        ShopWelcomeScreen screen = new ShopWelcomeScreen(next);
+        screen.page = PAGE_ACCESS;
+        screen.availabilityOnly = true;
+        return screen;
+    }
+
+    public void onAvailabilitySynced(boolean updateResult) {
+        if (!globalEdited) globalDisabled = ClientShopAvailability.globalDisabled();
+        if (awaitingGlobalSave && updateResult) {
+            awaitingGlobalSave = false;
+            globalDisabled = ClientShopAvailability.globalDisabled();
+            complete();
+        }
+    }
+
+    public static ShopWelcomeScreen availability(Supplier<Screen> next, boolean focusGlobal) {
+        ShopWelcomeScreen screen = availability(next);
+        screen.focusGlobalSetting = focusGlobal;
+        return screen;
     }
 
     private ShopTheme theme() {
@@ -159,11 +195,12 @@ public class ShopWelcomeScreen extends ScaledScreen {
                 left + 5, top + HEADER_H, panelWidth - 10, panelHeight - HEADER_H - 5);
         int head = t.glass ? GlassPalette.TEXT_HEAD : GOLD;
         g.drawString(this.font, "商店初始化", left + 10, top + 7, head, !t.glass);
-        String pageNo = (page + 1) + " / " + PAGE_COUNT;
+        String pageNo = availabilityOnly ? "商店启用" : (page + 1) + " / " + PAGE_COUNT;
         g.drawString(this.font, pageNo, left + panelWidth - 10 - this.font.width(pageNo), top + 7,
                 t.glass ? GlassPalette.TEXT_MUTED : GRAY, !t.glass);
 
-        if (page == PAGE_SETUP) drawSetupPage(g, t, mx, my);
+        if (page == PAGE_ACCESS) drawAvailabilityPage(g, t, mx, my);
+        else if (page == PAGE_SETUP) drawSetupPage(g, t, mx, my);
         else drawIntroPage(g, t);
 
         drawFooter(g, t, mx, my);
@@ -202,6 +239,32 @@ public class ShopWelcomeScreen extends ScaledScreen {
         }
     }
 
+    private int accessY(int index) { return contentTop() + 26 + index * 62; }
+
+    private void drawAvailabilityPage(GuiGraphics g, ShopTheme t, int mx, int my) {
+        int body = t.glass ? GlassPalette.TEXT : WHITE;
+        g.drawString(this.font, availabilityOnly
+                        ? focusGlobalSetting ? "开启全局商店配置（OP）" : "开启个人商店配置"
+                        : "选择是否启用山海商店", contentX(), contentTop(),
+                t.glass ? GlassPalette.ACCENT : GOLD, !t.glass);
+        drawBtn(g, t, contentX(), accessY(0), contentW(), BTN_H,
+                personalDisabled ? "§c个人禁用商店: 开" : "§a个人禁用商店: 关", mx, my);
+        drawWrapped(g, "仅影响这台客户端，保存到本机 config；其他玩家不受影响。",
+                contentX(), accessY(0) + BTN_H + 4, contentW(), body, !t.glass);
+        if (ClientShopAvailability.canConfigureGlobal()) {
+            drawBtn(g, t, contentX(), accessY(1), contentW(), BTN_H,
+                    globalDisabled ? "§c全局禁用商店: 开" : "§a全局禁用商店: 关", mx, my);
+            drawWrapped(g, "仅 OP 可配置。保存到服务端 config，所有玩家（含 OP）停止使用商店。",
+                    contentX(), accessY(1) + BTN_H + 4, contentW(), body, !t.glass);
+        } else {
+            drawWrapped(g, "全局状态：" + (ClientShopAvailability.globalDisabled() ? "已禁用" : "已启用")
+                            + "。只有 OP 可以修改。",
+                    contentX(), accessY(1), contentW(), body, !t.glass);
+        }
+        drawWrapped(g, "禁用后可用 /shanhai shopwizard 重新启用。全局禁用优先于个人设置。",
+                contentX(), accessY(2), contentW(), body, !t.glass);
+    }
+
     /** 主题点选卡：用它自己代表的主题画一块小底板，选中的边框亮起并标「已选」。 */
     private void drawThemeCard(GuiGraphics g, int i, ShopTheme preview, String name, String sub,
                                boolean selected, int mx, int my) {
@@ -224,8 +287,9 @@ public class ShopWelcomeScreen extends ScaledScreen {
     private void drawFooter(GuiGraphics g, ShopTheme t, int mx, int my) {
         int y = footerY();
         drawBtn(g, t, skipX(), y, 60, BTN_H, "§7跳过", mx, my);
-        if (page > 0) drawBtn(g, t, prevX(), y, 60, BTN_H, "§e上一页", mx, my);
-        drawBtn(g, t, nextX(), y, nextW(), BTN_H, page == PAGE_COUNT - 1 ? "§a完成" : "§b下一页", mx, my);
+        if (page > 0 && !availabilityOnly) drawBtn(g, t, prevX(), y, 60, BTN_H, "§e上一页", mx, my);
+        drawBtn(g, t, nextX(), y, nextW(), BTN_H, awaitingGlobalSave ? "§7保存中"
+                : availabilityOnly || page == PAGE_COUNT - 1 ? "§a完成" : "§b下一页", mx, my);
     }
 
     private void drawBtn(GuiGraphics g, ShopTheme t, int x, int y, int w, int h, String label, int mx, int my) {
@@ -247,13 +311,14 @@ public class ShopWelcomeScreen extends ScaledScreen {
     // ===== 交互 =====
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        if (awaitingGlobalSave) return true;
         if (btn != 0) return super.universalMouseClicked(mx, my, btn);
         int fy = footerY();
         if (GuiRenderUtil.isHovering(mx, my, skipX(), fy, 60, BTN_H)) {
             finish(false);
             return true;
         }
-        if (page > 0 && GuiRenderUtil.isHovering(mx, my, prevX(), fy, 60, BTN_H)) {
+        if (page > 0 && !availabilityOnly && GuiRenderUtil.isHovering(mx, my, prevX(), fy, 60, BTN_H)) {
             page--;
             return true;
         }
@@ -261,7 +326,18 @@ public class ShopWelcomeScreen extends ScaledScreen {
             advance();
             return true;
         }
-        if (page == PAGE_SETUP) {
+        if (page == PAGE_ACCESS) {
+            if (GuiRenderUtil.isHovering(mx, my, contentX(), accessY(0), contentW(), BTN_H)) {
+                personalDisabled = !personalDisabled;
+                return true;
+            }
+            if (ClientShopAvailability.canConfigureGlobal()
+                    && GuiRenderUtil.isHovering(mx, my, contentX(), accessY(1), contentW(), BTN_H)) {
+                globalDisabled = !globalDisabled;
+                globalEdited = true;
+                return true;
+            }
+        } else if (page == PAGE_SETUP) {
             if (GuiRenderUtil.isHovering(mx, my, cardX(0), cardY(), cardW(), CARD_H)) {
                 glassTheme = false;
                 return true;
@@ -286,12 +362,13 @@ public class ShopWelcomeScreen extends ScaledScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (awaitingGlobalSave) return true;
         // GLFW: 右 262 / 左 263 / 回车 257 / 小键盘回车 335
         if (keyCode == 262 || keyCode == 257 || keyCode == 335) {
             advance();
             return true;
         }
-        if (keyCode == 263 && page > 0) {
+        if (keyCode == 263 && page > 0 && !availabilityOnly) {
             page--;
             return true;
         }
@@ -299,7 +376,7 @@ public class ShopWelcomeScreen extends ScaledScreen {
     }
 
     private void advance() {
-        if (page >= PAGE_COUNT - 1) finish(true);
+        if (availabilityOnly || page >= PAGE_COUNT - 1) finish(true);
         else page++;
     }
 
@@ -310,11 +387,22 @@ public class ShopWelcomeScreen extends ScaledScreen {
     }
 
     private void finish(boolean save) {
+        if (awaitingGlobalSave) return;
         if (save) {
             ClientShopUiSettings.setShopTheme(glassTheme ? ClientShopUiSettings.THEME_GLASS : ClientShopUiSettings.THEME_CLASSIC);
             ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds);
             ClientShopUiSettings.setRememberShopView(rememberView);
+            ClientShopUiSettings.setShopDisabled(personalDisabled);
+            if (globalEdited && Minecraft.getInstance().getConnection() != null) {
+                awaitingGlobalSave = true;
+                ShanhaiNetwork.CHANNEL.sendToServer(ShopAvailabilityPacket.update(globalDisabled));
+                return;
+            }
         }
+        complete();
+    }
+
+    private void complete() {
         if (!preview) ClientShopUiSettings.setSetupDone(true);
         Minecraft.getInstance().setScreen(next.get());
     }

@@ -15,6 +15,7 @@ import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopAvailability;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
@@ -585,6 +586,8 @@ public class ShopScreen extends ScaledScreen {
     private int stageLockAutoCraftX, stageLockAutoCraftY, stageLockAutoCraftW, stageLockAutoCraftH;
     private boolean submissionAutoCraftVisible, stageSubmissionAutoCraftVisible, stageLockAutoCraftVisible;
     private boolean stageLockActive;
+    private long disabledShownAtMs;
+    private boolean disabledLastFrame;
     private String stageLockPath;
     private int stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH;
     // 网格卡片右键快捷菜单：导航跳转合集 + 管理效率（编辑权），条目变了/权限变了菜单项动态重算，不用固定坐标+布尔位那一套
@@ -1538,6 +1541,11 @@ public class ShopScreen extends ScaledScreen {
     public void tick() {
         super.tick();
         if (this.minecraft == null || this.minecraft.screen != this) return;
+        if (ClientShopAvailability.isDisabled()) {
+            queuedCurrency = null;
+            cancelPendingGuide();
+            return;
+        }
         if (queuedCurrency != null) {
             ResourceLocation currency = queuedCurrency;
             queuedCurrency = null;
@@ -1675,7 +1683,11 @@ public class ShopScreen extends ScaledScreen {
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         applyTheme(ShopTheme.current());
-        stageLockPath = lockedStageForCurrentView();
+        boolean disabled = ClientShopAvailability.isDisabled();
+        if (disabled && !disabledLastFrame) onAvailabilityChanged();
+        disabledLastFrame = disabled;
+        if (!disabled) disabledShownAtMs = 0L;
+        stageLockPath = disabled ? null : lockedStageForCurrentView();
         stageLockActive = stageLockPath != null;
         if (!stageLockActive) stageLockShownAtMs = 0L;
         if (stageLockActive) maybeRequestStagePreview(stageLockPath);
@@ -1697,7 +1709,7 @@ public class ShopScreen extends ScaledScreen {
         ClientShopActionResults.drain(nowMs, this::onActionResult);
         buttonFeedback.pointer(mx, my, nowMs);
         buttonFeedback.tick(nowMs);
-        drainAutoCraftResults();
+        if (!disabled) drainAutoCraftResults();
         boolean motionBusy = !openMotion.settled()
                 || (gridSwitchAtMs > 0L && nowMs - gridSwitchAtMs < GuiRenderUtil.MOTION_MS);
         ClientShopCatalog.pumpMaterialization(motionBusy ? LOAD_PUMP_MOTION_NS : LOAD_PUMP_SETTLED_NS);
@@ -1885,7 +1897,7 @@ public class ShopScreen extends ScaledScreen {
 
     /** 右键菜单、各大图层、阶段锁定任一盖在商店内容区上。它们打开时底层控件被遮罩压暗，也不响应点击。 */
     private boolean modalLayerOpen() {
-        return ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen
+        return ClientShopAvailability.isDisabled() || ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen
                 || stageLockActive;
     }
 
@@ -2127,6 +2139,7 @@ public class ShopScreen extends ScaledScreen {
      */
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
+        if (ClientShopAvailability.isDisabled()) return;
         // 先落盘：后处理读主画面，前面所有 GUI 批次必须已经画进去。
         g.flush();
         ShopGaussBlur.deferTopLayer(this, topG -> drawTopLayer(topG, smx, smy, mx, my));
@@ -2235,6 +2248,10 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void drawShopForeground(GuiGraphics g, int mx, int my, float pt) {
+        if (ClientShopAvailability.isDisabled()) {
+            renderDisabledOverlay(g, mx, my);
+            return;
+        }
         // 卡片飞行层画在所有基础控件（搜索框/数量框）之后、各种大图层之前：
         // 这样遮罩能一起压住输入框，模拟附近界面失焦；购物车/详情大图层仍可盖在它上面。
         renderCardFlight(g);
@@ -4626,6 +4643,68 @@ public class ShopScreen extends ScaledScreen {
         return endY;
     }
 
+    /** 山海：禁用不会关闭主页；清除在禁用前已按住、拖动或排队的交互。 */
+    public void onAvailabilityChanged() {
+        buttonFeedback.cancel(System.currentTimeMillis());
+        cancelPendingGuide();
+        queuedCurrency = null;
+        dragTabLevel = -1;
+        dragTabMoving = false;
+        dragCardEntryKey = -1L;
+        dragCardMoving = false;
+        draggingDescOverlayScroll = draggingDetailScroll = draggingGridScroll = false;
+        ctxMenuOpen = descOverlayOpen = guideOverlayOpen = groupPickerOpen = cartOverlayOpen = false;
+        if (searchBox != null) searchBox.setFocused(false);
+        if (amountBox != null) amountBox.setFocused(false);
+    }
+
+    private int[] disabledBounds() {
+        int areaW = detailX() + DETAIL_W - listLeft();
+        int w = Math.min(360, areaW - 18);
+        int h = Math.min(176, contentHeight() - 18);
+        return new int[]{listLeft() + (areaW - w) / 2, contentTop() + (contentHeight() - h) / 2, w, h};
+    }
+
+    private void renderDisabledOverlay(GuiGraphics g, int mx, int my) {
+        if (disabledShownAtMs == 0L) disabledShownAtMs = System.currentTimeMillis();
+        int[] r = disabledBounds();
+        float p = GuiRenderUtil.easeOut(GuiRenderUtil.popAnimProgress(disabledShownAtMs, GuiRenderUtil.MOTION_MS));
+        int[] hole = popHoleRect(p, r[0], r[1], r[2], r[3]);
+        if (!theme.glass) requestContentGauss(p, hole[0], hole[1], hole[2], hole[3]);
+        renderStageLockBlur(g, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight(), p);
+        glassPopupBackdrop(g, p, hole);
+        drawPopPanel(g, p, r[0], r[1], r[2], r[3], () -> {
+            renderBox(g, r[0], r[1], r[2], r[3], GOLD_DARK, PANEL_BG);
+            int center = r[0] + r[2] / 2;
+            g.drawCenteredString(this.font, "§c商店已禁用", center, r[1] + 14, WHITE);
+            g.drawCenteredString(this.font, "§7仅可查看主页，其他请求均已拒绝", center, r[1] + 36, WHITE);
+            g.drawCenteredString(this.font, "§7点击开启链接，前往对应的商店设置", center, r[1] + 50, WHITE);
+            if (ClientShopUiSettings.shopDisabled()) {
+                g.drawCenteredString(this.font, "§b§n[开启个人商店]", center, r[1] + 78, WHITE);
+            }
+            if (ClientShopAvailability.globalDisabled()) {
+                g.drawCenteredString(this.font, ClientShopAvailability.canConfigureGlobal()
+                        ? "§b§n[开启全局商店]" : "§7全局禁用：请联系 OP 开启", center, r[1] + 102, WHITE);
+            }
+            g.drawCenteredString(this.font, "§8ESC 关闭商店", center, r[1] + r[3] - 20, WHITE);
+        });
+    }
+
+    private boolean handleDisabledClick(double mx, double my, int btn) {
+        if (btn != 0) return true;
+        int[] r = disabledBounds();
+        if (ClientShopUiSettings.shopDisabled() && hit(mx, my, r[0] + 20, r[1] + 73, r[2] - 40, 20)) {
+            Minecraft.getInstance().setScreen(ShopWelcomeScreen.availability(() -> this));
+        } else if (ClientShopAvailability.globalDisabled() && ClientShopAvailability.canConfigureGlobal()
+                && hit(mx, my, r[0] + 20, r[1] + 97, r[2] - 40, 20)) {
+            Minecraft.getInstance().setScreen(ShopWelcomeScreen.availability(() -> this, true));
+        } else if (hit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
+            Minecraft.getInstance().setScreen(ShopWelcomeScreen.availability(() -> this,
+                    ClientShopAvailability.globalDisabled() && ClientShopAvailability.canConfigureGlobal()));
+        }
+        return true;
+    }
+
     /** 阶段尚未提交时覆盖内容区：商品列表/详情不可见，只保留解锁条件、说明和提交按钮。 */
     private void renderStageLockOverlay(GuiGraphics g, int mx, int my) {
         if (!stageLockActive || stageLockPath == null) return;
@@ -4721,6 +4800,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        if (ClientShopAvailability.isDisabled()) return handleDisabledClick(mx, my, btn);
         // 右键快捷菜单打开时拦截全部点击：点某一行执行该动作并关闭，点菜单外任意处只关闭，不冒泡给下层控件
         if (ctxMenuOpen) {
             return handleContextMenuClick(mx, my);
@@ -5449,6 +5529,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
+        if (ClientShopAvailability.isDisabled()) return true;
         if (stageLockActive) return true;
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
@@ -5498,6 +5579,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (ClientShopAvailability.isDisabled()) return true;
         if (dragTabLevel != -1) {
             dragTabMx = mx;
             dragTabMy = my;
@@ -5523,6 +5605,10 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
+        if (ClientShopAvailability.isDisabled()) {
+            onAvailabilityChanged();
+            return true;
+        }
         // 先结束按下态与连发；不 return，下面的拖拽、滚动条照常收尾
         buttonFeedback.release(System.currentTimeMillis());
         if (dragTabLevel != -1) {
@@ -5667,6 +5753,10 @@ public class ShopScreen extends ScaledScreen {
      */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (ClientShopAvailability.isDisabled()) {
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) onClose();
+            return true;
+        }
         if (keyCode == 256) {
             if (ctxMenuOpen) { closeContextMenu(); return true; }
             if (groupPickerOpen) { closeGroupPicker(); return true; }
@@ -5684,6 +5774,12 @@ public class ShopScreen extends ScaledScreen {
             }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        if (ClientShopAvailability.isDisabled()) return true;
+        return super.charTyped(codePoint, modifiers);
     }
 
     /** Enter 松开才允许下一次确认。其余按键（含修饰键）一律交还原版，输入法切换中英要靠它。 */
@@ -6718,6 +6814,7 @@ public class ShopScreen extends ScaledScreen {
      * 纯星火成本（无币种/无实物）不用往返——{@link ClientWalletAccount} 本地已同步，见 {@link #costCells}。
      */
     private void maybeRequestCostPreview(ShopCost cost) {
+        if (ClientShopAvailability.isDisabled()) return;
         if (cost.coins.isEmpty() && cost.physical.isEmpty()) return;
         net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
         long gameTime = lvl != null ? lvl.getGameTime() : 0L;
@@ -6733,6 +6830,7 @@ public class ShopScreen extends ScaledScreen {
 
     /** 階段鎖定頁的材料庫存預覽，與商品花費預覽使用相同的服務端統計口徑。 */
     private void maybeRequestStagePreview(String stagePath) {
+        if (ClientShopAvailability.isDisabled()) return;
         if (stagePath == null || stagePath.isBlank()) return;
         net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
         long gameTime = lvl != null ? lvl.getGameTime() : 0L;

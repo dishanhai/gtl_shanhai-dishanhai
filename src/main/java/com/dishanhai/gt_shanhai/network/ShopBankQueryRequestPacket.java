@@ -22,7 +22,9 @@ public class ShopBankQueryRequestPacket {
         NetworkEvent.Context context = ctx.get();
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
-            if (player != null) ShopBankQueryPacket.sendTo(player);
+            if (player != null && com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) {
+                ShopBankQueryPacket.sendTo(player);
+            }
         });
         context.setPacketHandled(true);
     }

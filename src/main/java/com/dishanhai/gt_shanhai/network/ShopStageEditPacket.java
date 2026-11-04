@@ -52,6 +52,7 @@ public final class ShopStageEditPacket {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player == null) return;
+            if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
             if (!ShopEditPermission.canEdit(player)) {
                 player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
                 return;

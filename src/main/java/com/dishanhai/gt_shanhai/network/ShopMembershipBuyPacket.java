@@ -34,6 +34,7 @@ public class ShopMembershipBuyPacket {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player == null) return;
+            if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
             WalletAccountAPI.MemberBuyResult result = WalletAccountAPI.buyMemberTier(
                     player.getServer(), player.getUUID(), pkt.tier);
             player.sendSystemMessage(Component.literal(memberBuyMessage(pkt.tier, result)));

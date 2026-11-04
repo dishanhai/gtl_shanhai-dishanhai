@@ -50,6 +50,7 @@ public class ShopCartEditPacket {
     }
 
     private static void apply(ShopCartEditPacket pkt, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (pkt.stableId.isBlank()) return;
         var server = player.getServer();
         if (server == null) return;

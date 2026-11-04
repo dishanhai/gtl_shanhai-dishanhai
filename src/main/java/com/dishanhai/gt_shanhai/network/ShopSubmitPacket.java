@@ -74,6 +74,7 @@ public final class ShopSubmitPacket {
     }
 
     private static void apply(ShopSubmitPacket packet, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         ShopSubmissionSavedData data = ShopSubmissionSavedData.get(player.getServer());
         if (packet.stage) {
             if (packet.stagePath.isBlank()) return;

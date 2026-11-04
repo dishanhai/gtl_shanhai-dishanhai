@@ -68,6 +68,7 @@ public class ExchangePacket {
     }
 
     private static void apply(ExchangePacket pkt, ServerPlayer player) {
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         if (!WalletItem.isCarrying(player)) {
             player.sendSystemMessage(Component.literal("§c[兑换] 需持有山海钱包（背包/饰品栏任意位置都行）"));
             return;

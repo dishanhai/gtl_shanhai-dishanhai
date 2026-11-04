@@ -27,8 +27,19 @@ public final class ShopCatalogSyncEventHandler {
     private ShopCatalogSyncEventHandler() {}
 
     @SubscribeEvent
+    public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        com.dishanhai.gt_shanhai.common.shop.ShopAvailability.clearPersonal(event.getEntity().getUUID());
+    }
+
+    @SubscribeEvent
+    public static void onServerStopped(net.minecraftforge.event.server.ServerStoppedEvent event) {
+        com.dishanhai.gt_shanhai.common.shop.ShopAvailability.clearPersonal();
+    }
+
+    @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        com.dishanhai.gt_shanhai.network.ShopAvailabilityPacket.sendTo(player);
         ShopCatalogManifestPacket.sendTo(player, ShopConfig.manifest());
         // 「任务 → 商店商品」手动绑定表，同一时机推：任务详情页那条跳转入口靠它决定显不显示
         ShopQuestLinkSyncPacket.sendTo(player);
