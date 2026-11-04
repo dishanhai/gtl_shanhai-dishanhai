@@ -71,6 +71,19 @@ public final class PatternSlotScopedRecipe extends GTRecipe {
                 dimension, pos, Math.max(0, slot), null, false);
     }
 
+    /** 山海：保存此槽樣板的 NBT 身份，不能寫入登錄配方共用的 data。 */
+    static GTRecipe withPatternIdentity(GTRecipe recipe, String recipeId, String recipeType) {
+        if (recipe == null) return null;
+        recipe.data = recipe.data.copy();
+        if (!recipeId.isBlank() && ResourceLocation.tryParse(recipeId) != null) {
+            recipe.data.putString(PatternRecipeTypeHelper.TAG_RECIPE_ID, recipeId);
+        }
+        if (!recipeType.isBlank() && ResourceLocation.tryParse(recipeType) != null) {
+            recipe.data.putString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE, recipeType);
+        }
+        return recipe;
+    }
+
     public static boolean matchesSource(GTRecipe recipe, ResourceLocation dimensionId,
                                         BlockPos bufferPos, int slot) {
         if (recipe instanceof PatternSlotScopedRecipe scoped) {

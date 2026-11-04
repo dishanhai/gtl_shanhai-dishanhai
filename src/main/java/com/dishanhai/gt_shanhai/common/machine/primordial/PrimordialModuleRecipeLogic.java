@@ -13,6 +13,7 @@ import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
 import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
 import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
+import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
 import com.gtladd.gtladditions.common.data.ParallelData;
 import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
@@ -191,6 +192,14 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
         if (!mod.hasAnnihilationCoreMounted()) return recipe;
 
         GTRecipe copy = recipe.copy();
+        // 普通 copy 不保留無線能源子型別，否則掛載湮滅核心後會變成無耗電配方。
+        if (recipe instanceof IWirelessGTRecipe wireless) {
+            copy = new WirelessGTRecipe(copy, wireless.getWirelessEuTickInputs());
+        }
+        RecipeExtensionCopier.copy(recipe, copy);
+        copy.data = recipe.data.copy();
+        copy.parallels = recipe.parallels;
+        copy.ocTier = recipe.ocTier;
         copy.duration = Math.max(1, (int) Math.ceil(copy.duration * mod.getExtraMountDurationMultiplier()));
 
         double lossChance = mod.getAnnihilationOutputLossChance();
@@ -367,6 +376,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                             && handleRecipeInputHandlePartCache(processed)) {
                         accumulatedEu = nextEu;
                         processedRecipe = true;
+                        onThreadRecipeInputHandled(recipe);
                         onBatchRecipeProcessed(recipe, parallel);
                         actualParallel = parallel > Long.MAX_VALUE - actualParallel
                                 ? Long.MAX_VALUE : actualParallel + parallel;
@@ -378,6 +388,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                     BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
                     accumulatedEu = nextEu;
                     processedRecipe = true;
+                    onThreadRecipeInputHandled(recipe);
                     actualParallel = parallel > Long.MAX_VALUE - actualParallel
                             ? Long.MAX_VALUE : actualParallel + parallel;
                     GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);

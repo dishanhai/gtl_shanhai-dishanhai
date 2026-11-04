@@ -68,6 +68,13 @@ class ShanhaiTerminalReportTest {
         assertNotEquals(decoded.lines().get(0).name(), decoded.lines().get(1).name());
         assertEquals(details, decoded.details().get(0).getString());
         assertEquals("第二个槽位", decoded.details().get(1).getString());
+        assertEquals("", decoded.dismissKeys().get(0));
+        var keyed = new ShanhaiTerminalReport.Builder(ShanhaiTerminalReport.Type.STELLAR_STUCK, target, 1);
+        keyed.add(target, "STUCK", Component.literal("卡死告警"), 0xFF3B30, Component.literal("槽位 3"),
+                java.util.List.of(), Component.literal("保留"), "minecraft:overworld\njob:slot:3");
+        var kept = new FriendlyByteBuf(Unpooled.buffer());
+        keyed.build().encode(kept);
+        assertEquals("minecraft:overworld\njob:slot:3", ShanhaiTerminalReport.decode(kept).dismissKeys().get(0));
     }
 
     @Test void chatShowsOnlyAFewLinesAndLinksToTheReportScreen() throws Exception {

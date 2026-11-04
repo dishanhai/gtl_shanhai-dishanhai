@@ -13,7 +13,7 @@ import snownee.jade.overlay.DisplayHelper;
 import java.util.List;
 
 /** 山海：固定側框文字寬度，保留翻譯與樣式，產物圖示和數量共用一列。 */
-final class PrimordialRecipeThreadText implements IElement {
+class PrimordialRecipeThreadText implements IElement {
     private static final int WIDTH = 236;
     private final Component text;
     private final IElement icon;
@@ -28,6 +28,16 @@ final class PrimordialRecipeThreadText implements IElement {
     }
 
     Component text() { return text; }
+
+    static IElement separator(IElement spacer) {
+        return new PrimordialRecipeThreadText(Component.empty(), spacer, null) {
+            @Override public Vec2 getSize() { return new Vec2(WIDTH, 7); }
+            @Override public void render(GuiGraphics graphics, float x, float y, float width, float height) {
+                int color = (IThemeHelper.get().getNormalColor() & 0x00FFFFFF) | 0x55000000;
+                graphics.fill((int) x, (int) y + 3, (int) (x + width), (int) y + 4, color);
+            }
+        };
+    }
 
     private int iconWidth() { return icon == null ? 0 : (int) Math.ceil(icon.getCachedSize().x) + 2; }
 

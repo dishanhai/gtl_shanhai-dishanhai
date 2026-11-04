@@ -34,6 +34,13 @@ class PrimordialRecipeThreadsProviderTest {
         view.putBoolean("enabled", true);
         ListTag rows = new ListTag();
         rows.add(row(0, 30, 100, "WORKING"));
+        rows.getCompound(0).putInt("moreOutputs", 2);
+        ListTag recipes = new ListTag();
+        CompoundTag source = new CompoundTag();
+        source.putString("recipeType", "gtceu:photon_matrix_etch");
+        source.putString("recipeId", "gt_shanhai:photon_matrix_etch/wafer/ulpic_wafer_6");
+        recipes.add(source);
+        rows.getCompound(0).put("recipes", recipes);
         rows.add(row(1, 2, 10, "WAITING"));
         view.put("threads", rows);
         data.put("sh_primordial_threads_display", view);
@@ -41,6 +48,8 @@ class PrimordialRecipeThreadsProviderTest {
         List<ResourceLocation> tagged = new ArrayList<>();
         List<Component> text = new ArrayList<>();
         List<Float> progress = new ArrayList<>();
+        List<String> sequence = new ArrayList<>();
+        List<String> colorKeys = new ArrayList<>();
         IElement[] elementRef = new IElement[1];
         ResourceLocation[] elementTag = new ResourceLocation[1];
         IElement element = proxy(IElement.class, (method, args) -> {
@@ -53,13 +62,23 @@ class PrimordialRecipeThreadsProviderTest {
         IProgressStyle fluentStyle = proxy(IProgressStyle.class, (method, args) -> style);
         IElementHelper helper = proxy(IElementHelper.class, (method, args) -> {
             if (method.equals("progressStyle")) return fluentStyle;
-            if (method.equals("progress")) { progress.add((Float) args[0]); text.add((Component) args[1]); }
+            if (method.equals("progress")) {
+                progress.add((Float) args[0]); text.add((Component) args[1]);
+                sequence.add("progress");
+            }
             return element;
         });
         ITooltip tooltip = proxy(ITooltip.class, (method, args) -> {
             if (method.equals("remove")) removed.add((ResourceLocation) args[0]);
             if (method.equals("add") && args.length == 1 && args[0] instanceof PrimordialRecipeThreadText label) {
-                text.add(label.text());
+                Component detail = label.text();
+                if (detail.getContents() instanceof TranslatableContents contents
+                        && contents.getKey().startsWith("gt_shanhai.primordial.threads.thread_color.")) {
+                    colorKeys.add(contents.getKey());
+                    detail = (Component) contents.getArgs()[0];
+                }
+                if (!detail.getString().isEmpty()) text.add(detail);
+                sequence.add(detail.getContents() instanceof TranslatableContents contents ? contents.getKey() : "separator");
                 tagged.add(label.getTag());
             }
             if (method.equals("add") && args.length == 2 && args[1] instanceof ResourceLocation uid) tagged.add(uid);
@@ -73,6 +92,16 @@ class PrimordialRecipeThreadsProviderTest {
         assertTrue(tagged.contains(PrimordialRecipeThreadsProvider.INSTANCE.getThreadElementUid()));
         assertEquals(List.of(0.3F, 0.2F), progress);
         assertTrue(text.stream().allMatch(component -> component.getContents() instanceof TranslatableContents));
+        assertTrue(sequence.indexOf("progress") < sequence.indexOf("gt_shanhai.primordial.threads.more_outputs"));
+        assertTrue(sequence.indexOf("gt_shanhai.primordial.threads.more_outputs")
+                < sequence.indexOf("gt_shanhai.primordial.threads.timing"));
+        assertEquals(1, sequence.stream().filter("separator"::equals).count());
+        assertTrue(colorKeys.contains("gt_shanhai.primordial.threads.thread_color.0"));
+        assertTrue(colorKeys.contains("gt_shanhai.primordial.threads.thread_color.1"));
+        var idLine = text.stream().filter(component -> ((TranslatableContents) component.getContents()).getKey()
+                .equals("gt_shanhai.primordial.threads.recipe_id")).findFirst().orElseThrow();
+        assertEquals("gt_shanhai:photon_matrix_etch/wafer/ulpic_wafer_6",
+                ((TranslatableContents) idLine.getContents()).getArgs()[0]);
     }
 
     @Test void sidePanelExtractionLeavesMachineTooltipElementsUntouched() {

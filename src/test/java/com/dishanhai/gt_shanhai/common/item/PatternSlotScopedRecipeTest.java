@@ -24,6 +24,23 @@ class PatternSlotScopedRecipeTest {
     private static final ResourceLocation ORIGINAL_ID = new ResourceLocation("gtceu", "distort/test_recipe");
     private static final ResourceLocation DIMENSION = new ResourceLocation("minecraft", "overworld");
 
+    @Test void patternNbtIdentitySurvivesScopedCopiesWithoutChangingTheRegisteredRecipe() {
+        GTRecipe original = emptyRecipe();
+        GTRecipe scoped = PatternSlotScopedRecipe.scope(original, DIMENSION, BlockPos.ZERO, 3);
+        CompoundTag pattern = new CompoundTag();
+        pattern.putString(PatternRecipeTypeHelper.TAG_RECIPE_ID,
+                "gt_shanhai:photon_matrix_etch/wafer/ulpic_wafer_6");
+        pattern.putString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE, "gtceu:photon_matrix_etch");
+        scoped = PatternSlotScopedRecipe.withPatternIdentity(scoped,
+                pattern.getString(PatternRecipeTypeHelper.TAG_RECIPE_ID),
+                pattern.getString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE));
+        GTRecipe copy = scoped.copy();
+        assertEquals(pattern.getString(PatternRecipeTypeHelper.TAG_RECIPE_ID),
+                copy.data.getString(PatternRecipeTypeHelper.TAG_RECIPE_ID));
+        assertEquals("gtceu:photon_matrix_etch", copy.data.getString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE));
+        assertTrue(original.data.isEmpty(), "樣板來源不能污染全域登錄的配方 data");
+    }
+
     @Test
     void duplicateRecipePatternsKeepIndependentSlotIdentity() {
         GTRecipe original = emptyRecipe();

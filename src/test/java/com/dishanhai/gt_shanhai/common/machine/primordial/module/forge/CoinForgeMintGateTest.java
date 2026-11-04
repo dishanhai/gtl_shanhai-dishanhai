@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import net.minecraft.network.chat.contents.TranslatableContents;
+
 import org.junit.jupiter.api.Test;
 
 class CoinForgeMintGateTest {
@@ -11,14 +13,15 @@ class CoinForgeMintGateTest {
     void lockedMintDiagnosticsReportTheSameRequiredLevelAsTheGate() {
         assertEquals("", CoinForgeMintGate.restrictionText(1, 1));
         assertEquals("", CoinForgeMintGate.restrictionText(0, 0));
-        String first = CoinForgeMintGate.restrictionText(0, CoinForgeMintGate.requiredModuleLevel("ulv"));
-        assertTrue(first.contains("未解锁"));
-        assertTrue(first.contains("入门物质模块"));
-        assertTrue(first.contains("Lv.1"));
-        String higher = CoinForgeMintGate.restrictionText(1, CoinForgeMintGate.requiredModuleLevel("hv"));
-        assertTrue(higher.contains("Lv.1"));
-        assertTrue(higher.contains("Lv.4"));
-        assertTrue(higher.contains(CoinForgeMintGate.permissionText(1)));
+        var first = (TranslatableContents) CoinForgeMintGate.restrictionComponent(0, CoinForgeMintGate.requiredModuleLevel("ulv")).getContents();
+        assertEquals("gui.gt_shanhai.stellar_stuck.mint_locked_detail", first.getKey());
+        assertEquals(0, first.getArgs()[0]);
+        assertEquals(1, first.getArgs()[2]);
+        var higher = (TranslatableContents) CoinForgeMintGate.restrictionComponent(1, CoinForgeMintGate.requiredModuleLevel("hv")).getContents();
+        assertEquals("gui.gt_shanhai.stellar_stuck.mint_locked_detail", higher.getKey());
+        assertEquals(1, higher.getArgs()[0]);
+        assertEquals(4, higher.getArgs()[2]);
+        assertEquals(CoinForgeMintGate.permissionComponent(1), higher.getArgs()[1]);
         assertFalse(CoinForgeMintGate.allowsRequiredLevel(1, 4));
         assertTrue(CoinForgeMintGate.allowsRequiredLevel(17, 17));
     }
@@ -36,14 +39,18 @@ class CoinForgeMintGateTest {
         assertTrue(CoinForgeMintGate.allows(4, "ulv"));
         assertTrue(CoinForgeMintGate.allows(4, "hv"));
         assertFalse(CoinForgeMintGate.allows(4, "ev"));
-        assertEquals("金币及以下", CoinForgeMintGate.permissionText(4));
+        var gold = (TranslatableContents) CoinForgeMintGate.permissionComponent(4).getContents();
+        assertEquals("gui.gt_shanhai.stellar_stuck.mint_upto", gold.getKey());
+        assertEquals("gui.gt_shanhai.stellar_stuck.mint_tier_3",
+                ((TranslatableContents) ((net.minecraft.network.chat.Component) gold.getArgs()[0]).getContents()).getKey());
     }
 
     @Test
     void topModuleUnlocksEveryShopStage() {
         assertTrue(CoinForgeMintGate.allows(14, "max"));
         assertTrue(CoinForgeMintGate.allows(17, "max"));
-        assertEquals("全部货币", CoinForgeMintGate.permissionText(17));
+        assertEquals("gui.gt_shanhai.stellar_stuck.mint_all",
+                ((TranslatableContents) CoinForgeMintGate.permissionComponent(17).getContents()).getKey());
     }
 
     @Test

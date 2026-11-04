@@ -30,6 +30,7 @@ import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
 import java.util.function.Predicate;
 
 /** 山海：原初批次的多线程并行。所有庫存及能源交易仍在伺服器執行緒執行。 */
@@ -45,6 +46,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private boolean drainRequested;
     private long allowance;
     private long continuousTicks;
+    private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
 
@@ -76,7 +78,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             Frame frame = lane.task();
             if (frame.progress >= frame.duration || !(frame.recipe instanceof IWirelessGTRecipe wireless)) continue;
             BigInteger eut = wireless.getWirelessEuTickInputs();
-            if (eut != null && (consumer ? eut.signum() > 0 : eut.signum() < 0)) used = used.add(eut.abs());
+            if (eut != null && (consumer ? eut.signum() < 0 : eut.signum() > 0)) used = used.add(eut.abs());
         }
         // 按已啟動批次的真實 EU/t 預留功率，避免「無限執行緒」將整數功率除為零。
         return fullPower.subtract(used).max(BigInteger.ZERO);
@@ -116,8 +118,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             if (frame.recipe instanceof IWirelessGTRecipe wireless) {
                 BigInteger eut = wireless.getWirelessEuTickInputs();
                 if (eut == null) continue;
-                if (eut.signum() > 0) consumption = consumption.add(eut);
-                else production = production.subtract(eut);
+                if (eut.signum() < 0) consumption = consumption.subtract(eut);
+                else production = production.add(eut);
             } else {
                 consumption = consumption.add(BigInteger.valueOf(RecipeHelper.getInputEUt(frame.recipe)).max(BigInteger.ZERO));
                 production = production.add(BigInteger.valueOf(RecipeHelper.getOutputEUt(frame.recipe)).max(BigInteger.ZERO));
@@ -139,10 +141,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             row.putInt("remainingTicks", Math.max(0, frame.duration - frame.progress));
             row.putString("status", available ? frame.status.name() : enabled ? "WAITING" : "SUSPEND");
             if (frame.recipe != null) {
-                row.putString("recipe", frame.recipe.id.toString());
-                if (frame.recipe.recipeType.registryName != null) {
-                    row.putString("recipeType", frame.recipe.recipeType.registryName.toString());
-                }
+                PrimordialThreadRecipeIdentity.appendDisplay(row, frame.recipe);
                 BigInteger batchConsumption = BigInteger.ZERO;
                 BigInteger batchProduction = BigInteger.ZERO;
                 if (available && frame.status == Status.WORKING && !frame.pendingSetup
@@ -150,8 +149,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                     if (frame.recipe instanceof IWirelessGTRecipe wireless) {
                         BigInteger eut = wireless.getWirelessEuTickInputs();
                         if (eut != null) {
-                            if (eut.signum() > 0) batchConsumption = eut;
-                            else batchProduction = eut.abs();
+                            if (eut.signum() < 0) batchConsumption = eut.abs();
+                            else batchProduction = eut;
                         }
                     } else {
                         batchConsumption = BigInteger.valueOf(RecipeHelper.getInputEUt(frame.recipe))
@@ -247,9 +246,25 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         if (!isThreadRecipeLookupAllowed()) return;
         lastRecipe = null;
         setRecipeStatus(null);
-        GTRecipe match = getGTRecipe();
-        // 原初建構最終配方時已真實扣料；即使總輸出暫時不夠，也必須保留這份批次。
-        if (match != null) setupRecipe(match);
+        var previousSources = matchingRecipeSources;
+        matchingRecipeSources = new LinkedHashSet<>();
+        try {
+            GTRecipe match = getGTRecipe();
+            // 原初建構最終配方時已真實扣料；即使總輸出暫時不夠，也必須保留這份批次。
+            if (match != null) {
+                PrimordialThreadRecipeIdentity.store(match, matchingRecipeSources);
+                setupRecipe(match);
+            }
+        } finally {
+            matchingRecipeSources = previousSources;
+        }
+    }
+
+    /** 只在本邏輯當次查找內記錄真實扣料成功的配方，不讀取其他執行緒或新樣板。 */
+    public final void onThreadRecipeInputHandled(GTRecipe recipe) {
+        if (matchingRecipeSources == null) return;
+        var identity = PrimordialThreadRecipeIdentity.fromRecipe(recipe);
+        if (identity != null) matchingRecipeSources.add(identity);
     }
 
     @Override public void setupRecipe(GTRecipe recipe) {
@@ -488,6 +503,9 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             GTRecipePayload payload = new GTRecipePayload();
             payload.setPayload(recipe);
             data.put("recipe", java.util.Objects.requireNonNull(payload.serializeNBT()));
+            if (recipe.data.contains(PrimordialThreadRecipeIdentity.KEY)) {
+                data.put(PrimordialThreadRecipeIdentity.KEY, recipe.data.getList(PrimordialThreadRecipeIdentity.KEY, 10).copy());
+            }
             if (origin != null) {
                 payload.setPayload(origin);
                 data.put("origin", java.util.Objects.requireNonNull(payload.serializeNBT()));
@@ -508,6 +526,10 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             GTRecipePayload payload = new GTRecipePayload();
             payload.deserializeNBT(data.get("recipe"));
             frame.recipe = java.util.Objects.requireNonNull(payload.getPayload(), "Missing paid recipe thread snapshot");
+            if (data.contains(PrimordialThreadRecipeIdentity.KEY)) {
+                frame.recipe.data = frame.recipe.data.copy();
+                frame.recipe.data.put(PrimordialThreadRecipeIdentity.KEY, data.getList(PrimordialThreadRecipeIdentity.KEY, 10).copy());
+            }
             if (data.getBoolean("wireless") && !(frame.recipe instanceof IWirelessGTRecipe)) {
                 GTRecipe original = frame.recipe;
                 frame.recipe = new WirelessGTRecipe(original, BigInteger.ZERO);

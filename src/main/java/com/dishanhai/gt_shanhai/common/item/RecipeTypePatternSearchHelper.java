@@ -193,6 +193,10 @@ public final class RecipeTypePatternSearchHelper {
             ResourceLocation dimensionId = buffer.getLevel() == null
                     ? null : buffer.getLevel().dimension().location();
             recipe = PatternSlotScopedRecipe.scope(recipe, dimensionId, buffer.getPos(), slot);
+            var patternStack = access.gtShanhai$getPatternStack(slot);
+            recipe = PatternSlotScopedRecipe.withPatternIdentity(recipe,
+                    PatternRecipeTypeHelper.readRecipeId(patternStack),
+                    PatternRecipeTypeHelper.readRecipeTypeId(patternStack));
         }
         synchronized (MARKED_RECIPE_CACHE) {
             MARKED_RECIPE_CACHE.computeIfAbsent(buffer, b -> new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>())

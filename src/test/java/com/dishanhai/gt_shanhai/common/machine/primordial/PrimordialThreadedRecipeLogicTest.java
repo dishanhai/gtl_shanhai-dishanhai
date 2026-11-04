@@ -93,9 +93,9 @@ class PrimordialThreadedRecipeLogicTest {
 
     @Test void displaySnapshotIncludesIndependentProgressAndSeparatesEnergyDirections() throws Exception {
         Probe logic = probe();
-        logic.pending.add(new WirelessGTRecipe(recipe("consumer", 100), BigInteger.TEN));
+        logic.pending.add(new WirelessGTRecipe(recipe("consumer", 100), BigInteger.TEN.negate()));
         tick(logic, 0);
-        logic.pending.add(new WirelessGTRecipe(recipe("generator", 20), BigInteger.valueOf(-7L)));
+        logic.pending.add(new WirelessGTRecipe(recipe("generator", 20), BigInteger.valueOf(7L)));
         logic.wake();
         tick(logic, 1);
         tick(logic, 2);
@@ -145,6 +145,51 @@ class PrimordialThreadedRecipeLogicTest {
         assertFalse(view.getList("threads", 10).getCompound(0).getString("reason").isEmpty());
     }
 
+    @Test void sourceRecipeIdentityIsFrozenSeparatelyForEveryAcceptedThread() throws Exception {
+        Probe logic = probe();
+        GTRecipe first = recipe("real_first", 100);
+        first.data.putString("gt_shanhai_recipe_id", "gt_shanhai:photon_matrix_etch/wafer/ulpic_wafer_6");
+        first.data.putString("gt_shanhai_recipe_type", "gtceu:photon_matrix_etch");
+        logic.sourceRecipes = List.of(first);
+        logic.pending.add(new WirelessGTRecipe(recipe("merged_first", 100), BigInteger.ZERO));
+        tick(logic, 0);
+        GTRecipe second = recipe("real_second", 100);
+        logic.sourceRecipes = List.of(second);
+        logic.pending.add(new WirelessGTRecipe(recipe("merged_second", 100), BigInteger.ZERO));
+        logic.wake();
+        tick(logic, 1);
+        first.data.putString("gt_shanhai_recipe_id", "gt_shanhai:later_pattern");
+        var rows = display(logic).getList("threads", 10);
+        assertEquals("gt_shanhai:photon_matrix_etch/wafer/ulpic_wafer_6",
+                rows.getCompound(0).getList("recipes", 10).getCompound(0).getString("recipeId"));
+        assertEquals("gt_shanhai:real_second",
+                rows.getCompound(1).getList("recipes", 10).getCompound(0).getString("recipeId"));
+        assertEquals(2, logic.inputTransactions);
+    }
+
+    @Test void nativeInputObserverRecordsSuccessOnlyDuringThisMachinesMatchingScope() throws Exception {
+        Probe logic = probe();
+        var sources = new java.util.LinkedHashSet<PrimordialThreadRecipeIdentity.Identity>();
+        set(PrimordialThreadedRecipeLogic.class, "matchingRecipeSources", logic, sources);
+        var method = com.dishanhai.gt_shanhai.mixin.StellarPatternInputParallelObservationMixin.class
+                .getDeclaredMethod("gtShanhai$observeConsumedParallel",
+                        com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine.class, GTRecipe.class,
+                        org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable.class);
+        method.setAccessible(true);
+        GTRecipe source = recipe("actual_input", 100);
+        method.invoke(null, logic.module, source,
+                new org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<>("test", false, Boolean.FALSE));
+        assertTrue(sources.isEmpty());
+        method.invoke(null, logic.module, source,
+                new org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<>("test", false, Boolean.TRUE));
+        assertEquals(Set.of(new PrimordialThreadRecipeIdentity.Identity("gt_shanhai:actual_input",
+                "gt_shanhai:actual_input")), sources);
+        set(PrimordialThreadedRecipeLogic.class, "matchingRecipeSources", logic, null);
+        method.invoke(null, logic.module, recipe("outside_scope", 100),
+                new org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<>("test", false, Boolean.TRUE));
+        assertEquals(1, sources.size());
+    }
+
     private static CompoundTag display(Probe logic) throws Exception {
         return logic.getRecipeThreadDisplay(0, 8);
     }
@@ -153,7 +198,7 @@ class PrimordialThreadedRecipeLogicTest {
         Probe logic = probe();
         logic.module.configuredThreads = 16;
         for (int i = 0; i < 12; i++) {
-            logic.pending.add(new WirelessGTRecipe(recipe("task_" + i, 1000), BigInteger.TEN));
+            logic.pending.add(new WirelessGTRecipe(recipe("task_" + i, 1000), BigInteger.TEN.negate()));
             tick(logic, i);
         }
         CompoundTag view = logic.getRecipeThreadDisplay(8, Integer.MAX_VALUE);
@@ -166,7 +211,7 @@ class PrimordialThreadedRecipeLogicTest {
 
     @Test void hugeEnergySnapshotStaysBoundedAndLocaleIndependent() throws Exception {
         Probe logic = probe();
-        logic.pending.add(new WirelessGTRecipe(recipe("huge", 100), BigInteger.ONE.shiftLeft(10000)));
+        logic.pending.add(new WirelessGTRecipe(recipe("huge", 100), BigInteger.ONE.shiftLeft(10000).negate()));
         tick(logic, 0);
         java.util.Locale previous = java.util.Locale.getDefault();
         try {
@@ -364,9 +409,9 @@ class PrimordialThreadedRecipeLogicTest {
 
     @Test void admissionReservesOnlyPowerAlreadyUsedInTheSameDirection() throws Exception {
         Probe logic = probe();
-        logic.pending.add(new WirelessGTRecipe(recipe("consumer", 100), BigInteger.TEN));
+        logic.pending.add(new WirelessGTRecipe(recipe("consumer", 100), BigInteger.TEN.negate()));
         tick(logic, 0);
-        logic.pending.add(new WirelessGTRecipe(recipe("generator", 100), BigInteger.valueOf(-7L)));
+        logic.pending.add(new WirelessGTRecipe(recipe("generator", 100), BigInteger.valueOf(7L)));
         logic.wake();
         tick(logic, 5);
         assertEquals(2, logic.getActiveRecipeThreadCount());
@@ -537,6 +582,7 @@ class PrimordialThreadedRecipeLogicTest {
     private static class Probe extends PrimordialThreadedRecipeLogic implements PrimordialRecipeThreadStateAccessor {
         Module module;
         ArrayDeque<GTRecipe> pending;
+        List<GTRecipe> sourceRecipes;
         List<String> finished;
         List<Long> admittedShares;
         Map<String, Integer> energyTicks;
@@ -564,6 +610,9 @@ class PrimordialThreadedRecipeLogicTest {
             if (next != null) {
                 inputTransactions++;
                 admittedShares.add(getThreadParallelAllowance());
+                for (GTRecipe source : sourceRecipes == null ? List.of(next) : sourceRecipes) {
+                    onThreadRecipeInputHandled(source);
+                }
             }
             return next;
         }

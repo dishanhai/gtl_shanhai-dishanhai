@@ -7,6 +7,10 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreM
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gtladd.gtladditions.common.data.ParallelData;
+import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
+import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
+import com.gtladd.gtladditions.api.machine.IWirelessElectricMultiblockMachine;
+import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -14,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -27,6 +33,28 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 山海：隔離世界、候選來源與 Mixin 才能用的庫存探測，保留真實分配與線程計算。 */
 class PrimordialParallelSupplyTest {
     private static final Unsafe UNSAFE = unsafe();
+
+    @Test void annihilationCopyRetainsWirelessChargeAndNativeHandlerStillDebitsIt() throws Exception {
+        Module module = module(0, 0);
+        module.annihilation = true;
+        GTRecipe original = new WirelessGTRecipe(module.logic.recipes.iterator().next(), BigInteger.valueOf(-37));
+        original.parallels = 16;
+        original.ocTier = 3;
+        original.data.putString("source", "kept");
+        var method = PrimordialModuleRecipeLogic.class.getDeclaredMethod("applyExtraMountRecipeEffects", GTRecipe.class);
+        method.setAccessible(true);
+        GTRecipe changed = (GTRecipe) method.invoke(module.logic, original);
+        assertInstanceOf(IWirelessGTRecipe.class, changed, "掛載效果複製不得遺失無線扣電欄位");
+        assertEquals(BigInteger.valueOf(-37), ((IWirelessGTRecipe) changed).getWirelessEuTickInputs());
+        assertEquals(2, changed.duration);
+        assertEquals(20, original.duration);
+        assertEquals(16, changed.parallels);
+        assertEquals(3, changed.ocTier);
+        assertTrue(module.logic.handleWirelessTickInput((IWirelessGTRecipe) changed));
+        assertEquals(BigInteger.valueOf(963), module.energy);
+        changed.data.putString("source", "changed");
+        assertEquals("kept", original.data.getString("source"));
+    }
 
     @Test void defaultCapacityRemains64WithoutAnActiveBatch() throws Exception {
         Module module = module(0, 0L);
@@ -150,6 +178,7 @@ class PrimordialParallelSupplyTest {
 
     private static Module module(int parallelLevel, long boost) throws Exception {
         Module module = (Module) UNSAFE.allocateInstance(Module.class);
+        module.energy = BigInteger.valueOf(1000);
         module.parallel = 64L;
         module.parallelLevel = parallelLevel;
         module.boost = boost;
@@ -174,6 +203,8 @@ class PrimordialParallelSupplyTest {
         int parallelLevel, hostLevel;
         PrimordialOmegaEngineMachine host;
         Logic logic;
+        boolean annihilation;
+        BigInteger energy = BigInteger.valueOf(1000);
         Module() { super(null); }
         @Override public long getCurrentParallel() { return parallel; }
         @Override public long getThreadBoost() { return boost; }
@@ -182,7 +213,20 @@ class PrimordialParallelSupplyTest {
         @Override protected int getParallelModuleLevel() { return parallelLevel; }
         @Override public boolean hasParallelOverdriver() { return false; }
         @Override public boolean hasDarkEnergyMultiplierMounted() { return false; }
-        @Override public boolean hasAnnihilationCoreMounted() { return false; }
+        @Override public boolean hasAnnihilationCoreMounted() { return annihilation; }
+        @Override public double getExtraMountDurationMultiplier() { return annihilation ? 0.1 : 1; }
+        @Override public double getAnnihilationOutputLossChance() { return 0; }
+        @Override public IWirelessNetworkEnergyHandler getWirelessNetworkEnergyHandler() {
+            return (IWirelessNetworkEnergyHandler) Proxy.newProxyInstance(getClass().getClassLoader(),
+                    new Class<?>[]{IWirelessNetworkEnergyHandler.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("isOnline")) return true;
+                        if (method.getName().equals("consumeEnergy")) {
+                            energy = energy.add((BigInteger) args[0]);
+                            return true;
+                        }
+                        return null;
+                    });
+        }
         @Override public boolean hasHyperstableBlackHoleSeedMounted() { return false; }
         @Override public int getHostOutputMultiplier() { return 1; }
         @Override public PrimordialOmegaEngineMachine getHost() { return host; }
@@ -198,6 +242,7 @@ class PrimordialParallelSupplyTest {
         long recipeLimit;
         Logic() { super(null); }
         @Override public SelectableRecipeTypeSetMachine getMachine() { return module; }
+        @Override public IWirelessElectricMultiblockMachine getWirelessMachine() { return module; }
         @Override protected Set<GTRecipe> lookupRecipeIterator() { return recipes; }
         @Override public long getMaxParallel(GTRecipe recipe, long limit) {
             return recipe == blocked ? 0L : recipeLimit > 0L ? Math.min(recipeLimit, limit) : limit;

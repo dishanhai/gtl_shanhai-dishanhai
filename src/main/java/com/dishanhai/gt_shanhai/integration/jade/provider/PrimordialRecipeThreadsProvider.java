@@ -81,67 +81,100 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
             addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.page", data.getInt("page"),
                     data.getInt("pages")).withStyle(ChatFormatting.DARK_GRAY));
         }
+        boolean firstThread = true;
         for (var element : data.getList("threads", 10)) {
-            tooltip.add(helper.spacer(0, 4).tag(THREAD_ELEMENT_UID));
+            if (firstThread) tooltip.add(helper.spacer(0, 4).tag(THREAD_ELEMENT_UID));
+            else tooltip.add(PrimordialRecipeThreadText.separator(helper.spacer(0, 7)).tag(THREAD_ELEMENT_UID));
+            firstThread = false;
             CompoundTag row = (CompoundTag) element;
             int progress = row.getInt("progress"), duration = row.getInt("duration");
             boolean working = "WORKING".equals(row.getString("status"));
             Component status = Component.translatable("gt_shanhai.primordial.threads.status."
                     + row.getString("status").toLowerCase(java.util.Locale.ROOT));
-            Component label = Component.translatable("gt_shanhai.primordial.threads.lane",
-                    row.getLong("index") + 1, status);
+            Component label = threadColor(row, Component.translatable("gt_shanhai.primordial.threads.lane",
+                    row.getLong("index") + 1, status));
             IElement progressBar = helper.progress(duration <= 0 ? 0 : Math.min(1F, (float) progress / duration), label,
                     helper.progressStyle().color(working ? 0xFF3D9B8F : 0xFF99764C).textColor(0xFFFFFFFF),
                     BoxStyle.DEFAULT, true).tag(THREAD_ELEMENT_UID);
             tooltip.add(progressBar);
+            appendThreadOutputs(tooltip, row);
             float fraction = duration <= 0 ? 0 : Math.max(0, Math.min(1F, (float) progress / duration));
-            addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.timing",
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.timing",
                     String.format(java.util.Locale.ROOT, "%.1f", fraction * 100), progress, duration,
-                    String.format(java.util.Locale.ROOT, "%.1f", row.getInt("remainingTicks") / 20.0))
-                    .withStyle(ChatFormatting.GRAY));
-            ResourceLocation recipeType = ResourceLocation.tryParse(row.getString("recipeType"));
-            addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.recipe",
-                    recipeType == null ? Component.translatable("gt_shanhai.primordial.threads.unknown_recipe")
-                            : Component.translatable(recipeType.toLanguageKey()))
-                    .withStyle(ChatFormatting.DARK_AQUA));
-            if (!row.getString("recipe").isEmpty()) {
-                addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.batch",
-                        NumberUtils.formatLong(row.getLong("reserved")))
-                        .withStyle(ChatFormatting.GRAY));
-                addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.batch_energy",
-                        row.getString("consumption"), row.getString("production")).withStyle(ChatFormatting.GOLD));
+                    String.format(java.util.Locale.ROOT, "%.1f", row.getInt("remainingTicks") / 20.0)));
+            var recipes = row.getList("recipes", 10);
+            if (recipes.isEmpty()) {
+                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.unknown_recipe"));
             }
+            for (var source : recipes) {
+                CompoundTag identity = (CompoundTag) source;
+                String typeId = identity.getString("recipeType");
+                ResourceLocation recipeType = typeId.isBlank() ? null : ResourceLocation.tryParse(typeId);
+                if (recipeType != null) addThreadDetail(tooltip, row,
+                        Component.translatable("gt_shanhai.primordial.threads.recipe",
+                                Component.translatable(recipeType.toLanguageKey())));
+                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.recipe_id",
+                        identity.getString("recipeId")));
+            }
+            if (row.getInt("moreRecipes") > 0) {
+                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.more_recipes",
+                        row.getInt("moreRecipes")));
+            }
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.batch",
+                    NumberUtils.formatLong(row.getLong("reserved"))));
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.batch_energy",
+                    row.getString("consumption"), row.getString("production")));
             if (row.contains("reason")) {
                 Component reason = Component.Serializer.fromJson(row.getString("reason"));
                 if (reason != null) addThreadText(tooltip, reason.copy().withStyle(ChatFormatting.YELLOW));
             }
-            for (var outputElement : row.getList("outputs", 10)) {
-                CompoundTag output = (CompoundTag) outputElement;
-                Component name;
-                IElement icon = null;
-                if (output.contains("item")) {
-                    ItemStack stack = ItemStack.of(output.getCompound("item"));
-                    icon = helper.smallItem(stack);
-                    name = stack.getHoverName();
-                } else {
-                    FluidStack stack = FluidStack.loadFromTag(output.getCompound("fluid"));
-                    name = stack.getDisplayName();
-                }
-                Component line = Component.translatable(output.contains("item")
-                                ? "gt_shanhai.primordial.threads.item_output" : "gt_shanhai.primordial.threads.fluid_output",
-                        NumberUtils.formatLong(output.getLong("amount")), name);
-                tooltip.add(new PrimordialRecipeThreadText(line, helper.text(line), icon).tag(THREAD_ELEMENT_UID));
+        }
+    }
+
+    private static void appendThreadOutputs(ITooltip tooltip, CompoundTag row) {
+        var helper = tooltip.getElementHelper();
+        for (var outputElement : row.getList("outputs", 10)) {
+            CompoundTag output = (CompoundTag) outputElement;
+            Component name;
+            IElement icon = null;
+            if (output.contains("item")) {
+                ItemStack stack = ItemStack.of(output.getCompound("item"));
+                icon = helper.smallItem(stack);
+                name = stack.getHoverName();
+            } else {
+                FluidStack stack = FluidStack.loadFromTag(output.getCompound("fluid"));
+                name = stack.getDisplayName();
             }
-            if (row.getInt("moreOutputs") > 0) {
-                addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.more_outputs",
-                        row.getInt("moreOutputs")).withStyle(ChatFormatting.DARK_GRAY));
-            }
+            Component line = threadColor(row, Component.translatable(output.contains("item")
+                            ? "gt_shanhai.primordial.threads.item_output" : "gt_shanhai.primordial.threads.fluid_output",
+                    NumberUtils.formatLong(output.getLong("amount")), name));
+            tooltip.add(new PrimordialRecipeThreadText(line, helper.text(line), icon).tag(THREAD_ELEMENT_UID));
+        }
+        if (row.getInt("moreOutputs") > 0) {
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.more_outputs",
+                    row.getInt("moreOutputs")));
         }
     }
 
     private static void addThreadText(ITooltip tooltip, Component text) {
         tooltip.add(new PrimordialRecipeThreadText(text, tooltip.getElementHelper().text(text), null)
                 .tag(THREAD_ELEMENT_UID));
+    }
+
+    private static Component threadColor(CompoundTag row, Component text) {
+        String key = "gt_shanhai.primordial.threads.thread_color." + Math.floorMod(row.getLong("index"), 6);
+        var result = Component.translatable(key, text);
+        // 將語言檔的 § 色碼同步為繼承樣式，讓 %s 裏的配方名稱等子元件也有相同顏色。
+        String format = Component.translatable(key, "").getString();
+        if (format.length() >= 2 && format.charAt(0) == '\u00a7') {
+            ChatFormatting color = ChatFormatting.getByCode(format.charAt(1));
+            if (color != null && color.isColor()) result.withStyle(color);
+        }
+        return result;
+    }
+
+    private static void addThreadDetail(ITooltip tooltip, CompoundTag row, Component text) {
+        addThreadText(tooltip, threadColor(row, text));
     }
 
     private static Object capacityText(long capacity) {
