@@ -185,6 +185,9 @@ public final class ChangelogScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (mouseY < contentTop || mouseY >= contentTop + contentHeight) {
+            return super.mouseClicked(mouseX, mouseY, button);
+        }
         int centerX = panelLeft + (PANEL_WIDTH - SCROLLBAR_WIDTH - 2) / 2;
         int y = contentTop - scrollOffset;
         for (RenderLine line : lines) {

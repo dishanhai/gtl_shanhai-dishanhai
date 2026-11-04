@@ -76,6 +76,18 @@ class ChangelogMarkdownSourceTest {
     }
 
     @Test
+    void screenRestrictsLinkClicksToVisibleContentBeforeDispatchingButtons() throws Exception {
+        String screen = source("client/gui/ChangelogScreen.java");
+        int click = screen.indexOf("public boolean mouseClicked(");
+        int scan = screen.indexOf("for (RenderLine line : lines)", click);
+        String guard = screen.substring(click, scan);
+        assertTrue(guard.contains("mouseY < contentTop")
+                        && guard.contains("mouseY >= contentTop + contentHeight")
+                        && guard.contains("return super.mouseClicked(mouseX, mouseY, button)"),
+                "裁切區外的點擊必須交給按鈕，不能觸發隱藏連結");
+    }
+
+    @Test
     void screenProvidesHistoricalUpdatesButton() throws Exception {
         String screen = source("client/gui/ChangelogScreen.java");
         assertTrue(screen.contains("历史更新"),

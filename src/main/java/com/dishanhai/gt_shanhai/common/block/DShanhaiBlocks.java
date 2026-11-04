@@ -51,54 +51,6 @@ public class DShanhaiBlocks {
         .build()
         .register();
 
-    public static final BlockEntry<Block> NEUTRONIUM_FRAME = GTDishanhaiRegistration.REGISTRATE
-        .block("neutronium_frame", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> COSMIC_NEUTRONIUM_FRAME = GTDishanhaiRegistration.REGISTRATE
-        .block("cosmic_neutronium_frame", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> SHIELDED_ACCELERATOR_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("shielded_accelerator_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> NIOBIUM_CAVITY_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("niobium_cavity_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> COOLANT_DELIVERY_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("coolant_delivery_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> NEUTRONIUM_GEARBOX = GTDishanhaiRegistration.REGISTRATE
-        .block("neutronium_gearbox", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
     public static void init() {}
 
     private DShanhaiBlocks() {}

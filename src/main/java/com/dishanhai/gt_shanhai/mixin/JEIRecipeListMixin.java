@@ -29,6 +29,11 @@ public class JEIRecipeListMixin {
 
     private static final ThreadLocal<Boolean> REENTRANT = ThreadLocal.withInitial(() -> false);
 
+    @Inject(method = "<init>", at = @At("RETURN"), remap = false)
+    private void gtShanhai$resetRecipeCacheForNewManager(CallbackInfo ci) {
+        JEIRecipeCache.clearAll();
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     @Inject(method = "addRecipes", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$normalizeGtRecipes(RecipeType type, List recipes, CallbackInfo ci) {

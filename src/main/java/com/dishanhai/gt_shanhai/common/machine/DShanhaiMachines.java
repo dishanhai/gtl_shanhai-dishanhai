@@ -173,9 +173,6 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition ETERNAL_GREGTECH_WORKSHOP_FUSION_MODULE;
     public static MultiblockMachineDefinition ETERNAL_GREGTECH_WORKSHOP_EYE_OF_HARMONY_MODULE;
     public static MultiblockMachineDefinition ETERNAL_GREGTECH_WORKSHOP_EXTRA_MODULE;
-    public static MultiblockMachineDefinition SPACE_SCALER;
-    public static MultiblockMachineDefinition INTEGRATED_ASSEMBLY_MATRIX;
-    public static MultiblockMachineDefinition INTEGRATED_ASSEMBLY_FACILITY;
     public static MultiblockMachineDefinition PROXY_EXECUTOR;
     public static MultiblockMachineDefinition SINGULARITY_DATA_HUB;
     public static MultiblockMachineDefinition ABSOLUTE_QUANTUM_PERFECT_PURIFICATION_UNIT;
@@ -2118,30 +2115,18 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§8结构来源: GTNL 原版 module.mb"));
         });
 
-        // ═══════════════════════════════════════════════════════════════
-        // 空间缩放仪 — TST 移植
-        // ═══════════════════════════════════════════════════════════════
-        SPACE_SCALER = com.dishanhai.gt_shanhai.common.machine.misc.SpaceScalerMachine.register();
 
         // ═══════════════════════════════════════════════════════════════
         // 量子计算机 — GTNL 移植
         // ═══════════════════════════════════════════════════════════════
         // quantum_computer is registered as an AE multiblock core in DShanhaiAE2Blocks.
 
-        // ═══════════════════════════════════════════════════════════════
-        // 集成装配矩阵 — TST 移植
-        // ═══════════════════════════════════════════════════════════════
-        INTEGRATED_ASSEMBLY_MATRIX = com.dishanhai.gt_shanhai.common.machine.misc.IntegratedAssemblyMatrixMachine.register();
 
         // ═══════════════════════════════════════════════════════════════
         // 物质定增 — NXY Matter Copier 移植
         // ═══════════════════════════════════════════════════════════════
         MATTER_COPIER = com.dishanhai.gt_shanhai.common.machine.misc.MatterCopierMachine.register();
 
-        // ═══════════════════════════════════════════════════════════════
-        // 综合组装车间 — GTNL 移植 (IntegratedAssemblyFacility)
-        // ═══════════════════════════════════════════════════════════════
-        INTEGRATED_ASSEMBLY_FACILITY = com.dishanhai.gt_shanhai.common.machine.misc.IntegratedAssemblyFacilityMachine.register();
 
         // ═══════════════════════════════════════════════════════════════
         // 盒系统中央控制器 — BoxPlusPlus 行为移植第一阶段
