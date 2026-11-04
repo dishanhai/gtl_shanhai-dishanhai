@@ -34,6 +34,8 @@
     "GtlCoreGraphPresenceDispatchPolicyMixin",
     "GtlCoreGraphPresenceCandidateCaptureMixin",
     "GtlCoreGraphPresenceExecutionAdapterMixin",
+    "GtlCoreGraphStellarOrderMixin",
+    "TransfiniteStellarOrderMixin",
     "AeUtilsVirtualPatternInputsMixin",
     "PreciseInventoryDisplayQueryMixin",
     "GTLCoreInfinityCellOverflowGuardMixin",

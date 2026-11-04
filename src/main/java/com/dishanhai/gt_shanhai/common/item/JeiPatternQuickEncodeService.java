@@ -44,6 +44,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -112,9 +113,10 @@ public final class JeiPatternQuickEncodeService {
             show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
             return;
         }
-        List<ItemStack> patterns = encodeMultiblockPatterns(multiblock);
+        EncodeFailure failure = new EncodeFailure();
+        List<ItemStack> patterns = encodeMultiblockPatterns(multiblock, failure);
         if (patterns.isEmpty()) {
-            show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+            showEncodeFailed(player, failure);
             return;
         }
         uploadToSelfSynthesis(player, menu, patterns);
@@ -140,16 +142,17 @@ public final class JeiPatternQuickEncodeService {
             return;
         }
 
+        EncodeFailure failure = new EncodeFailure();
         String recipeTypeId;
         List<String> recipeIds = new ArrayList<>();
         List<ItemStack> patterns;
         int recipeCount;
         if (craftingAnchor != null) {
             List<CraftingRecipe> recipes = wholeRecipeType
-                    ? collectVanillaCraftingRecipes(player.level())
+                    ? collectVanillaCraftingRecipes(player.level(), failure)
                     : List.of(craftingAnchor);
             if (recipes.isEmpty()) {
-                show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+                showEncodeFailed(player, failure);
                 return;
             }
             recipeTypeId = PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID;
@@ -157,17 +160,17 @@ public final class JeiPatternQuickEncodeService {
                 if (recipe != null && recipe.getId() != null) recipeIds.add(recipe.getId().toString());
             }
             recipeCount = recipes.size();
-            patterns = encodeCraftingPatterns(player, menu, recipes);
+            patterns = encodeCraftingPatterns(player, menu, recipes, failure);
         } else {
             boolean vanillaSmelting = PatternRecipeTypeHelper.isVanillaSmeltingRecipe(
                     player.level(), anchorRecipeId);
             List<GTRecipe> recipes = wholeRecipeType
                     ? vanillaSmelting
-                            ? collectVanillaSmeltingRecipes(player.level())
-                            : collectRecipes(anchor.recipeType)
+                            ? collectVanillaSmeltingRecipes(player.level(), failure)
+                            : collectRecipes(anchor.recipeType, failure)
                     : List.of(anchor);
             if (recipes.isEmpty()) {
-                show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+                showEncodeFailed(player, failure);
                 return;
             }
             recipeTypeId = anchor.recipeType.registryName.toString();
@@ -175,10 +178,10 @@ public final class JeiPatternQuickEncodeService {
                 if (recipe != null && recipe.id != null) recipeIds.add(recipe.id.toString());
             }
             recipeCount = recipes.size();
-            patterns = encodePatterns(player, menu, recipes);
+            patterns = encodePatterns(player, menu, recipes, failure);
         }
         if (patterns.size() != recipeCount) {
-            show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+            showEncodeFailed(player, failure);
             return;
         }
         if (orderByproducts) {
@@ -306,20 +309,23 @@ public final class JeiPatternQuickEncodeService {
             if (player != null) show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
             return false;
         }
+        EncodeFailure failure = new EncodeFailure();
         ItemStack pattern;
         try {
             Ae2GtmProcessingPattern encoded = ShanhaiPatternEncoder.encode(recipe, player, null, true);
             pattern = encoded == null ? ItemStack.EMPTY : encoded.getPatternItemStack();
-            if (!isExactValidPattern(player, recipe, pattern)) {
-                show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+            if (!isExactValidPattern(player, recipe, pattern, failure)) {
+                showEncodeFailed(player, failure);
                 return false;
             }
             pattern = pattern.copy();
             pattern.setCount(1);
             PatternEncoderMetadata.writeEncoder(pattern, player.getUUID(), player.getGameProfile().getName());
         } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.error("[RecipeEditorEncode] 编码配方失败 recipe={}", recipe.id, exception);
-            show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+            failure.replace("message.gt_shanhai.jei.quick_encode.fail.encode_error",
+                    recipeIdText(recipe), exception.getClass().getSimpleName());
+            GTDishanhaiMod.LOGGER.error("[RecipeEditorEncode] encode failed recipe={}", recipe.id, exception);
+            showEncodeFailed(player, failure);
             return false;
         }
 
@@ -337,7 +343,8 @@ public final class JeiPatternQuickEncodeService {
         try {
             availableTargets = new ArrayList<>(findAutomaticStellarTargets(player, node, pattern));
         } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.error("[RecipeEditorEncode] 星律目标搜索失败 type={}", recipeTypeId, exception);
+            GTDishanhaiMod.LOGGER.error("[RecipeEditorEncode] stellar target search failed type={}",
+                    recipeTypeId, exception);
             availableTargets = new ArrayList<>();
         }
         IActionSource actionSource = IActionSource.ofPlayer(player);
@@ -394,7 +401,8 @@ public final class JeiPatternQuickEncodeService {
 
     private static final int MULTIBLOCK_PATTERN_INPUTS = 81;
 
-    private static List<ItemStack> encodeMultiblockPatterns(MultiblockMachineDefinition multiblock) {
+    private static List<ItemStack> encodeMultiblockPatterns(MultiblockMachineDefinition multiblock,
+            EncodeFailure failure) {
         String[] filters = ConfigHolder.INSTANCE.filterHatch;
         List<GenericStack> inputs = new ArrayList<>();
         for (MaterialEntry entry : DShanhaiMaterialCounter.countMaterials(multiblock)) {
@@ -409,6 +417,7 @@ public final class JeiPatternQuickEncodeService {
             inputs.add(new GenericStack(AEItemKey.of(item), entry.count));
         }
         if (inputs.isEmpty()) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.multiblock_empty");
             return List.of();
         }
         int pages = (inputs.size() + MULTIBLOCK_PATTERN_INPUTS - 1) / MULTIBLOCK_PATTERN_INPUTS;
@@ -437,6 +446,9 @@ public final class JeiPatternQuickEncodeService {
             pattern.getOrCreateTag().putString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE,
                     SelfSynthesisUpload.RECIPE_TYPE_ID);
             patterns.add(pattern.copy());
+        }
+        if (patterns.isEmpty()) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.multiblock_pattern");
         }
         return patterns;
     }
@@ -504,9 +516,10 @@ public final class JeiPatternQuickEncodeService {
                 uploaded.size(), leftover.size());
     }
 
-    private static List<GTRecipe> collectRecipes(GTRecipeType recipeType) {
+    private static List<GTRecipe> collectRecipes(GTRecipeType recipeType, EncodeFailure failure) {
         if (recipeType == null || recipeType.getLookup() == null
                 || recipeType.getLookup().getLookup() == null) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.empty_recipes");
             return List.of();
         }
         Map<ResourceLocation, GTRecipe> unique = new LinkedHashMap<>();
@@ -517,17 +530,25 @@ public final class JeiPatternQuickEncodeService {
                 }
             });
         } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 无法读取配方类型 {} 的完整配方表",
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.recipe_table",
+                    String.valueOf(recipeType.registryName));
+            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] recipe table read failed type={}",
                     recipeType.registryName, exception);
             return List.of();
         }
         List<GTRecipe> recipes = new ArrayList<>(unique.values());
         recipes.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        if (recipes.isEmpty()) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.empty_recipes");
+        }
         return recipes;
     }
 
-    private static List<GTRecipe> collectVanillaSmeltingRecipes(Level level) {
-        if (level == null || level.getRecipeManager() == null) return List.of();
+    private static List<GTRecipe> collectVanillaSmeltingRecipes(Level level, EncodeFailure failure) {
+        if (level == null || level.getRecipeManager() == null) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.smelting_table");
+            return List.of();
+        }
         Map<ResourceLocation, GTRecipe> unique = new LinkedHashMap<>();
         try {
             for (SmeltingRecipe vanilla : level.getRecipeManager()
@@ -538,16 +559,23 @@ public final class JeiPatternQuickEncodeService {
                 }
             }
         } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 无法读取原版熔炉配方表", exception);
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.smelting_table");
+            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] smelting recipe table read failed", exception);
             return List.of();
         }
         List<GTRecipe> recipes = new ArrayList<>(unique.values());
         recipes.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        if (recipes.isEmpty()) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.empty_recipes");
+        }
         return recipes;
     }
 
-    private static List<CraftingRecipe> collectVanillaCraftingRecipes(Level level) {
-        if (level == null || level.getRecipeManager() == null) return List.of();
+    private static List<CraftingRecipe> collectVanillaCraftingRecipes(Level level, EncodeFailure failure) {
+        if (level == null || level.getRecipeManager() == null) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.crafting_table");
+            return List.of();
+        }
         Map<ResourceLocation, CraftingRecipe> unique = new LinkedHashMap<>();
         try {
             for (CraftingRecipe recipe : level.getRecipeManager()
@@ -557,23 +585,28 @@ public final class JeiPatternQuickEncodeService {
                 }
             }
         } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 无法读取原版合成配方表", exception);
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.crafting_table");
+            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] crafting recipe table read failed", exception);
             return List.of();
         }
         List<CraftingRecipe> recipes = new ArrayList<>(unique.values());
         recipes.sort(Comparator.comparing(recipe -> recipe.getId().toString()));
+        if (recipes.isEmpty()) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.empty_recipes");
+        }
         return recipes;
     }
 
     private static List<ItemStack> encodePatterns(ServerPlayer player, PatternEncodingTermMenu menu,
-            List<GTRecipe> recipes) {
+            List<GTRecipe> recipes, EncodeFailure failure) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
         for (GTRecipe recipe : recipes) {
             try {
                 Ae2GtmProcessingPattern encoded = ShanhaiPatternEncoder.encode(recipe, player, menu, true);
                 ItemStack pattern = encoded == null ? ItemStack.EMPTY : encoded.getPatternItemStack();
-                if (!isExactValidPattern(player, recipe, pattern)) {
-                    GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] 拒绝异常样板 recipe={}", recipe.id);
+                if (!isExactValidPattern(player, recipe, pattern, failure)) {
+                    GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] rejected pattern recipe={} reason={}",
+                            recipe.id, failure.key);
                     return List.of();
                 }
                 pattern = pattern.copy();
@@ -581,7 +614,9 @@ public final class JeiPatternQuickEncodeService {
                 PatternEncoderMetadata.writeEncoder(pattern, player.getUUID(), player.getGameProfile().getName());
                 patterns.add(pattern);
             } catch (RuntimeException exception) {
-                GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 编码配方失败 recipe={}", recipe.id, exception);
+                failure.replace("message.gt_shanhai.jei.quick_encode.fail.encode_error",
+                        recipeIdText(recipe), exception.getClass().getSimpleName());
+                GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] encode failed recipe={}", recipe.id, exception);
                 return List.of();
             }
         }
@@ -590,15 +625,16 @@ public final class JeiPatternQuickEncodeService {
 
     private static List<ItemStack> encodeCraftingPatterns(ServerPlayer player,
             PatternEncodingTermMenu menu,
-            List<CraftingRecipe> recipes) {
+            List<CraftingRecipe> recipes, EncodeFailure failure) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
         for (CraftingRecipe recipe : recipes) {
             try {
                 ItemStack pattern = ShanhaiPatternEncoder.encodeCrafting(recipe, player, menu);
-                if (!isExactValidPattern(player, PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID,
-                        pattern)) {
-                    GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] 拒绝异常原版合成样板 recipe={}",
-                            recipe.getId());
+                if (!isExactValidPattern(player,
+                        PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID,
+                        pattern, failure, recipeIdText(recipe))) {
+                    GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] rejected crafting pattern recipe={} reason={}",
+                            recipe.getId(), failure.key);
                     return List.of();
                 }
                 pattern = pattern.copy();
@@ -607,7 +643,9 @@ public final class JeiPatternQuickEncodeService {
                         player.getGameProfile().getName());
                 patterns.add(pattern);
             } catch (RuntimeException exception) {
-                GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 编码原版合成配方失败 recipe={}",
+                failure.replace("message.gt_shanhai.jei.quick_encode.fail.encode_error",
+                        recipeIdText(recipe), exception.getClass().getSimpleName());
+                GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] crafting encode failed recipe={}",
                         recipe.getId(), exception);
                 return List.of();
             }
@@ -615,26 +653,55 @@ public final class JeiPatternQuickEncodeService {
         return patterns;
     }
 
-    private static boolean isExactValidPattern(ServerPlayer player, GTRecipe recipe, ItemStack pattern) {
+    private static boolean isExactValidPattern(ServerPlayer player, GTRecipe recipe, ItemStack pattern,
+            EncodeFailure failure) {
+        String recipeId = recipeIdText(recipe);
         if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.invalid_type", recipeId);
             return false;
         }
-        return isExactValidPattern(player, recipe.recipeType.registryName.toString(), pattern)
-                && PatternDetailsHelper.decodePattern(pattern, player.level()) instanceof AEProcessingPattern;
+        if (!isExactValidPattern(player, recipe.recipeType.registryName.toString(), pattern, failure, recipeId)) {
+            return false;
+        }
+        if (PatternDetailsHelper.decodePattern(pattern, player.level()) instanceof AEProcessingPattern) {
+            return true;
+        }
+        failure.set("message.gt_shanhai.jei.quick_encode.fail.not_processing", recipeId);
+        return false;
     }
 
     private static boolean isExactValidPattern(ServerPlayer player, String recipeTypeId,
-            ItemStack pattern) {
+            ItemStack pattern, EncodeFailure failure, String recipeId) {
         if (pattern == null || pattern.isEmpty() || !PatternDetailsHelper.isEncodedPattern(pattern)) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.not_encoded", recipeId);
             return false;
         }
         IPatternDetails details = PatternDetailsHelper.decodePattern(pattern, player.level());
         if (PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID.equals(recipeTypeId)) {
-            return details instanceof AECraftingPattern;
+            if (details instanceof AECraftingPattern) return true;
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.not_crafting", recipeId);
+            return false;
         }
-        if (!(details instanceof AEProcessingPattern)) return false;
+        if (!(details instanceof AEProcessingPattern)) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.not_processing", recipeId);
+            return false;
+        }
         String encodedTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
-        return PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(encodedTypeId, recipeTypeId);
+        if (PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(encodedTypeId, recipeTypeId)) {
+            return true;
+        }
+        failure.set("message.gt_shanhai.jei.quick_encode.fail.type_mismatch",
+                recipeId, recipeTypeId == null ? "" : recipeTypeId,
+                encodedTypeId == null ? "" : encodedTypeId);
+        return false;
+    }
+
+    private static String recipeIdText(GTRecipe recipe) {
+        return recipe == null || recipe.id == null ? "" : recipe.id.toString();
+    }
+
+    private static String recipeIdText(CraftingRecipe recipe) {
+        return recipe == null || recipe.getId() == null ? "" : recipe.getId().toString();
     }
 
     private static String recipeTypeIdForPattern(ServerPlayer player, ItemStack pattern) {
@@ -898,7 +965,7 @@ public final class JeiPatternQuickEncodeService {
             hostTypes = WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(
                     controllers);
         } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.debug("[JEIQuickEncode] 无法读取星律主机配方类型 pos={}",
+            GTDishanhaiMod.LOGGER.debug("[JEIQuickEncode] host recipe types unreadable pos={}",
                     stellar.getPos(), exception);
             return;
         }
@@ -912,7 +979,8 @@ public final class JeiPatternQuickEncodeService {
         if (stellar.getLevel() == null) return;
         ResourceKey<Level> levelKey = stellar.getLevel().dimension();
         Component targetName = stellar.getTerminalGroup() == null
-                ? Component.literal("星律样板总成") : stellar.getTerminalGroup().name();
+                ? Component.translatable("message.gt_shanhai.jei.quick_encode.stellar_fallback")
+                : stellar.getTerminalGroup().name();
         StellarTargetKey key = new StellarTargetKey(levelKey, stellar.getPos().immutable());
         ResourceLocation representativeTypeId = recipeTypeIds.iterator().next();
         Target target = new Target(levelKey, stellar.getPos().immutable(),
@@ -1368,7 +1436,7 @@ public final class JeiPatternQuickEncodeService {
             if (!removeFromTarget(player, entry.pattern(), entry.target(), entry.slot())) {
                 success = false;
                 GTDishanhaiMod.LOGGER.error(
-                        "[JEIQuickEncode] 回滚失败 target={} pos={} slot={}",
+                        "[JEIQuickEncode] rollback failed target={} pos={} slot={}",
                         entry.target().targetName().getString(), entry.target().bufferPos(), entry.slot());
             }
         }
@@ -1397,11 +1465,41 @@ public final class JeiPatternQuickEncodeService {
         return true;
     }
 
+    private static void showEncodeFailed(ServerPlayer player, EncodeFailure failure) {
+        show(player, "message.gt_shanhai.jei.quick_encode.encode_failed", failure.component());
+    }
+
     private static void show(ServerPlayer player, String translationKey, Object... args) {
         Component message = Component.translatable(translationKey, args);
         player.displayClientMessage(message, true);
-        Component detail = Component.literal("[JEI快速编写] ").append(message);
+        Component detail = Component.translatable(
+                "message.gt_shanhai.jei.quick_encode.chat_prefix", message);
         player.sendSystemMessage(detail);
+    }
+
+    /** 只保留第一条失败原因。参数是配方 ID、类型 ID 或异常类名，句子本身在语言文件。 */
+    private static final class EncodeFailure {
+        private String key;
+        private Object[] args = new Object[0];
+
+        void set(String translationKey, Object... arguments) {
+            if (key != null) return;
+            key = translationKey;
+            args = arguments == null ? new Object[0] : arguments;
+        }
+
+        /** 异常中断时用异常原因覆盖先前的校验记录。 */
+        void replace(String translationKey, Object... arguments) {
+            key = null;
+            set(translationKey, arguments);
+        }
+
+        Component component() {
+            if (key == null) {
+                return Component.translatable("message.gt_shanhai.jei.quick_encode.fail.unknown");
+            }
+            return Component.translatable(key, args);
+        }
     }
 
     private static void showSuccess(ServerPlayer player, boolean wholeRecipeType, int total,
@@ -1435,11 +1533,13 @@ public final class JeiPatternQuickEncodeService {
         Component targetDetails = describeTargets(player, targetPatterns, sdaCount, inventoryCount);
         MutableComponent detail = Component.translatable(
                 "message.gt_shanhai.jei.quick_encode.operation_detail",
-                total, recipeTypeLabel(recipeTypeId), describeRecipeIds(recipeIds),
-                targetDetails, sdaCount, inventoryCount, skippedCount);
+                section('a', total), recipeTypeLabel(recipeTypeId), describeRecipeIds(recipeIds),
+                targetDetails, section('b', sdaCount), section('e', inventoryCount),
+                section(skippedCount > 0 ? 'c' : 'f', skippedCount));
         if (!duplicatePatterns.isEmpty()) {
-            detail.append(Component.literal("; ")).append(Component.translatable(
-                    "message.gt_shanhai.jei.quick_encode.duplicate_detail", duplicatePatterns.size()));
+            detail.append(Component.literal("§7; ")).append(Component.translatable(
+                    "message.gt_shanhai.jei.quick_encode.duplicate_detail",
+                    section('e', duplicatePatterns.size())));
         }
         player.sendSystemMessage(detail);
     }
@@ -1451,8 +1551,13 @@ public final class JeiPatternQuickEncodeService {
         }
         ResourceLocation id = ResourceLocation.tryParse(recipeTypeId);
         String key = id == null ? recipeTypeId : id.toLanguageKey();
-        return Component.translatableWithFallback(key, recipeTypeId)
-                .append(Component.literal("(" + recipeTypeId + ")"));
+        return Component.translatableWithFallback(key, recipeTypeId).withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal("§b(" + recipeTypeId + ")"));
+    }
+
+    /** 翻译参数是独立组件，前面的 § 染不到数值，数值要自己带颜色码。 */
+    private static Component section(char code, int value) {
+        return Component.literal("§" + code + value);
     }
 
     private static Component describeRecipeIds(List<String> recipeIds) {
@@ -1462,19 +1567,19 @@ public final class JeiPatternQuickEncodeService {
                 if (recipeId != null && !recipeId.isBlank()) unique.add(recipeId);
             }
         }
-        if (unique.isEmpty()) return Component.literal("unknown");
-        if (unique.size() == 1) return Component.literal(unique.iterator().next());
+        if (unique.isEmpty()) return Component.literal("§7unknown");
+        if (unique.size() == 1) return Component.literal("§d" + unique.iterator().next());
         StringBuilder shown = new StringBuilder();
         int count = 0;
         for (String recipeId : unique) {
             if (count >= MAX_DETAIL_RECIPE_IDS) break;
-            if (shown.length() > 0) shown.append(", ");
+            if (shown.length() > 0) shown.append("§7, §d");
             shown.append(recipeId);
             count++;
         }
-        if (unique.size() <= MAX_DETAIL_RECIPE_IDS) return Component.literal(shown.toString());
+        if (unique.size() <= MAX_DETAIL_RECIPE_IDS) return Component.literal("§d" + shown);
         return Component.translatable("message.gt_shanhai.jei.quick_encode.recipe_ids_more",
-                shown.toString(), unique.size());
+                Component.literal("§d" + shown), section('d', unique.size()));
     }
 
     private static Component describeTargets(ServerPlayer player, List<UploadedPattern> uploaded,
@@ -1496,14 +1601,22 @@ public final class JeiPatternQuickEncodeService {
         }
         MutableComponent details = Component.empty();
         for (Map.Entry<StellarTargetKey, Target> entry : targets.entrySet()) {
-            if (!details.getSiblings().isEmpty()) details.append(Component.literal("; "));
+            if (!details.getSiblings().isEmpty()) details.append(Component.literal("§7; "));
             Target target = entry.getValue();
-            String targetName = target.targetName() == null
-                    ? "星律样板总成" : target.targetName().getString();
-            details.append(Component.literal(targetName + " @ "));
+            Component rawName = target.targetName();
+            Component shownName;
+            if (rawName == null || rawName.getContents() instanceof TranslatableContents) {
+                shownName = (rawName == null
+                        ? Component.translatable("message.gt_shanhai.jei.quick_encode.stellar_fallback")
+                        : rawName.copy()).withStyle(ChatFormatting.WHITE);
+            } else {
+                shownName = Component.literal(rawName.getString()).withStyle(ChatFormatting.WHITE);
+            }
+            details.append(shownName);
+            details.append(Component.literal("§7 @ "));
             details.append(teleportLink(target));
-            details.append(Component.literal(" x" + counts.get(entry.getKey())));
-            details.append(Component.literal("; "));
+            details.append(Component.literal("§f x" + counts.get(entry.getKey())));
+            details.append(Component.literal("§7; "));
             details.append(describeSlots(player, target));
         }
         return details;
@@ -1541,7 +1654,7 @@ public final class JeiPatternQuickEncodeService {
                         if (!inventory.getStackInSlot(slot).isEmpty()) occupied++;
                     }
                     return Component.translatable("message.gt_shanhai.jei.quick_encode.slots",
-                            occupied, inventory.size() - occupied);
+                            section('6', occupied), section('a', inventory.size() - occupied));
                 }
             }
         } catch (RuntimeException exception) {

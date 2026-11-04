@@ -73,6 +73,16 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ['-Xlint:-processing', '-Xlint:-deprecation', '-Xlint:-removal']
 }
 
+// ForgeGradle 在 afterEvaluate 會連 piston-meta.mojang.com 取 asset index。
+// 連線逾時只印堆疊，建置仍會繼續，但每次白等約半分鐘。
+// 本機 forge_gradle 快取已有這份 1.20.1 version.json，先放到 downloadMCMeta 的輸出路徑即可跳過網路。
+def cachedMcVersionJson = file("${System.properties['user.home']}/.gradle/caches/forge_gradle/minecraft_repo/versions/${minecraft_version}/version.json")
+def mcMetaOut = layout.buildDirectory.file('downloadMCMeta/version.json').get().asFile
+if (cachedMcVersionJson.isFile() && !mcMetaOut.isFile()) {
+    mcMetaOut.parentFile.mkdirs()
+    java.nio.file.Files.copy(cachedMcVersionJson.toPath(), mcMetaOut.toPath())
+}
+
 minecraft {
     mappings channel: mappings_channel, version: "${mappings_version}-${minecraft_version}"
     accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')

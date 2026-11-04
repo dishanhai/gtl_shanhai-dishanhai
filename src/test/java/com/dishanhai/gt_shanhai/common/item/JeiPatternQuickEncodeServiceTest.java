@@ -203,7 +203,7 @@ class JeiPatternQuickEncodeServiceTest {
         String source = Files.readString(SERVICE);
         assertTrue(source.contains("resolveRecipe(player.level(), anchorRecipeId)"),
                 "原版 JEI 配方必须使用服务端 RecipeManager 解析");
-        assertTrue(source.contains("collectVanillaSmeltingRecipes(player.level())"),
+        assertTrue(source.contains("collectVanillaSmeltingRecipes(player.level(), failure)"),
                 "原版熔炉的整类编写必须只收集 minecraft:smelting 配方");
 
         String helper = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
@@ -272,5 +272,41 @@ class JeiPatternQuickEncodeServiceTest {
         assertTrue(source.contains("thenComparing(target -> target.targetMachineId() == null"));
         assertTrue(source.contains("thenComparing(target -> target.levelKey().location().toString())"));
         assertTrue(source.contains("thenComparingLong(target -> target.bufferPos().asLong())"));
+    }
+
+    @Test
+    void encodeFailuresShowATranslatedReason() throws Exception {
+        String source = Files.readString(SERVICE);
+        String zh = Files.readString(Path.of("src", "main", "resources", "assets",
+                "gt_shanhai", "lang", "zh_cn.json"));
+        String en = Files.readString(Path.of("src", "main", "resources", "assets",
+                "gt_shanhai", "lang", "en_us.json"));
+        String[] keys = {
+                "message.gt_shanhai.jei.quick_encode.encode_failed",
+                "message.gt_shanhai.jei.quick_encode.fail.not_encoded",
+                "message.gt_shanhai.jei.quick_encode.fail.not_crafting",
+                "message.gt_shanhai.jei.quick_encode.fail.not_processing",
+                "message.gt_shanhai.jei.quick_encode.fail.type_mismatch",
+                "message.gt_shanhai.jei.quick_encode.fail.encode_error",
+                "message.gt_shanhai.jei.quick_encode.fail.invalid_type",
+                "message.gt_shanhai.jei.quick_encode.fail.recipe_table",
+                "message.gt_shanhai.jei.quick_encode.fail.smelting_table",
+                "message.gt_shanhai.jei.quick_encode.fail.crafting_table",
+                "message.gt_shanhai.jei.quick_encode.fail.empty_recipes",
+                "message.gt_shanhai.jei.quick_encode.fail.multiblock_empty",
+                "message.gt_shanhai.jei.quick_encode.fail.multiblock_pattern",
+                "message.gt_shanhai.jei.quick_encode.fail.unknown",
+                "message.gt_shanhai.jei.quick_encode.chat_prefix",
+                "message.gt_shanhai.jei.quick_encode.stellar_fallback"
+        };
+        for (String key : keys) {
+            assertTrue(source.contains("\"" + key + "\""), key);
+            assertTrue(zh.contains("\"" + key + "\""), key);
+            assertTrue(en.contains("\"" + key + "\""), key);
+        }
+        assertTrue(source.contains("showEncodeFailed(player, failure)"));
+        assertTrue(source.contains("player.displayClientMessage(message, true)"));
+        assertFalse(source.contains("Component.literal(\"[JEI快速编写] \")"));
+        assertFalse(source.contains("Component.literal(\"星律样板总成\")"));
     }
 }

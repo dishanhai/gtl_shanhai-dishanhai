@@ -1720,6 +1720,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (gtShanhai$isRuntimeTrackableSlot(slot) && entry != null) stuckRuntimeReports.put(slot, entry);
     }
 
+    /** 歷史條目被叉掉後，槽位按鈕不能再拿這份快照把同一條報告打開。 */
+    public void gtShanhai$forgetDismissedStuckReport(int slot) {
+        if (gtShanhai$isRuntimeTrackableSlot(slot)) stuckRuntimeReports.remove(slot);
+    }
+
     public ShanhaiTerminalReport gtShanhai$buildStuckReport() {
         gtShanhai$clearResolvedRuntimeWarnings();
         if (getLevel() instanceof ServerLevel level) {
@@ -2710,7 +2715,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         ItemStack circuitStack = getSharedCircuitInventory().getStackInSlot(0);
         int circuit = circuitStack.isEmpty() ? -1 : IntCircuitBehaviour.getCircuitConfiguration(circuitStack);
-        String hostStatus = hostCount == 0 ? "" : clip(StellarPatternStuckWatch.currentHostStatus(this), 180);
+        String hostStatus = hostCount == 0 ? "" : StellarPatternStuckWatch.currentHostStatus(this);
         String hostTypes = hostCount == 0 ? "" : terminalHostRecipeTypes();
         List<BlockPos> proxyPositions = getBoundProxyPositions();
         int proxyCount = proxyPositions == null ? 0 : proxyPositions.size();
@@ -3256,9 +3261,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (slot < maxPatternCount || wildcardPatterns == null) return "";
         int localSlot = slot - maxPatternCount;
         if (localSlot < 0 || localSlot >= wildcardPatterns.size()) return "";
-        StringBuilder text = new StringBuilder("通配展开 ").append(localSlot + 1);
         IPatternDetails pattern = wildcardPatterns.get(localSlot);
-        if (pattern == null || wildcardPreviewByMother == null) return text.toString();
+        if (pattern == null || wildcardPreviewByMother == null) {
+            return StellarPatternWarningText.store(StellarPatternWarningText.line("wildcard_slot", localSlot + 1));
+        }
         StringBuilder mothers = new StringBuilder();
         for (int mother = 0; mother < wildcardPreviewByMother.size(); mother++) {
             List<IPatternDetails> preview = wildcardPreviewByMother.get(mother);
@@ -3266,10 +3272,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             if (mothers.length() > 0) mothers.append(',');
             mothers.append(mother + 1);
         }
-        if (mothers.length() > 0) {
-            text.append(" 母槽 ").append(mothers);
+        if (mothers.length() == 0) {
+            return StellarPatternWarningText.store(StellarPatternWarningText.line("wildcard_slot", localSlot + 1));
         }
-        return text.toString();
+        return StellarPatternWarningText.store(StellarPatternWarningText.line(
+                "wildcard_slot_mother", localSlot + 1, mothers.toString()));
     }
 
     public int gtShanhai$findStuckMotherSlot(int slot) {
