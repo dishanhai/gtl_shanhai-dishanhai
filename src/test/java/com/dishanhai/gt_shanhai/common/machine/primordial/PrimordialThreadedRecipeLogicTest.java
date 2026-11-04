@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.machine.primordial;
 
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
+import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.generator.PrimordialOmegaVoidInductionArmatureLogic;
 import com.dishanhai.gt_shanhai.mixin.PrimordialRecipeThreadStateAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
@@ -71,6 +72,127 @@ class PrimordialThreadedRecipeLogicTest {
         tick(logic, 5);
         assertEquals(List.of("later"), logic.running());
         assertEquals(2, logic.inputTransactions);
+    }
+
+    @Test void pushedMatchStartsOnNextTickEvenAfterAnEmptyLookup() throws Exception {
+        Probe logic = probe();
+        logic.queue("long", 100);
+        tick(logic, 0);
+        tick(logic, 1);
+        logic.queue("pushed", 2);
+        logic.wake();
+        tick(logic, 2);
+        assertEquals(List.of("long", "pushed"), logic.running());
+        assertEquals(2, logic.inputTransactions);
+        assertEquals(Map.of("long", 2), logic.energyTicks);
+        tick(logic, 3);
+        tick(logic, 4);
+        assertEquals(List.of("pushed"), logic.finished);
+        assertEquals(List.of("long"), logic.running());
+    }
+
+    @Test void displaySnapshotIncludesIndependentProgressAndSeparatesEnergyDirections() throws Exception {
+        Probe logic = probe();
+        logic.pending.add(new WirelessGTRecipe(recipe("consumer", 100), BigInteger.TEN));
+        tick(logic, 0);
+        logic.pending.add(new WirelessGTRecipe(recipe("generator", 20), BigInteger.valueOf(-7L)));
+        logic.wake();
+        tick(logic, 1);
+        tick(logic, 2);
+        int transactions = logic.inputTransactions;
+        int lookups = logic.lookups;
+        CompoundTag view = display(logic);
+        assertEquals(2, view.getInt("active"));
+        assertEquals(4L, view.getLong("capacity"));
+        assertEquals(32L, view.getLong("reserved"));
+        assertEquals("10", view.getString("consumption"));
+        assertEquals("7", view.getString("production"));
+        ListTag rows = view.getList("threads", 10);
+        assertEquals(2, rows.size());
+        assertEquals(2, rows.getCompound(0).getInt("progress"));
+        assertEquals(1, rows.getCompound(1).getInt("progress"));
+        assertEquals(100, rows.getCompound(0).getInt("duration"));
+        assertEquals(20, rows.getCompound(1).getInt("duration"));
+        assertEquals("gt_shanhai:consumer", rows.getCompound(0).getString("recipeType"));
+        assertEquals(16L, rows.getCompound(0).getLong("reserved"));
+        assertEquals("10", rows.getCompound(0).getString("consumption"));
+        assertEquals("0", rows.getCompound(0).getString("production"));
+        assertEquals("gt_shanhai:generator", rows.getCompound(1).getString("recipe"));
+        assertEquals("0", rows.getCompound(1).getString("consumption"));
+        assertEquals("7", rows.getCompound(1).getString("production"));
+        assertEquals(19, rows.getCompound(1).getInt("remainingTicks"));
+        assertEquals(transactions, logic.inputTransactions);
+        assertEquals(lookups, logic.lookups, "Jade 讀取不得尋配方或扣料");
+
+        logic.setWorkingEnabled(false);
+        view = display(logic);
+        assertFalse(view.getBoolean("enabled"));
+        assertEquals(2, view.getInt("active"));
+        assertEquals("0", view.getString("consumption"));
+        assertEquals("0", view.getString("production"));
+    }
+
+    @Test void blockedCompletedThreadIsVisibleWithoutReportingEnergyConsumption() throws Exception {
+        Probe logic = probe();
+        logic.pending.add(new WirelessGTRecipe(recipe("blocked", 1), BigInteger.TEN));
+        tick(logic, 0);
+        logic.outputAvailable = false;
+        tick(logic, 1);
+        CompoundTag view = display(logic);
+        assertEquals(1, view.getInt("waiting"));
+        assertEquals("0", view.getString("consumption"));
+        assertEquals("WAITING", view.getList("threads", 10).getCompound(0).getString("status"));
+        assertFalse(view.getList("threads", 10).getCompound(0).getString("reason").isEmpty());
+    }
+
+    private static CompoundTag display(Probe logic) throws Exception {
+        return logic.getRecipeThreadDisplay(0, 8);
+    }
+
+    @Test void displayPagesBoundRowsButStillSumEveryRunningThread() throws Exception {
+        Probe logic = probe();
+        logic.module.configuredThreads = 16;
+        for (int i = 0; i < 12; i++) {
+            logic.pending.add(new WirelessGTRecipe(recipe("task_" + i, 1000), BigInteger.TEN));
+            tick(logic, i);
+        }
+        CompoundTag view = logic.getRecipeThreadDisplay(8, Integer.MAX_VALUE);
+        assertEquals(12, view.getInt("active"));
+        assertEquals("120", view.getString("consumption"));
+        assertEquals(4, view.getList("threads", 10).size());
+        assertEquals(8L, view.getList("threads", 10).getCompound(0).getLong("index"));
+        assertEquals(8, logic.getRecipeThreadDisplay(0, Integer.MAX_VALUE).getList("threads", 10).size());
+    }
+
+    @Test void hugeEnergySnapshotStaysBoundedAndLocaleIndependent() throws Exception {
+        Probe logic = probe();
+        logic.pending.add(new WirelessGTRecipe(recipe("huge", 100), BigInteger.ONE.shiftLeft(10000)));
+        tick(logic, 0);
+        java.util.Locale previous = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.GERMANY);
+            String energy = display(logic).getString("consumption");
+            assertTrue(energy.length() < 24);
+            assertTrue(energy.matches("[0-9]+\\.[0-9]+E[0-9]+"));
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
+    }
+
+    @Test void unavailableMachineReportsAllRetainedThreadsWaitingWithTheSameReason() throws Exception {
+        Probe logic = probe();
+        logic.queue("retained", 100);
+        tick(logic, 0);
+        logic.module.formed = false;
+        tick(logic, 1);
+        CompoundTag view = display(logic);
+        assertEquals(1, view.getInt("waiting"));
+        assertEquals("0", view.getString("consumption"));
+        CompoundTag row = view.getList("threads", 10).getCompound(0);
+        assertEquals("WAITING", row.getString("status"));
+        assertTrue(row.getString("reason").contains("gt_shanhai.primordial.threads.waiting_machine"));
+        assertEquals(1, logic.inputTransactions);
+        assertTrue(logic.energyTicks.isEmpty());
     }
 
     @Test void successfulSingleThreadOneTickRecipesKeepOneBatchPerTickThroughput() throws Exception {
@@ -387,6 +509,7 @@ class PrimordialThreadedRecipeLogicTest {
         logic.outputAvailable = true;
         set(RecipeLogic.class, "machine", logic, module);
         set(RecipeLogic.class, "chanceCaches", logic, new IdentityHashMap<>());
+        set(SelectableRecipeTypeSetRecipeLogic.class, "perTypeLookupCache", logic, new HashMap<>());
         set(PrimordialThreadedRecipeLogic.class, "threads", logic, new PrimordialThreadScheduler<>());
         logic.shanhai$threadStatus(RecipeLogic.Status.IDLE);
         logic.setWorkingEnabled(true);
@@ -487,11 +610,7 @@ class PrimordialThreadedRecipeLogicTest {
         @Override public void shanhai$threadWaitingReason(Component reason) { UNSAFE.putObject(this, REASON, reason); }
 
         void queue(String id, int ticks) throws Exception { pending.add(recipe(id, ticks)); }
-        void wake() throws Exception {
-            Field field = PrimordialThreadedRecipeLogic.class.getDeclaredField("threads");
-            field.setAccessible(true);
-            ((PrimordialThreadScheduler<?>) field.get(this)).requestSearch();
-        }
+        void wake() { onThreadInputsChanged(); }
         List<String> running() { return getRunningThreadRecipes().stream().map(recipe -> recipe.id.getPath()).toList(); }
         BigInteger powerBudget(long fullPower, boolean consumer) {
             return getThreadPowerBudget(BigInteger.valueOf(fullPower), consumer);
@@ -509,6 +628,8 @@ class PrimordialThreadedRecipeLogicTest {
 
     private static GTRecipe recipe(String id, int ticks) throws Exception {
         GTRecipeType type = (GTRecipeType) UNSAFE.allocateInstance(GTRecipeType.class);
+        UNSAFE.putObject(type, UNSAFE.objectFieldOffset(GTRecipeType.class.getField("registryName")),
+                new ResourceLocation("gt_shanhai", id));
         return new TestRecipe(type, id, ticks);
     }
 

@@ -72,17 +72,20 @@ public class PrimordialCoinForgeLogic extends PrimordialModuleRecipeLogic {
                 }
             }
         }
-        String reason = CoinForgeMintGate.restrictionText(forge.getModuleLevel(), required);
-        if (reason.isEmpty()) return "";
+        var reason = CoinForgeMintGate.restrictionComponent(forge.getModuleLevel(), required);
+        if (reason == null) return "";
+        var text = reason.copy();
         var modules = PrimordialCoinForgeModule.registeredModuleIds();
         if (required > 0 && required <= modules.size()) {
             String moduleId = modules.get(required - 1);
             var module = ForgeRegistries.ITEMS.getValue(new ResourceLocation(moduleId));
-            reason += "\n所需模块: " + (module == null || module == net.minecraft.world.item.Items.AIR
-                    ? moduleId : module.getDescription().getString())
-                    + " (" + moduleId + ")";
+            String moduleName = module == null || module == net.minecraft.world.item.Items.AIR
+                    ? moduleId : module.getDescription().getString();
+            text.append("\n").append(
+                    com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningText.line(
+                            "required_module", moduleName, moduleId));
         }
-        return reason;
+        return com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningText.store(text);
     }
 
     private static int requiredOutputModuleLevel(Map<RecipeCapability<?>, List<Content>> contents) {

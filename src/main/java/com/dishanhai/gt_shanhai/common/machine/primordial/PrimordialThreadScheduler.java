@@ -19,6 +19,7 @@ public final class PrimordialThreadScheduler<T> {
     private long lastSearch = Long.MIN_VALUE;
     private boolean lastSearchSucceeded;
     private boolean dirty = true;
+    private boolean pushed;
     private boolean enabled = true;
 
     public static long threadCount(long additional) {
@@ -26,7 +27,10 @@ public final class PrimordialThreadScheduler<T> {
     }
 
     public List<Lane<T>> lanes() { return Collections.unmodifiableList(lanes); }
-    public void requestSearch() { dirty = true; }
+    /** 明確的新訂單／設定變更：下一 tick 接單，不沿用舊輸入的失敗退避。 */
+    public void requestSearch() { dirty = true; pushed = true; }
+    /** 一般倉室數量通知可能每 tick 發生，保留失敗限頻。 */
+    public void requestRetry() { dirty = true; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
@@ -62,7 +66,7 @@ public final class PrimordialThreadScheduler<T> {
         if (count <= 0L || lanes.size() >= count) return;
         if (lastSearch == now) return;
         // 成功工作可以逐 tick 接續（分子組裝原生為 1 tick），只有失敗後才限頻。
-        if (!lastSearchSucceeded && lastSearch != Long.MIN_VALUE
+        if (!pushed && !lastSearchSucceeded && lastSearch != Long.MIN_VALUE
                 && now >= lastSearch && now - lastSearch < 5L) return;
         if (!dirty && now < nextSearch) return;
 
@@ -77,6 +81,7 @@ public final class PrimordialThreadScheduler<T> {
         if (share > capacity - Math.min(capacity, reserved())) return;
 
         dirty = false;
+        pushed = false;
         lastSearch = now;
         nextSearch = now > Long.MAX_VALUE - 20L ? Long.MAX_VALUE : now + 20L;
         T task = runner.start(share);

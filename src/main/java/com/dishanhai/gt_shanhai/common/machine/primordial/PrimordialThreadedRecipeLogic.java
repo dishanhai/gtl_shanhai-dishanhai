@@ -8,6 +8,8 @@ import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
+import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.syncdata.GTRecipePayload;
 import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
 import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
@@ -22,6 +24,7 @@ import org.gtlcore.gtlcore.api.machine.ISuspendableMachine;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 import org.gtlcore.gtlcore.api.recipe.RecipeExtensionCopier;
+import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 
 import java.math.BigInteger;
 import java.util.HashMap;
@@ -83,6 +86,130 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     public final int getActiveRecipeThreadCount() { return activeRecipeThreads; }
     public final long getReservedThreadParallel() { return reservedThreadParallel; }
 
+    /** Jade 唯讀快照：不切換 frame、不查配方、不交易庫存，僅分頁傳送有限的批次。 */
+    public final CompoundTag getRecipeThreadDisplay(int first, int maximum) {
+        CompoundTag data = new CompoundTag();
+        var lanes = threads.lanes();
+        int limit = Math.max(1, Math.min(8, maximum));
+        int offset = Math.max(0, Math.min(first, Math.max(0, lanes.size() - 1)));
+        boolean enabled = threads.isEnabled() && !isSuspend();
+        boolean available = enabled
+                && (!(getMachine() instanceof IMultiController controller) || controller.isFormed())
+                && (!(getMachine() instanceof PrimordialOmegaEngineModuleBase module) || module.canModuleWork());
+        data.putBoolean("enabled", enabled);
+        data.putInt("active", lanes.size());
+        data.putLong("capacity", getRecipeThreadCapacity());
+        data.putLong("reserved", threads.reserved());
+        data.putLong("parallelCapacity", getUnreservedTotalParallelLimit());
+        data.putBoolean("draining", nativeDrainRequested());
+        data.putInt("offset", offset);
+        BigInteger consumption = BigInteger.ZERO, production = BigInteger.ZERO;
+        int waiting = 0;
+        int running = 0;
+        for (var lane : lanes) {
+            Frame frame = lane.task();
+            if (enabled && (!available || frame.status == Status.WAITING || frame.pendingSetup)) waiting++;
+            if (available && frame.status == Status.WORKING && !frame.pendingSetup
+                    && frame.progress < frame.duration && frame.recipe != null) running++;
+            if (!available || frame.status != Status.WORKING || frame.pendingSetup
+                    || frame.progress >= frame.duration || frame.recipe == null) continue;
+            if (frame.recipe instanceof IWirelessGTRecipe wireless) {
+                BigInteger eut = wireless.getWirelessEuTickInputs();
+                if (eut == null) continue;
+                if (eut.signum() > 0) consumption = consumption.add(eut);
+                else production = production.subtract(eut);
+            } else {
+                consumption = consumption.add(BigInteger.valueOf(RecipeHelper.getInputEUt(frame.recipe)).max(BigInteger.ZERO));
+                production = production.add(BigInteger.valueOf(RecipeHelper.getOutputEUt(frame.recipe)).max(BigInteger.ZERO));
+            }
+        }
+        data.putInt("waiting", waiting);
+        data.putInt("running", running);
+        data.putString("consumption", formatThreadEnergy(consumption));
+        data.putString("production", formatThreadEnergy(production));
+        ListTag rows = new ListTag();
+        for (int i = offset; i < lanes.size() && i - offset < limit; i++) {
+            var lane = lanes.get(i);
+            Frame frame = lane.task();
+            CompoundTag row = new CompoundTag();
+            row.putLong("index", lane.index());
+            row.putLong("reserved", lane.reserved());
+            row.putInt("progress", frame.progress);
+            row.putInt("duration", frame.duration);
+            row.putInt("remainingTicks", Math.max(0, frame.duration - frame.progress));
+            row.putString("status", available ? frame.status.name() : enabled ? "WAITING" : "SUSPEND");
+            if (frame.recipe != null) {
+                row.putString("recipe", frame.recipe.id.toString());
+                if (frame.recipe.recipeType.registryName != null) {
+                    row.putString("recipeType", frame.recipe.recipeType.registryName.toString());
+                }
+                BigInteger batchConsumption = BigInteger.ZERO;
+                BigInteger batchProduction = BigInteger.ZERO;
+                if (available && frame.status == Status.WORKING && !frame.pendingSetup
+                        && frame.progress < frame.duration) {
+                    if (frame.recipe instanceof IWirelessGTRecipe wireless) {
+                        BigInteger eut = wireless.getWirelessEuTickInputs();
+                        if (eut != null) {
+                            if (eut.signum() > 0) batchConsumption = eut;
+                            else batchProduction = eut.abs();
+                        }
+                    } else {
+                        batchConsumption = BigInteger.valueOf(RecipeHelper.getInputEUt(frame.recipe))
+                                .max(BigInteger.ZERO);
+                        batchProduction = BigInteger.valueOf(RecipeHelper.getOutputEUt(frame.recipe))
+                                .max(BigInteger.ZERO);
+                    }
+                }
+                row.putString("consumption", formatThreadEnergy(batchConsumption));
+                row.putString("production", formatThreadEnergy(batchProduction));
+            }
+            Component reason = enabled && !available
+                    ? Component.translatable("gt_shanhai.primordial.threads.waiting_machine")
+                    : enabled ? frame.reason : null;
+            if (reason != null) row.putString("reason", Component.Serializer.toJson(reason));
+            appendThreadOutputs(row, frame.recipe);
+            rows.add(row);
+        }
+        data.put("threads", rows);
+        return data;
+    }
+
+    private static String formatThreadEnergy(BigInteger value) {
+        if (value.bitLength() <= 256) return value.toString();
+        int bits = value.bitLength();
+        double log = Math.log10(value.shiftRight(bits - 53).doubleValue()) + (bits - 53) * Math.log10(2);
+        int exponent = (int) Math.floor(log);
+        return String.format(java.util.Locale.ROOT, "%.3fE%d", Math.pow(10, log - exponent), exponent);
+    }
+
+    private static void appendThreadOutputs(CompoundTag row, GTRecipe recipe) {
+        if (recipe == null || recipe.outputs.isEmpty()) return;
+        ListTag outputs = new ListTag();
+        int total = 0;
+        for (var ingredient : RecipeHelper.getOutputContents(recipe, ItemRecipeCapability.CAP)) {
+            var stacks = ingredient.getItems();
+            if (stacks.length == 0 || stacks[0].isEmpty()) continue;
+            total++;
+            if (outputs.size() >= 4) continue;
+            CompoundTag output = new CompoundTag();
+            output.put("item", stacks[0].copyWithCount(1).save(new CompoundTag()));
+            output.putLong("amount", ingredient instanceof LongIngredient large
+                    ? large.getActualAmount() : stacks[0].getCount());
+            outputs.add(output);
+        }
+        for (var fluid : RecipeHelper.getOutputFluids(recipe)) {
+            if (fluid.isEmpty()) continue;
+            total++;
+            if (outputs.size() >= 4) continue;
+            CompoundTag output = new CompoundTag();
+            output.put("fluid", fluid.saveToTag(new CompoundTag()));
+            output.putLong("amount", fluid.getAmount());
+            outputs.add(output);
+        }
+        row.put("outputs", outputs);
+        row.putInt("moreOutputs", total - outputs.size());
+    }
+
     public final long getRecipeThreadCapacity() {
         long configured = getMachine() instanceof PrimordialOmegaEngineModuleBase module
                 ? module.getParallelRecipeThreadCount()
@@ -108,7 +235,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     @Override public void updateTickSubscription() {
         if (tickingThreads) return; // 本 tick 的狀態切換及扣料通知不能自我喚醒。
-        if (threads != null) threads.requestSearch();
+        if (threads != null) threads.requestRetry();
         super.updateTickSubscription();
     }
 
@@ -134,7 +261,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             progress = 0;
             duration = Math.max(1, recipe.duration);
             pendingSetup = true;
-            setWaiting(Component.literal("等待配方启动条件"));
+            setWaiting(Component.translatable("gt_shanhai.primordial.threads.waiting_setup"));
         }
     }
 
@@ -149,7 +276,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     @Override public void interruptRecipe() {
         if (!tickingThreads) { super.interruptRecipe(); return; }
         // 批次輸入已扣除，暫時不可工作時不可清掉該批次。
-        setWaiting(Component.literal("等待机器恢复工作"));
+        setWaiting(Component.translatable("gt_shanhai.primordial.threads.waiting_machine"));
     }
 
     private PrimordialRecipeThreadStateAccessor access() {
@@ -189,7 +316,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                             if (fuelTime > 0) fuelTime--;
                             if (progress >= duration) {
                                 if (!canFinishThreadBatch(lastRecipe)) {
-                                    setWaiting(Component.literal("等待配方输出空间"));
+                                    setWaiting(Component.translatable("gt_shanhai.primordial.threads.waiting_output"));
                                 } else {
                                     // admission=false：native finish 不得自行續批或重複扣料。
                                     // 旗標對外保持可取消，只在 native 完成回呼內暫時屏蔽。

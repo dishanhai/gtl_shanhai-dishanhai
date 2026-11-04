@@ -50,14 +50,14 @@ class PrimordialThreadSchedulerTest {
         assertEquals(before, searches, "額度滿時不可查配方");
     }
 
-    @Test void emptyLanesShareOneLazySearchAndNotificationCannotBypassTheCadence() {
+    @Test void emptyLanesShareOneLazySearchAndNoisyNotificationCannotBypassTheCadence() {
         tick(0, 64, 64);
         for (int t = 1; t < 20; t++) tick(t, 64, 64);
         assertEquals(1, searches);
         tick(20, 64, 64);
         assertEquals(2, searches);
         inputs.add(new Task("push", 40));
-        scheduler.requestSearch();
+        scheduler.requestRetry();
         tick(21, 64, 64);
         assertEquals(2, searches);
         tick(25, 64, 64);
@@ -76,6 +76,25 @@ class PrimordialThreadSchedulerTest {
         assertEquals(2, scheduler.lanes().size());
         assertEquals(2, searches);
         assertTrue(scheduler.lanes().stream().allMatch(lane -> lane.task().remaining < 100));
+    }
+
+    @Test void explicitPushBypassesFailedSearchBackoffWhileExistingBatchKeepsRunning() {
+        inputs.add(new Task("long", 100));
+        tick(0, 64, 4);
+        tick(1, 64, 4); // 無其他配方，進入失敗退避。
+        inputs.add(new Task("pushed", 2));
+        scheduler.requestSearch();
+        tick(2, 64, 4);
+        assertEquals(List.of("long", "pushed"),
+                scheduler.lanes().stream().map(lane -> lane.task().id).toList());
+        assertEquals(98, scheduler.lanes().getFirst().task().remaining);
+        assertEquals(3, searches);
+        scheduler.requestSearch();
+        tick(2, 64, 4);
+        assertEquals(3, searches, "同 tick 最多接單一次");
+        tick(3, 64, 4);
+        tick(4, 64, 4);
+        assertEquals(List.of("pushed"), completed);
     }
 
     @Test void hugeThreadCountsAllocateOnlyRunningLanesAndNeverOverflow() {
