@@ -12,6 +12,11 @@ class RemovedAssemblyMachinesRegistrationTest {
         String machines = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/DShanhaiMachines.java"));
         String blocks = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/block/DShanhaiBlocks.java"));
         String hub = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/misc/SingularityDataHubMachine.java"));
+        String addon = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/GTDishanhaiGTAddon.java"));
+        int blocksInit = addon.indexOf("DShanhaiBlocks.init()");
+        int machinesInit = addon.indexOf("DShanhaiMachines.init()");
+        assertTrue(blocksInit >= 0, "DShanhaiBlocks.init()");
+        assertTrue(machinesInit > blocksInit, "機殼必須在機器註冊之前進入 Registrate");
         for (String name : new String[]{"SPACE_SCALER", "INTEGRATED_ASSEMBLY_MATRIX", "INTEGRATED_ASSEMBLY_FACILITY"}) {
             assertFalse(machines.contains(name), name);
         }

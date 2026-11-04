@@ -9,6 +9,7 @@ import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
 
 import com.dishanhai.gt_shanhai.common.DShanhaiCreativeModeTabs;
+import com.dishanhai.gt_shanhai.common.block.DShanhaiBlocks;
 import com.dishanhai.gt_shanhai.common.fluid.DShanhaiFluids;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiItems;
 import com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines;
@@ -36,6 +37,9 @@ public class GTDishanhaiGTAddon implements IGTAddon {
     public void initializeAddon() {
         DShanhaiCreativeModeTabs.init();
         getRegistrate().creativeModeTab(DShanhaiCreativeModeTabs.TAB_DISHANHAI);
+        // 機殼註冊在 DShanhaiBlocks 靜態欄位。必須在這裡觸發類初始化，
+        // 否則要等到結構預覽才載入，RegisterEvent 已過，條目不會進註冊表。
+        DShanhaiBlocks.init();
         DShanhaiItems.init();
         DShanhaiFluids.init();
 

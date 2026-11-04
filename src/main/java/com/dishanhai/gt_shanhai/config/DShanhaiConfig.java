@@ -169,6 +169,7 @@ public final class DShanhaiConfig {
         /** 样板总成工具箱 — 剪贴板面板最多渲染的样板数 */
         public ForgeConfigSpec.IntValue patternBufferToolkitPreviewLimit;
         /** 山海商店 — 购买总量达到此阈值时打包成超级磁盘阵列（而非塞背包） */
+        public ForgeConfigSpec.BooleanValue shopDisabled;
         public ForgeConfigSpec.LongValue shopSdaPackThreshold;
         /** 山海商店 — 奖励表模式（自选/随机/全部/FTBQ）单次购买最多独立随机抽取的次数 */
         public ForgeConfigSpec.LongValue shopRewardRollCap;
@@ -456,6 +457,10 @@ public final class DShanhaiConfig {
             builder.pop();
 
             builder.push("shop");
+            shopDisabled = builder
+                    .comment("山海商店：全局禁用商店（默认 false）",
+                             "禁用后所有玩家（含 OP）均不能交易；OP 仍可通过 /shanhai shopwizard 重新启用")
+                    .define("disabled", false);
             shopSdaPackThreshold = builder
                     .comment("山海商店：非 AE 模式下，单次购买货物总量 ≥ 此阈值时打包成超级磁盘阵列赠送（而非塞背包）",
                              "默认 1000。设很大则几乎总进背包；设 1 则任何购买都打包成 SDA")

@@ -170,6 +170,7 @@ class GuixuSharedModuleBonusTest {
         Molecular module;
         MolecularLogic() { super(null); }
         @Override public Molecular getMachine() { return module; }
+        @Override protected long getUnreservedTotalParallelLimit() { return Long.MAX_VALUE; }
     }
 
     private static class MarkerContent extends Content {

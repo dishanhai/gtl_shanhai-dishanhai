@@ -1,0 +1,114 @@
+{
+  "data": {
+    "euTier": 11
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzhy",
+      "level": 32,
+      "type": "module_level"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 33554432
+      }
+    ]
+  },
+  "type": "gtceu:matter_module_casting",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 19
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "dishanhai:dimensional_frame"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:worldline_boundless_singularity"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:worldline_imaginary_string"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "dishanhai:genesis_shard"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 256000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_transcend"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 128000,
+          "value": [
+            {
+              "fluid": "dishanhai:causal_essence"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:worldline_genesis_embryo"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:matter_module_casting/matter_module_casting_genesis_embryo",
+      "defaultEnabled": true
+    }
+  ]
+}

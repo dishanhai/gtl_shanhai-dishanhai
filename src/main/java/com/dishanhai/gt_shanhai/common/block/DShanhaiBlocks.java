@@ -51,6 +51,7 @@ public class DShanhaiBlocks {
         .build()
         .register();
 
+    /** 由 {@code GTDishanhaiGTAddon.initializeAddon()} 呼叫，藉此在 RegisterEvent 之前完成上面的靜態註冊。 */
     public static void init() {}
 
     private DShanhaiBlocks() {}
