@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.integration.enhancedcore;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
@@ -12,10 +11,7 @@ import org.junit.jupiter.api.Test;
 class EnhancedCoreCloudApiTest {
 
     private static boolean supports(boolean installed, Predicate<Object> methods) {
-        Class<?> api = assertDoesNotThrow(() -> Class.forName(
-                "com.dishanhai.gt_shanhai.integration.enhancedcore.EnhancedCoreCloudApi"));
-        Method probe = assertDoesNotThrow(() -> api.getMethod("supports", boolean.class, Predicate.class));
-        return (boolean) assertDoesNotThrow(() -> probe.invoke(null, installed, methods));
+        return EnhancedCoreCloudApi.supports(installed, methods::test);
     }
 
     @Test

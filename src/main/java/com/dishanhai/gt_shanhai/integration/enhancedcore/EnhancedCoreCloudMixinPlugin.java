@@ -36,6 +36,10 @@ public final class EnhancedCoreCloudMixinPlugin implements IMixinConfigPlugin {
                             return false;
                         }
                     });
+            if (!cloudAvailable && mods != null && mods.getModFileById(EnhancedCoreCloudCompat.MOD_ID) != null) {
+                org.apache.logging.log4j.LogManager.getLogger("gt_shanhai:enhancedcore")
+                        .warn("Enhancedcore cloud API differs from the supported bridge; cloud compatibility is disabled");
+            }
         }
         return cloudAvailable;
     }

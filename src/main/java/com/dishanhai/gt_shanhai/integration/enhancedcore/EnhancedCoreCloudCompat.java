@@ -1,5 +1,10 @@
 package com.dishanhai.gt_shanhai.integration.enhancedcore;
 
+import appeng.menu.me.items.PatternEncodingTermMenu;
+import java.util.List;
+import java.util.function.BooleanSupplier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 
 import org.objectweb.asm.Type;
@@ -16,8 +21,7 @@ public final class EnhancedCoreCloudCompat {
     }
 
     public static EnhancedCoreCloudUploadBatch.Result tryUpload(
-            net.minecraft.server.level.ServerPlayer player, appeng.menu.me.items.PatternEncodingTermMenu menu,
-            java.util.List<net.minecraft.world.item.ItemStack> patterns, java.util.function.BooleanSupplier consumeBlank) {
+            ServerPlayer player, PatternEncodingTermMenu menu, List<ItemStack> patterns, BooleanSupplier consumeBlank) {
         return isAvailable() ? EnhancedCoreCloudUpload.tryUpload(player, menu, patterns, consumeBlank) : null;
     }
 

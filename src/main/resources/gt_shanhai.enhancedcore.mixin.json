@@ -3,8 +3,28 @@
   "minVersion": "0.8",
   "package": "com.dishanhai.gt_shanhai.mixin",
   "compatibilityLevel": "JAVA_17",
+  "plugin": "com.dishanhai.gt_shanhai.integration.enhancedcore.EnhancedCoreCloudMixinPlugin",
   "mixins": [
     "EnhancedCoreIntegratedFactoryStructureMixin",
-    "EnhancedCoreRetryableVirtualMixin"
+    "EnhancedCoreRetryableVirtualMixin",
+    "EnhancedCoreCloudLibraryTerminalMixin",
+    "EnhancedCoreCloudLibraryInboxMixin",
+    "EnhancedCoreCloudLibraryUploadMixin",
+    "EnhancedCoreCloudLibraryMetadataMixin",
+    "EnhancedCoreCloudLibraryEntryMixin",
+    "EnhancedCoreCloudBufferLibraryMixin",
+    "EnhancedCoreCloudBufferDispatchMixin",
+    "EnhancedCoreCloudLibraryMatchingMixin",
+    "EnhancedCoreCloudProbeVirtualMixin",
+    "EnhancedCoreCloudCpuVirtualMixin",
+    "EnhancedCoreCloudInputsVirtualMixin",
+    "EnhancedCorePrimordialCloudBufferTypesMixin",
+    "EnhancedCorePrimordialCloudScanTypesMixin",
+    "EnhancedCorePrimordialIvBufferTypesMixin",
+    "EnhancedCorePrimordialLookupMixin",
+    "EnhancedCorePrimordialRecipeIoMixin",
+    "EnhancedCorePrimordialParallelMixin",
+    "EnhancedCorePrimordialTickMixin",
+    "EnhancedCorePrimordialScopeMixin"
   ]
 }

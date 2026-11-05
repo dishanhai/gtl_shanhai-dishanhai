@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.*;
 @Pseudo
 @Mixin(targets = "com.gtl.enhancedcore.common.cloud.CloudPatternBufferMachine", remap = false)
 public abstract class EnhancedCorePrimordialCloudBufferTypesMixin {
-    @Redirect(method = {"cloudDispatchCapacity", "claim", "snapshot", "switchMode"}, at = @At(value = "INVOKE", target =
+    @Redirect(method = {"graphOperationsPerPattern", "claim", "snapshot", "switchMode"}, at = @At(value = "INVOKE", target =
             "Lcom/gregtechceu/gtceu/api/machine/MultiblockMachineDefinition;getRecipeTypes()[Lcom/gregtechceu/gtceu/api/recipe/GTRecipeType;"))
     private GTRecipeType[] shanhai$selectedTypes(MultiblockMachineDefinition definition,
             @Local WorkableElectricMultiblockMachine machine) {

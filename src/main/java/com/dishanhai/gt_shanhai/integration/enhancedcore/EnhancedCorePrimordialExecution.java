@@ -29,8 +29,9 @@ public final class EnhancedCorePrimordialExecution {
             if (!(part instanceof CloudPatternBufferMachine buffer)) continue;
             for (IvJob job : IvBuffers.jobs(buffer, machine)) orders.add(new Ref(buffer, job));
         }
-        boolean requested = orders.stream().anyMatch(ref -> ref.job.active() || ref.job.remaining > 0
-                || !ref.job.pending.isEmpty());
+        boolean requested = orders.stream().anyMatch(ref -> ref.job.active() || !ref.job.pending.isEmpty()
+                || !ref.job.halted && ref.job.remaining > 0
+                && logic.isCloudRecipeSelected(ref.job.recipe));
         boolean localEmpty = logic.prepareForCloudExecution(requested);
         if (EnhancedCorePrimordialPolicy.owner(requested, localEmpty ? 0 : 1)
                 != EnhancedCorePrimordialPolicy.Owner.CLOUD) return false;
@@ -59,9 +60,6 @@ public final class EnhancedCorePrimordialExecution {
                     scheduler.lanes().size(), ref.job.nativeCapacity, ref);
         }
         long now = machine.getOffsetTimer();
-        List<GTRecipe> reservedRecipes = new ArrayList<>();
-        for (Ref ref : orders) if (ref.job.active() && !ref.job.halted && ref.job.nativeRecipe != null)
-            reservedRecipes.add(readBatch(ref.job).recipe());
         scheduler.tick(now, logic.getCloudParallelCapacity(), logic.getRecipeThreadCapacity(),
                 new PrimordialThreadScheduler.Runner<>() {
                     @Override public boolean advance(Ref ref) {
@@ -89,8 +87,12 @@ public final class EnhancedCorePrimordialExecution {
                         for (Ref ref : orders) {
                             IvJob job = ref.job;
                             if (job.active() || job.halted || job.cancelled || job.remaining <= 0
-                                    || !job.pending.isEmpty() || !IvBuffers.bind(ref.buffer, machine)) continue;
+                                    || !job.pending.isEmpty() || !logic.isCloudRecipeSelected(job.recipe)
+                                    || !IvBuffers.bind(ref.buffer, machine)) continue;
                             try (var scope = EnhancedCorePrimordialContext.begin(logic, ref.buffer, job, true)) {
+                                List<GTRecipe> reservedRecipes = orders.stream()
+                                        .filter(other -> other.job.active() && !other.job.halted)
+                                        .map(other -> readBatch(other.job).recipe()).toList();
                                 var batch = logic.prepareCloudBatch(Math.min(share, job.remaining), reservedRecipes);
                                 if (batch == null) continue;
                                 long parallel = batch.recipe().data.contains(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY)
@@ -124,13 +126,21 @@ public final class EnhancedCorePrimordialExecution {
         PrimordialThreadedRecipeLogic.CloudBatch display = null;
         int active = 0;
         long reserved = 0;
+        List<PrimordialThreadedRecipeLogic.CloudBatch> displays = new ArrayList<>();
+        List<Long> reservations = new ArrayList<>();
         for (Ref ref : orders) if (ref.job.active()) {
             active++;
             reserved = reserved > Long.MAX_VALUE - ref.job.nativeCapacity
                     ? Long.MAX_VALUE : reserved + ref.job.nativeCapacity;
-            if (display == null && !ref.job.halted) display = readBatch(ref.job);
+            if (!ref.job.halted) {
+                var batch = readBatch(ref.job);
+                displays.add(batch);
+                reservations.add(ref.job.nativeCapacity);
+                if (display == null) display = batch;
+            }
         }
-        logic.projectCloudBatch(display, active, reserved);
+        logic.projectCloudBatch(display, active, reserved, displays, reservations,
+                scheduler.admissionShare(logic.getCloudParallelCapacity(), logic.getRecipeThreadCapacity()) <= 0);
         machine.markDirty();
         return true;
     }

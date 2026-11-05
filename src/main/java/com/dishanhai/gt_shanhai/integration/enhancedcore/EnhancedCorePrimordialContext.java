@@ -8,9 +8,12 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gtl.enhancedcore.common.recipe.iv.*;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
+import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
+import org.gtlcore.gtlcore.api.recipe.RecipeExtensionCopier;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachine;
 
 import java.util.*;
+import java.util.function.UnaryOperator;
 
 /** Server-thread, order-local material view while the original primordial logic runs. */
 public final class EnhancedCorePrimordialContext implements AutoCloseable {
@@ -62,15 +65,44 @@ public final class EnhancedCorePrimordialContext implements AutoCloseable {
     public RecipeResult handle(IO io, Map<RecipeCapability<?>, List<Content>> contents,
                                GTRecipe recipe, boolean simulate) {
         if (contents != recipe.inputs && contents != recipe.outputs) return null;
-        if (io == IO.OUT) return RecipeResult.SUCCESS;
+        if (io == IO.OUT) {
+            if (!simulate) replaceCompletion(job.completion, IvRecipeInputs.outputs(contents));
+            return RecipeResult.SUCCESS;
+        }
         if (!admission) return recipe.inputs.isEmpty() ? RecipeResult.SUCCESS : RecipeResult.fail(null);
         Map<AEKey, Long> payment = IvRecipeInputs.plan(contents, inventory, virtual, 1);
         if (payment == null) return RecipeResult.fail(null);
         if (!simulate) {
+            var rolled = rollConsumedInputs(contents, consumable -> {
+                GTRecipe inputRoll = recipe.copy();
+                RecipeExtensionCopier.copy(recipe, inputRoll);
+                inputRoll.outputs.clear();
+                inputRoll.outputs.putAll(consumable);
+                return IParallelLogic.getRecipeOutputChance(logic.getMachine(), inputRoll).outputs;
+            });
+            payment = IvRecipeInputs.plan(rolled, inventory, Map.of(), 1);
+            if (payment == null) return RecipeResult.fail(null);
             IvRecipeInputs.subtract(inventory, payment);
             committed = true;
         }
         return RecipeResult.SUCCESS;
+    }
+
+    static Map<RecipeCapability<?>, List<Content>> rollConsumedInputs(
+            Map<RecipeCapability<?>, List<Content>> contents,
+            UnaryOperator<Map<RecipeCapability<?>, List<Content>>> nativeRoll) {
+        Map<RecipeCapability<?>, List<Content>> consumable = new LinkedHashMap<>();
+        contents.forEach((capability, values) -> {
+            var positive = values.stream().filter(content -> content.chance > 0).toList();
+            if (!positive.isEmpty()) consumable.put(capability, positive);
+        });
+        return nativeRoll.apply(consumable);
+    }
+
+    static <K> void replaceCompletion(Map<K, Long> completion, Map<K, Long> finalOutputs) {
+        Map<K, Long> validated = new LinkedHashMap<>(finalOutputs);
+        completion.clear();
+        completion.putAll(validated);
     }
 
     public long plannedParallel() { return plannedParallel; }

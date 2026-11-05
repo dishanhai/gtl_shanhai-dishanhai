@@ -53,6 +53,10 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private long completedThreadBatches;
     private RecipeThreadPriority<GTRecipe> priority;
     private boolean priorityInputHandled;
+    private boolean cloudAdmissionBlocked;
+    private List<GTRecipe> cloudReservedRecipes = List.of();
+    private List<PrimordialThreadScheduler.Lane<Frame>> cloudDisplayLanes = List.of();
+    private boolean cloudThreadsFull;
     private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
@@ -99,6 +103,11 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             BigInteger eut = wireless.getWirelessEuTickInputs();
             if (eut != null && (consumer ? eut.signum() < 0 : eut.signum() > 0)) used = used.add(eut.abs());
         }
+        for (GTRecipe recipe : cloudReservedRecipes) {
+            if (!(recipe instanceof IWirelessGTRecipe wireless)) continue;
+            BigInteger eut = wireless.getWirelessEuTickInputs();
+            if (eut != null && (consumer ? eut.signum() < 0 : eut.signum() > 0)) used = used.add(eut.abs());
+        }
         // 按已啟動批次的真實 EU/t 預留功率，避免「無限執行緒」將整數功率除為零。
         return fullPower.subtract(used).max(BigInteger.ZERO);
     }
@@ -109,25 +118,27 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     public final long getReservedThreadParallel() { return reservedThreadParallel; }
 
     public final RecipeThreadSnapshot getRecipeThreadSnapshot() {
+        var lanes = displayLanes();
         boolean enabled = threads.isEnabled() && !isSuspend();
         boolean available = enabled
                 && (!(getMachine() instanceof IMultiController controller) || controller.isFormed());
         int running = 0;
-        for (var lane : threads.lanes()) {
+        for (var lane : lanes) {
             Frame frame = lane.task();
             if (available && frame.status == Status.WORKING && !frame.pendingSetup
                     && frame.progress < frame.duration && frame.recipe != null) running++;
         }
-        return new RecipeThreadSnapshot(getRecipeThreadCapacity(), threads.lanes().size(), running,
-                enabled, nativeDrainRequested(), getUnreservedTotalParallelLimit(), threads.reserved(),
+        return new RecipeThreadSnapshot(getRecipeThreadCapacity(), lanes.size(), running,
+                enabled, nativeDrainRequested(), getUnreservedTotalParallelLimit(), displayReserved(),
                 continuousTicks, completedThreadBatches,
-                threads.admissionShare(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) <= 0L);
+                !cloudDisplayLanes.isEmpty() ? cloudThreadsFull
+                        : threads.admissionShare(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) <= 0L);
     }
 
     /** Jade 唯讀快照：不切換 frame、不查配方、不交易庫存，僅分頁傳送有限的批次。 */
     public final CompoundTag getRecipeThreadDisplay(int first, int maximum) {
         CompoundTag data = new CompoundTag();
-        var lanes = threads.lanes();
+        var lanes = displayLanes();
         int limit = Math.max(0, Math.min(8, maximum));
         int offset = Math.max(0, Math.min(first, Math.max(0, lanes.size() - 1)));
         boolean enabled = threads.isEnabled() && !isSuspend();
@@ -137,7 +148,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         data.putBoolean("enabled", enabled);
         data.putInt("active", lanes.size());
         data.putLong("capacity", getRecipeThreadCapacity());
-        data.putLong("reserved", threads.reserved());
+        data.putLong("reserved", displayReserved());
         data.putLong("parallelCapacity", getUnreservedTotalParallelLimit());
         data.putBoolean("draining", nativeDrainRequested());
         data.putInt("offset", offset);
@@ -256,7 +267,15 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     protected final List<GTRecipe> getRunningThreadRecipes() {
         return threads == null ? List.of()
-                : threads.lanes().stream().map(lane -> lane.task().recipe).toList();
+                : displayLanes().stream().map(lane -> lane.task().recipe).toList();
+    }
+
+    private List<PrimordialThreadScheduler.Lane<Frame>> displayLanes() {
+        return cloudDisplayLanes.isEmpty() ? threads.lanes() : cloudDisplayLanes;
+    }
+
+    private long displayReserved() {
+        return cloudDisplayLanes.isEmpty() ? threads.reserved() : reservedThreadParallel;
     }
 
     public final void onThreadInputsChanged() {
@@ -320,6 +339,129 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     protected void setupThreadRecipe(GTRecipe recipe) { super.setupRecipe(recipe); }
 
+    /** Optional adapters drain paid local lanes before taking exclusive ownership. */
+    public final boolean prepareForCloudExecution(boolean requested) {
+        importLegacyBatch();
+        cloudAdmissionBlocked = requested;
+        if (!requested) cloudDisplayLanes = List.of();
+        return threads.lanes().isEmpty();
+    }
+
+    public final long getCloudParallelCapacity() { return getUnreservedTotalParallelLimit(); }
+    public final boolean isCloudDrainRequested() { return nativeDrainRequested(); }
+    public final boolean isCloudExecutionAvailable() {
+        return threads.isEnabled() && !isSuspend()
+                && (!(getMachine() instanceof IMultiController controller) || controller.isFormed())
+                && (!(getMachine() instanceof PrimordialOmegaEngineModuleBase module) || module.canModuleWork());
+    }
+
+    public final boolean checkCloudCandidate(GTRecipe recipe) {
+        if (!isCloudRecipeSelected(recipe)) return false;
+        if (isLock() && getLockRecipe() != null
+                && (!getLockRecipe().id.equals(recipe.id) || getLockRecipe().recipeType != recipe.recipeType)) return false;
+        return checkRecipe(recipe);
+    }
+
+    public final boolean isCloudRecipeSelected(GTRecipe recipe) {
+        return recipe != null && recipe.recipeType != null && getMachine().isRecipeTypeSelected(recipe.recipeType);
+    }
+
+    /** The snapshot is owned by the cloud order, never inserted into local persisted lanes. */
+    public record CloudBatch(GTRecipe recipe, CompoundTag snapshot, int progress, int duration) {}
+
+    public final CloudBatch prepareCloudBatch(long share, List<GTRecipe> reservedRecipes) {
+        if (!threads.lanes().isEmpty() || share <= 0 || isSuspend() || nativeDrainRequested()) return null;
+        Frame previous = capture();
+        tickingThreads = admission = true;
+        allowance = share;
+        cloudReservedRecipes = reservedRecipes;
+        try {
+            apply(new Frame());
+            findAndHandleRecipe();
+            return lastRecipe == null || duration <= 0 ? null : cloudBatch(capture());
+        } finally {
+            admission = tickingThreads = false;
+            allowance = 0;
+            cloudReservedRecipes = List.of();
+            apply(previous);
+        }
+    }
+
+    public final CloudBatch advanceCloudBatch(CompoundTag snapshot) {
+        return advanceCloudFrame(Frame.load(snapshot));
+    }
+
+    private CloudBatch advanceCloudFrame(Frame frame) {
+        if (!threads.lanes().isEmpty()) throw new IllegalStateException("Cloud execution still has paid local lanes");
+        Frame previous = capture();
+        drainRequested = nativeDrainRequested();
+        tickingThreads = true;
+        try {
+            if (advanceFrame(frame)) return null;
+            return cloudBatch(frame);
+        } finally {
+            tickingThreads = false;
+            apply(previous);
+        }
+    }
+
+    private CloudBatch cloudBatch(Frame frame) {
+        return new CloudBatch(frame.recipe, frame.save(), frame.progress, frame.duration);
+    }
+
+    public static CloudBatch restoreCloudBatch(CompoundTag snapshot) {
+        Frame frame = Frame.load(snapshot);
+        return new CloudBatch(frame.recipe, snapshot, frame.progress, frame.duration);
+    }
+
+    public final void projectCloudBatch(CloudBatch batch, int active, long reserved,
+            List<CloudBatch> batches, List<Long> reservations, boolean full) {
+        Status previousStatus = getStatus();
+        var display = new java.util.ArrayList<PrimordialThreadScheduler.Lane<Frame>>(batches.size());
+        for (int i = 0; i < batches.size(); i++) display.add(new PrimordialThreadScheduler.Lane<>(
+                i, reservations.get(i), Frame.load(batches.get(i).snapshot)));
+        cloudDisplayLanes = List.copyOf(display);
+        cloudThreadsFull = full;
+        if (batch == null) apply(new Frame()); else apply(Frame.load(batch.snapshot));
+        activeRecipeThreads = active;
+        reservedThreadParallel = reserved;
+        totalContinuousRunningTime = continuousTicks;
+        Status aggregate = getStatus();
+        if (nativeDrainRequested() && active == 0) {
+            setNativeDrain(false);
+            threads.setEnabled(false);
+            aggregate = Status.SUSPEND;
+        }
+        access().shanhai$threadStatus(previousStatus);
+        super.setStatus(aggregate);
+    }
+
+    private boolean advanceFrame(Frame frame) {
+        apply(frame);
+        if (pendingSetup) {
+            setupRecipe(lastRecipe);
+            if (pendingSetup) { captureInto(frame); return false; }
+        }
+        int before = progress;
+        if (progress < duration) handleRecipeWorking();
+        if (progress > before) continuousTicks++;
+        if (fuelTime > 0) fuelTime--;
+        if (progress >= duration) {
+            if (!canFinishThreadBatch(lastRecipe)) {
+                setWaiting(Component.translatable("gt_shanhai.primordial.threads.waiting_output"));
+            } else {
+                setNativeDrain(false);
+                try { onRecipeFinish(); }
+                finally { setNativeDrain(drainRequested); }
+                completedThreadBatches++;
+                lastRecipe = null;
+                duration = progress = 0;
+            }
+        }
+        captureInto(frame);
+        return lastRecipe == null;
+    }
+
     @Override public void setStatus(Status status) {
         if (!tickingThreads) { super.setStatus(status); return; }
         access().shanhai$threadStatus(status);
@@ -358,34 +500,10 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             threads.tick(getMachine().getOffsetTimer(), getUnreservedTotalParallelLimit(), getRecipeThreadCapacity(),
                     new PrimordialThreadScheduler.Runner<>() {
                         public boolean advance(Frame frame) {
-                            apply(frame);
-                            if (pendingSetup) {
-                                setupRecipe(lastRecipe);
-                                if (pendingSetup) { captureInto(frame); return false; }
-                            }
-                            int before = progress;
-                            if (progress < duration) handleRecipeWorking();
-                            if (progress > before) continuousTicks++;
-                            if (fuelTime > 0) fuelTime--;
-                            if (progress >= duration) {
-                                if (!canFinishThreadBatch(lastRecipe)) {
-                                    setWaiting(Component.translatable("gt_shanhai.primordial.threads.waiting_output"));
-                                } else {
-                                    // admission=false：native finish 不得自行續批或重複扣料。
-                                    // 旗標對外保持可取消，只在 native 完成回呼內暫時屏蔽。
-                                    setNativeDrain(false);
-                                    try { onRecipeFinish(); }
-                                    finally { setNativeDrain(drainRequested); }
-                                    completedThreadBatches++;
-                                    lastRecipe = null;
-                                    duration = progress = 0;
-                                }
-                            }
-                            captureInto(frame);
-                            return lastRecipe == null;
+                            return advanceFrame(frame);
                         }
                         public Frame start(long share) {
-                            if (drainRequested) return null;
+                            if (drainRequested || cloudAdmissionBlocked) return null;
                             apply(new Frame());
                             allowance = share;
                             admission = true;
@@ -460,7 +578,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     @Override public void inValid() {
         importLegacyBatch();
         Status previous = getStatus();
-        for (var lane : threads.lanes()) { apply(lane.task()); super.inValid(); }
+        for (var lane : displayLanes()) { apply(lane.task()); super.inValid(); }
         project(previous);
     }
 
@@ -561,6 +679,9 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             data.putBoolean("dirty", dirty);
             data.putBoolean("pendingSetup", pendingSetup);
             data.putBoolean("wireless", recipe instanceof IWirelessGTRecipe);
+            if (recipe instanceof IWirelessGTRecipe wireless && wireless.getWirelessEuTickInputs() != null) {
+                data.putString("wirelessEuTick", wireless.getWirelessEuTickInputs().toString());
+            }
             data.putInt("progress", progress); data.putInt("duration", duration);
             data.putInt("fuel", fuel); data.putInt("maxFuel", maxFuel);
             data.putLong("continuous", continuous);
@@ -580,7 +701,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             }
             if (data.getBoolean("wireless") && !(frame.recipe instanceof IWirelessGTRecipe)) {
                 GTRecipe original = frame.recipe;
-                frame.recipe = new WirelessGTRecipe(original, BigInteger.ZERO);
+                frame.recipe = new WirelessGTRecipe(original, data.contains("wirelessEuTick")
+                        ? new BigInteger(data.getString("wirelessEuTick")) : BigInteger.ZERO);
                 RecipeExtensionCopier.copy(original, frame.recipe);
             }
             if (data.contains("origin")) {

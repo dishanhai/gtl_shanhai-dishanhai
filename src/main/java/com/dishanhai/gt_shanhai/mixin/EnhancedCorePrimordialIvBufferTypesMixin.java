@@ -15,6 +15,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Pseudo
 @Mixin(targets = "com.gtl.enhancedcore.common.recipe.iv.IvBuffers", remap = false)
 public abstract class EnhancedCorePrimordialIvBufferTypesMixin {
+    @Inject(method = "targetController", at = @At("HEAD"), cancellable = true)
+    private static void shanhai$processingControllers(Object machine, CallbackInfoReturnable<Boolean> cir) {
+        if (machine instanceof WorkableElectricMultiblockMachine workable
+                && workable.getRecipeLogic() instanceof PrimordialMolecularAssemblerModuleLogic) cir.setReturnValue(false);
+    }
+
     @Inject(method = "genericCloudMixedInputs", at = @At("HEAD"), cancellable = true)
     private static void shanhai$serialInputs(WorkableElectricMultiblockMachine machine,
             CallbackInfoReturnable<Boolean> cir) {

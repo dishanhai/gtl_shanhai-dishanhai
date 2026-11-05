@@ -66,6 +66,12 @@ class EnhancedCoreCloudBytecodeContractTest {
                 }
             }
             assertFalse(targets.isEmpty(), simple + " lacks targets");
+            for (var field : mixin.fields) {
+                if (annotations(field.visibleAnnotations, field.invisibleAnnotations).stream()
+                        .noneMatch(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/Shadow;"))) continue;
+                for (String target : targets) assertTrue(hasField(target, field.name, field.desc),
+                        simple + " missing shadow " + target + "#" + field.name + ":" + field.desc);
+            }
             for (var handler : mixin.methods) {
                 for (var annotation : annotations(handler.visibleAnnotations, handler.invisibleAnnotations)) {
                     if (annotation.values == null) continue;
@@ -97,6 +103,14 @@ class EnhancedCoreCloudBytecodeContractTest {
         if (node.methods.stream().anyMatch(method -> method.name.equals(name)
                 && (desc == null || method.desc.equals(desc)))) return true;
         return node.superName != null && !node.superName.equals("java/lang/Object") && hasMethod(node.superName, selector);
+    }
+
+    private boolean hasField(String owner, String name, String descriptor) throws IOException {
+        ClassNode node = readClass(owner);
+        if (node == null) return false;
+        if (node.fields.stream().anyMatch(field -> field.name.equals(name) && field.desc.equals(descriptor))) return true;
+        return node.superName != null && !node.superName.equals("java/lang/Object")
+                && hasField(node.superName, name, descriptor);
     }
 
     private ClassNode readClass(String owner) throws IOException {

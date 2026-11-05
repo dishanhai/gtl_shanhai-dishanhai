@@ -17,7 +17,15 @@ public final class EnhancedCoreCloudApi {
             new Method(CLOUD + "transfer.CloudTerminalUpload", "processingOriginal",
                     "(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/level/Level;)Z"),
             new Method(CLOUD + "transfer.CloudTerminalUpload", "upload",
-                    "(Lnet/minecraft/server/level/ServerPlayer;Ljava/util/UUID;Lappeng/parts/encoding/PatternEncodingLogic;)V"));
+                    "(Lnet/minecraft/server/level/ServerPlayer;Ljava/util/UUID;Lappeng/parts/encoding/PatternEncodingLogic;)V"),
+            new Method(CLOUD + "CloudPatternBufferMachine", "cloudProbe",
+                    "(Lcom/gtl/enhancedcore/common/cloud/store/CloudPatternStore$Entry;)Lcom/gtl/enhancedcore/common/cloud/CloudPatternMatching$Probe;"),
+            new Method(CLOUD + "CloudCpuRefill", "physicalUnits", "(Lappeng/api/crafting/IPatternDetails;)Ljava/util/Map;"),
+            // 這兩個合成方法也是原初選擇集的注入目標；版本變更不能半套啟用橋接。
+            new Method("com.gtl.enhancedcore.common.recipe.iv.IvBuffers", "lambda$push$21",
+                    "(Lcom/gregtechceu/gtceu/api/recipe/GTRecipe;Lcom/gregtechceu/gtceu/api/machine/multiblock/WorkableElectricMultiblockMachine;)Z"),
+            new Method("com.gtl.enhancedcore.common.recipe.iv.IvBuffers", "lambda$cloudControllers$6",
+                    "(Lcom/gtl/enhancedcore/common/cloud/CloudPatternBufferMachine;Lcom/gregtechceu/gtceu/api/machine/multiblock/WorkableElectricMultiblockMachine;)Z"));
 
     private EnhancedCoreCloudApi() {}
 
