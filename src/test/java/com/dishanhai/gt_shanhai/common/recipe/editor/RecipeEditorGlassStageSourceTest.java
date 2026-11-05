@@ -27,7 +27,7 @@ class RecipeEditorGlassStageSourceTest {
                         panel.indexOf("void syncBlastChrome(")).contains("warmBlurOnce();")),
                 () -> assertFalse(panel.substring(panel.indexOf("public void drawInBackground("),
                         panel.indexOf("private void warmBlurOnce()")).contains("warmBlurOnce();")),
-                // 主请求必须先于子部件登记：ShopGaussBlur.request* 会清掉第二槽位（弹层模糊）
+                // 主请求必须先于子部件登记：GaussBlur.request* 会清掉第二槽位（弹层模糊）
                 () -> assertTrue(panel.indexOf("requestSlideBlur(graphics, now);")
                         < panel.indexOf("super.drawInBackground(graphics, mouseX, mouseY, partialTicks);")),
                 // 只在换页进行中请求；视口取静止的内容栏

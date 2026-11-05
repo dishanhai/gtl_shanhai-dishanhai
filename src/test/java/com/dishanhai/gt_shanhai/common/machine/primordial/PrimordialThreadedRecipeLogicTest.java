@@ -40,6 +40,28 @@ class PrimordialThreadedRecipeLogicTest {
     private static final long ACTIVE = offset(RecipeLogic.class, "isActive");
     private static final long REASON = offset(RecipeLogic.class, "waitingReason");
 
+    @Test void stellarSnapshotObservesAllBatchProgressAndCountsOnlyReleasedBatches() throws Exception {
+        Probe logic = probe();
+        logic.queue("long", 100); tick(logic, 0);
+        logic.queue("short", 2); logic.wake(); tick(logic, 1); tick(logic, 2);
+        var state = logic.getRecipeThreadSnapshot();
+        assertEquals(4, state.capacity()); assertEquals(2, state.active());
+        assertEquals(2, state.running()); assertFalse(state.threadsFull());
+        assertEquals(64, state.parallelCapacity()); assertEquals(32, state.reservedParallel());
+        assertEquals(3, state.successfulTicks()); assertEquals(0, state.completedBatches());
+        int inputs = logic.inputTransactions, lookups = logic.lookups;
+        assertEquals(state, logic.getRecipeThreadSnapshot());
+        assertEquals(inputs, logic.inputTransactions); assertEquals(lookups, logic.lookups);
+        logic.outputAvailable = false; tick(logic, 3);
+        assertEquals(0, logic.getRecipeThreadSnapshot().completedBatches());
+        logic.outputAvailable = true; tick(logic, 4);
+        state = logic.getRecipeThreadSnapshot();
+        assertEquals(1, state.completedBatches()); assertEquals(1, state.active());
+        logic.setWorkingEnabled(false);
+        assertFalse(logic.getRecipeThreadSnapshot().enabled());
+        assertEquals(0, logic.getRecipeThreadSnapshot().running());
+    }
+
     @Test void laterBatchStartsAndFinishesWithoutWaitingForTheFirstBatch() throws Exception {
         Probe logic = probe();
         logic.queue("long", 100);

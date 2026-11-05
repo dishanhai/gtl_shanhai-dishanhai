@@ -8,6 +8,14 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PrimordialThreadSchedulerTest {
+    @Test void readonlyAdmissionShareIncludesDowngradedReservationsAndRoundRemainders() {
+        var scheduler = new PrimordialThreadScheduler<String>();
+        scheduler.restore(0, 25, "a"); scheduler.restore(1, 25, "b"); scheduler.restore(2, 25, "c");
+        assertEquals(0, scheduler.admissionShare(90, 4));
+        assertEquals(25, scheduler.admissionShare(100, 4));
+        assertEquals(3, scheduler.lanes().size()); assertEquals(75, scheduler.reserved());
+    }
+
     private final PrimordialThreadScheduler<Task> scheduler = new PrimordialThreadScheduler<>();
     private final ArrayDeque<Task> inputs = new ArrayDeque<>();
     private final List<String> completed = new ArrayList<>();

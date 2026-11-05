@@ -3,7 +3,13 @@ package com.dishanhai.gt_shanhai.client.gui.generator;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.dishanhai.gt_shanhai.client.gui.glass.*;
+import com.dishanhai.sh_better_ui.client.glass.*;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.ButtonFeedback;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.dishanhai.gt_shanhai.client.gui.scaled.*;
 import com.dishanhai.gt_shanhai.client.gui.shop.*;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
@@ -258,7 +264,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         if (layoutRequested) rebuildLayout();
     }
     @Override protected void renderScaledBackground(GuiGraphics g,int mx,int my,float pt) {
-        long at=now(); ShopGaussBlur.clear(); ShopGaussBlur.clearTopLayer(); tooltip=List.of();
+        long at=now(); GaussBlur.clear(); GaussBlur.clearTopLayer(); tooltip=List.of();
         float open=spring(opening,1,at);
         float previous=scroll.value(); spring(scroll,scrollTarget,at);
         velocity=lastFrame==0 || at<=lastFrame?0:(scroll.value()-previous)*1000f/(at-lastFrame); lastFrame=at;
@@ -369,7 +375,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
             GlassBlur.requestPopup(g,dropdown.hole(),Math.min(1,dropdown.opening.value())); g.pose().popPose();
         }
         g.flush();
-        ShopGaussBlur.deferTopLayer(this,topGraphics -> {
+        GaussBlur.deferTopLayer(this,topGraphics -> {
             if (dropdown!=null) {
                 topGraphics.pose().pushPose();
                 try {
@@ -558,7 +564,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         closed=true; PatternGeneratorScreenOpener.forget(this);
     }
     @Override public void removed() {
-        feedback.cancel(now()); ShopGaussBlur.clear(); ShopGaussBlur.clearTopLayer();
+        feedback.cancel(now()); GaussBlur.clear(); GaussBlur.clearTopLayer();
         if (!suspended) finish(); super.removed();
     }
     /** NBT 與所有 tag 均完整列入提示，不縮短識別內容。 */

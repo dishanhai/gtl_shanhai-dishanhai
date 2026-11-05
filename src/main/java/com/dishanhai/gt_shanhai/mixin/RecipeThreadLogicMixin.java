@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.mixin;
 
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
+import com.dishanhai.gt_shanhai.api.machine.RecipeThreadSnapshot;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadedRecipeLogic;
 import com.dishanhai.gt_shanhai.common.machine.thread.NativeRecipeThreadHost;
 import com.dishanhai.gt_shanhai.common.machine.thread.NativeRecipeThreadRuntime;
@@ -35,6 +36,7 @@ public abstract class RecipeThreadLogicMixin implements NativeRecipeThreadHost, 
     }
     @Override public int getActiveRecipeThreadCount() { return shanhai$recipeThreads().getActiveRecipeThreadCount(); }
     @Override public boolean isRecipeThreadDisplayAvailable() { return shanhai$recipeThreads().isRecipeThreadDisplayAvailable(); }
+    @Override public RecipeThreadSnapshot getRecipeThreadSnapshot() { return shanhai$recipeThreads().getRecipeThreadSnapshot(); }
     @Override public void onThreadInputsChanged() { shanhai$recipeThreads().onThreadInputsChanged(); }
 
     @Inject(method = "serverTick", at = @At("HEAD"), cancellable = true)

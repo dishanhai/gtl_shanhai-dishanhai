@@ -5,6 +5,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** 山海：純決策測試，直接覆蓋等待、停滯、飢餓與數量上限。 */
 class StellarPatternWaitPolicyTest {
+    @Test void unlimitedParallelStillWaitsForAnAggregateBatchBeforeAdmittingLaterSlots() {
+        var policy = new StellarPatternWaitPolicy(); Object batch = new Object();
+        assertTrue(policy.observe(0, 200, Long.MAX_VALUE, 2, 2, true, false, 10, 10L, 1000, batch, true));
+        assertTrue(policy.observe(200, 200, Long.MAX_VALUE, 2, 2, true, false, 210, 210L, 1000, batch, true));
+        assertFalse(policy.observe(201, 200, Long.MAX_VALUE, 2, 2, true, false, 0, 211L, 1000, new Object(), true),
+                "一次聚合批次完成後仍遺漏該槽，不能僅因新批次忙碌就永久延後");
+    }
+
+    @Test void aggregateAdmissionWaitCannotExcuseAnExplicitFailureOrStall() {
+        var policy = new StellarPatternWaitPolicy(); Object batch = new Object();
+        policy.observe(0, 200, Long.MAX_VALUE, 2, 2, true, false, 10, 10L, 1000, batch, true);
+        assertFalse(policy.observe(200, 200, Long.MAX_VALUE, 2, 2, true, false, 10, 10L, 1000, batch, true));
+        assertFalse(new StellarPatternWaitPolicy().observe(0, 200, Long.MAX_VALUE, 2, 2,
+                true, true, 10, 10L, 1000, batch, true));
+    }
+
     @Test void lowParallelKeepsWaitingWhileTheCurrentBatchAdvances() {
         var policy = new StellarPatternWaitPolicy(); Object batch = new Object();
         assertTrue(policy.observe(0, 200, 1, 1, 3, true, false, 0, batch));

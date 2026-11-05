@@ -10,4 +10,6 @@ public interface IRecipeThreadDisplay {
     void onThreadInputsChanged();
     int getActiveRecipeThreadCount();
     boolean isRecipeThreadDisplayAvailable();
+    /** No recipe lookup, frame switching or inventory transaction is allowed in this observation. */
+    default RecipeThreadSnapshot getRecipeThreadSnapshot() { return null; }
 }
