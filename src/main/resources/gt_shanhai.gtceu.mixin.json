@@ -37,7 +37,9 @@
     "RecipeIteratorStripMixin",
     "BranchStripMixin",
     "ArcanicAstrographHubCompressionMixin",
-    "ArcanicAstrographHubSlotMixin",
+    "ShanhaiHubAbilityPredicateMixin",
+    "ShanhaiHubIoPredicateMixin",
+    "ShanhaiHubAdmissionMixin",
     "ProgrammableHatchRecipeTypeSearchMixin",
     "NativeVirtualFindHandleRecipeMixin",
     "NativeVirtualBeforeWorkingBypassMixin",
@@ -48,6 +50,7 @@
     "IntCircuitIngredientAdvancedCircuitMixin"
   ],
   "client": [
+    "ShanhaiLoadingDataPackMixin",
     "GTLCoreMultiblockInfoRegistrationMixin"
   ]
 }

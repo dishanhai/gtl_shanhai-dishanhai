@@ -1,10 +1,10 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingProvider;
-import appeng.api.stacks.KeyCounter;
 import appeng.crafting.execution.CraftingCpuLogic;
 import appeng.crafting.execution.ExecutingCraftingJob;
+import appeng.me.service.CraftingService;
+import appeng.api.networking.energy.IEnergyService;
+import net.minecraft.world.level.Level;
 
 import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternCraftingContext;
 
@@ -15,8 +15,6 @@ import org.spongepowered.asm.mixin.Final;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.gen.Accessor;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(value = CraftingCpuLogic.class, priority = 1500, remap = false)
 public abstract class CraftingCpuLogicStellarContextMixin {
@@ -26,17 +24,16 @@ public abstract class CraftingCpuLogicStellarContextMixin {
     private ExecutingCraftingJob job;
     @Shadow @Final private appeng.me.cluster.implementations.CraftingCPUCluster cluster;
 
-    @Redirect(method = "executeCrafting", at = @At(value = "INVOKE",
-            target = "Lappeng/api/networking/crafting/ICraftingProvider;pushPattern(Lappeng/api/crafting/IPatternDetails;[Lappeng/api/stacks/KeyCounter;)Z"),
-            remap = false)
-    private boolean gtShanhai$pushPatternWithStellarContext(ICraftingProvider provider, IPatternDetails details,
-            KeyCounter[] inputHolder) {
+    // 山海：包住 CPU 本輪上下文，讓 Enhancedcore 仍可攔截 provider.pushPattern。
+    @WrapMethod(method = "executeCrafting", remap = false)
+    private int gtShanhai$pushPatternWithStellarContext(int budget, CraftingService service,
+            IEnergyService energy, Level level, Operation<Integer> original) {
         ExecutingCraftingJobAccessor current = job == null ? null : (ExecutingCraftingJobAccessor) job;
         StellarPatternCraftingContext.pushOrder(current == null ? null : new StellarPatternCraftingContext.Order(
                 current.gtShanhai$getLink(), current.gtShanhai$getFinalOutput(), current::gtShanhai$stellarRemainingAmount,
                 current.gtShanhai$getPlayerId(), cluster.getName() == null ? "AE CPU" : cluster.getName().getString()));
         try {
-            return provider.pushPattern(details, inputHolder);
+            return original.call(budget, service, energy, level);
         } finally {
             StellarPatternCraftingContext.pop();
         }
