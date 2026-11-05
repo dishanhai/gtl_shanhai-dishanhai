@@ -1,5 +1,8 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+import com.dishanhai.sh_better_ui.client.blur.GlassStyle;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -134,7 +137,7 @@ class ShopBatchOperationsSourceTest {
     @Test
     void shopThemeSwitchesBetweenClassicAndGeneratorGlass() throws Exception {
         String screen = source("client/gui/shop/ShopScreen.java");
-        String theme = source("client/gui/shop/ShopTheme.java");
+        String theme = Files.readString(Path.of("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/glass/GlassTheme.java"));
         String settings = source("client/gui/shop/ShopSettingsScreen.java");
         String prefs = source("client/shop/ClientShopUiSettings.java");
         assertTrue(theme.contains("GlassPalette.ACCENT") && theme.contains("GlassPalette.LIT") && theme.contains("GlassBlur.backdrop("),
@@ -159,12 +162,12 @@ class ShopBatchOperationsSourceTest {
     @Test
     void glassButtonsAndRegionsGetTheirOwnDarkerBlur() throws Exception {
         String screen = source("client/gui/shop/ShopScreen.java");
-        String theme = source("client/gui/shop/ShopTheme.java");
-        String style = source("client/gui/shop/ShopGlassStyle.java");
-        String blur = source("client/gui/shop/ShopGaussBlur.java");
-        assertTrue(style.contains("CONTROL = new ShopGlassStyle(") && style.contains("REGION = new ShopGlassStyle("),
+        String theme = Files.readString(Path.of("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/glass/GlassTheme.java"));
+        String style = Files.readString(Path.of("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GlassStyle.java"));
+        String blur = Files.readString(Path.of("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GaussBlur.java"));
+        assertTrue(style.contains("CONTROL = new GlassStyle(") && style.contains("REGION = new GlassStyle("),
                 "按钮与区域应各有一套压暗去色的玻璃样式");
-        assertTrue(theme.contains("ShopGlassStyle.CONTROL") && theme.contains("ShopGlassStyle.REGION"),
+        assertTrue(theme.contains("GlassStyle.CONTROL") && theme.contains("GlassStyle.REGION"),
                 "主题应提供按钮/区域的毛玻璃入口");
         assertTrue(screen.contains("theme.controlBackdrop(g, x, y, w, h);")
                         && screen.contains("theme.controlBackdrop(g, xs[idx], y, ws[idx], h);"),

@@ -1,8 +1,13 @@
 package com.dishanhai.gt_shanhai.client.gui.terminal;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.*;
+import com.dishanhai.sh_better_ui.client.glass.*;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.dishanhai.gt_shanhai.client.gui.scaled.*;
-import com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur;
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
 import com.dishanhai.gt_shanhai.client.ShanhaiStructureHighlightClient;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopUiSounds;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
@@ -327,7 +332,7 @@ public final class TerminalReportScreen extends ScaledScreen {
 
     // ---------- 繪製 ----------
     @Override protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
-        long at = now(); ShopGaussBlur.clear(); ShopGaussBlur.clearTopLayer();
+        long at = now(); GaussBlur.clear(); GaussBlur.clearTopLayer();
         pumpLayout(LOAD_BUDGET_NS);
         float open = spring(opening, 1, at);
         spring(scroll, scrollTarget, at);
@@ -616,6 +621,6 @@ public final class TerminalReportScreen extends ScaledScreen {
     }
     @Override public boolean isPauseScreen() { return false; }
     @Override public void removed() {
-        ui.feedback.cancel(now()); ShopGaussBlur.clear(); ShopGaussBlur.clearTopLayer(); super.removed();
+        ui.feedback.cancel(now()); GaussBlur.clear(); GaussBlur.clearTopLayer(); super.removed();
     }
 }

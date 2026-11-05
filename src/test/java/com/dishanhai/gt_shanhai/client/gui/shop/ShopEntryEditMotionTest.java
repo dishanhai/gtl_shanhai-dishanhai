@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopEntryEditLayout.Row;
 
 import org.junit.jupiter.api.Test;

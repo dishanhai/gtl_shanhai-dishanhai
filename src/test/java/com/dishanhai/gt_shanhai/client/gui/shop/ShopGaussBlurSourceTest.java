@@ -1,5 +1,8 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+import com.dishanhai.sh_better_ui.client.blur.GlassStyle;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -18,29 +21,29 @@ class ShopGaussBlurSourceTest {
     @Test
     void postChainStaysOneChainAndCoversShopMotion() throws Exception {
         String shop = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopScreen.java");
-        String blur = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGaussBlur.java");
+        String blur = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GaussBlur.java");
         String clientInit = read("src/main/java/com/dishanhai/gt_shanhai/client/ClientInit.java");
-        String fsh = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.fsh");
-        String program = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.json");
-        String post = read("src/main/resources/assets/gt_shanhai/shaders/post/shop_gauss_blur.json");
+        String fsh = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.fsh");
+        String program = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.json");
+        String post = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/post/shop_gauss_blur.json");
 
         assertAll(
                 () -> assertTrue(Files.exists(Path.of(
-                        "src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.vsh"))),
-                () -> assertTrue(shop.contains("ShopGaussBlur.request")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.requestExtra")),
+                        "../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.vsh"))),
+                () -> assertTrue(shop.contains("GaussBlur.request")),
+                () -> assertTrue(shop.contains("GaussBlur.requestExtra")),
                 () -> assertTrue(shop.contains("openBlurredOverlay")),
                 () -> assertTrue(shop.contains("requestContentGauss")),
                 () -> assertTrue(shop.contains("requestPanelGauss")),
                 () -> assertTrue(shop.contains("openSmoothTextOverlay")),
                 () -> assertTrue(shop.contains("requestGroupSwitchGauss")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.requestSmooth")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.requestSmoothCells")),
+                () -> assertTrue(shop.contains("GaussBlur.requestSmooth")),
+                () -> assertTrue(shop.contains("GaussBlur.requestSmoothCells")),
                 () -> assertTrue(shop.contains("openSmoothTextOverlay(g, cartMotion.value()")),
                 () -> assertTrue(shop.contains("hole[0], hole[1], hole[2], hole[3], true")),
                 () -> assertTrue(shop.contains("CLICK_WAVE_TO_PX")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.requestWave")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.setWaveOrigin")),
+                () -> assertTrue(shop.contains("GaussBlur.requestWave")),
+                () -> assertTrue(shop.contains("GaussBlur.setWaveOrigin")),
                 () -> assertTrue(shop.contains("requestClickWave")),
                 () -> assertTrue(shop.contains("renderClickWaveRing")),
                 () -> assertTrue(shop.contains("drawRingArc")),
@@ -72,20 +75,22 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(program.contains("\"WaveRefract\"")),
                 () -> assertTrue(program.contains("\"WaveGlow\"")),
                 () -> assertFalse(shop.contains("new RenderTarget")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.clear()")),
+                () -> assertTrue(shop.contains("GaussBlur.clear()")),
                 () -> assertTrue(shop.contains("toFramebufferX")),
                 () -> assertFalse(shop.contains("left + 6, top + 6, left + panelWidth - 6")),
                 () -> assertTrue(blur.contains("new PostChain(")),
                 () -> assertTrue(blur.contains("f_110009_")),
                 () -> assertTrue(blur.contains("ScreenEvent.Render.Post")),
-                () -> assertTrue(clientInit.contains("ShopGaussBlur::onScreenRenderPost")),
+                () -> assertFalse(clientInit.contains("GaussBlur::onScreenRenderPost")),
+                () -> assertTrue(read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/UiClient.java")
+                        .contains("GaussBlur.onScreenRenderPost(event)")),
                 () -> assertTrue(fsh.contains("uniform vec4 Rect")),
                 () -> assertTrue(fsh.contains("uniform vec4 Hole")),
                 () -> assertTrue(fsh.contains("uniform float Progress")),
                 () -> assertTrue(program.contains("\"Rect\"")),
                 () -> assertTrue(program.contains("\"Hole\"")),
                 () -> assertTrue(post.contains("minecraft:main")),
-                () -> assertTrue(post.contains("gt_shanhai:shop_gauss_blur")),
+                () -> assertTrue(post.contains("sh_better_ui:shop_gauss_blur")),
                 () -> assertTrue(post.contains("\"BlurDir\", \"values\": [1.0, 0.0]")),
                 () -> assertTrue(post.contains("\"BlurDir\", \"values\": [0.0, 1.0]"))
         );
@@ -94,9 +99,9 @@ class ShopGaussBlurSourceTest {
     @Test
     void liquidGlassLayerIsWiredEndToEnd() throws Exception {
         String shop = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopScreen.java");
-        String blur = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGaussBlur.java");
-        String fsh = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.fsh");
-        String program = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.json");
+        String blur = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GaussBlur.java");
+        String fsh = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.fsh");
+        String program = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.json");
 
         assertAll(
                 // shader 与 program json 必须成对声明，缺任一个 Java 侧的空检查都会判定不可用
@@ -119,18 +124,18 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(blur.indexOf("RenderSystem.enableScissor(") < blur.indexOf("post.process(partialTick)")),
                 () -> assertTrue(blur.indexOf("post.process(partialTick)") < blur.indexOf("RenderSystem.disableScissor()")),
                 // 点击波不加玻璃层；各调用点用对应的预设
-                () -> assertTrue(blur.contains("ShopGlassStyle.NONE, partialTick")),
-                () -> assertTrue(shop.contains("ShopGlassStyle.FLIGHT")),
-                () -> assertTrue(shop.contains("ShopGlassStyle.SWAP")),
-                () -> assertTrue(shop.contains("ShopGlassStyle.LOADING")),
-                () -> assertTrue(shop.contains("ShopGlassStyle.OVERLAY"))
+                () -> assertTrue(blur.contains("GlassStyle.NONE, partialTick")),
+                () -> assertTrue(shop.contains("GlassStyle.FLIGHT")),
+                () -> assertTrue(shop.contains("GlassStyle.SWAP")),
+                () -> assertTrue(shop.contains("GlassStyle.LOADING")),
+                () -> assertTrue(shop.contains("GlassStyle.OVERLAY"))
         );
     }
 
     @Test
     void topLayerIsDrawnAfterTheBlurInsteadOfBeingBlurred() throws Exception {
         String shop = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopScreen.java");
-        String blur = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGaussBlur.java");
+        String blur = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GaussBlur.java");
         String renderTooltips = shop.substring(shop.indexOf("protected void renderTooltips("));
         renderTooltips = renderTooltips.substring(0, renderTooltips.indexOf("private void drawTopLayer("));
         String post = blur.substring(blur.indexOf("public static void onScreenRenderPost("));
@@ -140,7 +145,7 @@ class ShopGaussBlurSourceTest {
         String renderTooltipsFinal = renderTooltips;
         assertAll(
                 // 后处理读的是整张主画面：tooltip 必须登记到 Post 里、模糊之后再画，Screen.render 里不能直接画
-                () -> assertTrue(renderTooltipsFinal.contains("ShopGaussBlur.deferTopLayer(this")),
+                () -> assertTrue(renderTooltipsFinal.contains("GaussBlur.deferTopLayer(this")),
                 () -> assertFalse(renderTooltipsFinal.contains("renderComponentTooltip")),
                 () -> assertTrue(shop.contains("private void drawTooltipLayer(")),
                 // 先跑模糊，再画上层；上层在 finally 里，模糊失败也不丢 tooltip
@@ -148,7 +153,7 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(postFinal.indexOf("runBlurPasses(event)") < postFinal.indexOf("runTopLayer(event")),
                 () -> assertTrue(postFinal.contains("finally")),
                 () -> assertTrue(blur.contains("public static void clearTopLayer()")),
-                () -> assertTrue(shop.contains("ShopGaussBlur.clearTopLayer()")),
+                () -> assertTrue(shop.contains("GaussBlur.clearTopLayer()")),
                 // 横幅/撤销按钮/拖拽图标走同一条上层，且要高于前景图层的 Z
                 () -> assertTrue(shop.contains("private void drawScaledTopLayer(")),
                 () -> assertTrue(shop.contains("TOP_LAYER_Z = 600.0f")),
@@ -159,16 +164,16 @@ class ShopGaussBlurSourceTest {
                 // 弹入期间挖洞和面板同一条缩放曲线
                 () -> assertTrue(shop.contains("popHoleRect(")),
                 () -> assertTrue(shop.contains("GuiMotion.panelScale(")),
-                () -> assertTrue(read("src/main/java/com/dishanhai/gt_shanhai/client/gui/scaled/GuiRenderUtil.java")
+                () -> assertTrue(read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/gui/scaled/GuiRenderUtil.java")
                         .contains("scaleAt(g, cx, cy, popScale(t));"))
         );
     }
 
     @Test
     void motionAxisIsWiredEndToEnd() throws Exception {
-        String blur = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGaussBlur.java");
-        String fsh = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.fsh");
-        String program = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.json");
+        String blur = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GaussBlur.java");
+        String fsh = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.fsh");
+        String program = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.json");
 
         assertAll(
                 // shader 与 program json 必须成对声明，缺任一个 Java 侧的空检查都会判定不可用
@@ -186,8 +191,8 @@ class ShopGaussBlurSourceTest {
                 // 点击波 / 第二矩形固定 (1,1)；主请求带自己的方向轴；"NONE, partialTick" 相邻关系保持
                 () -> assertTrue(blur.contains("NO_WAVE, axisX, axisY, glass, partialTick")),
                 () -> assertTrue(blur.contains("NO_WAVE, 1f, 1f, glass2, partialTick")),
-                () -> assertTrue(blur.contains("wave, 1f, 1f, ShopGlassStyle.NONE, partialTick")),
-                () -> assertTrue(blur.contains("ShopGlassStyle.NONE, partialTick")),
+                () -> assertTrue(blur.contains("wave, 1f, 1f, GlassStyle.NONE, partialTick")),
+                () -> assertTrue(blur.contains("GlassStyle.NONE, partialTick")),
                 // MotionAxis 缺失要走既有的降级路径，不能悄悄当成已就绪
                 () -> assertTrue(blur.contains("|| motionAxisUniform == null")),
                 // 三条取样分支都读 axisRadius，换页的方向模糊才不会退化成各向同性

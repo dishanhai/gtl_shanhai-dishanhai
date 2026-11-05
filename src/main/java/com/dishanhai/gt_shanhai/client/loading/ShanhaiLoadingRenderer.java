@@ -1,9 +1,9 @@
 package com.dishanhai.gt_shanhai.client.loading;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
-import com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassBlur;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopTheme;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -167,10 +167,10 @@ public final class ShanhaiLoadingRenderer {
     }
 
     static void warmGlass(boolean startup) {
-        if (ShopGaussBlur.isReady()) return;
+        if (GaussBlur.isReady()) return;
         if (startup ? startupBlurAttempted : worldBlurAttempted) return;
         if (startup) startupBlurAttempted = true; else worldBlurAttempted = true;
-        ShopGaussBlur.warmUp();
+        GaussBlur.warmUp();
     }
 
     private static void drawText(GuiGraphics graphics, List<TextRun> text, ShanhaiLoadingFont atlas, float opacity) {

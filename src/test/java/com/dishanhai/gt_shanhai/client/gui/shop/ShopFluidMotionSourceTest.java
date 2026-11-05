@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -22,7 +24,7 @@ class ShopFluidMotionSourceTest {
         String exchange = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ExchangeScreen.java"));
         String util = Files.readString(Path.of(
-                "src/main/java/com/dishanhai/gt_shanhai/client/gui/scaled/GuiRenderUtil.java"));
+                "../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/gui/scaled/GuiRenderUtil.java"));
 
         assertAll(
                 () -> assertFalse(shop.contains("cardSwitchAtMs")),
@@ -35,9 +37,9 @@ class ShopFluidMotionSourceTest {
                 () -> assertTrue(exchange.contains("openMotion")),
                 () -> assertFalse(shop.contains("dampingFraction")),
                 () -> assertFalse(shop.contains("new RenderTarget")),
-                () -> assertTrue(shop.contains("ShopGaussBlur")),
+                () -> assertTrue(shop.contains("GaussBlur")),
                 () -> assertTrue(currency.contains("GuiRenderUtil.scaleAt(")),
-                // 商品卡片 → 详情面板：一条几何通道 + 源卡磨砂/残影；右侧面板的高斯后处理走 ShopGaussBlur
+                // 商品卡片 → 详情面板：一条几何通道 + 源卡磨砂/残影；右侧面板的高斯后处理走 GaussBlur
                 () -> assertTrue(shop.contains("beginCardFlight")),
                 () -> assertTrue(shop.contains("renderCardFlight")),
                 () -> assertTrue(shop.contains("GuiRenderUtil.FluidSpring")),

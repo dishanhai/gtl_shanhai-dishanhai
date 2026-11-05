@@ -1,8 +1,8 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture
 import com.lowdragmc.lowdraglib.gui.widget.Widget
 import com.mojang.blaze3d.systems.RenderSystem

@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect
+import com.dishanhai.sh_better_ui.client.glass.GuiRect
 
 data class PickerGeometry(
     val sidebar: GuiRect,

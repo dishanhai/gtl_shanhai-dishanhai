@@ -1,8 +1,8 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopEntryEditLayout.Row;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopEntryEditLayout.Tab;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;

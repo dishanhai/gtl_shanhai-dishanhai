@@ -1,10 +1,10 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.scaled.ButtonFeedback;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
-import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
+import com.dishanhai.sh_better_ui.client.gui.scaled.ButtonFeedback;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 
 import com.mojang.blaze3d.platform.InputConstants;
@@ -150,7 +150,7 @@ final class ShopDialogUi {
         dragging = false;
     }
 
-    void holdRepeat(com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve curve, ButtonFeedback.RepeatAction action) {
+    void holdRepeat(com.dishanhai.sh_better_ui.client.gui.scaled.RepeatCurve curve, ButtonFeedback.RepeatAction action) {
         feedback.holdRepeat(curve, action, System.currentTimeMillis());
     }
 

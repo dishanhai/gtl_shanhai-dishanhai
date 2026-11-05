@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 
 /** 山海提示動效：高度改變時保持彈簧速度，退場從當前透明度接續。 */
 final class ShopNoticeMotion {

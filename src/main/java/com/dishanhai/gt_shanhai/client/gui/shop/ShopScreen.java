@@ -1,14 +1,17 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.scaled.ButtonFeedback;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+import com.dishanhai.sh_better_ui.client.blur.GlassStyle;
+
+import com.dishanhai.sh_better_ui.client.gui.scaled.ButtonFeedback;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.RepeatCurve;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
-import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
+import com.dishanhai.sh_better_ui.client.glass.GlassBlur;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
@@ -251,7 +254,7 @@ public class ShopScreen extends ScaledScreen {
     /** 占位文字只横移这一段，格子和物品槽不动。 */
     private static final float LOAD_CELL_SLIDE_PX = 6f;
     private static final long LOAD_BLUR_PERIOD_MS = 900L;
-    private static final int LOAD_BLUR_CAP = ShopGaussBlur.MAX_CELL_RECTS;
+    private static final int LOAD_BLUR_CAP = GaussBlur.MAX_CELL_RECTS;
     private final Map<Long, Long> loadingCellAtMs = new HashMap<>();
     private final ArrayList<Long> frameLoadKeys = new ArrayList<>();
     private final int[] loadBlurVirtual = new int[LOAD_BLUR_CAP * 4];
@@ -442,7 +445,7 @@ public class ShopScreen extends ScaledScreen {
         if (cardFlightActive && entry != cardFlightEntry) {
             cardFlightActive = false;
             cardFlightEntry = null;
-            ShopGaussBlur.clear();
+            GaussBlur.clear();
         }
         pendingRestoreStableId = null;
         long newKey = entry == null ? -1L : entryKey;
@@ -462,7 +465,7 @@ public class ShopScreen extends ScaledScreen {
         detailScrollMax = 0;
         cardFlightActive = false;
         cardFlightEntry = null;
-        ShopGaussBlur.clear();
+        GaussBlur.clear();
     }
 
     /**
@@ -1437,7 +1440,7 @@ public class ShopScreen extends ScaledScreen {
         // 在弹窗里按 Enter 确认后回到这里时键还按着：松开前的系统重复不能再下一单
         enterHeld = ShopDialogUi.enterDown();
         // 预编译后处理链，避免第一次点商品时才加载 shader 造成卡顿；失败会自动回退局部磨砂。
-        ShopGaussBlur.warmUp();
+        GaussBlur.warmUp();
         boolean fresh = searchBox == null;
         String restoreStableId = null;
         if (observedCatalogRevision != ClientShopCatalog.revision()) {
@@ -1766,9 +1769,9 @@ public class ShopScreen extends ScaledScreen {
             theme.rootShadow(g, left, top, panelWidth, panelHeight);
             theme.backdrop(g, left, top, panelWidth, panelHeight);
             theme.box(g, left, top, panelWidth, panelHeight,
-                    com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette.ROOT_EDGE, PANEL_BG);
+                    com.dishanhai.sh_better_ui.client.glass.GlassPalette.ROOT_EDGE, PANEL_BG);
             theme.box(g, left + 6, top + TOP_BAR_H + 6, panelWidth - 12, panelHeight - TOP_BAR_H - 12,
-                    com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette.DISPLAY_EDGE, PANEL_INNER);
+                    com.dishanhai.sh_better_ui.client.glass.GlassPalette.DISPLAY_EDGE, PANEL_INNER);
         } else {
             // 整体面板（KE 风格 4 层嵌套：金边→金→暗背景→内层）
             g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
@@ -1826,7 +1829,7 @@ public class ShopScreen extends ScaledScreen {
         int titleHalf = this.font.width(titleText) / 2 + 6;
         if (topStripOriginX() + topStripContentW() <= titleX() - titleHalf && titleX() + titleHalf <= favBtnX()) {
             g.drawCenteredString(this.font, titleText, titleX(), top + 9,
-                    theme.glass ? com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette.TEXT_HEAD : GOLD);
+                    theme.glass ? com.dishanhai.sh_better_ui.client.glass.GlassPalette.TEXT_HEAD : GOLD);
         }
 
         // 余额行（KE 货币栏：图标 + 紧凑数字 横排）
@@ -2082,7 +2085,7 @@ public class ShopScreen extends ScaledScreen {
                 noticePose(g, row);
                 if (!ClientShopUiSettings.reduceMotion()) {
                     GlassBlur.backdrop(g, new GuiRect(0, 0, row.width(), row.height()),
-                            row.alpha() * 0.65f, ShopGlassStyle.NONE, 5f);
+                            row.alpha() * 0.65f, GlassStyle.NONE, 5f);
                 }
                 // 山海：方框磨砂材質，單像素灰邊與窄色標，避免多層圓角形成厚重外圈。
                 g.fill(1, 2, row.width() + 1, row.height() + 2, noticeColor(0x30000000, row.alpha()));
@@ -2135,14 +2138,14 @@ public class ShopScreen extends ScaledScreen {
     /**
      * 帧末模糊后处理读的是整张主画面，画在模糊矩形上的东西会一起被糊（加载格、切页、飞行、大图层都会）。
      * 所以要压在模糊之上的内容——提示横幅、撤销按钮、拖拽中的卡片图标、tooltip——不在 Screen.render 里画，
-     * 只在这里登记，由 {@link ShopGaussBlur#onScreenRenderPost} 在模糊跑完后调 {@link #drawTopLayer}。
+     * 只在这里登记，由 {@link GaussBlur#onScreenRenderPost} 在模糊跑完后调 {@link #drawTopLayer}。
      */
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
         if (ClientShopAvailability.isDisabled()) return;
         // 先落盘：后处理读主画面，前面所有 GUI 批次必须已经画进去。
         g.flush();
-        ShopGaussBlur.deferTopLayer(this, topG -> drawTopLayer(topG, smx, smy, mx, my));
+        GaussBlur.deferTopLayer(this, topG -> drawTopLayer(topG, smx, smy, mx, my));
     }
 
     private void drawTopLayer(GuiGraphics g, int smx, int smy, int mx, int my) {
@@ -2394,7 +2397,7 @@ public class ShopScreen extends ScaledScreen {
     private void requestGroupSwitchGauss(float strength) {
         int topY = contentTop();
         int h = contentBlurBottom() - topY;
-        requestPanelGauss(listLeft(), topY, listWidth(), h, strength, 0, 0, 0, 0, true, ShopGlassStyle.SWAP);
+        requestPanelGauss(listLeft(), topY, listWidth(), h, strength, 0, 0, 0, 0, true, GlassStyle.SWAP);
     }
 
     private void requestPanelGauss(int x, int y, int w, int h, float strength,
@@ -2404,19 +2407,19 @@ public class ShopScreen extends ScaledScreen {
 
     private void requestPanelGauss(int x, int y, int w, int h, float strength,
                                    int holeX, int holeY, int holeW, int holeH, boolean smooth) {
-        requestPanelGauss(x, y, w, h, strength, holeX, holeY, holeW, holeH, smooth, ShopGlassStyle.OVERLAY);
+        requestPanelGauss(x, y, w, h, strength, holeX, holeY, holeW, holeH, smooth, GlassStyle.OVERLAY);
     }
 
     private void requestPanelGauss(int x, int y, int w, int h, float strength,
                                    int holeX, int holeY, int holeW, int holeH, boolean smooth,
-                                   ShopGlassStyle glass) {
+                                   GlassStyle glass) {
         if (strength <= 0.01f || w <= 0 || h <= 0) return;
         if (this.minecraft == null || this.minecraft.getMainRenderTarget() == null) return;
         int[] rect = clampToShopInner(x, y, w, h);
         if (rect[2] <= 1 || rect[3] <= 1) return;
         float pixelScale = (float) this.minecraft.getMainRenderTarget().width
                 / (float) Math.max(1, this.width);
-        float radiusPx = ShopGaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
+        float radiusPx = GaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
         int pad = 2;
         boolean hole = holeW > 0 && holeH > 0;
         int hx = hole ? toFramebufferX(holeX - pad) : 0;
@@ -2424,12 +2427,12 @@ public class ShopScreen extends ScaledScreen {
         int hw = hole ? toFramebufferW(holeW + pad * 2) : 0;
         int hh = hole ? toFramebufferH(holeH + pad * 2) : 0;
         if (smooth) {
-            ShopGaussBlur.requestSmooth(
+            GaussBlur.requestSmooth(
                     toFramebufferX(rect[0]), toFramebufferY(rect[1]),
                     toFramebufferW(rect[2]), toFramebufferH(rect[3]),
                     strength, radiusPx, hx, hy, hw, hh, glass);
         } else {
-            ShopGaussBlur.request(
+            GaussBlur.request(
                     toFramebufferX(rect[0]), toFramebufferY(rect[1]),
                     toFramebufferW(rect[2]), toFramebufferH(rect[3]),
                     strength, radiusPx, hx, hy, hw, hh, glass);
@@ -2443,7 +2446,7 @@ public class ShopScreen extends ScaledScreen {
         int dim = ((int) (0xC0 * k)) << 24;
         int soft = ((int) (0x40 * k)) << 24;
         if (dim == 0) return;
-        if (w <= 0 || h <= 0 || !ShopGaussBlur.isReady()) {
+        if (w <= 0 || h <= 0 || !GaussBlur.isReady()) {
             g.fill(0, 0, vWidth, vHeight, dim);
             return;
         }
@@ -3487,14 +3490,14 @@ public class ShopScreen extends ScaledScreen {
         float strength = loadingBlurStrength(System.currentTimeMillis());
         float pixelScale = (float) this.minecraft.getMainRenderTarget().width
                 / (float) Math.max(1, this.width);
-        float radiusPx = ShopGaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
+        float radiusPx = GaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
         if (loadMissing == loadSeen && unionX1 > unionX0 && unionY1 > unionY0) {
             int[] clipped = clampToShopInner(unionX0, unionY0, unionX1 - unionX0, unionY1 - unionY0);
             if (clipped[2] <= 1 || clipped[3] <= 1) return;
-            ShopGaussBlur.requestSmooth(
+            GaussBlur.requestSmooth(
                     toFramebufferX(clipped[0]), toFramebufferY(clipped[1]),
                     toFramebufferW(clipped[2]), toFramebufferH(clipped[3]),
-                    strength, radiusPx, 0, 0, 0, 0, ShopGlassStyle.LOADING);
+                    strength, radiusPx, 0, 0, 0, 0, GlassStyle.LOADING);
             return;
         }
         int n = 0;
@@ -3512,11 +3515,11 @@ public class ShopScreen extends ScaledScreen {
         }
         if (n <= 0) return;
         if (n == 1) {
-            ShopGaussBlur.requestSmooth(
+            GaussBlur.requestSmooth(
                     loadBlurFb[0], loadBlurFb[1], loadBlurFb[2], loadBlurFb[3],
-                    strength, radiusPx, 0, 0, 0, 0, ShopGlassStyle.LOADING);
+                    strength, radiusPx, 0, 0, 0, 0, GlassStyle.LOADING);
         } else {
-            ShopGaussBlur.requestSmoothCells(loadBlurFb, n, strength, radiusPx, ShopGlassStyle.LOADING);
+            GaussBlur.requestSmoothCells(loadBlurFb, n, strength, radiusPx, GlassStyle.LOADING);
         }
     }
 
@@ -3774,8 +3777,8 @@ public class ShopScreen extends ScaledScreen {
     /** 20x20 淡色棋盘物品槽（仿 KE renderItemCheckerSlot）。 */
     private static void renderItemCheckerSlot(GuiGraphics g, int x, int y) {
         if (theme.glass) {
-            com.dishanhai.gt_shanhai.client.gui.glass.GlassCell.draw(g, x - 1, y - 1, 22,
-                    com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette.ROW_EDGE, 0f, false);
+            com.dishanhai.sh_better_ui.client.glass.GlassCell.draw(g, x - 1, y - 1, 22,
+                    com.dishanhai.sh_better_ui.client.glass.GlassPalette.ROW_EDGE, 0f, false);
             return;
         }
         g.fill(x - 1, y - 1, x + 21, y + 21, -7697782);
@@ -4354,7 +4357,7 @@ public class ShopScreen extends ScaledScreen {
      * 几何通道，不额外叠平移/缩放两套动画；图标与名称按同一 p 从卡片头部滑到详情头部，
      * 落地时正好压在详情面板的同名元素上，再随遮罩一起淡出，避免换内容的硬切。</p>
      *
-     * <p>源卡片留在原位，磨砂叠层之外再交给 {@link ShopGaussBlur} 做第二块高斯；
+     * <p>源卡片留在原位，磨砂叠层之外再交给 {@link GaussBlur} 做第二块高斯；
      * 右侧详情面板是第一块。两块都挖掉正在飞行的卡片。后处理在界面帧末对
      * {@code minecraft:main} 做局部采样，不另分配渲染目标。</p>
      */
@@ -4366,7 +4369,7 @@ public class ShopScreen extends ScaledScreen {
         if (cardFlightSpring.settled()) {
             cardFlightActive = false;
             cardFlightEntry = null;
-            ShopGaussBlur.clear();
+            GaussBlur.clear();
             return;
         }
 
@@ -4379,7 +4382,7 @@ public class ShopScreen extends ScaledScreen {
         // 最后 7% 让飞行层和源卡片磨砂一起溶解，露出下面已经画好的详情面板；弹簧归位前就完成交接。
         float fade = 1f - smoothstep(0.93f, 1f, p);
         if (fade <= 0.01f) {
-            ShopGaussBlur.clear();
+            GaussBlur.clear();
             return;
         }
 
@@ -4411,23 +4414,23 @@ public class ShopScreen extends ScaledScreen {
                 // 模糊半径按“虚拟单位 → 物理像素”的真实比例换算，避免 4K/高 GUI scale 下看起来不糊。
                 float pixelScale = (float) this.minecraft.getMainRenderTarget().width
                         / (float) this.width;
-                float radiusPx = ShopGaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
-                ShopGaussBlur.request(
+                float radiusPx = GaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
+                GaussBlur.request(
                         toFramebufferX(detailLeft), toFramebufferY(detailTop),
                         toFramebufferW(detailW), toFramebufferH(detailH),
                         panelBlur, radiusPx,
                         toFramebufferX(rx - 2), toFramebufferY(ry - 2),
                         toFramebufferW(rw + 4), toFramebufferH(rh + 4),
-                        ShopGlassStyle.FLIGHT);
+                        GlassStyle.FLIGHT);
                 // 源卡片同一条进度再糊一块。主请求会清掉旧的第二矩形，所以必须紧跟在 request 后面。
-                ShopGaussBlur.requestExtra(
+                GaussBlur.requestExtra(
                         toFramebufferX(cardFlightSrcX), toFramebufferY(cardFlightSrcY),
                         toFramebufferW(cardFlightSrcW), toFramebufferH(cardFlightSrcH),
                         panelBlur, radiusPx,
                         toFramebufferX(rx - 2), toFramebufferY(ry - 2),
                         toFramebufferW(rw + 4), toFramebufferH(rh + 4),
-                        ShopGlassStyle.FLIGHT);
-                if (!ShopGaussBlur.isReady()) {
+                        GlassStyle.FLIGHT);
+                if (!GaussBlur.isReady()) {
                     // 后处理资源加载失败时保留局部磨砂兜底；仍然只覆盖右侧面板，不会全屏刷白。
                     int frostA = (int) (0x3A * panelBlur);
                     int frostB = (int) (0x1C * panelBlur);
@@ -4437,7 +4440,7 @@ public class ShopScreen extends ScaledScreen {
                             (frostB << 24) | 0xB4BEC8);
                 }
             } else {
-                ShopGaussBlur.clear();
+                GaussBlur.clear();
             }
 
             // 源卡片保留在原位，只盖一层磨砂 + 低透明度偏移重绘，模拟高斯模糊；不再把卡片抠掉留空。
@@ -4770,8 +4773,8 @@ public class ShopScreen extends ScaledScreen {
     public void onClose() {
         clickWaveAtMs = 0L;
         ShopStageBlur.clear();
-        ShopGaussBlur.clear();
-        ShopGaussBlur.clearTopLayer();
+        GaussBlur.clear();
+        GaussBlur.clearTopLayer();
         super.onClose();
     }
 
@@ -4790,8 +4793,8 @@ public class ShopScreen extends ScaledScreen {
             ClientShopUiSettings.clearShopView();
         }
         ShopStageBlur.clear();
-        ShopGaussBlur.clear();
-        ShopGaussBlur.clearTopLayer();
+        GaussBlur.clear();
+        GaussBlur.clearTopLayer();
         buttonFeedback.cancel(System.currentTimeMillis());
         super.removed();
     }
@@ -6183,9 +6186,9 @@ public class ShopScreen extends ScaledScreen {
      *
      * <p>只用高斯是看不见的——商店面板大面积是纯色，糊完还是一样。所以波由三层组成：
      * shader 侧的径向折射位移 + 圆盘透镜放大 + 波峰高光；外加 {@link #renderClickWaveRing}
-     * 直绘的亮环，后处理不可用（{@link ShopGaussBlur#isReady()} 为假）时也照样有反馈。</p>
+     * 直绘的亮环，后处理不可用（{@link GaussBlur#isReady()} 为假）时也照样有反馈。</p>
      *
-     * <p>波走独立槽位（{@link ShopGaussBlur#requestWave}），不和飞行/浮层的模糊抢位置；
+     * <p>波走独立槽位（{@link GaussBlur#requestWave}），不和飞行/浮层的模糊抢位置；
      * 点商品格必然同时开飞行，共用一个槽位就会整段让路，效果等于没有。</p>
      */
     private void requestClickWave(GuiGraphics g) {
@@ -6213,13 +6216,13 @@ public class ShopScreen extends ScaledScreen {
         float puff = 1f - smoothstep(0.30f, 1f, t);
         float refractPx = 7.5f * toPx * puff;
         float glow = 0.85f * puff;
-        ShopGaussBlur.requestWave(
+        GaussBlur.requestWave(
                 toFramebufferX(rect[0]), toFramebufferY(rect[1]),
                 toFramebufferW(rect[2]), toFramebufferH(rect[3]),
                 strength, kernelPx, wavePx, bandPx, refractPx, glow);
         float fx = toFramebufferX(clickWaveX);
         float fy = toFramebufferY(clickWaveY);
-        ShopGaussBlur.setWaveOrigin((fx + 0.5f) / (float) fbW, 1f - (fy + 0.5f) / (float) fbH);
+        GaussBlur.setWaveOrigin((fx + 0.5f) / (float) fbW, 1f - (fy + 0.5f) / (float) fbH);
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -91,15 +93,15 @@ class ShopPickerFeedbackSourceTest {
     void blurRequestsAndOneTopLayerAreRegisteredAfterAllPainting() throws Exception {
         String source = picker();
         String finish = extractBlock(source, "protected void renderTooltips(");
-        assertTrue(finish.indexOf("ShopGaussBlur.clear()") < finish.indexOf("ShopGaussBlur.requestDirectional("));
-        assertTrue(finish.indexOf("ShopGaussBlur.requestDirectional(") < finish.indexOf("ShopGaussBlur.requestExtra("));
-        assertTrue(finish.contains("ShopGaussBlur.deferTopLayer(this"));
+        assertTrue(finish.indexOf("GaussBlur.clear()") < finish.indexOf("GaussBlur.requestDirectional("));
+        assertTrue(finish.indexOf("GaussBlur.requestDirectional(") < finish.indexOf("GaussBlur.requestExtra("));
+        assertTrue(finish.contains("GaussBlur.deferTopLayer(this"));
         assertTrue(source.contains("GlassGeometry.applyAffine(") && source.contains("GlassGeometry.toPixels("));
         assertTrue(source.contains("parent.render(g, -1, -1"));
         String removed = extractBlock(source, "public void removed()");
-        assertTrue(removed.contains("ShopGaussBlur.clear()") && removed.contains("ShopGaussBlur.clearTopLayer()"));
+        assertTrue(removed.contains("GaussBlur.clear()") && removed.contains("GaussBlur.clearTopLayer()"));
         String client = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/ClientInit.java"));
-        assertTrue(client.contains("ShopGaussBlur.allowScreen(") && client.contains("instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen"));
+        assertTrue(client.contains("GaussBlur.allowScreen(") && client.contains("instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen"));
     }
 
     @Test

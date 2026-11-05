@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShopButtonFeedbackSourceTest {
 
     private static final String SHOP = "src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopScreen.java";
-    private static final String UTIL = "src/main/java/com/dishanhai/gt_shanhai/client/gui/scaled/GuiRenderUtil.java";
+    private static final String UTIL = "../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/gui/scaled/GuiRenderUtil.java";
 
     @Test
     void everyButtonHitPressesTheButtonAndReleaseLiftsIt() throws Exception {
