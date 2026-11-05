@@ -21,6 +21,9 @@ import appeng.api.storage.MEStorage;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.api.gui.configurators.FancyConfiguratorSidebarPage;
+import com.dishanhai.gt_shanhai.common.machine.part.ui.RecipeThreadConfigurationPage;
+import com.dishanhai.gt_shanhai.common.machine.part.ui.RecipeThreadPanelWidget;
+import com.dishanhai.gt_shanhai.common.machine.part.ui.StellarGlassTexture;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeIdMatchPolicy;
@@ -58,7 +61,6 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
-import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
 import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
 import com.gregtechceu.gtceu.integration.ae2.utils.SerializableManagedGridNode;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidSlot;
@@ -66,6 +68,7 @@ import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemSlot;
 import com.gregtechceu.gtceu.api.gui.widget.LongInputWidget;
 import com.gregtechceu.gtceu.utils.FormattingUtil;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ColorBorderTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
@@ -335,7 +338,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         this.combinedTerminalPatternInventory = createCombinedTerminalPatternInventory(super.getTerminalPatternInventory());
 
         int uiWidth = Math.max(patternsPerRow * 18 + 16, 106);
-        int uiHeight = rowsPerPage * 18 + 28;
+        int uiHeight = rowsPerPage * 18 + 32;
         this.paginationUIManager = new CachedPatternPaginationUIManager(
                 patternsPerRow, rowsPerPage, maxPages, uiWidth, uiHeight,
                 this::onPatternChange,
@@ -1928,7 +1931,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public void attachConfigurators(@NotNull ConfiguratorPanel configuratorPanel) {
         List<IFancyConfigurator> parentConfigurators = collectParentConfigurators();
         if (PARENT_REFUND < parentConfigurators.size()) {
-            configuratorPanel.attachConfigurators(parentConfigurators.get(PARENT_REFUND));
+            configuratorPanel.attachConfigurators(StellarGlassTexture.configurator(parentConfigurators.get(PARENT_REFUND)));
         }
     }
 
@@ -1995,6 +1998,15 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     @Override
+    public ModularUI createUI(Player player) {
+        return RecipeThreadConfigurationPage.createGlassUI(this, player);
+    }
+
+    public int stellarPatternUiWidth() {
+        return paginationUIManager.getUiWidth();
+    }
+
+    @Override
     public @NotNull Widget createUIWidget() {
         return createFocusedUIWidget(-1);
     }
@@ -2018,13 +2030,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         int width = this.paginationUIManager.getUiWidth();
         int patternBottom = this.paginationUIManager.getUiHeight();
         WidgetGroup group = new WidgetGroup(0, 0, width, patternBottom);
+        group.setBackground(StellarGlassTexture.page());
         group.addWidget(new LabelWidget(8, 2, () -> this.isOnline ? "gtceu.gui.me_network.online" : "gtceu.gui.me_network.offline"));
-        group.addWidget(new AETextInputButtonWidget(width - 78, 2, 70, 10)
+        group.addWidget(StellarGlassTexture.renameButton(width - 78, 2, 70, 10)
                 .setText(this.customName)
                 .setOnConfirm(this::setCustomName)
                 .setButtonTooltips(new Component[]{Component.translatable("gui.gtceu.rename.desc")}));
-        MEPatternCatalystUIManager catalystUIManager = new MEPatternCatalystUIManager(width + 4,
-                this.catalystItems, this.catalystFluids, this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
+        MEPatternCatalystUIManager catalystUIManager = createGlassCatalystUIManager(width + 4);
+        catalystUIManager.setBackground(StellarGlassTexture.floatingPanel());
         group.waitToAdded(catalystUIManager);
         group.addWidget(pagination.createPaginationUI(catalystUIManager::toggleFor));
         return group;
@@ -2093,17 +2106,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     getConnectedHostOutputMultiplier()).getString()));
             group.addWidget(new LabelWidget(6, 40,
                     Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.foa_multiplier").getString()));
-            group.addWidget(new LongInputWidget(78, 35, 76, 18,
+            LongInputWidget multiplierInput = new LongInputWidget(78, 35, 76, 18,
                     RecipeTypePatternBufferPartMachine.this::getPatternOutputMultiplier,
-                    RecipeTypePatternBufferPartMachine.this::setPatternOutputMultiplier)
-                    .setMin(1L).setMax(Long.MAX_VALUE));
-            group.addWidget(new ButtonWidget(6, 58, 46, 16, new TextTexture("§f开关", -1),
+                    RecipeTypePatternBufferPartMachine.this::setPatternOutputMultiplier);
+            multiplierInput.setMin(1L).setMax(Long.MAX_VALUE);
+            RecipeThreadPanelWidget.styleStellarNumberInput(multiplierInput);
+            group.addWidget(multiplierInput);
+            group.addWidget(new ButtonWidget(6, 58, 46, 16, glassButton(new TextTexture("§f开关", -1)),
                     click -> setOutputMultiplierModeEnabled(!outputMultiplierModeEnabled)));
-            group.addWidget(new ButtonWidget(56, 58, 46, 16, new TextTexture("§b读宿主", -1),
+            group.addWidget(new ButtonWidget(56, 58, 46, 16, glassButton(new TextTexture("§b读宿主", -1)),
                     click -> syncOutputMultiplierFromHost()));
-            group.addWidget(new ButtonWidget(106, 58, 48, 16, new TextTexture("§d读样板", -1),
+            group.addWidget(new ButtonWidget(106, 58, 48, 16, glassButton(new TextTexture("§d读样板", -1)),
                     click -> syncOutputMultiplierFromPattern()));
-            group.addWidget(new ButtonWidget(6, 78, 148, 16, new TextTexture("§e刷新内部样板", -1),
+            group.addWidget(new ButtonWidget(6, 78, 148, 16, glassButton(new TextTexture("§e刷新内部样板", -1)),
                     click -> refreshOutputMultiplierPatterns()));
             group.addWidget(new LabelWidget(6, 100, Component.translatable(
                     "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning").getString())
@@ -2153,15 +2168,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return Math.max(176, 16 + wildcardSlotsPerPage * 18);
     }
 
+    private static IGuiTexture glassButton(IGuiTexture face) {
+        return new GuiTextureGroup(StellarGlassTexture.button(), StellarGlassTexture.adapt(face));
+    }
+
     private void addWildcardPageControls(WidgetGroup group, int y, int width, Runnable onChange) {
-        group.addWidget(new ButtonWidget(8, y, 24, 12, new TextTexture("<<", -1), click -> {
+        group.addWidget(new ButtonWidget(8, y, 24, 12, glassButton(new TextTexture("<<", -1)), click -> {
             if (selectedWildcardPage <= 0) return;
             selectedWildcardPage--;
             onChange.run();
         }));
         group.addWidget(new LabelWidget(width / 2 - 12, y + 2,
                 () -> (selectedWildcardPage + 1) + " / " + wildcardMaxPages));
-        group.addWidget(new ButtonWidget(width - 32, y, 24, 12, new TextTexture(">>", -1), click -> {
+        group.addWidget(new ButtonWidget(width - 32, y, 24, 12, glassButton(new TextTexture(">>", -1)), click -> {
             if (selectedWildcardPage >= wildcardMaxPages - 1) return;
             selectedWildcardPage++;
             onChange.run();
@@ -2176,10 +2195,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             int column = slot - start;
             int motherSlot = slot;
             group.addWidget(new SlotWidget(wildcardPatternInventory, slot, originX + column * 18, slotY)
-                    .setBackground(new IGuiTexture[]{GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY}));
+                    .setBackground(StellarGlassTexture.slot(), GuiTextures.PATTERN_OVERLAY));
             String slotText = (selectedWildcardMotherSlot == slot ? "§a" : "§7") + (slot + 1);
             group.addWidget(new ButtonWidget(originX + 1 + column * 18, buttonY, 16, 10,
-                    new TextTexture(slotText, -1), click -> {
+                    glassButton(new TextTexture(slotText, -1)), click -> {
                         selectedWildcardMotherSlot = motherSlot;
                         onSelect.run();
                     }));
@@ -2226,7 +2245,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     () -> selectedWildcardPreviewPatterns()));
 
             recipeTypeList = new DraggableScrollableWidgetGroup(8, 123, width - 16, 42);
-            recipeTypeList.setBackground(com.gregtechceu.gtceu.api.gui.GuiTextures.DISPLAY);
+            recipeTypeList.setBackground(StellarGlassTexture.display());
             recipeTypeList.setYScrollBarWidth(4).setYBarStyle(
                     new ColorRectTexture(0xFF3F4252),
                     new ColorRectTexture(0xFFE0E2EA).setRadius(2));
@@ -2240,7 +2259,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             String autoText = (assignedTypeId.isEmpty() ? "§a> " : "§7")
                     + Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString();
             recipeTypeList.addWidget(new ButtonWidget(2, y, 134, 16,
-                    new TextTexture(autoText, -1), clickData -> {
+                    glassButton(new TextTexture(autoText, -1)), clickData -> {
                         clearWildcardRecipeType(selectedWildcardMotherSlot);
                         rebuildConfigurator();
                     }));
@@ -2258,7 +2277,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 boolean selected = type.registryName.toString().equals(assignedTypeId);
                 String text = (selected ? "§a> " : "§f") + wildcardRecipeTypeDisplayName(type);
                 recipeTypeList.addWidget(new ButtonWidget(2, y, 134, 16,
-                        new TextTexture(text, -1), clickData -> {
+                        glassButton(new TextTexture(text, -1)), clickData -> {
                             assignWildcardRecipeType(selectedWildcardMotherSlot, type);
                             rebuildConfigurator();
                         }));
@@ -2845,36 +2864,35 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         boolean wildcard = holder instanceof ShanhaiStellarRemoteUIHolder remote
                 && remote.mode() == ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD;
         if (wildcard ? slot < 0 || slot >= wildcardSlotCount : slot >= 0 && !isValidRemotePatternSlot(slot)) return null;
-        return new ModularUI(176, 166, holder, player)
-                .widget(new FancyMachineUIWidget(this, 176, 166));
+        return RecipeThreadConfigurationPage.createGlassUI(this, player, holder);
     }
 
     public ModularUI createRemoteSlotCatalystUI(Player player, int slot, IUIHolder holder) {
         if (!isValidRemotePatternSlot(slot)) return null;
 
-        WidgetGroup root = new WidgetGroup(0, 0, 176, 180);
+        WidgetGroup root = RecipeThreadPanelWidget.stellarRoot(176, 180);
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
                 "gui.gt_shanhai.remote_pattern_catalyst", slot + 1).getString()));
         CachedPatternSlotWidget preview = new CachedPatternSlotWidget(getPatternInventory(), slot, 150, 134,
                 () -> gtShanhai$isPatternSlotWarning(slot), this::patternPreviewLevel);
-        preview.setCanTakeItems(false).setCanPutItems(false).setBackground(GuiTextures.SLOT);
+        preview.setCanTakeItems(false).setCanPutItems(false).setBackground(StellarGlassTexture.slot());
+        preview.setOccupiedTexture(StellarGlassTexture.slot());
         preview.setFocused(true);
         root.addWidget(preview);
-        root.addWidget(new ButtonWidget(8, 134, 136, 16, new TextTexture(
-                Component.translatable("gui.gt_shanhai.ultimate_terminal.report.open_main").getString()), click -> {
+        root.addWidget(new ButtonWidget(8, 134, 136, 16, glassButton(new TextTexture(
+                Component.translatable("gui.gt_shanhai.ultimate_terminal.report.open_main").getString())), click -> {
                     if (player instanceof ServerPlayer serverPlayer && holder instanceof
                             com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder remote) {
                         remote.openMainUI(serverPlayer);
                     }
                 }));
-        MEPatternCatalystUIManager manager = new MEPatternCatalystUIManager(
-                8, this.catalystItems, this.catalystFluids,
-                this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
+        MEPatternCatalystUIManager manager = createGlassCatalystUIManager(8);
+        manager.setBackground(StellarGlassTexture.panel());
         root.addWidget(manager);
         manager.toggleFor(slot);
         layoutRemoteCatalystContainers(manager);
-        root.addWidget(new ButtonWidget(8, 158, 100, 16, new TextTexture(
-                Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_info").getString()), click -> {
+        root.addWidget(new ButtonWidget(8, 158, 100, 16, glassButton(new TextTexture(
+                Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_info").getString())), click -> {
                     if (!(player instanceof ServerPlayer serverPlayer)) return;
                     StellarPatternStuckReport.Entry entry = gtShanhai$getStuckReportEntry(slot);
                     if (entry == null) {
@@ -2886,8 +2904,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket.sendAndOpenTo(serverPlayer,
                             gtShanhai$buildStuckReport());
                 }));
-        root.addWidget(new ButtonWidget(112, 158, 56, 16, new TextTexture(
-                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
+        root.addWidget(new ButtonWidget(112, 158, 56, 16, glassButton(new TextTexture(
+                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString())), click -> {
                     if (player instanceof ServerPlayer serverPlayer) {
                         com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper
                                 .openFirst(serverPlayer);
@@ -2895,8 +2913,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 }));
         return new ModularUI(176, 266, holder, player)
                 .widget(root)
-                .widget(UITemplate.bindPlayerInventory(player.getInventory(), GuiTextures.SLOT, 7, 184, true))
-                .background(GuiTextures.BACKGROUND);
+                .widget(UITemplate.bindPlayerInventory(player.getInventory(), StellarGlassTexture.slot(), 7, 184, true))
+                .background(StellarGlassTexture.root());
     }
 
     private static void layoutRemoteCatalystContainers(MEPatternCatalystUIManager manager) {
@@ -2911,6 +2929,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                         fluidContainer.getPositionX() + fluidContainer.getSizeWidth()),
                 Math.max(itemContainer.getPositionY() + itemContainer.getSizeHeight(),
                         fluidContainer.getPositionY() + fluidContainer.getSizeHeight()));
+    }
+
+    private MEPatternCatalystUIManager createGlassCatalystUIManager(int dockX) {
+        return new MEPatternCatalystUIManager(dockX, this.catalystItems, this.catalystFluids,
+                this.cacheRecipeCount, this::removeSlotFromGTRecipeCache) {
+            @Override
+            public void toggleFor(int index) {
+                super.toggleFor(index);
+                RecipeThreadPanelWidget.styleCatalystControls(this);
+            }
+        };
     }
 
     public ModularUI createRemoteStockInputUI(Player player, IUIHolder holder) {
@@ -2948,11 +2977,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         int width = Math.max(176, wildcardPanelWidth());
         int inventoryY = 182;
         int height = inventoryY + REMOTE_PLAYER_INVENTORY_HEIGHT;
-        WidgetGroup root = new WidgetGroup(0, 0, width, height);
+        WidgetGroup root = RecipeThreadPanelWidget.stellarRoot(width, height);
         root.addWidget(createRemoteWildcardContent(typeIds, typeNames, -1));
         root.addWidget(remoteReturnButton(player, width - 64, 162));
         root.addWidget(remotePlayerInventory(player, width, inventoryY));
-        return new ModularUI(width, height, holder, player).widget(root).background(GuiTextures.BACKGROUND);
+        return new ModularUI(width, height, holder, player).widget(root).background(StellarGlassTexture.root());
     }
 
     /** 遠端通配頁以介面區域狀態保存選取，不改機器上其他檢視者的母槽與頁碼。 */
@@ -2977,9 +3006,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                         if (selected == focusedMother) CachedPatternSlotWidget.gtShanhai$drawFocusBorder(
                                 graphics, getPositionX(), getPositionY(), getSizeWidth(), getSizeHeight());
                     }
-                }.setBackground(GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY));
+                }.setBackground(StellarGlassTexture.slot(), GuiTextures.PATTERN_OVERLAY));
                 slotHost.addWidget(new ButtonWidget(x + 1, 18, 16, 10,
-                        new TextTexture((selection[0] == index ? "§a" : "§7") + (index + 1), -1), click -> {
+                        glassButton(new TextTexture((selection[0] == index ? "§a" : "§7") + (index + 1), -1)), click -> {
                             selection[0] = selected;
                             rebuildSlots[0].run();
                         }));
@@ -2987,11 +3016,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         };
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
                 "gui.gt_shanhai.wildcard_pattern_config").getString()));
-        root.addWidget(new ButtonWidget(8, 16, 24, 12, new TextTexture("<<", -1), click -> {
+        root.addWidget(new ButtonWidget(8, 16, 24, 12, glassButton(new TextTexture("<<", -1)), click -> {
             if (selection[1] > 0) { selection[1]--; rebuildSlots[0].run(); }
         }));
         root.addWidget(new LabelWidget(width / 2 - 12, 18, () -> (selection[1] + 1) + " / " + wildcardMaxPages));
-        root.addWidget(new ButtonWidget(width - 32, 16, 24, 12, new TextTexture(">>", -1), click -> {
+        root.addWidget(new ButtonWidget(width - 32, 16, 24, 12, glassButton(new TextTexture(">>", -1)), click -> {
             if (selection[1] < wildcardMaxPages - 1) { selection[1]++; rebuildSlots[0].run(); }
         }));
         rebuildSlots[0].run();
@@ -3003,21 +3032,21 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 "gui.gt_shanhai.wildcard_pattern_expanded", wildcardPreviewByMother.get(selection[0]).size()).getString()));
 
         DraggableScrollableWidgetGroup typeList = new DraggableScrollableWidgetGroup(8, 86, width - 16, 72);
-        typeList.setBackground(GuiTextures.DISPLAY);
+        typeList.setBackground(StellarGlassTexture.display());
         typeList.setYScrollBarWidth(4).setYBarStyle(
                 new ColorRectTexture(0xFF3F4252),
                 new ColorRectTexture(0xFFE0E2EA).setRadius(2));
         int count = Math.min(typeIds.size(), typeNames.size());
         int y = 2;
         typeList.addWidget(new ButtonWidget(2, y, 148, 16,
-                new TextTexture(Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString(), -1),
+                glassButton(new TextTexture(Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString(), -1)),
                 click -> clearWildcardRecipeType(selection[0])));
         y += 18;
         for (int index = 0; index < count; index++) {
             String typeId = typeIds.get(index);
             String typeName = typeNames.get(index);
             typeList.addWidget(new ButtonWidget(2, y, 148, 16,
-                    new TextTexture(typeName, -1),
+                    glassButton(new TextTexture(typeName, -1)),
                     click -> assignWildcardRecipeTypeId(selection[0], typeId)));
             y += 18;
         }
@@ -3030,23 +3059,23 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         int width = Math.max(176, content.getSize().width);
         int inventoryY = content.getSize().height + 22;
         int height = inventoryY + REMOTE_PLAYER_INVENTORY_HEIGHT;
-        WidgetGroup root = new WidgetGroup(0, 0, width, height);
+        WidgetGroup root = RecipeThreadPanelWidget.stellarRoot(width, height);
         root.addWidget(content);
         root.addWidget(remoteReturnButton(player, width - 64, content.getSize().height + 2));
         root.addWidget(remotePlayerInventory(player, width, inventoryY));
         return new ModularUI(width, height, holder, player)
                 .widget(root)
-                .background(GuiTextures.BACKGROUND);
+                .background(StellarGlassTexture.root());
     }
 
     private static Widget remotePlayerInventory(Player player, int width, int y) {
         int x = Math.max(7, (width - 162) / 2);
-        return UITemplate.bindPlayerInventory(player.getInventory(), GuiTextures.SLOT, x, y, true);
+        return UITemplate.bindPlayerInventory(player.getInventory(), StellarGlassTexture.slot(), x, y, true);
     }
 
     private ButtonWidget remoteReturnButton(Player player, int x, int y) {
-        return new ButtonWidget(x, y, 56, 16, new TextTexture(
-                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
+        return new ButtonWidget(x, y, 56, 16, glassButton(new TextTexture(
+                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString())), click -> {
             if (player instanceof ServerPlayer serverPlayer) {
                 com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper
                         .openFirst(serverPlayer);

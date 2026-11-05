@@ -12,7 +12,7 @@ import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopUiSounds;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiItems;
 import com.dishanhai.gt_shanhai.common.item.ShanhaiUltimateTerminalConfig;
-import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
+import com.dishanhai.sh_better_ui.client.gui.scaled.PageTransition;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.UltimateTerminalConfigPacket;
 import com.dishanhai.gt_shanhai.network.UltimateTerminalConfigPacket.Field;
@@ -63,8 +63,15 @@ public final class UltimateTerminalScreen extends ScaledScreen {
     private final SpringTable<String> selection = new SpringTable<>(Spring.HOVER);
     private final SpringTable<String> stagger = new SpringTable<>(Spring.STAGGER);
     private TerminalGlassUi ui;
-    private final GlassPanelTexture root = GlassPanelTexture.root(), display = GlassPanelTexture.display();
-    private final ShanhaiRecipeEditorAnimation transition = new ShanhaiRecipeEditorAnimation();
+    private final boolean clearGlass = com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.clearGlass();
+    private final GlassColors colors = GlassColors.select(clearGlass);
+    private final GlassPanelTexture root = clearGlass ? GlassPanelTexture.clearPanel() : GlassPanelTexture.root();
+    private final GlassPanelTexture display = clearGlass ? GlassPanelTexture.clearPanel() : GlassPanelTexture.display();
+
+    @Override public void renderBackground(GuiGraphics g) {
+        if (!clearGlass) super.renderBackground(g);
+    }
+    private final PageTransition transition = new PageTransition();
     private int direction = 1, stage;
     private int left, top, cursor, contentHeight, scrollTarget;
     private boolean layoutRequested, warmed;
@@ -154,7 +161,7 @@ public final class UltimateTerminalScreen extends ScaledScreen {
             repeatBox = new AnimatableEditBox(font, 0, 0, 20, 20, tr("repeat"));
             repeatBox.setMaxLength(3);
             repeatBox.setFilter(value -> value.chars().allMatch(Character::isDigit));
-            repeatBox.setTextColor(GlassPalette.TEXT);
+            repeatBox.setTextColor(colors.TEXT);
             repeatBox.setValue(String.valueOf(repeat));
             repeatBox.setResponder(value -> {
                 if (syncing) return;
@@ -286,7 +293,7 @@ public final class UltimateTerminalScreen extends ScaledScreen {
         super.tick();
         var player = Minecraft.getInstance().player;
         if (player == null || !player.getItemInHand(hand).is(DShanhaiItems.ULTIMATE_TERMINAL.get())) { onClose(); return; }
-        if (!warmed) { warmed = true; if (!reduced()) GlassBlur.warmUp(); }
+        if (!warmed) { warmed = true; if (!reduced() || clearGlass) GlassBlur.warmUp(); }
         if (repeatBox != null) repeatBox.tick();
         if (layoutRequested) rebuildLayout();
     }
@@ -301,16 +308,16 @@ public final class UltimateTerminalScreen extends ScaledScreen {
         if (reduced()) { transition.reset(stage, at); leaving = List.of(); }
         GuiRenderUtil.withPanelMotion(g, left + PANEL_W / 2f, top + PANEL_H / 2f, open, () -> {
             root.draw(g, mx, my, left, top, PANEL_W, PANEL_H);
-            ui.wrap(g, tr("title"), left + 12, top + 10, PANEL_W - 66, GlassPalette.TEXT_HEAD);
+            ui.wrap(g, tr("title"), left + 12, top + 10, PANEL_W - 66, colors.TEXT_HEAD);
             ui.button(g, "close", left + PANEL_W - 40, top + 8, 28, 22, Component.literal("×"), 16, true, mx, my, null);
             ui.button(g, "back", left + 12, top + PANEL_H - 30, 90, 22, tr("back"), 78, page != Page.MAIN, mx, my, null);
-            ui.wrap(g, bound, left + 110, top + PANEL_H - 31, PANEL_W - 122, GlassPalette.TEXT_MUTED);
+            ui.wrap(g, bound, left + 110, top + PANEL_H - 31, PANEL_W - 122, colors.TEXT_MUTED);
             display.draw(g, mx, my, contentX() - 3, contentY() - 3, CONTENT_W + 6, viewportHeight() + 6);
             if (contentHeight > viewportHeight()) {
                 int thumb = Math.max(14, viewportHeight() * viewportHeight() / contentHeight);
                 int thumbY = contentY() + Math.round((viewportHeight() - thumb) * scroll.value() / Math.max(1, contentHeight - viewportHeight()));
-                g.fill(contentX() + CONTENT_W + 2, contentY(), contentX() + CONTENT_W + 4, contentY() + viewportHeight(), GlassPalette.DISPLAY_EDGE);
-                g.fill(contentX() + CONTENT_W + 2, thumbY, contentX() + CONTENT_W + 4, thumbY + thumb, GlassPalette.ACCENT);
+                g.fill(contentX() + CONTENT_W + 2, contentY(), contentX() + CONTENT_W + 4, contentY() + viewportHeight(), colors.DISPLAY_EDGE);
+                g.fill(contentX() + CONTENT_W + 2, thumbY, contentX() + CONTENT_W + 4, thumbY + thumb, colors.ACCENT);
             }
             TerminalGlassUi.scissor(g, contentX(), contentY(), CONTENT_W, viewportHeight());
             try {
@@ -344,7 +351,7 @@ public final class UltimateTerminalScreen extends ScaledScreen {
                     float on = follow(selection, e.key, flags.get(e.flag) ? 1 : 0, at);
                     int textWidth = toggleTextWidth(e.w);
                     ui.button(g, e.key, x, y, e.w, e.h, e.text, textWidth, true, mx, my, () -> {
-                        ui.wrap(g, e.desc, x + 6, y + 5 + ui.height(e.text, textWidth), textWidth, GlassPalette.TEXT_DIM);
+                        ui.wrap(g, e.desc, x + 6, y + 5 + ui.height(e.text, textWidth), textWidth, colors.TEXT_DIM);
                         drawPill(g, x + e.w - 6 - PILL_W, y + (e.h - PILL_H) / 2, on);
                     });
                 }
@@ -354,27 +361,27 @@ public final class UltimateTerminalScreen extends ScaledScreen {
                         g.pose().pushPose(); g.pose().translate(0, (1 - appear) * 8, 0);
                         ui.button(g, e.key, x, y, e.w, e.h, Component.empty(), 1, true, mx, my, null);
                         float chosen = follow(selection, e.key, e.selected.getAsBoolean() ? 1 : 0, at);
-                        GlassCell.draw(g, x + 3, y + 3, 20, GlassPalette.ROW_EDGE, chosen, over);
+                        GlassCell.draw(g, x + 3, y + 3, 20, colors.ROW_EDGE, chosen, over, colors);
                         if (!e.icon.isEmpty()) g.renderItem(e.icon, x + 5, y + 5);
-                        ui.wrap(g, e.text, x + 27, y + 5, tierTextWidth(e.w), GlassPalette.TEXT);
+                        ui.wrap(g, e.text, x + 27, y + 5, tierTextWidth(e.w), colors.TEXT);
                         g.pose().popPose();
                     });
                 }
                 case BUTTON -> {
                     ui.button(g, e.key, x, y, e.w, e.h, e.text, Math.max(1, e.w - 12), true, mx, my, null);
                     float chosen = follow(selection, e.key, e.selected.getAsBoolean() ? 1 : 0, at);
-                    if (chosen > 0.02f) g.renderOutline(x, y, e.w, e.h, GuiMotion.lerpColor(0x0069E8FF, GlassPalette.ACCENT, chosen));
+                    if (chosen > 0.02f) g.renderOutline(x, y, e.w, e.h, GuiMotion.lerpColor(0x0069E8FF, colors.ACCENT, chosen));
                 }
-                case TEXT -> ui.wrap(g, e.text, x, y, e.w, e.dim ? GlassPalette.TEXT_DIM : GlassPalette.TEXT_MUTED);
+                case TEXT -> ui.wrap(g, e.text, x, y, e.w, e.dim ? colors.TEXT_DIM : colors.TEXT_MUTED);
             }
         }
     }
     private void drawPill(GuiGraphics g, int x, int y, float on) {
-        g.fill(x, y, x + PILL_W, y + PILL_H, GuiMotion.lerpColor(GlassPalette.DISPLAY_FILL, TRACK_ON, on));
-        g.renderOutline(x, y, PILL_W, PILL_H, GuiMotion.lerpColor(GlassPalette.ROW_EDGE, GlassPalette.ACCENT, on));
+        g.fill(x, y, x + PILL_W, y + PILL_H, GuiMotion.lerpColor(colors.DISPLAY_FILL, TRACK_ON, on));
+        g.renderOutline(x, y, PILL_W, PILL_H, GuiMotion.lerpColor(colors.ROW_EDGE, colors.ACCENT, on));
         int knob = PILL_H - 4;
         g.fill(x + 2 + Math.round(on * (PILL_W - 4 - knob)), y + 2, x + 2 + Math.round(on * (PILL_W - 4 - knob)) + knob, y + 2 + knob,
-                GuiMotion.lerpColor(GlassPalette.TEXT_DIM, GlassPalette.TEXT, on));
+                GuiMotion.lerpColor(colors.TEXT_DIM, colors.TEXT, on));
     }
     // ---------- 輸入 ----------
     @Override protected boolean universalMouseClicked(double mx, double my, int button) {

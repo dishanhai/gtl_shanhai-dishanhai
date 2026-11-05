@@ -1,11 +1,13 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.common.machine.part.ui.StellarGlassTexture;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAESlot;
 import com.lowdragmc.lowdraglib.gui.texture.ColorBorderTexture;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
@@ -54,11 +56,13 @@ final class PatternBufferStockRequestConfigurator implements IFancyConfigurator 
         page.addWidget(new LabelWidget(4, 14, () -> Component.translatable("gui.gtlcore.tag_whitelist").getString()));
         TextFieldWidget white = new TextFieldWidget(4, 24, 168, 12,
                 machine::stockTagWhite, machine::setStockTagWhite);
+        white.setBordered(false).setBackground(StellarGlassTexture.display());
         white.setCurrentString(machine.stockTagWhite());
         page.addWidget(white);
         page.addWidget(new LabelWidget(4, 38, () -> Component.translatable("gui.gtlcore.tag_blacklist").getString()));
         TextFieldWidget black = new TextFieldWidget(4, 48, 168, 12,
                 machine::stockTagBlack, machine::setStockTagBlack);
+        black.setBordered(false).setBackground(StellarGlassTexture.display());
         black.setCurrentString(machine.stockTagBlack());
         page.addWidget(black);
         page.addWidget(new LabelWidget(22, 64, () -> Component.translatable(
@@ -106,6 +110,7 @@ final class PatternBufferStockRequestConfigurator implements IFancyConfigurator 
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.amount").getString()));
         TextFieldWidget amount = new TextFieldWidget(28, 16, 36, 12, null,
                 text -> machine.setStockRequestDraft(fluid, slot, true, text));
+        amount.setBordered(false).setBackground(StellarGlassTexture.display());
         amount.setCurrentString(machine.stockRequestDraft(fluid, slot, true));
         amount.setHoverTooltips(Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.amount_tip"));
@@ -114,13 +119,16 @@ final class PatternBufferStockRequestConfigurator implements IFancyConfigurator 
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.batch").getString()));
         TextFieldWidget batch = new TextFieldWidget(92, 16, 32, 12, null,
                 text -> machine.setStockRequestDraft(fluid, slot, false, text));
+        batch.setBordered(false).setBackground(StellarGlassTexture.display());
         batch.setCurrentString(machine.stockRequestDraft(fluid, slot, false));
         batch.setHoverTooltips(Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.batch_tip"));
         group.addWidget(batch);
-        group.addWidget(new ButtonWidget(128, 16, 44, 12, new TextTexture(
+        TextTexture submitText = new TextTexture(
                 Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.submit")
-                        .getString(), -1),
+                        .getString(), -1);
+        IGuiTexture submitGlass = new GuiTextureGroup(StellarGlassTexture.button(), StellarGlassTexture.adapt(submitText));
+        group.addWidget(new ButtonWidget(128, 16, 44, 12, submitGlass,
                 click -> machine.submitStockRequest(fluid, slot)));
     }
 

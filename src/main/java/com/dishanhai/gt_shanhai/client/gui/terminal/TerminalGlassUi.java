@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.terminal;
 
-import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassColors;
 import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.dishanhai.sh_better_ui.client.gui.scaled.ButtonFeedback;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
@@ -8,7 +8,7 @@ import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
-import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
+import com.dishanhai.sh_better_ui.client.gui.scaled.PageTransition;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -18,11 +18,13 @@ final class TerminalGlassUi {
     final Font font;
     final ButtonFeedback feedback = new ButtonFeedback();
     private final SpringTable<String> hover = new SpringTable<>(Spring.HOVER);
-    private final GlassPanelTexture page = GlassPanelTexture.page();
+    private final boolean clearGlass = com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.clearGlass();
+    private final GlassColors colors = GlassColors.select(clearGlass);
+    private final GlassPanelTexture page = clearGlass ? GlassPanelTexture.clearButtonOverlay() : GlassPanelTexture.page();
 
     TerminalGlassUi(Font font) { this.font = font; }
 
-    static long now() { return ShanhaiRecipeEditorAnimation.nowMs(); }
+    static long now() { return PageTransition.nowMs(); }
     static boolean reduced() { return ClientShopUiSettings.reduceMotion(); }
     static boolean hit(double mx, double my, int x, int y, int w, int h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 
@@ -43,9 +45,9 @@ final class TerminalGlassUi {
         long id = key.hashCode(); var visual = feedback.visual(id, id, enabled, at, reduced());
         GuiRenderUtil.withButtonMotion(g, x, y, w, h, visual.scale(), visual.shakeX(), () -> {
             page.draw(g, mx, my, x, y, w, h);
-            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, ButtonFeedback.shade(GuiMotion.lerpColor(GlassPalette.BUTTON_FILL, GlassPalette.BUTTON_FILL_HOVER, hot), visual));
-            g.renderOutline(x, y, w, h, ButtonFeedback.tint(GuiMotion.lerpColor(GlassPalette.BUTTON_EDGE, GlassPalette.ACCENT, hot), visual));
-            wrap(g, text, x + 6, y + 5, textWidth, enabled ? GlassPalette.TEXT : GlassPalette.TEXT_OFF);
+            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, ButtonFeedback.shade(GuiMotion.lerpColor(colors.BUTTON_FILL, colors.BUTTON_FILL_HOVER, hot), visual));
+            g.renderOutline(x, y, w, h, ButtonFeedback.tint(GuiMotion.lerpColor(colors.BUTTON_EDGE, colors.ACCENT, hot), visual));
+            wrap(g, text, x + 6, y + 5, textWidth, enabled ? colors.TEXT : colors.TEXT_OFF);
             if (extra != null) extra.run();
         });
     }

@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.dishanhai.gt_shanhai.common.machine.part.ui.StellarGlassTexture;
 import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
@@ -130,8 +131,8 @@ public final class CachedPatternPaginationUIManager {
                 slot.invalidatePatternCache();
                 onPatternChange.accept(finalSlot);
             });
-            slot.setOccupiedTexture(GuiTextures.SLOT);
-            slot.setBackground(GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY);
+            slot.setOccupiedTexture(StellarGlassTexture.slot());
+            slot.setBackground(StellarGlassTexture.slot(), GuiTextures.PATTERN_OVERLAY);
 
             if (onMiddleClicked != null) {
                 slot.setOnMiddleClick(() -> onMiddleClicked.accept(finalSlot));
@@ -154,7 +155,7 @@ public final class CachedPatternPaginationUIManager {
     private void createPageControls(WidgetGroup parentGroup) {
         int pageControlY = 16 + rowsPerPage * 18 + 4;
         parentGroup.addWidget(new ButtonWidget(8, pageControlY, 30, 12,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture("<<")), clickData -> {
+                new GuiTextureGroup(StellarGlassTexture.button(), new TextTexture("<<")), clickData -> {
                     if (currentPageIndex > 0) {
                         currentPageIndex--;
                         refreshPage(currentPageIndex);
@@ -164,7 +165,7 @@ public final class CachedPatternPaginationUIManager {
         parentGroup.addWidget(new LabelWidget(pageIndicatorX, pageControlY + 2,
                 () -> (currentPageIndex + 1) + " / " + maxPages));
         parentGroup.addWidget(new ButtonWidget(uiWidth - 38, pageControlY, 30, 12,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(">>")), clickData -> {
+                new GuiTextureGroup(StellarGlassTexture.button(), new TextTexture(">>")), clickData -> {
                     if (currentPageIndex < maxPages - 1) {
                         currentPageIndex++;
                         refreshPage(currentPageIndex);

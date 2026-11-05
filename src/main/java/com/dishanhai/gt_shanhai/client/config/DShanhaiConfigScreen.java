@@ -40,6 +40,13 @@ public final class DShanhaiConfigScreen {
                 .setTitle(Component.literal("山海私货 配置"));
         ConfigEntryBuilder e = builder.entryBuilder();
 
+        ConfigCategory appearance = builder.getOrCreateCategory(Component.translatable("config.gt_shanhai.ui.category"));
+        appearance.addEntry(e.startBooleanToggle(Component.translatable("config.gt_shanhai.ui.clear_glass"),
+                        com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.clearGlass())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("config.gt_shanhai.ui.clear_glass.tooltip"))
+                .setSaveConsumer(com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig::setClearGlass).build());
+
         // 山海雙階段載入：獨立 client 設定，在啟動 reload 前即可讀取。
         ConfigCategory loading = builder.getOrCreateCategory(Component.literal("山海载入动画"));
         loading.addEntry(e.startBooleanToggle(Component.literal("世界資料非同步載入"),

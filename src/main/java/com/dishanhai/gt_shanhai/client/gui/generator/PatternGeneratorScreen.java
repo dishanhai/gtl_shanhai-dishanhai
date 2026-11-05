@@ -10,12 +10,12 @@ import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.ButtonFeedback;
+import com.dishanhai.sh_better_ui.client.gui.scaled.PageTransition;
 import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.dishanhai.gt_shanhai.client.gui.scaled.*;
 import com.dishanhai.gt_shanhai.client.gui.shop.*;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.common.item.generator.*;
-import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
 import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -57,9 +57,16 @@ public final class PatternGeneratorScreen extends ScaledScreen {
     private final SpringTable<String> stagger=new SpringTable<>(Spring.STAGGER);
     private final ButtonFeedback feedback=new ButtonFeedback();
     private final UiSoundThrottle sounds=new UiSoundThrottle();
-    private final GlassPanelTexture root=GlassPanelTexture.root(), display=GlassPanelTexture.display();
-    private final GlassPanelTexture pageTexture=GlassPanelTexture.page();
-    private final ShanhaiRecipeEditorAnimation transition=new ShanhaiRecipeEditorAnimation();
+    private final boolean clearGlass=com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.clearGlass();
+    private final GlassColors colors=GlassColors.select(clearGlass);
+    private final GlassPanelTexture root=clearGlass?GlassPanelTexture.clearPanel():GlassPanelTexture.root();
+    private final GlassPanelTexture display=clearGlass?GlassPanelTexture.clearPanel():GlassPanelTexture.display();
+    private final GlassPanelTexture pageTexture=clearGlass?GlassPanelTexture.clearButtonOverlay():GlassPanelTexture.page();
+
+    @Override public void renderBackground(GuiGraphics g) {
+        if (!clearGlass) super.renderBackground(g);
+    }
+    private final PageTransition transition=new PageTransition();
     private List<Element> leaving=List.of();
     private int leavingScroll;
     private int direction=1,stage;
@@ -103,7 +110,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         opening.setTarget(1,now()); transition.reset(0,now());
     }
     UUID sessionId() { return model.snapshot.sessionId(); }
-    static long now() { return ShanhaiRecipeEditorAnimation.nowMs(); }
+    static long now() { return PageTransition.nowMs(); }
     static Component tr(String key,Object... args) { return Component.translatable(PREFIX+key,args); }
     static Choice choice(String key,Component text,boolean enabled,Runnable action) { return new Choice(key,text,enabled,action); }
     PatternGeneratorSettings settings() { return model.settings; }
@@ -178,7 +185,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         box.setResponder(text->{});
         box.setMaxLength(maximum);
         if (!box.getValue().equals(value)) box.setValue(value);
-        box.active=enabled; box.setTextColor(GlassPalette.TEXT);
+        box.active=enabled; box.setTextColor(colors.TEXT);
         box.setResponder(text->{ changed.accept(text); layoutRequested=true; });
         fields.put(key,box); addWidget(box);
         var element=new Element(key,0,cursor,CONTENT_W,20,Component.empty(),enabled,null); element.field=box; elements.add(element); cursor+=26;
@@ -260,7 +267,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
 
     @Override public void tick() {
         super.tick(); if (closed) return;
-        if (!warmed) { warmed=true; if (!reduced()) GlassBlur.warmUp(); }
+        if (!warmed) { warmed=true; if (!reduced() || clearGlass) GlassBlur.warmUp(); }
         model.tick(now()); fields.values().forEach(EditBox::tick);
         if (layoutRequested) rebuildLayout();
     }
@@ -274,16 +281,16 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         if (reduced()) { transition.reset(stage,at); leaving=List.of(); }
         GuiRenderUtil.withPanelMotion(g,left+PANEL_W/2f,top+PANEL_H/2f,open,()-> {
             root.draw(g,mx,my,left,top,PANEL_W,PANEL_H);
-            wrap(g,tr("title"),left+12,top+10,PANEL_W-66,GlassPalette.TEXT_HEAD);
+            wrap(g,tr("title"),left+12,top+10,PANEL_W-66,colors.TEXT_HEAD);
             drawButton(g,"close",left+PANEL_W-40,top+8,28,22,Component.literal("×"),true,mx,my);
             drawButton(g,"back",left+12,top+PANEL_H-30,90,22,tr("back_main"),page!=Page.MAIN,mx,my);
-            wrap(g,tr("selected_total",state().selected(),state().count()),left+110,top+PANEL_H-31,PANEL_W-122,GlassPalette.TEXT_MUTED);
+            wrap(g,tr("selected_total",state().selected(),state().count()),left+110,top+PANEL_H-31,PANEL_W-122,colors.TEXT_MUTED);
             display.draw(g,mx,my,contentX()-3,contentY()-3,CONTENT_W+6,viewportHeight()+6);
             if (contentHeight>viewportHeight()) {
                 int thumb=Math.max(14,viewportHeight()*viewportHeight()/contentHeight);
                 int thumbY=contentY()+Math.round((viewportHeight()-thumb)*scroll.value()/Math.max(1,contentHeight-viewportHeight()));
-                g.fill(contentX()+CONTENT_W+2,contentY(),contentX()+CONTENT_W+4,contentY()+viewportHeight(),GlassPalette.DISPLAY_EDGE);
-                g.fill(contentX()+CONTENT_W+2,thumbY,contentX()+CONTENT_W+4,thumbY+thumb,GlassPalette.ACCENT);
+                g.fill(contentX()+CONTENT_W+2,contentY(),contentX()+CONTENT_W+4,contentY()+viewportHeight(),colors.DISPLAY_EDGE);
+                g.fill(contentX()+CONTENT_W+2,thumbY,contentX()+CONTENT_W+4,thumbY+thumb,colors.ACCENT);
             }
             scissor(g,contentX(),contentY(),CONTENT_W,viewportHeight());
             try {
@@ -296,8 +303,8 @@ public final class PatternGeneratorScreen extends ScaledScreen {
             if (!reduced()) {
                 GuiRect viewport=new GuiRect(contentX(),contentY(),CONTENT_W,viewportHeight());
                 if (transition.moving(at)) GlassBlur.requestPage(g,viewport,GlassMotion.pageSlide(transition.linear(at)));
-                else if (page==Page.PREVIEW && PatternGeneratorMotion.scrollBlur(velocity)>0.01f)
-                    GlassBlur.requestPage(g,viewport,new GlassMotion.Sample(PatternGeneratorMotion.scrollBlur(velocity),8,0,1));
+                else if (page==Page.PREVIEW && GuiMotion.scrollBlur(velocity)>0.01f)
+                    GlassBlur.requestPage(g,viewport,new GlassMotion.Sample(GuiMotion.scrollBlur(velocity),8,0,1));
             }
         });
     }
@@ -320,7 +327,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
             if (e.ghost!=null) {
                 g.pose().pushPose(); g.pose().translate(contentX(),contentY()-scrollY,0);
                 float selected=follow(selection,e.key,e.ghost.isSelected()?1:0,now());
-                e.ghost.draw(g,over,selected); g.pose().popPose();
+                e.ghost.draw(g,over,selected,colors); g.pose().popPose();
                 if (over) {
                     var lines=new ArrayList<Component>(); var stack=e.ghost.value();
                     if (stack!=null) {
@@ -336,14 +343,14 @@ public final class PatternGeneratorScreen extends ScaledScreen {
                     g.pose().pushPose(); g.pose().translate(0,(1-appear)*8,0);
                     drawButton(g,e.key,x,y,e.w,e.h,Component.empty(),e.enabled,mx,my);
                     float checked=follow(selection,e.key,e.recipe.checked()?1:0,now());
-                    GlassCell.draw(g,x+3,y+3,20,GlassPalette.ROW_EDGE,checked,over);
+                    GlassCell.draw(g,x+3,y+3,20,colors.ROW_EDGE,checked,over,colors);
                     var icon=GeneratorGhostSlot.display(e.recipe.outputs().isEmpty()?null:e.recipe.outputs().get(0));
                     if (!icon.isEmpty()) g.renderItem(icon,x+5,y+5);
-                    wrap(g,e.text,x+27,y+5,recipeNameWidth(e.w),GlassPalette.TEXT); g.pose().popPose();
+                    wrap(g,e.text,x+27,y+5,recipeNameWidth(e.w),colors.TEXT); g.pose().popPose();
                 });
                 if (over) setTooltip(e.key,details(e.recipe));
             } else if (e.click!=null) drawButton(g,e.key,x,y,e.w,e.h,e.text,e.enabled,mx,my);
-            else wrap(g,e.text,x,y,e.w,GlassPalette.TEXT_MUTED);
+            else wrap(g,e.text,x,y,e.w,colors.TEXT_MUTED);
         }
     }
     void drawButton(GuiGraphics g,String key,int x,int y,int w,int h,Component text,boolean enabled,int mx,int my) {
@@ -351,10 +358,10 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         long id=key.hashCode(); var visual=feedback.visual(id,id,enabled,at,reduced());
         GuiRenderUtil.withButtonMotion(g,x,y,w,h,visual.scale(),visual.shakeX(),()-> {
             pageTexture.draw(g,mx,my,x,y,w,h);
-            g.fill(x+1,y+1,x+w-1,y+h-1,ButtonFeedback.shade(GuiMotion.lerpColor(GlassPalette.BUTTON_FILL,GlassPalette.BUTTON_FILL_HOVER,hot),visual));
-            g.renderOutline(x,y,w,h,ButtonFeedback.tint(GuiMotion.lerpColor(GlassPalette.BUTTON_EDGE,GlassPalette.ACCENT,hot),visual));
-            wrap(g,text,x+6,y+5,w-12,enabled?GlassPalette.TEXT:GlassPalette.TEXT_OFF);
-            if (visual.pending()) GuiRenderUtil.drawPendingSweep(g,x,y,w,h,visual.pendingPhase(),GlassPalette.ACCENT);
+            g.fill(x+1,y+1,x+w-1,y+h-1,ButtonFeedback.shade(GuiMotion.lerpColor(colors.BUTTON_FILL,colors.BUTTON_FILL_HOVER,hot),visual));
+            g.renderOutline(x,y,w,h,ButtonFeedback.tint(GuiMotion.lerpColor(colors.BUTTON_EDGE,colors.ACCENT,hot),visual));
+            wrap(g,text,x+6,y+5,w-12,enabled?colors.TEXT:colors.TEXT_OFF);
+            if (visual.pending()) GuiRenderUtil.drawPendingSweep(g,x,y,w,h,visual.pendingPhase(),colors.ACCENT);
         });
     }
     void wrap(GuiGraphics g,Component text,int x,int y,int width,int color) {
@@ -401,8 +408,8 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         try {
             g.pose().translate(x,y,600); g.pose().scale(fit,fit,1);
             GuiRenderUtil.withPanelMotion(g,(longest+12)/2f,fullHeight/2f,open,()-> {
-                g.fill(0,0,longest+12,fullHeight,GlassPalette.PANEL_FILL); g.renderOutline(0,0,longest+12,fullHeight,GlassPalette.ACCENT);
-                int lineY=5; for (var line:lines) { g.drawString(font,line,6,lineY,GlassPalette.TEXT,false); lineY+=font.lineHeight; }
+                g.fill(0,0,longest+12,fullHeight,colors.PANEL_FILL); g.renderOutline(0,0,longest+12,fullHeight,colors.ACCENT);
+                int lineY=5; for (var line:lines) { g.drawString(font,line,6,lineY,colors.TEXT,false); lineY+=font.lineHeight; }
             });
         } finally { g.pose().popPose(); }
     }
@@ -490,7 +497,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
         String grid=state().page()+":"+settings().previewColumns+":"+state().previewPage().stream().map(PatternGeneratorPreview::id).toList();
         if (!grid.equals(lastGrid)) {
             lastGrid=grid; stagger.clear(); scrollTarget=0; scroll.snap(0);
-            for (int i=0;i<state().previewPage().size();i++) stagger.start("recipe."+state().previewPage().get(i).id(),reduced()?1:0,1,now(),PatternGeneratorMotion.staggerDelay(i));
+            for (int i=0;i<state().previewPage().size();i++) stagger.start("recipe."+state().previewPage().get(i).id(),reduced()?1:0,1,now(),GuiMotion.staggerDelay(i));
         }
     }
     private static ButtonFeedback.Tone tone(Component value) {

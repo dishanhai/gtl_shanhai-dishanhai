@@ -4,7 +4,7 @@ import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import com.dishanhai.sh_better_ui.client.glass.GlassCell;
-import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassColors;
 import com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen;
 import com.gregtechceu.gtceu.api.item.MetaMachineItem;
 import com.lowdragmc.lowdraglib.gui.widget.PhantomFluidWidget;
@@ -36,8 +36,8 @@ public final class GeneratorGhostSlot {
     }
     void accept(GenericStack stack) { if (stack == null || accepts(stack)) { selected.run(); changed.accept(stack); } }
     boolean hit(double mx,double my) { return mx>=x && mx<x+20 && my>=y && my<y+20; }
-    void draw(GuiGraphics g,boolean hover,float selectedAmount) {
-        GlassCell.draw(g,x,y,20,GlassPalette.ROOT_EDGE,selectedAmount,hover);
+    void draw(GuiGraphics g,boolean hover,float selectedAmount,GlassColors colors) {
+        GlassCell.draw(g,x,y,20,colors.ROOT_EDGE,selectedAmount,hover,colors);
         ItemStack icon = display(value.get());
         if (!icon.isEmpty()) g.renderItem(icon,x+2,y+2);
     }

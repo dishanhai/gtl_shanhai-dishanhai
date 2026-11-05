@@ -22,7 +22,9 @@ final class GeneratorDropdown {
     final Spring scroll = new Spring(Spring.SCROLL);
     private final int[] starts,heights;
     private final int total;
-    private final GlassPanelTexture panel=GlassPanelTexture.panel();
+    private final boolean clearGlass=com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.clearGlass();
+    private final GlassColors colors=GlassColors.select(clearGlass);
+    private final GlassPanelTexture panel=clearGlass?GlassPanelTexture.clearPanel():GlassPanelTexture.panel();
     private int target;
     private int selected;
 
@@ -51,7 +53,7 @@ final class GeneratorDropdown {
                     int rowY=y+4+starts[i]-Math.round(scroll.value());
                     if (rowY+heights[i]<y || rowY>y+h) continue;
                     screen.drawButton(g,"dropdown."+i,x+4,rowY,w-8,heights[i]-2,options.get(i),true,mx,my);
-                    if (i==selected) g.renderOutline(x+4,rowY,w-8,heights[i]-2,GlassPalette.ACCENT);
+                    if (i==selected) g.renderOutline(x+4,rowY,w-8,heights[i]-2,colors.ACCENT);
                 }
             } finally { g.disableScissor(); }
         });

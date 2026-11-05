@@ -1,7 +1,12 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
 import appeng.api.stacks.GenericStack;
+import appeng.api.stacks.AEFluidKey;
+import appeng.api.stacks.AEItemKey;
 
+import com.dishanhai.gt_shanhai.common.machine.part.ui.StellarGlassTexture;
+import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.integration.ae2.utils.AEUtil;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidList;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemList;
 import com.gregtechceu.gtceu.integration.ae2.slot.IConfigurableSlot;
@@ -13,9 +18,18 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 
 import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigSlotWidget;
 import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
+import org.gtlcore.gtlcore.integration.ae2.MEFluidUnits;
 
+import com.lowdragmc.lowdraglib.gui.editor.Icons;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
+import com.lowdragmc.lowdraglib.gui.util.DrawerHelper;
+import com.lowdragmc.lowdraglib.gui.util.TextFormattingUtil;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
+import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.lowdragmc.lowdraglib.utils.Position;
+import net.minecraft.client.gui.GuiGraphics;
+
+import java.util.List;
 
 import java.util.function.IntConsumer;
 
@@ -37,6 +51,71 @@ final class PatternBufferStockSlotWidget extends AEDualConfigWidget {
                                  IntConsumer pageSetter, int page, RecipeTypePatternBufferPartMachine machine) {
         super(x, y, items, fluids, pageSetter, page);
         this.machine = machine;
+        for (Widget widget : List.copyOf(widgets)) {
+            if (widget instanceof AEDualConfigSlotWidget slot) {
+                int position = widgets.indexOf(widget);
+                int localIndex = slot.getSelfPositionY() / 38 * 8 + slot.getSelfPositionX() / 18;
+                removeWidget(widget);
+                addWidget(position, new GlassStockSlotWidget(slot.getSelfPositionX(), slot.getSelfPositionY(),
+                        this, localIndex));
+            }
+        }
+        pageUpWidget.setButtonTexture(new GuiTextureGroup(StellarGlassTexture.button(),
+                StellarGlassTexture.accentIcon(Icons.LEFT.copy().scale(0.7f))));
+        pageDownWidget.setButtonTexture(new GuiTextureGroup(StellarGlassTexture.button(),
+                StellarGlassTexture.accentIcon(Icons.RIGHT.copy().scale(0.7f))));
+    }
+
+    /** 只改本機器的格子繪製；GTLCore 原槽的點擊、拖入及 tooltip 流程由父類繼承。 */
+    private static final class GlassStockSlotWidget extends AEDualConfigSlotWidget {
+        private GlassStockSlotWidget(int x, int y, PatternBufferStockSlotWidget parent, int index) {
+            super(x, y, parent, index);
+        }
+
+        @Override
+        @OnlyIn(Dist.CLIENT)
+        public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+            int x = getPositionX();
+            int y = getPositionY();
+            StellarGlassTexture.display().draw(graphics, mouseX, mouseY, x, y, 18, 18);
+            StellarGlassTexture.display().draw(graphics, mouseX, mouseY, x, y + 18, 18, 18);
+            GuiTextures.CONFIG_ARROW.draw(graphics, mouseX, mouseY, x, y, 18, 18);
+            if (select) {
+                graphics.renderOutline(x, y, 18, 18, StellarGlassTexture.accentColor());
+            }
+
+            IConfigurableSlot slot = parentWidget.getDisplay(getIndex());
+            GenericStack config = slot.getConfig();
+            GenericStack stock = slot.getStock();
+            drawStack(graphics, config, x + 1, y + 1);
+            drawStack(graphics, stock, x + 1, y + 19);
+            if (stock != null && stock.amount() > 0) {
+                String amount = stock.what() instanceof AEFluidKey
+                        ? MEFluidUnits.formatDisplayAmount(stock.amount())
+                        : TextFormattingUtil.formatLongToCompactString(stock.amount(), 4);
+                DrawerHelper.drawStringFixedCorner(graphics, amount, x + 18, y + 36, 0xFFFFFF, true, 0.5f);
+            }
+            if (stock != null) {
+                if (mouseOverConfig(mouseX, mouseY)) {
+                    drawSelectionOverlay(graphics, x + 1, y + 1, 16, 16);
+                } else if (mouseOverStock(mouseX, mouseY)) {
+                    drawSelectionOverlay(graphics, x + 1, y + 19, 16, 16);
+                }
+            }
+        }
+
+        @OnlyIn(Dist.CLIENT)
+        private static void drawStack(GuiGraphics graphics, GenericStack stack, int x, int y) {
+            if (stack == null) return;
+            if (stack.what() instanceof AEItemKey item) {
+                DrawerHelper.drawItemStack(graphics, new ItemStack(item.getItem()), x, y, -1, null);
+            } else if (stack.what() instanceof AEFluidKey) {
+                FluidStack fluid = AEUtil.toFluidStack(stack);
+                if (!fluid.isEmpty()) {
+                    DrawerHelper.drawFluidForGui(graphics, fluid, stack.amount(), x, y, 16, 16);
+                }
+            }
+        }
     }
 
     @Override

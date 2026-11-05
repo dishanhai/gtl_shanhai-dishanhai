@@ -13,7 +13,7 @@ import com.dishanhai.gt_shanhai.client.gui.shop.ShopUiSounds;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
 import com.dishanhai.gt_shanhai.network.StellarWarningDismissPacket;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
-import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
+import com.dishanhai.sh_better_ui.client.gui.scaled.PageTransition;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -82,8 +82,15 @@ public final class TerminalReportScreen extends ScaledScreen {
     private final Spring scroll = new Spring(Spring.SCROLL);
     private final SpringTable<String> selection = new SpringTable<>(Spring.HOVER);
     private final SpringTable<String> stagger = new SpringTable<>(Spring.STAGGER);
-    private final GlassPanelTexture root = GlassPanelTexture.root(), display = GlassPanelTexture.display();
-    private final ShanhaiRecipeEditorAnimation transition = new ShanhaiRecipeEditorAnimation();
+    private final boolean clearGlass = com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.clearGlass();
+    private final GlassColors colors = GlassColors.select(clearGlass);
+    private final GlassPanelTexture root = clearGlass ? GlassPanelTexture.clearPanel() : GlassPanelTexture.root();
+    private final GlassPanelTexture display = clearGlass ? GlassPanelTexture.clearPanel() : GlassPanelTexture.display();
+
+    @Override public void renderBackground(GuiGraphics g) {
+        if (!clearGlass) super.renderBackground(g);
+    }
+    private final PageTransition transition = new PageTransition();
     private TerminalGlassUi ui;
     private int filter = -1, stage, left, top, headerBottom, listHeight, contentHeight, scrollTarget;
     private List<Group> layoutGroups = List.of();
@@ -327,7 +334,7 @@ public final class TerminalReportScreen extends ScaledScreen {
 
     @Override public void tick() {
         super.tick();
-        if (!warmed) { warmed = true; if (!reduced()) GlassBlur.warmUp(); }
+        if (!warmed) { warmed = true; if (!reduced() || clearGlass) GlassBlur.warmUp(); }
     }
 
     // ---------- 繪製 ----------
@@ -342,23 +349,23 @@ public final class TerminalReportScreen extends ScaledScreen {
         GuiRenderUtil.withPanelMotion(g, left + PANEL_W / 2f, top + PANEL_H / 2f, open, () -> {
             root.draw(g, mx, my, left, top, PANEL_W, PANEL_H);
             int y = top + 10;
-            ui.wrap(g, getTitle(), left + 12, y, PANEL_W - 66, GlassPalette.TEXT_HEAD);
+            ui.wrap(g, getTitle(), left + 12, y, PANEL_W - 66, colors.TEXT_HEAD);
             ui.button(g, "close", left + PANEL_W - 40, top + 8, 28, 22, Component.literal("×"), 16, true, mx, my, null);
             y += ui.height(getTitle(), PANEL_W - 66) + 4;
             Component target = targetLine();
-            ui.wrap(g, target, left + 12, y, CONTENT_W, GlassPalette.TEXT_MUTED);
+            ui.wrap(g, target, left + 12, y, CONTENT_W, colors.TEXT_MUTED);
             y += ui.height(target, CONTENT_W) + 2;
-            ui.wrap(g, counts(), left + 12, y, CONTENT_W, GlassPalette.TEXT);
+            ui.wrap(g, counts(), left + 12, y, CONTENT_W, colors.TEXT);
             if (hasSeparateSummary())
-                ui.wrap(g, report.summary(), left + 12, y + ui.height(counts(), CONTENT_W) + 2, CONTENT_W, GlassPalette.TEXT);
+                ui.wrap(g, report.summary(), left + 12, y + ui.height(counts(), CONTENT_W) + 2, CONTENT_W, colors.TEXT);
             for (Chip chip : chips) {
                 ui.button(g, chip.key(), listX() + chip.x(), top + chip.y(), chip.w(), chip.h(), chip.text(), Math.max(1, chip.w() - 12), true, mx, my, null);
                 float chosen = follow(selection, chip.key(), chip.category() == filter ? 1 : 0, at);
-                if (chosen > 0.02f) g.renderOutline(listX() + chip.x(), top + chip.y(), chip.w(), chip.h(), GuiMotion.lerpColor(0x0069E8FF, GlassPalette.ACCENT, chosen));
+                if (chosen > 0.02f) g.renderOutline(listX() + chip.x(), top + chip.y(), chip.w(), chip.h(), GuiMotion.lerpColor(0x0069E8FF, colors.ACCENT, chosen));
             }
             int headY = top + headerBottom - font.lineHeight - 4;
-            ui.wrap(g, tr("col_kind"), listX() + COL_KIND, headY, COL_KIND_W, GlassPalette.TEXT_DIM);
-            ui.wrap(g, tr(isStellarStuck() ? "col_stellar_stuck" : isCraft() ? "col_block_craft" : "col_block"), listX() + COL_NAME, headY, COL_NAME_W, GlassPalette.TEXT_DIM);
+            ui.wrap(g, tr("col_kind"), listX() + COL_KIND, headY, COL_KIND_W, colors.TEXT_DIM);
+            ui.wrap(g, tr(isStellarStuck() ? "col_stellar_stuck" : isCraft() ? "col_block_craft" : "col_block"), listX() + COL_NAME, headY, COL_NAME_W, colors.TEXT_DIM);
             display.draw(g, mx, my, listX() - 3, listY() - 3, CONTENT_W + 6, listHeight + 6);
             drawRows(g, mx, my, at);
             drawScrollbar(g);
@@ -372,7 +379,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     private void drawRows(GuiGraphics g, int mx, int my, long at) {
         if (rows.isEmpty()) {
             if (loading) drawSpinner(g, listX() + CONTENT_W / 2, listY() + listHeight / 2, 14, at);
-            else ui.wrap(g, tr("empty"), listX() + 4, listY() + 4, CONTENT_W - 8, GlassPalette.TEXT_MUTED);
+            else ui.wrap(g, tr("empty"), listX() + 4, listY() + 4, CONTENT_W - 8, colors.TEXT_MUTED);
             return;
         }
         TerminalGlassUi.scissor(g, listX(), listY(), CONTENT_W, listHeight);
@@ -392,21 +399,21 @@ public final class TerminalReportScreen extends ScaledScreen {
                 int rowIndex = i;
                 GuiRenderUtil.withPanelMotion(g, x + CONTENT_W / 2f, y + row.h() / 2f, appear, () -> {
                     g.pose().pushPose(); g.pose().translate(0, (1 - appear) * 8, 0);
-                    g.fill(x, rowY, x + CONTENT_W, rowY + row.h(), GuiMotion.lerpColor(GlassPalette.ROW_FILL, GlassPalette.ROW_FILL_HOVER, hot));
-                    g.renderOutline(x, rowY, CONTENT_W, row.h(), GuiMotion.lerpColor(GlassPalette.ROW_EDGE, GlassPalette.ACCENT, hot));
+                    g.fill(x, rowY, x + CONTENT_W, rowY + row.h(), GuiMotion.lerpColor(colors.ROW_FILL, colors.ROW_FILL_HOVER, hot));
+                    g.renderOutline(x, rowY, CONTENT_W, row.h(), GuiMotion.lerpColor(colors.ROW_EDGE, colors.ACCENT, hot));
                     g.fill(x + 1, rowY + 1, x + 4, rowY + row.h() - 1, 0xFF000000 | color);
-                    ui.wrap(g, row.kind(), x + COL_KIND, rowY + 4, COL_KIND_W, GlassPalette.TEXT);
+                    ui.wrap(g, row.kind(), x + COL_KIND, rowY + 4, COL_KIND_W, colors.TEXT);
                     if (row.cells().isEmpty())
-                        ui.wrap(g, report.names().get(row.group().name()), x + COL_NAME, rowY + 4, COL_NAME_W, GlassPalette.TEXT);
+                        ui.wrap(g, report.names().get(row.group().name()), x + COL_NAME, rowY + 4, COL_NAME_W, colors.TEXT);
                     else drawCells(g, row, x + COL_NAME, rowY + 4, mx, my);
                     int lineY = rowY + 4 + row.gridH() + 3;
                     for (FormattedCharSequence line : row.detailLines()) {
                         if (lineY + font.lineHeight >= listY() && lineY <= listY() + listHeight)
-                            g.drawString(font, line, x + COL_NAME, lineY, GlassPalette.TEXT_MUTED, false);
+                            g.drawString(font, line, x + COL_NAME, lineY, colors.TEXT_MUTED, false);
                         lineY += font.lineHeight;
                     }
                     if (row.coordShown() > 0) {
-                        ui.wrap(g, row.coordsHeader(), x + COL_NAME, lineY, COL_NAME_W, GlassPalette.TEXT_DIM);
+                        ui.wrap(g, row.coordsHeader(), x + COL_NAME, lineY, COL_NAME_W, colors.TEXT_DIM);
                         lineY += font.lineHeight;
                         List<BlockPos> positions = row.group().positions();
                         for (int k = 0; k < row.coordShown(); k++, lineY += font.lineHeight) {
@@ -416,7 +423,7 @@ public final class TerminalReportScreen extends ScaledScreen {
                                 if (index >= positions.size()) break;
                                 BlockPos pos = positions.get(index);
                                 g.drawString(font, pos.getX() + "," + pos.getY() + "," + pos.getZ(),
-                                        x + COL_NAME + c * row.coordCellW(), lineY, GlassPalette.TEXT_DIM, false);
+                                        x + COL_NAME + c * row.coordCellW(), lineY, colors.TEXT_DIM, false);
                             }
                         }
                     }
@@ -450,11 +457,11 @@ public final class TerminalReportScreen extends ScaledScreen {
             int x = originX + cell.x(), y = originY + cell.y();
             if (y + cell.h() < listY() || y > listY() + listHeight) continue;
             boolean over = inList && hit(mx, my, x, y, cell.w(), cell.h());
-            g.fill(x, y, x + cell.w(), y + cell.h(), GlassPalette.DISPLAY_FILL);
-            g.renderOutline(x, y, cell.w(), cell.h(), over ? GlassPalette.ACCENT : GlassPalette.ROW_EDGE);
-            GlassCell.draw(g, x + 3, y + 3, CELL_ICON, GlassPalette.ROW_EDGE, 0, over);
+            g.fill(x, y, x + cell.w(), y + cell.h(), colors.DISPLAY_FILL);
+            g.renderOutline(x, y, cell.w(), cell.h(), over ? colors.ACCENT : colors.ROW_EDGE);
+            GlassCell.draw(g, x + 3, y + 3, CELL_ICON, colors.ROW_EDGE, 0, over, colors);
             g.renderItem(cell.stack(), x + 5, y + 5);
-            ui.wrap(g, cell.text(), x + CELL_ICON + 7, y + 5, cell.w() - CELL_ICON - 10, GlassPalette.TEXT);
+            ui.wrap(g, cell.text(), x + CELL_ICON + 7, y + 5, cell.w() - CELL_ICON - 10, colors.TEXT);
         }
     }
     /** 載入動畫：一圈小方塊，亮點沿圓周旋轉並拖出漸暗的尾巴。 */
@@ -466,7 +473,7 @@ public final class TerminalReportScreen extends ScaledScreen {
             int px = cx + (int) Math.round(Math.cos(angle) * radius) - 1, py = cy + (int) Math.round(Math.sin(angle) * radius) - 1;
             int age = (head - i + dots) % dots;
             int alpha = 255 - age * (200 / dots);
-            g.fill(px, py, px + 3, py + 3, (alpha << 24) | (GlassPalette.ACCENT & 0xFFFFFF));
+            g.fill(px, py, px + 3, py + 3, (alpha << 24) | (colors.ACCENT & 0xFFFFFF));
         }
     }
     private int thumbHeight() { return Math.max(14, listHeight * listHeight / Math.max(1, contentHeight)); }
@@ -474,8 +481,8 @@ public final class TerminalReportScreen extends ScaledScreen {
         if (contentHeight <= listHeight) return;
         int thumb = thumbHeight();
         int thumbY = listY() + Math.round((listHeight - thumb) * scroll.value() / Math.max(1, contentHeight - listHeight));
-        g.fill(listX() + CONTENT_W + 2, listY(), listX() + CONTENT_W + 4, listY() + listHeight, GlassPalette.DISPLAY_EDGE);
-        g.fill(listX() + CONTENT_W + 2, thumbY, listX() + CONTENT_W + 4, thumbY + thumb, draggingBar ? GlassPalette.TEXT : GlassPalette.ACCENT);
+        g.fill(listX() + CONTENT_W + 2, listY(), listX() + CONTENT_W + 4, listY() + listHeight, colors.DISPLAY_EDGE);
+        g.fill(listX() + CONTENT_W + 2, thumbY, listX() + CONTENT_W + 4, thumbY + thumb, draggingBar ? colors.TEXT : colors.ACCENT);
     }
     private void drawFooter(GuiGraphics g, long at) {
         int y = top + PANEL_H - FOOTER_H + 6;
@@ -486,10 +493,10 @@ public final class TerminalReportScreen extends ScaledScreen {
             drawSpinner(g, left + 18, y + 4, 5, at);
             textX += 20; line = tr("loading", layoutCursor, layoutGroups.size());
         }
-        ui.wrap(g, line, textX, y, CONTENT_W - (textX - left - 12), flashing && !loading ? GlassPalette.OK : GlassPalette.TEXT_MUTED);
+        ui.wrap(g, line, textX, y, CONTENT_W - (textX - left - 12), flashing && !loading ? colors.OK : colors.TEXT_MUTED);
         if (report.omitted() > 0)
-            ui.wrap(g, tr("omitted", report.omitted()).copy().withStyle(ChatFormatting.YELLOW), left + 12,
-                    y + ui.height(line, CONTENT_W) + 2, CONTENT_W, GlassPalette.TEXT_MUTED);
+            ui.wrap(g, clearGlass ? tr("omitted", report.omitted()) : tr("omitted", report.omitted()).copy().withStyle(ChatFormatting.YELLOW), left + 12,
+                    y + ui.height(line, CONTENT_W) + 2, CONTENT_W, colors.TEXT_MUTED);
     }
 
     // ---------- 輸入 ----------
