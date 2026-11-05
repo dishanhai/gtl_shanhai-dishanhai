@@ -1,32 +1,71 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import net.minecraft.client.Minecraft;
-import com.dishanhai.sh_better_ui.client.glass.GlassTooltip;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraftforge.client.event.RenderTooltipEvent;
 
 
 /**
- * 商店玻璃主题下的 tooltip（山海署名，客户端）：原版 tooltip 是近黑底 + 紫粉渐变边，和半透明玻璃格格不入，
- * 而且别的模组会往它的颜色事件里塞自己的边框。这里在 {@link RenderTooltipEvent.Pre} 里直接接管——
- * 只在商店界面且主题为玻璃时取消原版绘制，按原版同一套布局（宽高、定位器、首行后空两像素）自己画：
- * 毛玻璃底 + 深蓝实底 + 青色细边，再画文字与图片组件。别的界面、经典主题完全不受影响。
+ * 山海：商店系 tooltip 使用当前商店主题的边框；沿用事件提供的字型、定位器和文字／图片组件。
+ * 在其他模组绘制彩色边框前接管，非商店画面不受影响。
  */
 public final class ShopGlassTooltip {
-
+    private static final int PAD = 4;
 
     private ShopGlassTooltip() {
     }
 
-    /** 当前界面是商店系界面且玻璃主题开着。 */
+    /** 当前界面是商店系界面，三种主题均使用自己的 tooltip 框。 */
     static boolean applies() {
         var screen = Minecraft.getInstance().screen;
         return screen != null
-                && screen.getClass().getName().startsWith("com.dishanhai.gt_shanhai.client.gui.shop.")
-                && ShopTheme.current().glass;
+                && screen.getClass().getName().startsWith("com.dishanhai.gt_shanhai.client.gui.shop.");
     }
 
-    /** 以 LOWEST 优先级挂在 Forge 总线上：别的模组先改完位置/字体，我们再接管绘制。 */
+    /** 以 HIGHEST 优先级挂在 Forge 总线上，先于外部 tooltip 边框绘制。 */
     public static void onTooltipPre(RenderTooltipEvent.Pre event) {
-        if (applies()) GlassTooltip.render(event);
+        if (!applies() || event.getComponents().isEmpty()) return;
+        var components = event.getComponents();
+        var font = event.getFont();
+        int width = 0;
+        int height = components.size() == 1 ? -2 : 0;
+        for (ClientTooltipComponent c : components) {
+            width = Math.max(width, c.getWidth(font));
+            height += c.getHeight();
+        }
+        var pos = event.getTooltipPositioner().positionTooltip(event.getScreenWidth(), event.getScreenHeight(),
+                event.getX(), event.getY(), width, height);
+        int x = pos.x();
+        int y = pos.y();
+        ShopTheme theme = ShopTheme.current();
+        GuiGraphics g = event.getGraphics();
+        event.setCanceled(true);
+        g.pose().pushPose();
+        try {
+            if (theme.glass) {
+                theme.tooltipPanel(g, x - PAD, y - PAD, width + PAD * 2, height + PAD * 2);
+            } else {
+                theme.rootPanel(g, x - PAD, y - PAD, width + PAD * 2, height + PAD * 2,
+                        x - PAD + 2, y - PAD + 2, width + PAD * 2 - 4, height + PAD * 2 - 4);
+            }
+            g.flush();
+            g.pose().translate(0f, 0f, 400f);
+            int ty = y;
+            for (int i = 0; i < components.size(); i++) {
+                ClientTooltipComponent c = components.get(i);
+                c.renderText(font, x, ty, g.pose().last().pose(), g.bufferSource());
+                ty += c.getHeight() + (i == 0 ? 2 : 0);
+            }
+            g.flush();
+            ty = y;
+            for (int i = 0; i < components.size(); i++) {
+                ClientTooltipComponent c = components.get(i);
+                c.renderImage(font, x, ty, g);
+                ty += c.getHeight() + (i == 0 ? 2 : 0);
+            }
+        } finally {
+            g.pose().popPose();
+        }
     }
 }

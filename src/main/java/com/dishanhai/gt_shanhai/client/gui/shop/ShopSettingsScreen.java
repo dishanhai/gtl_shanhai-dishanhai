@@ -69,8 +69,9 @@ public class ShopSettingsScreen extends ScaledScreen {
     private static final String SOUND_HINT =
             "§7点击、步进连发与成交结果的提示音，用原版声音，跟随主音量。只存在这台客户端";
 
-    private static final String THEME_HINT =
-            "§7动态玻璃与山海样板生成器同一套：半透明分层底板、左上受光亮边、外缘柔影；文字颜色不变。本页即时预览，保存后商店生效。只存在这台客户端";
+    private String themeHint() {
+        return Component.translatable("gt_shanhai.shop.theme.hint").getString();
+    }
 
     private final ShopScreen parent;
     private final boolean serverRows;
@@ -85,7 +86,7 @@ public class ShopSettingsScreen extends ScaledScreen {
     private boolean rememberShopView;
     private boolean reduceMotion;
     private boolean uiSounds;
-    private boolean glassTheme;
+    private String shopTheme;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private EditBox cardWidthBox;
@@ -120,7 +121,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.rememberShopView = ClientShopUiSettings.rememberShopView();
         this.reduceMotion = ClientShopUiSettings.reduceMotion();
         this.uiSounds = ClientShopUiSettings.uiSounds();
-        this.glassTheme = ClientShopUiSettings.glassTheme();
+        this.shopTheme = ClientShopUiSettings.shopTheme();
     }
 
     @Override
@@ -130,7 +131,7 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     /** 本页按尚未保存的选择即时预览主题。 */
     private ShopTheme theme() {
-        return glassTheme ? ShopTheme.GLASS : ShopTheme.CLASSIC;
+        return ShopTheme.of(shopTheme);
     }
 
     @Override
@@ -275,9 +276,10 @@ public class ShopSettingsScreen extends ScaledScreen {
         int themeY = visualY(row(rowTheme()));
         if (rowVisible(themeY, 16)) {
             drawBtn(g, x, themeY, fieldWidth(), 16,
-                    glassTheme ? "§b界面主题: 动态玻璃（同样板生成器）" : "§6界面主题: 经典金框（默认）", mx, my);
+                    Component.translatable("gt_shanhai.shop.theme.setting",
+                            Component.translatable("gt_shanhai.shop.theme." + shopTheme)).getString(), mx, my);
         }
-        drawWrappedContentLines(g, THEME_HINT, x, row(rowThemeHint()), textW);
+        drawWrappedContentLines(g, themeHint(), x, row(rowThemeHint()), textW);
 
         g.disableScissor();
         drawScrollbar(g, mx, my);
@@ -328,7 +330,7 @@ public class ShopSettingsScreen extends ScaledScreen {
                 return true;
             }
             if (hitContent(mx, contentMy, x, row(rowTheme()), w, 16)) {
-                glassTheme = !glassTheme;
+                shopTheme = ShopTheme.next(shopTheme);
                 return true;
             }
         }
@@ -383,7 +385,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         ClientShopUiSettings.setRewardPreviewBar(previewBar);
         ClientShopUiSettings.setRememberShopView(rememberShopView);
         ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds);
-        ClientShopUiSettings.setShopTheme(glassTheme ? ClientShopUiSettings.THEME_GLASS : ClientShopUiSettings.THEME_CLASSIC);
+        ClientShopUiSettings.setShopTheme(shopTheme);
         parent.onRememberShopViewSaved(rememberShopView);
         if (serverRows) {
             ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
@@ -426,7 +428,7 @@ public class ShopSettingsScreen extends ScaledScreen {
     private int rowThemeHint() { return rowTheme() + 18; }
 
     /** 选项区内容总高：最后一段说明换几行就长几行。 */
-    private int contentHeight() { return row(rowThemeHint()) + wrappedHeight(THEME_HINT) + 4; }
+    private int contentHeight() { return row(rowThemeHint()) + wrappedHeight(themeHint()) + 4; }
 
     private int wrappedHeight(String text) {
         return Math.max(1, this.font.split(Component.literal(text), fieldWidth()).size()) * 10;

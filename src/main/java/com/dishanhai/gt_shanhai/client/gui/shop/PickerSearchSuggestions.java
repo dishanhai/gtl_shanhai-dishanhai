@@ -21,13 +21,21 @@ public final class PickerSearchSuggestions {
     }
 
     public List<ShopCatalogSearchIndex.Suggestion> suggest(String query, List<Integer> matches) {
+        return suggest(query, matches, 5);
+    }
+
+    public List<ShopCatalogSearchIndex.Suggestion> suggestAll(String query, List<Integer> matches) {
+        return suggest(query, matches, matches.size());
+    }
+
+    private List<ShopCatalogSearchIndex.Suggestion> suggest(String query, List<Integer> matches, int limit) {
         String q = query == null ? "" : query.trim();
         if (q.isEmpty() || matches.isEmpty()) return List.of();
         List<Long> candidates = matches.stream().map(Integer::longValue).toList();
-        if ("@#$*".indexOf(q.charAt(0)) < 0) return index.suggest(q, candidates, 5);
+        if ("@#$*".indexOf(q.charAt(0)) < 0) return index.suggest(q, candidates, limit);
         String ranking = q.substring(1).trim();
         if (ranking.isEmpty()) return List.of();
-        return index.suggestMatches(ranking, candidates, 5).stream()
+        return index.suggestMatches(ranking, candidates, limit).stream()
                 .map(suggestion -> new ShopCatalogSearchIndex.Suggestion(suggestion.entryKey(),
                         suggestion.displayName(), "*" + ids.get(suggestion.entryKey()))).toList();
     }

@@ -68,6 +68,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private static final int BTN_BG = -14935012;
     private static final int BTN_HOVER = -12303292;
     private static final int SEL_ACTIVE = -12285748;  // 已选清单当前激活行底色
+    private ShopTheme theme = ShopTheme.current();
 
     private static final int TARGET_W = 600;
     private static final int TARGET_H = 380;
@@ -742,7 +743,7 @@ public class MultiPickerScreen extends ScaledScreen {
 
     private void refreshSearchSuggestions() {
         if (searchSuggestions != null)
-            searchSuggestions.update(suggestionIndex.suggest(searchBox.getValue(), filtered));
+            searchSuggestions.update(suggestionIndex.suggestAll(searchBox.getValue(), filtered));
     }
 
     private void rebuildSource() {
@@ -1022,6 +1023,7 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        theme = ShopTheme.current();
         updateMotion(mx, my);
         ui.frame(mx, my);
         if ((itemCacheReady && !itemCacheAppliedOnce)
@@ -1032,11 +1034,17 @@ public class MultiPickerScreen extends ScaledScreen {
         hoverItem = null;
         hoverFluidTip = null;
         hoverSelNameFull = null;
-        g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
-        g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
-        g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
+        if (theme.glass) {
+            theme.rootPanel(g, left, top, panelWidth, panelHeight,
+                    left + 2, top + 2, panelWidth - 4, panelHeight - 4);
+        } else {
+            g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
+            g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
+            g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
+        }
         String title = replacing ? (rowMode ? "编辑这一排" : "替换这一格") : restrictedMode ? "多选货币" : allowTexture ? "多选显示图标" : "多选资源";
-        g.drawString(this.font, "§6" + title, left + 10, top + 7, GOLD, true);
+        g.drawString(this.font, theme.label("§6" + title), left + 10, top + 7,
+                theme.glass ? theme.colors.TEXT_HEAD : GOLD, !theme.glass);
         g.drawString(this.font, "§8点选、拖过连选；右侧调整数量与顺序", left + 10, top + 21, GRAY, false);
         if (originalSelection != null && replacing) {
             List<net.minecraft.util.FormattedCharSequence> originalLines = this.font.split(
@@ -1123,7 +1131,8 @@ public class MultiPickerScreen extends ScaledScreen {
                 String id = index == 0 ? "" : moduleOrder.get(index - 1);
                 String label = index == 0 ? "全部模组" : moduleNames.getOrDefault(id, id);
                 int count = index == 0 ? curNames().size() : moduleCounts.getOrDefault(id, 0);
-                if (id.equals(moduleFilter)) g.fill(sidebarX, ry, sidebarX + sidebarW, ry + height, SEL_ACTIVE);
+                if (id.equals(moduleFilter)) g.fill(sidebarX, ry, sidebarX + sidebarW, ry + height,
+                        theme.glass ? theme.selectBg : SEL_ACTIVE);
                 List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(label), moduleLabelWidth());
                 for (int line = 0; line < lines.size(); line++)
                     g.drawString(this.font, lines.get(line), sidebarX + 2, ry + 3 + line * this.font.lineHeight, WHITE, false);
@@ -1175,7 +1184,8 @@ public class MultiPickerScreen extends ScaledScreen {
         g.pose().pushPose();
         try {
             g.pose().translate(0, 0, GRID_HEADER_Z);
-            g.fill(gridX, y, gridX + gridW, y + row.getHeight(), 0xFF302C24);
+            g.fill(gridX, y, gridX + gridW, y + row.getHeight(),
+                    theme.glass ? 0xEE000000 | (theme.panelBg & 0xFFFFFF) : 0xFF302C24);
             String id = row.getModule();
             String label = (collapsedModules.contains(id) ? "▸ " : "▾ ") + moduleNames.getOrDefault(id, id)
                     + " (" + filteredModuleCounts.getOrDefault(id, 0) + ")";
@@ -1207,7 +1217,9 @@ public class MultiPickerScreen extends ScaledScreen {
             g.pose().translate(x + 10, y + 10, hover ? 50 : 0);
             g.pose().scale(scale, scale, 1);
             g.pose().translate(-x - 10, -y - 10, 0);
-            EditorWidgets.checkerSlot(g, x, y, hover);
+            if (theme.glass) theme.box(g, x, y, SLOT, SLOT, hover ? theme.frame : theme.cellEdge,
+                    hover ? theme.rowHover : theme.boxBg);
+            else EditorWidgets.checkerSlot(g, x, y, hover);
             if (mode == Mode.FLUID || isBookmarkFluidIndex(index)) EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, curFluid(index));
             else if (mode == Mode.TEXTURE) EditorWidgets.textureThumb(g, x + 2, y + 2, 16, ALL_TEXTURES.get(index));
             else {
@@ -1238,8 +1250,11 @@ public class MultiPickerScreen extends ScaledScreen {
     }
 
     private void drawSelectedList(GuiGraphics g, int mx, int my) {
-        g.fill(selX - 2, selY - 2, selX + selW + 6, gridBottom + 1, PANEL_BG);
-        g.drawString(this.font, "§6已选清单 (" + selected.size() + ")", selX + 2, selY + 1, GOLD, false);
+        if (theme.glass) theme.box(g, selX - 2, selY - 2, selW + 8, gridBottom - selY + 3,
+                theme.colors.DISPLAY_EDGE, theme.boxBg);
+        else g.fill(selX - 2, selY - 2, selX + selW + 6, gridBottom + 1, PANEL_BG);
+        g.drawString(this.font, theme.label("§6已选清单 (" + selected.size() + ")"), selX + 2, selY + 1,
+                theme.glass ? theme.colors.TEXT_HEAD : GOLD, false);
         ui.draw(g, this.font, syncAllX(), selY + 14, selW - 42, 16,
                 "§b全部设为 " + (active == null ? 1 : active.count), mx, my, active != null);
         ui.draw(g, this.font, clearAllX(), selY + 14, 36, 16, "§c清空", mx, my, !selected.isEmpty());
@@ -1252,7 +1267,8 @@ public class MultiPickerScreen extends ScaledScreen {
                 if (y + height <= listTop() || y >= gridBottom) continue;
                 boolean hover = GuiRenderUtil.isHovering(mx, my, selX, Math.max(listTop(), y), selW, Math.min(height, gridBottom - y));
                 float glow = ui.rowHover(index, hover);
-                if (entry == active) g.fill(selX, y, selX + selW, y + height - 1, SEL_ACTIVE);
+                if (entry == active) g.fill(selX, y, selX + selW, y + height - 1,
+                        theme.glass ? theme.selectBg : SEL_ACTIVE);
                 else if (glow > 0) g.fill(selX, y, selX + selW, y + height - 1, GuiMotion.lerpColor(0, 0x33FFFFFF, glow));
                 float flash = addFlash(entry, System.currentTimeMillis());
                 if (flash > 0) g.fill(selX, y, selX + selW, y + height - 1, (Math.round(90 * flash) << 24) | 0xFFD040);
@@ -1287,7 +1303,7 @@ public class MultiPickerScreen extends ScaledScreen {
         ui.draw(g, this.font, minusX, y, 16, 16, "−", mx, my, true);
         ui.draw(g, this.font, plusX, y, 16, 16, "+", mx, my, true);
         if (entry != editingQuantity) {
-            g.fill(minusX + 19, y, plusX - 3, y + 16, 0x50202020);
+            g.fill(minusX + 19, y, plusX - 3, y + 16, theme.glass ? theme.barBg : 0x50202020);
             g.drawCenteredString(this.font, Long.toString(entry.count), (minusX + 19 + plusX - 3) / 2, y + 4, CYAN);
         }
         String unit = entry.isFluid ? "mB" : entry.itemIcon.hasTag() ? "NBT" : "个";
@@ -1320,11 +1336,12 @@ public class MultiPickerScreen extends ScaledScreen {
             float swap = Math.max(0, 1 - (System.currentTimeMillis() - modeChangedAtMs) / 180f);
             float strength = ClientShopUiSettings.reduceMotion() ? 0 : Math.min(0.8f, Math.max(Math.abs(gridVelocity) / 1800f - 0.08f, swap * 0.65f));
             if (strength > 0.01f) GaussBlur.requestDirectional(grid.getX(), grid.getY(), grid.getW(), grid.getH(),
-                    strength, 8 * guiScale, 0, 1, GlassStyle.SWAP);
+                    strength, 8 * guiScale, 0, 1, theme == ShopTheme.SMOKE ? GlassStyle.NONE : GlassStyle.SWAP);
             PixelRect panel = toPixels(new GuiRect(left, top, panelWidth, panelHeight));
             GaussBlur.requestExtra(0, 0, mc.getMainRenderTarget().width, mc.getMainRenderTarget().height,
                     Math.min(1, opening.value()) * 0.85f, 12 * guiScale,
-                    panel.getX(), panel.getY(), panel.getW(), panel.getH(), GlassStyle.OVERLAY);
+                    panel.getX(), panel.getY(), panel.getW(), panel.getH(),
+                    theme == ShopTheme.SMOKE ? GlassStyle.NONE : GlassStyle.OVERLAY);
         }
         GaussBlur.deferTopLayer(this, topGraphics -> drawTopLayer(topGraphics, smx, smy, mx, my));
     }
@@ -1343,7 +1360,8 @@ public class MultiPickerScreen extends ScaledScreen {
                 }
             }
             if (draggedSelection != null && dragStarted) {
-                g.fill(smx + 8, smy + 8, smx + 32, smy + 32, 0xD0303028);
+                if (theme.glass) theme.box(g, smx + 8, smy + 8, 24, 24, theme.frameDark, theme.panelBg);
+                else g.fill(smx + 8, smy + 8, smx + 32, smy + 32, 0xD0303028);
                 drawSelectionIcon(g, draggedSelection, smx + 12, smy + 12);
             }
         } finally { g.pose().popPose(); }
@@ -1678,9 +1696,10 @@ public class MultiPickerScreen extends ScaledScreen {
     }
 
     private void drawListName(GuiGraphics g, String text, int x, int y, int width, boolean rowHover) {
-        List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(text), width);
+        List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(theme.label(text)), width);
         for (int index = 0; index < lines.size(); index++)
-            g.drawString(this.font, lines.get(index), x, y + index * this.font.lineHeight, WHITE, true);
+            g.drawString(this.font, lines.get(index), x, y + index * this.font.lineHeight,
+                    theme.ink(text, WHITE), !theme.glass);
     }
 
     private boolean selListClicked(double mx, double my, int btn) {

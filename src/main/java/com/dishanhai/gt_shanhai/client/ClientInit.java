@@ -73,14 +73,16 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onItemTooltip);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onClientTick);
-        // 商店玻璃主题的 tooltip：LOWEST 让别的模组先改完，我们再接管绘制
-        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
+        // 山海：先接管商店 tooltip，避免外部模组提前绘制不同主题的边框。
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGHEST,
                 com.dishanhai.gt_shanhai.client.gui.shop.ShopGlassTooltip::onTooltipPre);
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
                 com.dishanhai.gt_shanhai.client.gui.StellarGlassTooltip::onTooltipPre);
         // 山海：消费端只登记画面；独立库负责唯一 Post 事件、预热、关闭与资源重载。
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
-                screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen);
+                screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen
+                        || screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopSettingsScreen
+                        || screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopWelcomeScreen);
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.lowdragmc.lowdraglib.gui.modular.ModularUIGuiContainer container
                         && (container.modularUI.holder == com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory.INSTANCE

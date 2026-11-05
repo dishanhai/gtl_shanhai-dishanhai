@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
+import com.dishanhai.gt_shanhai.api.TextFormatParser;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
@@ -127,7 +128,7 @@ public class RewardChoiceScreen extends ScaledScreen {
             String chance = "§e" + dev.ftb.mods.ftbquests.quest.loot.WeightedReward.chanceString(opt.weight(), totalWeight);
             String right = amount + " " + chance;
             int nameW = Math.max(16, rowW() - TEXT_X - this.font.width(right) - 4 - checkW);
-            List<FormattedCharSequence> name = this.font.split(st.getHoverName(), nameW);
+            List<FormattedCharSequence> name = this.font.split(TextFormatParser.normalizeFcsComponent(st.getHoverName()), nameW);
             rows.add(new Row(st, name, right, Math.max(ROW_H, name.size() * LINE_H + 4)));
         }
         return rows;

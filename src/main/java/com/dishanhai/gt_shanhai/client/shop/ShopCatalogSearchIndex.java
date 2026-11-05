@@ -15,7 +15,6 @@ public final class ShopCatalogSearchIndex {
     public record Suggestion(long entryKey, String displayName, String completion) {}
     private record SuggestionText(String name, String completionName, String normalizedName, List<String> ids,
                                   List<String> normalizedIds) {}
-    private record RankedSuggestion(int rank, Suggestion suggestion) {}
     private record QueryKey(String query, String scope) {}
     private static final int CACHE_LIMIT = 64;
     private final Map<Long, AdvancedSearchUtil.PreparedText> texts = new LinkedHashMap<>();
@@ -64,7 +63,7 @@ public final class ShopCatalogSearchIndex {
         return immutable;
     }
 
-    /** 山海：只从当前可见候选中联想；有界插入排序，不加载商品详情，也不排序整个目录。 */
+    /** 山海：只从当前可见候选中联想；按原有七档优先级稳定分桶，不加载商品详情。 */
     public List<Suggestion> suggest(String query, List<Long> candidates, int limit) {
         return suggest(query, candidates, limit, true);
     }
@@ -77,7 +76,8 @@ public final class ShopCatalogSearchIndex {
     private List<Suggestion> suggest(String query, List<Long> candidates, int limit, boolean matchText) {
         var prepared = AdvancedSearchUtil.prepareQuery(query);
         if (limit <= 0 || prepared.tokens().isEmpty()) return List.of();
-        List<RankedSuggestion> best = new ArrayList<>();
+        List<List<Suggestion>> ranked = new ArrayList<>(7);
+        for (int i = 0; i < 7; i++) ranked.add(new ArrayList<>());
         for (Long key : candidates == null ? texts.keySet() : candidates) {
             var text = texts.get(key);
             if (text == null || (matchText && !text.matches(prepared))) continue;
@@ -95,13 +95,16 @@ public final class ShopCatalogSearchIndex {
                 }
                 rank += idRank;
             }
-            int at = 0;
-            while (at < best.size() && best.get(at).rank() <= rank) at++;
-            if (at >= limit) continue;
-            best.add(at, new RankedSuggestion(rank, new Suggestion(key, source.name(), completion)));
-            if (best.size() > limit) best.remove(best.size() - 1);
+            List<Suggestion> bucket = ranked.get(rank);
+            if (bucket.size() < limit) bucket.add(new Suggestion(key, source.name(), completion));
         }
-        return best.stream().map(RankedSuggestion::suggestion).toList();
+        List<Suggestion> result = new ArrayList<>();
+        for (List<Suggestion> bucket : ranked) {
+            int count = Math.min(bucket.size(), limit - result.size());
+            result.addAll(bucket.subList(0, count));
+            if (result.size() == limit) break;
+        }
+        return List.copyOf(result);
     }
 
     private static int matchRank(String text, String query) {

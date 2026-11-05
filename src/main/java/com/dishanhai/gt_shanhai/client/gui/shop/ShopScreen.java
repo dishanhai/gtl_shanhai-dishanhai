@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.gt_shanhai.api.TextFormatParser;
 import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
 import com.dishanhai.sh_better_ui.client.blur.GlassStyle;
 
@@ -135,6 +136,7 @@ public class ShopScreen extends ScaledScreen {
     // "长按脱离"进入真正的拖拽视觉态，松开时按落点算目标下标发包持久化，见反馈：要能拖到任意位置，
     // 不只是前移/后移。非拖拽（未越过阈值）松开 = 当普通点击处理，行为等同原来的立即切换。
     private int dragTabLevel = -1;         // 0=主分类,1=二级,2=三级,3=四级；-1=当前未在拖拽/按下追踪中
+    private int dragTabButton = -1;
     private String dragTabCategory;        // 正在拖拽/追踪的页签名
     private double dragTabStartX, dragTabStartY; // 按下时坐标，用于判断是否越过拖拽阈值
     private boolean dragTabMoving;         // 是否已越过阈值，进入真正拖拽视觉态（页签跟随鼠标、原位置塌陷）
@@ -469,6 +471,12 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void clearSelection() {
+        cancelPendingGuide();
+        closeDescOverlay();
+        descMotion.snap(0f);
+        closeGuideOverlay();
+        guideMotion.snap(0f);
+        draggingDescOverlayScroll = false;
         pendingRestoreStableId = null;
         selectedEntryKey = -1L;
         selected = null;
@@ -777,9 +785,7 @@ public class ShopScreen extends ScaledScreen {
      * 商品卡片上的小分类字段：当前页停在父分类时，显示该商品的下一层分类。
      * 例如当前页是「无限盘区/前期」，条目属于「无限盘区/前期/ulv」时显示「ulv」。
      */
-    private static String cardCategoryBadge(ShopEntry entry) {
-        if (entry == null) return "";
-        String[] parts = splitCardCategoryPath(entry.getCategory());
+    private static String cardCategoryBadge(String[] parts) {
         int depth = currentCategoryDepth();
         if (cardCategoryMatchesCurrentPrefix(parts, depth)) {
             for (int i = depth; i < parts.length; i++) {
@@ -943,9 +949,10 @@ public class ShopScreen extends ScaledScreen {
      * （见 universalMouseDragged 的阈值判定、universalMouseReleased 的分支）。value=""（「全部」伪页签）
      * 或没有编辑权限时不会越过拖拽阈值，松开即按原逻辑切页，按下反馈得以先播完压下。
      */
-    private void beginTabAction(int level, String value, double mx, double my) {
+    private void beginTabAction(int level, String value, double mx, double my, int button) {
         // 全部/无编辑权也先记按下、等松开再切页：否则切页触发的 init 会把刚压下的反馈直接归零
         dragTabLevel = level;
+        dragTabButton = button;
         dragTabCategory = value;
         dragTabStartX = mx;
         dragTabStartY = my;
@@ -965,7 +972,7 @@ public class ShopScreen extends ScaledScreen {
             if (hit(mx, my, x, y, aw, TAB_H)) {
                 armClickWave(mx, my);
                 pressTab(x, y, aw, TAB_H);
-                beginTabAction(level, "", mx, my);
+                beginTabAction(level, "", mx, my, btn);
                 return true;
             }
             x += aw + 3;
@@ -982,7 +989,7 @@ public class ShopScreen extends ScaledScreen {
                     return true;
                 }
                 pressTab(x, y, tw, TAB_H);
-                beginTabAction(level, item, mx, my);
+                beginTabAction(level, item, mx, my, btn);
                 return true;
             }
             x += tw + 3;
@@ -1253,7 +1260,7 @@ public class ShopScreen extends ScaledScreen {
     /** 山海：联想和商品网格共用已经过分类、收藏及资源筛选的候选。 */
     private void refreshSearchSuggestions() {
         if (searchSuggestions != null)
-            searchSuggestions.update(ClientShopCatalog.searchSuggestions(currentSearch(), visibleEntryKeys, 5));
+            searchSuggestions.update(ClientShopCatalog.searchSuggestions(currentSearch(), visibleEntryKeys, visibleEntryKeys.size()));
     }
 
     private void drawSearchFrame(GuiGraphics g, int mx, int my) {
@@ -1802,6 +1809,7 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void recomputeVisible() {
+        cardCategoryContext = new Object();
         String q = searchBox != null ? searchBox.getValue() : "";
         List<Long> keys = (q == null || q.isBlank())
                 ? ClientShopCatalog.keysOfGroup(selectedTop, selectedSub, selectedSub2, selectedSub3)
@@ -1918,9 +1926,9 @@ public class ShopScreen extends ScaledScreen {
             theme.rootShadow(g, left, top, panelWidth, panelHeight);
             theme.backdrop(g, left, top, panelWidth, panelHeight);
             theme.box(g, left, top, panelWidth, panelHeight,
-                    com.dishanhai.sh_better_ui.client.glass.GlassPalette.ROOT_EDGE, PANEL_BG);
+                    theme.colors.ROOT_EDGE, PANEL_BG);
             theme.box(g, left + 6, top + TOP_BAR_H + 6, panelWidth - 12, panelHeight - TOP_BAR_H - 12,
-                    com.dishanhai.sh_better_ui.client.glass.GlassPalette.DISPLAY_EDGE, PANEL_INNER);
+                    theme.colors.DISPLAY_EDGE, PANEL_INNER);
         } else {
             // 整体面板（KE 风格 4 层嵌套：金边→金→暗背景→内层）
             g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
@@ -1978,7 +1986,7 @@ public class ShopScreen extends ScaledScreen {
         int titleHalf = this.font.width(titleText) / 2 + 6;
         if (topStripOriginX() + topStripContentW() <= titleX() - titleHalf && titleX() + titleHalf <= favBtnX()) {
             g.drawCenteredString(this.font, titleText, titleX(), top + 9,
-                    theme.glass ? com.dishanhai.sh_better_ui.client.glass.GlassPalette.TEXT_HEAD : GOLD);
+                    theme.glass ? theme.colors.TEXT_HEAD : GOLD);
         }
 
         // 余额行（KE 货币栏：图标 + 紧凑数字 横排）
@@ -2051,12 +2059,52 @@ public class ShopScreen extends ScaledScreen {
 
     /** 右键菜单、各大图层、阶段锁定任一盖在商店内容区上。它们打开时底层控件被遮罩压暗，也不响应点击。 */
     private boolean modalLayerOpen() {
-        return ClientShopAvailability.isDisabled() || ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen
-                || stageLockActive;
+        return ClientShopAvailability.isDisabled() || activeOverlay() != Overlay.NONE || stageLockActive;
     }
+
+    /** 山海：退场还可见时只吞输入，不能再次执行旧浮层操作，也不能点到下面。 */
+    private boolean overlayClosing() {
+        return !ctxMenuOpen && !descOverlayOpen && !guideOverlayOpen && !groupPickerOpen && !cartOverlayOpen
+                && activeOverlay() != Overlay.NONE;
+    }
+
+    private void cancelUnderlyingInput() {
+        buttonFeedback.release(System.currentTimeMillis());
+        cancelPendingGuide();
+        dragTabLevel = -1;
+        dragTabButton = -1;
+        dragTabCategory = null;
+        dragTabMoving = false;
+        dragCardEntryKey = -1L;
+        dragCardEntry = null;
+        dragCardOldIndex = -1;
+        dragCardMoving = false;
+        draggingDescOverlayScroll = draggingDetailScroll = draggingGridScroll = false;
+        setDragging(false);
+        clearTextFocus();
+        if (searchSuggestions != null) searchSuggestions.dismiss();
+    }
+
+    /** 沿用五根弹簧；新浮层接管时旧层立即退位，不能在新层关闭后重新冒出来。 */
+    private void closeOtherOverlays(Spring keep) {
+        if (keep != ctxMotion) {
+            closeContextMenu();
+            ctxMotion.snap(0f);
+            ctxMenuItems = List.of();
+            ctxMenuEntryKey = -1L;
+        }
+        if (keep != descMotion) { closeDescOverlay(); descMotion.snap(0f); }
+        if (keep != guideMotion) { closeGuideOverlay(); guideMotion.snap(0f); }
+        if (keep != groupPickerMotion) { closeGroupPicker(); groupPickerMotion.snap(0f); }
+        if (keep != cartMotion) { closeCartOverlay(); cartMotion.snap(0f); }
+    }
+
+    private void resetOverlays() { closeOtherOverlays(null); }
 
     /** 打开浮层：已经完全静止在 0 时从 0 起（snap 免得残留旧速度），退场到一半被重新打开则从当前值接着走。 */
     private void openOverlay(Spring motion) {
+        cancelUnderlyingInput();
+        closeOtherOverlays(motion);
         long now = System.currentTimeMillis();
         if (motion.settled() && motion.value() <= OVERLAY_VISIBLE_EPS) motion.snap(0f);
         motion.setTarget(1f, now);
@@ -2410,10 +2458,7 @@ public class ShopScreen extends ScaledScreen {
         // 卡片飞行层画在所有基础控件（搜索框/数量框）之后、各种大图层之前：
         // 这样遮罩能一起压住输入框，模拟附近界面失焦；购物车/详情大图层仍可盖在它上面。
         renderCardFlight(g);
-        if (stageLockActive) {
-            renderStageLockOverlay(g, mx, my);
-            return;
-        }
+        if (stageLockActive) renderStageLockOverlay(g, mx, my);
         updateOverlayMotion(System.currentTimeMillis());
         switch (activeOverlay()) {
             case CTX -> drawContextMenu(g, mx, my);
@@ -3489,21 +3534,29 @@ public class ShopScreen extends ScaledScreen {
     private void drawLoadingCell(GuiGraphics g, long entryKey, int cx, int cy) {
         int cellW = cellW();
         int cellH = cellH();
+        ShopCardLayout layout = ShopCardLayout.of(cellW, cellH, 26, 0, false);
         renderBox(g, cx, cy, cellW, cellH, CELL_EDGE, ROW_BG);
         int slotX = cx + 3, slotY = cy + 3;
-        renderItemCheckerSlot(g, slotX, slotY);
+        g.pose().pushPose();
+        try {
+            g.pose().translate(slotX, slotY, 0f);
+            float scale = layout.slotSize() / 20f;
+            g.pose().scale(scale, scale, 1f);
+            renderItemCheckerSlot(g, 0, 0);
+        } finally { g.pose().popPose(); }
         com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.Stub stub =
                 ClientShopCatalog.stub(entryKey);
-        String label = "加载中…";
+        String label = Component.translatable("gt_shanhai.shop.card.loading_name").getString();
         if (stub != null && !stub.displayName().isEmpty()) label = stub.displayName();
         else if (stub != null && !stub.goodsIds().isEmpty()) label = stub.goodsIds().get(0);
-        if (stub != null && ClientShopFavorites.contains(stub.stableId())) {
-            g.drawString(this.font, "§e★", cx + cellW - 10, cy + 14, GOLD, false);
+        boolean favorite = stub != null && ClientShopFavorites.contains(stub.stableId());
+        if (favorite) {
+            g.drawString(this.font, "§e★", cx + cellW - 10, cy + layout.favoriteY(), GOLD, false);
         }
         if (stub != null && batchSelectionStableIds.contains(stub.stableId())) {
             renderBatchSelectionOutline(g, cx, cy, cellW, cellH);
         }
-        renderNumberBar(g, cx + 2, cy + cellH - 13, 34);
+        renderNumberBar(g, cx + 2, cy + layout.priceY(), layout.numberWidth());
         float dx = loadingLabelDx(entryKey);
         boolean slide = dx > 0.05f;
         if (slide) {
@@ -3511,12 +3564,13 @@ public class ShopScreen extends ScaledScreen {
             g.pose().translate(dx, 0f, 0f);
         }
         try {
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, cellW - 29),
-                    slotX + 23, cy + 4, GRAY, true);
-            g.drawString(this.font, "§8加载中", cx + 5, cy + cellH - 11, GRAY, false);
+            g.drawString(this.font, cardText(label, Math.max(0, layout.nameWidth(favorite) - (int) Math.ceil(dx))),
+                    cx + layout.textX(), cy + 4, GRAY, true);
         } finally {
             if (slide) g.pose().popPose();
         }
+        g.drawString(this.font, cardText(Component.translatable("gt_shanhai.shop.card.loading").getString(),
+                layout.numberWidth() - 6), cx + 5, cy + layout.priceY() + 2, GRAY, false);
     }
 
     /** 占位第一次出现才记时刻。开场和切页已经在动，这段横移等它们落位再播，避免叠两条通道。 */
@@ -3768,60 +3822,72 @@ public class ShopScreen extends ScaledScreen {
         snapDetailScroll((int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * detailScrollMax));
     }
 
-    /**
-     * 网格格渲染缓存：{@link ShopEntry#goodsDisplayName}/{@link ShopEntry#makeGoodsStack}/成本主成分
-     * 文本+图标——这些每帧都在算但对同一个 ShopEntry 对象结果恒定，商品一多（几百上千条）逐帧重算就是
-     * 打开/滚动商店卡顿的元凶。按条目对象身份缓存一次即可；用 WeakHashMap 是因为编辑/新增商品在
-     * {@link ShopConfig} 里永远是造一个全新 ShopEntry 对象替换旧的（见 replaceEntry/addEntry），
-     * 新对象天然缓存未命中会自动重算，旧对象没了强引用后随 GC 自动清掉，不用手动失效。
-     * 静态字段=跨开关屏幕复用，不止省一帧。截断宽度对任意格恒定（cx 无关，见 {@link #buildCellCache}
-     * 推导），故可以脱离具体格坐标缓存。
-     */
+    /** 山海：缓存解析与几何，物品模型仍正常逐帧绘制；不让无限盘 NBT／分类拆分反复进入热路径。 */
     private static final class CellCache {
-        final int cellWidth;
+        final int cellWidth, cellHeight;
+        final ShopCardLayout layout;
+        final List<ShopEntry.DisplayIcon> icons;
         final ItemStack goodsStack; // 无自定义显示图标、主商品非流体时用；否则为 null（流体走 goodsFluid，组合/自定义走 renderIconComposite）
         final net.minecraft.world.level.material.Fluid goodsFluid; // 主商品是流体时非空（同 renderFluidIcon 配套）
-        final String trimmedName;
-        final String amtText;
+        final String trimmedName, favoriteName, amtText, extraText;
+        final Component favoriteMark = Component.translatable("gt_shanhai.shop.card.favorite");
+        final String[] categoryParts;
         final ItemStack costIcon;
         final boolean sparkPrimary;
         final boolean euPrimary;
         final boolean fluidPrimary;
-        final int extra;
+        Object categoryContext;
+        String badge = "", favoriteBadge = "";
 
-        CellCache(int cellWidth, ItemStack goodsStack, net.minecraft.world.level.material.Fluid goodsFluid, String trimmedName,
-                  String amtText, ItemStack costIcon, boolean sparkPrimary, boolean euPrimary, boolean fluidPrimary, int extra) {
+        CellCache(int cellWidth, int cellHeight, ShopCardLayout layout, List<ShopEntry.DisplayIcon> icons,
+                  ItemStack goodsStack, net.minecraft.world.level.material.Fluid goodsFluid, String trimmedName, String favoriteName,
+                  String amtText, String extraText, String[] categoryParts, ItemStack costIcon,
+                  boolean sparkPrimary, boolean euPrimary, boolean fluidPrimary) {
             this.cellWidth = cellWidth;
+            this.cellHeight = cellHeight;
+            this.layout = layout;
+            this.icons = icons;
             this.goodsStack = goodsStack;
             this.goodsFluid = goodsFluid;
             this.trimmedName = trimmedName;
+            this.favoriteName = favoriteName;
             this.amtText = amtText;
+            this.extraText = extraText;
+            this.categoryParts = categoryParts;
             this.costIcon = costIcon;
             this.sparkPrimary = sparkPrimary;
             this.euPrimary = euPrimary;
             this.fluidPrimary = fluidPrimary;
-            this.extra = extra;
         }
     }
 
     private static final Map<ShopEntry, CellCache> CELL_CACHE = new java.util.WeakHashMap<>();
+    private static net.minecraft.locale.Language cellCacheLanguage;
+    private static net.minecraft.client.gui.Font cellCacheFont;
+    private Object cardCategoryContext = new Object();
 
     private CellCache cellCacheFor(ShopEntry entry) {
+        var language = net.minecraft.locale.Language.getInstance();
+        if (cellCacheLanguage != language || cellCacheFont != this.font) {
+            CELL_CACHE.clear();
+            cellCacheLanguage = language;
+            cellCacheFont = this.font;
+        }
         CellCache cached = CELL_CACHE.get(entry);
         int cellW = cellW();
-        if (cached != null && cached.cellWidth == cellW) return cached;
+        if (cached != null && cached.cellWidth == cellW && cached.cellHeight == cellH()) return cached;
         CellCache built = buildCellCache(entry);
         CELL_CACHE.put(entry, built);
         return built;
     }
 
-    /** 截断宽度推导：rightX-textX = (cx+cellW()-3)-(cx+3+23) = cellW()-29，与格子的 cx 无关。 */
+    /** 山海：布局、图标来源及裁字仅在条目／尺寸／语言变化时计算。 */
     private CellCache buildCellCache(ShopEntry entry) {
         int cellW = cellW();
-        boolean noCustomIcons = entry.effectiveIcons().isEmpty();
+        List<ShopEntry.DisplayIcon> icons = List.copyOf(entry.effectiveIcons());
+        boolean noCustomIcons = icons.isEmpty();
         ItemStack goodsStack = noCustomIcons && !entry.isPrimaryGoodsFluid() ? entry.displayGoodsStack() : null;
         net.minecraft.world.level.material.Fluid goodsFluid = noCustomIcons && entry.isPrimaryGoodsFluid() ? entry.primaryGoodsFluid() : null;
-        String trimmedName = GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), cellW - 29);
         ShopCost cost = entry.getCost();
         String amtText;
         ItemStack costIcon = null;
@@ -3846,10 +3912,35 @@ public class ShopScreen extends ScaledScreen {
                 if (!unit0.isEmpty()) costIcon = unit0;
             }
         } else {
-            amtText = "免";
+            amtText = Component.translatable("gt_shanhai.shop.card.free").getString();
         }
         int extra = cost.componentCount() - 1;
-        return new CellCache(cellW, goodsStack, goodsFluid, trimmedName, amtText, costIcon, sparkPrimary, euPrimary, fluidPrimary, extra);
+        String extraText = extra > 0 ? Component.translatable("gt_shanhai.shop.card.extra", extra).getString() : "";
+        ShopCardLayout layout = ShopCardLayout.of(cellW, cellH(), this.font.width(amtText), this.font.width(extraText),
+                costIcon != null || sparkPrimary || euPrimary || fluidPrimary);
+        String name = entry.goodsDisplayName();
+        return new CellCache(cellW, cellH(), layout, icons, goodsStack, goodsFluid,
+                cardText(name, layout.nameWidth(false)),
+                cardText(name, layout.nameWidth(true)),
+                cardText(amtText, layout.numberWidth() - 6), extraText,
+                splitCardCategoryPath(entry.getCategory()), costIcon, sparkPrimary, euPrimary, fluidPrimary);
+    }
+
+    /** 共用省略助手保留最小字宽；卡片窄列再用原版 API 严格夹到实际预算。 */
+    private String cardText(String text, int width) {
+        if (width <= 0) return "";
+        return this.font.plainSubstrByWidth(GuiRenderUtil.trimText(this.font, text, width), width);
+    }
+
+    private String cachedCategoryBadge(CellCache cc, boolean favorite) {
+        if (!cc.layout.showCategory()) return "";
+        if (cc.categoryContext != cardCategoryContext) {
+            String badge = cardCategoryBadge(cc.categoryParts);
+            cc.badge = cardText(badge, cc.layout.badgeWidth(false));
+            cc.favoriteBadge = cardText(badge, cc.layout.badgeWidth(true));
+            cc.categoryContext = cardCategoryContext;
+        }
+        return favorite ? cc.favoriteBadge : cc.badge;
     }
 
     /** KE 风格横向格：左棋盘物品槽 + 右侧名称/状态 + 底部价格数字条 + 货币小图标。 */
@@ -3857,7 +3948,8 @@ public class ShopScreen extends ScaledScreen {
         boolean sel = selected == entry;
         int cellW = cellW();
         int cellH = cellH();
-        boolean hover = GuiRenderUtil.isHovering(mx, my, cx, cy, cellW, cellH);
+        boolean hover = !modalLayerOpen() && !searchSuggestions.contains(mx, my)
+                && GuiRenderUtil.isHovering(mx, my, cx, cy, cellW, cellH);
         float hv = hoverCells.follow(entryKey, hover ? 1f : 0f, System.currentTimeMillis());
         // 限时折扣：格子太小塞不下额外文字（见 CurrencyAtmScreen 教训，不硬挤新元素），改用边框/价格变色示意，
         // 具体折扣%和倒计时留给悬浮 tooltip（buildTooltip）和详情页（drawDetail）精确显示
@@ -3869,54 +3961,61 @@ public class ShopScreen extends ScaledScreen {
         if (isBatchSelected(entry)) renderBatchSelectionOutline(g, cx, cy, cellW, cellH);
 
         CellCache cc = cellCacheFor(entry);
+        ShopCardLayout layout = cc.layout;
+        boolean favorite = ClientShopFavorites.contains(entry.getStableId());
 
         // 棋盘物品槽（20x20）：有自定义显示图标走组合渲染（1主+最多4附属角标），否则用缓存好的商品图标
         int slotX = cx + 3, slotY = cy + 3;
-        renderItemCheckerSlot(g, slotX, slotY);
-        List<ShopEntry.DisplayIcon> cellIcons = entry.effectiveIcons();
-        if (!cellIcons.isEmpty()) {
-            renderIconComposite(g, cellIcons, slotX, slotY);
-        } else if (cc.goodsFluid != null) {
-            renderFluidIcon(g, slotX + 2, slotY + 2, 16, cc.goodsFluid);
-        } else {
-            g.renderItem(cc.goodsStack, slotX + 2, slotY + 2);
-            g.renderItemDecorations(this.font, cc.goodsStack, slotX + 2, slotY + 2);
-        }
+        g.pose().pushPose();
+        try {
+            g.pose().translate(slotX, slotY, 0f);
+            float iconScale = layout.slotSize() / 20f;
+            g.pose().scale(iconScale, iconScale, 1f);
+            renderItemCheckerSlot(g, 0, 0);
+            if (!cc.icons.isEmpty()) {
+                renderIconComposite(g, cc.icons, 0, 0);
+            } else if (cc.goodsFluid != null) {
+                renderFluidIcon(g, 2, 2, 16, cc.goodsFluid);
+            } else {
+                g.renderItem(cc.goodsStack, 2, 2);
+                g.renderItemDecorations(this.font, cc.goodsStack, 2, 2);
+            }
+        } finally { g.pose().popPose(); }
 
         // 商品名（右上，截断宽度对所有格恒定，缓存好的结果直接画）
-        int textX = slotX + 23;
-        g.drawString(this.font, cc.trimmedName, textX, cy + 4, WHITE, true);
+        int textX = cx + layout.textX();
+        g.drawString(this.font, favorite ? cc.favoriteName : cc.trimmedName, textX, cy + 4, WHITE, true);
 
-        String categoryBadge = cardCategoryBadge(entry);
+        String categoryBadge = cachedCategoryBadge(cc, favorite);
         if (!categoryBadge.isEmpty()) {
-            int badgeMaxW = cellW - 29 - (ClientShopFavorites.contains(entry.getStableId()) ? 12 : 0);
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, categoryBadge, badgeMaxW),
-                    textX, cy + 15, CYAN, false);
+            g.drawString(this.font, categoryBadge, textX, cy + 14, CYAN, false);
         }
 
         // 收藏角标（名称行与底部价格条之间的空白带，右对齐，不挤占任何已有元素）
-        if (ClientShopFavorites.contains(entry.getStableId())) {
-            g.drawString(this.font, "§e★", cx + cellW - 10, cy + 14, GOLD, false);
+        if (favorite) {
+            g.drawString(this.font, cc.favoriteMark,
+                    cx + cellW - 10, cy + layout.favoriteY(), GOLD, false);
         }
 
         // 底部成本数字条 + 主成分图标 +「+K」（多元成本取主成分：币种 > 星火 > 实物；全部缓存好）
         int numX = cx + 2;
-        int numY = cy + cellH - 13;
-        int numW = Math.min(48, Math.max(22, this.font.width(cc.amtText) + 8));
-        renderNumberBar(g, numX, numY, numW);
+        int numY = cy + layout.priceY();
+        renderNumberBar(g, numX, numY, layout.numberWidth());
         g.drawString(this.font, cc.amtText, numX + 4, numY + 2, onSale ? RED : NUMBER_BAR_TEXT, false);
-        int iconX = numX + numW + 2;
-        if (cc.sparkPrimary) {
-            g.drawString(this.font, "§e★", iconX + 1, numY + 2, GOLD, false);
-        } else if (cc.euPrimary) {
-            g.drawString(this.font, "§d⚡", iconX + 1, numY + 2, GOLD, false);
-        } else if (cc.fluidPrimary) {
-            g.drawString(this.font, "§b≈", iconX + 1, numY + 2, CYAN, false); // 流体主成分标记
-        } else if (cc.costIcon != null) {
-            renderCurrencyItem(g, cc.costIcon, iconX, numY - 2);
+        int iconX = cx + layout.costX();
+        if (layout.showCost()) {
+            if (cc.sparkPrimary) {
+                g.drawString(this.font, "§e★", iconX + 1, numY + 2, GOLD, false);
+            } else if (cc.euPrimary) {
+                g.drawString(this.font, "§d⚡", iconX + 1, numY + 2, GOLD, false);
+            } else if (cc.fluidPrimary) {
+                g.drawString(this.font, "§b≈", iconX + 1, numY + 2, CYAN, false); // 流体主成分标记
+            } else if (cc.costIcon != null) {
+                renderCurrencyItem(g, cc.costIcon, iconX, numY);
+            }
         }
-        if (cc.extra > 0) {
-            g.drawString(this.font, "§7+" + cc.extra, iconX + 15, numY + 2, GRAY, false);
+        if (layout.showExtra()) {
+            g.drawString(this.font, cc.extraText, cx + layout.extraX(), numY + 2, GRAY, false);
         }
     }
 
@@ -3931,15 +4030,14 @@ public class ShopScreen extends ScaledScreen {
     private static void renderItemCheckerSlot(GuiGraphics g, int x, int y) {
         if (theme.glass) {
             com.dishanhai.sh_better_ui.client.glass.GlassCell.draw(g, x - 1, y - 1, 22,
-                    com.dishanhai.sh_better_ui.client.glass.GlassPalette.ROW_EDGE, 0f, false);
+                    theme.colors.ROW_EDGE, 0f, false, theme.colors);
             return;
         }
         g.fill(x - 1, y - 1, x + 21, y + 21, -7697782);
-        g.fill(x, y, x + 20, y + 20, -1644826);
+        g.fill(x, y, x + 20, y + 20, -2302756);
         for (int yy = 0; yy < 20; yy += 5) {
-            for (int xx = 0; xx < 20; xx += 5) {
-                int color = (((xx / 5) + (yy / 5)) & 1) == 0 ? -723724 : -2302756;
-                g.fill(x + xx, y + yy, Math.min(x + xx + 5, x + 20), Math.min(y + yy + 5, y + 20), color);
+            for (int xx = (yy / 5 % 2) * 5; xx < 20; xx += 10) {
+                g.fill(x + xx, y + yy, x + xx + 5, y + yy + 5, -723724);
             }
         }
         // 立体边
@@ -3999,11 +4097,11 @@ public class ShopScreen extends ScaledScreen {
         g.pose().popPose();
     }
 
-    /** 货币小图标（0.75x 缩放）。 */
+    /** 山海：成本图标限定为 10px，高度不侵入上方分类文字。 */
     private void renderCurrencyItem(GuiGraphics g, ItemStack stack, int x, int y) {
         g.pose().pushPose();
         g.pose().translate(x, y, 0);
-        g.pose().scale(0.75f, 0.75f, 1f);
+        g.pose().scale(0.625f, 0.625f, 1f);
         g.renderItem(stack, 0, 0);
         g.pose().popPose();
     }
@@ -4713,15 +4811,14 @@ public class ShopScreen extends ScaledScreen {
 
     /** 飞行层头部图标：与网格卡片/详情面板保持同一套优先级（自定义组合 > 流体 > 物品）。 */
     private void drawFlightIcon(GuiGraphics g, ShopEntry entry, int x, int y) {
-        List<ShopEntry.DisplayIcon> icons = entry.effectiveIcons();
-        if (!icons.isEmpty()) {
-            renderIconComposite(g, icons, x - 2, y - 2);
-        } else if (entry.isPrimaryGoodsFluid()) {
-            renderFluidIcon(g, x, y, 16, entry.primaryGoodsFluid());
+        CellCache cc = cellCacheFor(entry);
+        if (!cc.icons.isEmpty()) {
+            renderIconComposite(g, cc.icons, x - 2, y - 2);
+        } else if (cc.goodsFluid != null) {
+            renderFluidIcon(g, x, y, 16, cc.goodsFluid);
         } else {
-            ItemStack stack = entry.displayGoodsStack();
-            g.renderItem(stack, x, y);
-            g.renderItemDecorations(this.font, stack, x, y);
+            g.renderItem(cc.goodsStack, x, y);
+            g.renderItemDecorations(this.font, cc.goodsStack, x, y);
         }
     }
 
@@ -4802,14 +4899,9 @@ public class ShopScreen extends ScaledScreen {
     /** 山海：禁用不会关闭主页；清除在禁用前已按住、拖动或排队的交互。 */
     public void onAvailabilityChanged() {
         buttonFeedback.cancel(System.currentTimeMillis());
-        cancelPendingGuide();
+        cancelUnderlyingInput();
         queuedCurrency = null;
-        dragTabLevel = -1;
-        dragTabMoving = false;
-        dragCardEntryKey = -1L;
-        dragCardMoving = false;
-        draggingDescOverlayScroll = draggingDetailScroll = draggingGridScroll = false;
-        ctxMenuOpen = descOverlayOpen = guideOverlayOpen = groupPickerOpen = cartOverlayOpen = false;
+        resetOverlays();
         if (searchBox != null) searchBox.setFocused(false);
         if (amountBox != null) amountBox.setFocused(false);
     }
@@ -4949,6 +5041,7 @@ public class ShopScreen extends ScaledScreen {
         GaussBlur.clear();
         GaussBlur.clearTopLayer();
         buttonFeedback.cancel(System.currentTimeMillis());
+        cancelUnderlyingInput();
         super.removed();
     }
 
@@ -4957,6 +5050,7 @@ public class ShopScreen extends ScaledScreen {
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
         if (ClientShopAvailability.isDisabled()) return handleDisabledClick(mx, my, btn);
+        if (overlayClosing()) return true;
         // 右键快捷菜单打开时拦截全部点击：点某一行执行该动作并关闭，点菜单外任意处只关闭，不冒泡给下层控件
         if (ctxMenuOpen) {
             return handleContextMenuClick(mx, my);
@@ -4965,7 +5059,8 @@ public class ShopScreen extends ScaledScreen {
         if (cartOverlayOpen) {
             return handleCartOverlayClick(mx, my);
         }
-        if (stageLockActive && hit(mx, my, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight())) {
+        if (activeOverlay() == Overlay.NONE && stageLockActive
+                && hit(mx, my, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight())) {
             if (stageLockAutoCraftVisible && buttonHit(mx, my, stageLockAutoCraftX, stageLockAutoCraftY,
                     stageLockAutoCraftW, stageLockAutoCraftH) && stageLockPath != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
@@ -5698,8 +5793,9 @@ public class ShopScreen extends ScaledScreen {
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
         if (ClientShopAvailability.isDisabled()) return true;
+        if (ctxMenuOpen || overlayClosing()) return true;
         if (searchSuggestions.mouseScrolled(mx, my, d)) return true;
-        if (stageLockActive) return true;
+        if (stageLockActive && activeOverlay() == Overlay.NONE) return true;
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
             int maxScroll = descOverlayMaxScroll(r, descOverlayLines(r).size());
@@ -5749,7 +5845,12 @@ public class ShopScreen extends ScaledScreen {
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
         if (ClientShopAvailability.isDisabled()) return true;
+        if (activeOverlay() != Overlay.NONE || (stageLockActive && dragTabLevel == -1)) {
+            if (descOverlayOpen && draggingDescOverlayScroll) updateDescOverlayScrollFromDrag(my);
+            return true;
+        }
         if (dragTabLevel != -1) {
+            if (btn != dragTabButton) return true;
             dragTabMx = mx;
             dragTabMy = my;
             if (!dragTabMoving && dragEnabled() && !dragTabCategory.isEmpty()
@@ -5780,11 +5881,17 @@ public class ShopScreen extends ScaledScreen {
         }
         // 先结束按下态与连发；不 return，下面的拖拽、滚动条照常收尾
         buttonFeedback.release(System.currentTimeMillis());
+        if (activeOverlay() != Overlay.NONE || (stageLockActive && dragTabLevel == -1)) {
+            cancelUnderlyingInput();
+            return true;
+        }
         if (dragTabLevel != -1) {
+            if (btn != dragTabButton) return true;
             int level = dragTabLevel;
             String category = dragTabCategory;
             boolean moved = dragTabMoving;
             dragTabLevel = -1;
+            dragTabButton = -1;
             dragTabCategory = null;
             dragTabMoving = false;
             if (moved) sendTabReorder(level, category, computeTabDropIndex(level, mx));
@@ -5792,6 +5899,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         if (dragCardEntryKey != -1L) {
+            if (btn != 0) return true;
             long entryKey = dragCardEntryKey;
             ShopEntry entry = dragCardEntry;
             int oldIndex = dragCardOldIndex;
@@ -5932,8 +6040,13 @@ public class ShopScreen extends ScaledScreen {
             if (cartOverlayOpen) { closeCartOverlay(); return true; } // 结算批次不清，见 handleCartOverlayClick 关闭分支
             if (descOverlayOpen) { closeDescOverlay(); return true; }
             if (guideOverlayOpen) { closeGuideOverlay(); return true; }
+            if (activeOverlay() != Overlay.NONE) return true;
             if (searchSuggestions.dismiss()) return true;
             if (clearTextFocus()) return true;
+        }
+        if (modalLayerOpen()) {
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) onClose();
+            return true;
         }
         if (searchSuggestions.navigationKey(keyCode)) return true;
         if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
@@ -5954,7 +6067,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
-        if (ClientShopAvailability.isDisabled()) return true;
+        if (modalLayerOpen()) return true;
         return super.charTyped(codePoint, modifiers);
     }
 
@@ -7235,10 +7348,12 @@ public class ShopScreen extends ScaledScreen {
             int chanceW = this.font.width(chance);
             int countW = count.isEmpty() ? 0 : this.font.width(count) + 2;
             int iconW = hasIcon ? 18 : 0;
-            int nameMax = Math.max(8, maxW - iconW - countW - chanceW - 2);
-            String name = (line.deliverable() ? "§f" : "§8") + GuiRenderUtil.trimText(this.font, line.name(), nameMax);
+            int nameMax = Math.max(0, maxW - iconW - countW - chanceW - 2);
+            Component label = TextFormatParser.normalizeFcsComponent(Component.literal(line.name()));
+            FormattedCharSequence name = net.minecraft.locale.Language.getInstance().getVisualOrder(
+                    this.font.substrByWidth(label, nameMax));
             int nameW = this.font.width(name);
-            g.drawString(this.font, name, x + iconW, ry + 4, WHITE, true);
+            g.drawString(this.font, name, x + iconW, ry + 4, line.deliverable() ? WHITE : GRAY, true);
             if (!count.isEmpty()) g.drawString(this.font, count, x + iconW + nameW + 2, ry + 4, GRAY, true);
             g.drawString(this.font, chance, x + maxW - chanceW, ry + 4, WHITE, true);
             if (hv) {
@@ -7606,7 +7721,7 @@ public class ShopScreen extends ScaledScreen {
         g.pose().pushPose();
         g.pose().translate(0.0f, 0.0f, 600.0f);
         try {
-            if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
+            if (activeOverlay() != Overlay.NONE) return; // 浮层退场期间也不让底层 tooltip 穿透
             if (searchSuggestions.contains(smx, smy) || (searchSuggestions.open()
                     && hit(smx, smy, searchBoxX(), searchBoxY(), SEARCH_W, 12))) return;
             if (hoveredTipPage != null) {

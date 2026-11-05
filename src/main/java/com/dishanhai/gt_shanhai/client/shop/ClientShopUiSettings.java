@@ -22,6 +22,7 @@ public final class ClientShopUiSettings {
     public static final String THEME_CLASSIC = "classic";
     /** 界面主题：与山海样板生成器相同的动态玻璃。 */
     public static final String THEME_GLASS = "glass";
+    public static final String THEME_SMOKE = "smoke";
     private static final int MIN_CARD_WIDTH = 48;
     private static final int MAX_CARD_WIDTH = 120;
     private static final int MIN_CARD_HEIGHT = 28;
@@ -170,7 +171,7 @@ public final class ClientShopUiSettings {
     }
 
     public static boolean glassTheme() {
-        return THEME_GLASS.equals(shopTheme());
+        return !THEME_CLASSIC.equals(shopTheme());
     }
 
     public static synchronized void setShopTheme(String theme) {
@@ -180,7 +181,7 @@ public final class ClientShopUiSettings {
     }
 
     private static String normalizeTheme(String theme) {
-        return THEME_GLASS.equals(theme) ? THEME_GLASS : THEME_CLASSIC;
+        return THEME_SMOKE.equals(theme) ? THEME_SMOKE : THEME_GLASS.equals(theme) ? THEME_GLASS : THEME_CLASSIC;
     }
 
     public static String pickerSort() {
