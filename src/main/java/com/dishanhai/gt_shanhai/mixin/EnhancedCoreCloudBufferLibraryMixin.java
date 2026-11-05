@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.mixin;
 
 import appeng.api.crafting.IPatternDetails;
 import com.dishanhai.gt_shanhai.common.item.SelectedRecipePattern;
+import com.dishanhai.gt_shanhai.common.item.PatternEncodePreferences;
 import com.dishanhai.gt_shanhai.integration.enhancedcore.EnhancedCoreCloudLibraryCompat;
 import com.gtl.enhancedcore.common.cloud.CloudPatternBufferMachine;
 import com.gtl.enhancedcore.common.cloud.CloudPatternMatching;
@@ -30,7 +31,8 @@ public class EnhancedCoreCloudBufferLibraryMixin {
         if (node == null) return;
         List<Object> key = List.of(node.id(), node.generation(), buffer.iv$getState().identity,
                 buffer.cloudStore().library(buffer.cloudLibraryId()).revision(), buffer.cloudMode(), keepByProduct,
-                buffer.cloudAllocationEpoch(), Set.copyOf(validatedLeases), EnhancedCoreCloudLibraryCompat.recipeRevision());
+                buffer.cloudAllocationEpoch(), Set.copyOf(validatedLeases), EnhancedCoreCloudLibraryCompat.recipeRevision(),
+                PatternEncodePreferences.writeVirtualProvider());
         if (!key.equals(gtShanhai$publicationKey)) {
             gtShanhai$children = List.copyOf(EnhancedCoreCloudLibraryCompat.publications(buffer, validatedLeases));
             gtShanhai$publicationKey = key;
@@ -66,8 +68,7 @@ public class EnhancedCoreCloudBufferLibraryMixin {
         if (recipe == null || !buffer.cloudRouteValid(route)) { cir.setReturnValue(0L); return; }
         var entry = buffer.entry(route.getInt("slot"));
         if (entry == null) { cir.setReturnValue(0L); return; }
-        var child = SelectedRecipePattern.expand(entry.original(), buffer.getLevel()).stream()
-                .filter(value -> value.recipe().id.equals(recipe.id)).findFirst().orElse(null);
+        var child = EnhancedCoreCloudLibraryCompat.child(entry.original(), buffer.getLevel(), recipe.id.toString());
         var probe = child == null ? null : EnhancedCoreCloudLibraryCompat.childProbe(buffer, entry, child, keepByProduct);
         var machine = com.gtl.enhancedcore.common.recipe.iv.IvBuffers.controller(buffer);
         if (probe == null || machine == null || !CloudPatternMatching.supported(recipe, machine)) { cir.setReturnValue(0L); return; }
@@ -80,7 +81,12 @@ public class EnhancedCoreCloudBufferLibraryMixin {
         if (!EnhancedCoreCloudLibraryCompat.mother(original)) return;
         String id = EnhancedCoreCloudLibraryCompat.dispatchRecipe();
         var buffer = (CloudPatternBufferMachine)(Object)this;
-        for (var child : SelectedRecipePattern.expand(original, buffer.getLevel())) {
+        if (id != null) {
+            var child = EnhancedCoreCloudLibraryCompat.child(original, buffer.getLevel(), id);
+            cir.setReturnValue(child == null ? null : EnhancedCoreCloudLibraryCompat.routed(buffer, slot, original, child));
+            return;
+        }
+        for (var child : EnhancedCoreCloudLibraryCompat.children(original, buffer.getLevel())) {
             // Only Enhancedcore's UI bookkeeping receives a representative; provider publication expands all children.
             if ((id == null && Objects.equals(buffer.cloudMode(), child.recipe().recipeType.registryName))
                     || child.recipe().id.toString().equals(id)) {

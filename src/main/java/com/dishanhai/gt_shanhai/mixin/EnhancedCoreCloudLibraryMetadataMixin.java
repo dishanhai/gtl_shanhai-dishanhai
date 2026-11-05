@@ -2,6 +2,9 @@ package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.integration.enhancedcore.EnhancedCoreCloudLibraryCompat;
 import com.gtl.enhancedcore.common.cloud.store.CloudPatternStore;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import java.util.Locale;
 import java.util.UUID;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -27,6 +30,22 @@ public class EnhancedCoreCloudLibraryMetadataMixin {
             entry.setRecipeTypes(actor, EnhancedCoreCloudLibraryCompat.types(entry.original(), server.overworld()));
             ci.cancel();
         }
+    }
+
+    @WrapOperation(method = "catalogRow", at = @At(value = "INVOKE",
+            target = "Ljava/lang/String;toLowerCase(Ljava/util/Locale;)Ljava/lang/String;"), require = 0)
+    private static String gtShanhai$completeSearchIndex(String text, Locale locale, Operation<String> original,
+                                                       CloudPatternStore.Entry entry, ServerLevel level) {
+        if (EnhancedCoreCloudLibraryCompat.mother(entry.original()))
+            text += " " + EnhancedCoreCloudLibraryCompat.searchText(entry, level);
+        return original.call(text, locale);
+    }
+
+    @WrapOperation(method = "terminalSide", at = @At(value = "INVOKE",
+            target = "Ljava/lang/StringBuilder;toString()Ljava/lang/String;"), require = 0)
+    private static String gtShanhai$completeTerminalNames(StringBuilder keys, Operation<String> original,
+                                                         CompoundTag display, String prefix) {
+        return EnhancedCoreCloudLibraryCompat.terminalKeys(original.call(keys), display, prefix);
     }
 
     @Inject(method = "reloaded", at = @At("HEAD"), require = 0)

@@ -38,9 +38,8 @@ public class EnhancedCoreCloudBufferDispatchMixin {
     private static IPatternDetails gtShanhai$childCircuits(ItemStack stack, Level level, Operation<IPatternDetails> original) {
         String id = EnhancedCoreCloudLibraryCompat.dispatchRecipe();
         if (id != null && EnhancedCoreCloudLibraryCompat.mother(stack)) {
-            for (var child : SelectedRecipePattern.expand(stack, level))
-                if (child.recipe().id.toString().equals(id)) return child.pattern();
-            return null;
+            var child = EnhancedCoreCloudLibraryCompat.child(stack, level, id);
+            return child == null ? null : child.pattern();
         }
         return original.call(stack, level);
     }
