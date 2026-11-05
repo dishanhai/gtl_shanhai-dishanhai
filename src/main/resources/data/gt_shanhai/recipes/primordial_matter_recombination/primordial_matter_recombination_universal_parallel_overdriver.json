@@ -19,6 +19,38 @@
   },
   "type": "gtceu:primordial_matter_recombination",
   "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1024000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_ultimate"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 512000,
+          "value": [
+            {
+              "fluid": "dishanhai:stabilized_eternity"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 512000,
+          "value": [
+            {
+              "fluid": "dishanhai:causal_essence"
+            }
+          ]
+        }
+      }
+    ],
     "item": [
       {
         "content": {
@@ -67,45 +99,13 @@
       },
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "gt_shanhai:genesis_calculator"
           }
         },
         "chance": 0
-      }
-    ],
-    "fluid": [
-      {
-        "content": {
-          "amount": 1024000,
-          "value": [
-            {
-              "fluid": "dishanhai:matter_fluid_ultimate"
-            }
-          ]
-        }
-      },
-      {
-        "content": {
-          "amount": 512000,
-          "value": [
-            {
-              "fluid": "dishanhai:stabilized_eternity"
-            }
-          ]
-        }
-      },
-      {
-        "content": {
-          "amount": 512000,
-          "value": [
-            {
-              "fluid": "dishanhai:causal_essence"
-            }
-          ]
-        }
       }
     ]
   },
@@ -125,7 +125,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "dishanhai:primordial_matter_recombination/primordial_matter_recombination_universal_parallel_overdriver",
+      "recipeId": "gt_shanhai:primordial_matter_recombination/primordial_matter_recombination_universal_parallel_overdriver",
       "defaultEnabled": true
     }
   ]

@@ -1,0 +1,154 @@
+---
+navigation:
+  title: 配方线程仓
+  parent: ae/parallel_index.md
+  position: 15
+categories:
+  - gt_shanhai
+  - ae2
+item_ids:
+  - gt_shanhai:recipe_thread_hatch
+  - dishanhai:thread_shard_1
+  - dishanhai:thread_shard_2
+  - dishanhai:thread_shard_3
+  - dishanhai:thread_shard_4
+  - dishanhai:thread_shard_5
+  - dishanhai:thread_shard_6
+  - dishanhai:thread_shard_7
+  - dishanhai:universal_parallel_overdriver
+---
+
+# 配方线程仓
+
+<Column gap="15" fullWidth={true}>
+
+<Row>
+  <BlockImage id="gt_shanhai:recipe_thread_hatch" scale="6" />
+</Row>
+
+<Column gap="2" fullWidth={true}>
+
+<ItemLink id="gt_shanhai:recipe_thread_hatch" /> 是一种用于多方块机器的**独立配方批次扩展仓**。它不提供单批并行上限，也不向机器输入配方原料，而是为机器开启**多线程并行（独立批次）**能力——让同一台多方块能够同时挂起多批配方，各自独立计时、独立结算。
+
+* 可安装在多方块结构允许的**并行仓**（`PARALLEL_HATCH`）或**物品输入总线**（`IMPORT_ITEMS`）位置。
+* 基础提供 **1** 个独立批次；放入已注册的原初线程增强物品后，批次容量按 `1 + 物品倍率 × 堆叠数量` 扩展。
+* 槽位内的配置物品仅用于计算批次上限，**永远不会作为配方原料被消耗**，也不会暴露给机器输入列表。
+* 不会实现原生的 `IParallelHatch` 接口，因此与普通并行仓或可调并行部件同装时，**不会覆盖或干扰宿主原本的并行仓选择**。
+
+</Column>
+
+<Column gap="2" fullWidth={true}>
+
+## 工作原理
+
+### 独立配方批次 vs 单次并行 vs 跨配方合并
+
+在终局多方块产线中，容易混淆三种不同的并发概念：
+
+| 维度 | 单次并行（Parallel） | 跨配方线程（Multiple Recipes） | 独立配方批次（Recipe Thread Hatch） |
+| --- | --- | --- | --- |
+| **核心作用** | 同一配方单次放大多少倍输入与产出 | 单次接单时把多少条配方打包成一笔合成 | 同一台机器同时存在多少个独立计时槽（Lane） |
+| **计时与结算** | 共用同一进度条，同时完成 | 合并后共用同一进度条，绑死最慢配方 | **每批独立计时、到点即立刻产出并空出槽位** |
+| **典型痛点** | 无法同时跑慢配方与快配方 | 一个 100 秒配方会拖住同批的 1 秒配方 | 解决长短配方混跑互相阻塞的问题 |
+
+简单比喻：如果多方块是一间车间，**单次并行**是每个工位一次能加工多少件零件；**独立配方批次**则是在车间里隔出多个互不等待的独立流水线工位，快单做完立刻出货并接下一单，不必等旁边的慢单跑完。
+
+### 批次容量计算与上限收敛
+
+1. **仓室自身容量**：
+   - 当能力处于**已启用**状态时：`批次容量 = 1 + 线程物品单件倍率 × 堆叠数量`（上限钳制在 `Long.MAX_VALUE`）。
+   - 当能力处于**已关闭**状态或槽位为空时：`批次容量 = 1`（仅保留基础单批次）。
+2. **多来源取最高（不叠加）**：
+   - 若多方块同时安装了多个 <ItemLink id="gt_shanhai:recipe_thread_hatch" />，或同时装有带多线程并行页签的 <ItemLink id="gt_shanhai:maintenance_hatch" />，控制器只会**取所有来源中的最高容量值**，不会把多个仓室的容量相加。
+3. **受整机总并行限制**：
+   - 宿主最终生效的独立批次数为 `min(整机总并行容量, 最高批次容量)`。如果机器本身只有 1 并行，即使线程仓提供 65 批次，实际也只会运行 1 个批次。
+
+### 支持的线程物品与对应配方线程数
+
+配方线程仓的槽位读取原初通用线程物品注册表（单格最多可堆叠 64 个）。放入不同档位的线程物品时，对应的额外线程与仓室提供的**总独立配方批次（配方线程数）**如下：
+
+<Row gap="12">
+  <ItemImage id="dishanhai:thread_shard_1" scale="3" />
+  <ItemImage id="dishanhai:thread_shard_2" scale="3" />
+  <ItemImage id="dishanhai:thread_shard_3" scale="3" />
+  <ItemImage id="dishanhai:thread_shard_4" scale="3" />
+  <ItemImage id="dishanhai:thread_shard_5" scale="3" />
+  <ItemImage id="dishanhai:thread_shard_6" scale="3" />
+  <ItemImage id="dishanhai:thread_shard_7" scale="3" />
+  <ItemImage id="dishanhai:universal_parallel_overdriver" scale="3" />
+</Row>
+
+| 线程物品 | 单件额外线程（倍率） | 放入 1 个时总配方线程数 | 放满 64 个时总配方线程数 |
+| --- | --- | --- | --- |
+| 空槽 ／ 关闭额外批次 | `+0` | **1**（基础单批次） | **1**（基础单批次） |
+| <ItemLink id="dishanhai:thread_shard_1" /> | `+1` ／ 个 | **2**（`1 + 1`） | **65**（`1 + 64`） |
+| <ItemLink id="dishanhai:thread_shard_2" /> | `+4` ／ 个 | **5**（`1 + 4`） | **257**（`1 + 256`） |
+| <ItemLink id="dishanhai:thread_shard_3" /> | `+16` ／ 个 | **17**（`1 + 16`） | **1,025**（`1 + 1,024`） |
+| <ItemLink id="dishanhai:thread_shard_4" /> | `+64` ／ 个 | **65**（`1 + 64`） | **4,097**（`1 + 4,096`） |
+| <ItemLink id="dishanhai:thread_shard_5" /> | `+256` ／ 个 | **257**（`1 + 256`） | **16,385**（`1 + 16,384`） |
+| <ItemLink id="dishanhai:thread_shard_6" /> | `+1,024` ／ 个 | **1,025**（`1 + 1,024`） | **65,537**（`1 + 65,536`） |
+| <ItemLink id="dishanhai:thread_shard_7" /> | `+4,096` ／ 个 | **4,097**（`1 + 4,096`） | **262,145**（`1 + 262,144`） |
+| <ItemLink id="dishanhai:universal_parallel_overdriver" /> | `Long.MAX_VALUE` | **9,223,372,036,854,775,807**（无限） | **9,223,372,036,854,775,807**（无限） |
+
+* 任意数量的 <ItemLink id="dishanhai:thread_shard_1" /> ～ <ItemLink id="dishanhai:thread_shard_7" /> 均按 `1 + 单件倍率 × 堆叠数量` 线性计算。
+* <ItemLink id="dishanhai:universal_parallel_overdriver" /> 只需放入 **1 个**即可直接将仓室批次容量拉满至 `Long.MAX_VALUE`（Jade 面板中显示为 `无限`）。
+
+### 并行配额与功率预算分配
+
+所有独立批次**共用整机的总并行容量与最大功率（或无线电网预算）**：
+
+* **并行均分**：假设整机总并行容量为 `P`，当前有效批次上限为 `N`，则第 `i` 个批次在接单时最多可分得约 `P / N` 的并行份额（余数优先分给前序批次）。
+* **功率与无线 EU 预留**：新批次接单时，只会使用扣除在途批次已占用功率后的**剩余电压/功率预算**（无线供电模式下则会预留所有在途批次跑完所需的剩余无线 EU），绝不会超出机器物理供电上限。
+* **逐 Tick 独立推进**：每个服务端 Tick 先推进已有批次的进度，到点的批次先检查输出空间并结算产物；随后空闲批次槽才会按剩余配额搜索并接取新配方。
+
+</Column>
+
+<Column gap="2" fullWidth={true}>
+
+## 使用方式
+
+### 安装与配置步骤
+
+1. 在多方块结构的**并行仓位**或**物品输入仓位**装入一个 <ItemLink id="gt_shanhai:recipe_thread_hatch" />，使多方块成型。
+2. 右键打开配方线程仓的毛玻璃界面，在右侧槽位放入已登记的线程增强物品（如世线残片系列或寰宇并行超限器）。
+3. 观察左侧面板显示的**独立配方批次**数值变化；需要临时停用多批次接单时，可点击界面下方的 `[关闭额外批次]` 按钮。
+4. 将准星对准运行中的多方块控制器，即可在 **Jade 左侧独立面板**实时查看各在途批次的进度条、预计产出、配方 ID、并行占用与耗电详情。
+
+### 界面与 Jade 状态说明
+
+| 界面项 | 含义说明 |
+| --- | --- |
+| **独立配方批次** | 当前仓室向控制器提供的最大独立批次容量。 |
+| **能力状态** | 显示 `已启用` 或 `已关闭`；点击下方按钮可随时切换是否允许额外批次接单。 |
+| **已连接控制器** | 当前仓室接入的已成型多方块控制器数量。 |
+| **运行 / 等待** | 汇总所有已连接控制器中处于 `WORKING`（运行中）与 `WAITING`（等待输出或供电）的批次数。 |
+| **并行占用** | 当前所有在途批次已锁定的并行配额总和 ／ 整机总并行容量。 |
+
+### 安全降配与拆除保护
+
+* **取出物品或关闭额外批次**：能力降回 `1` 批，但**已经扣料的在途批次不会被销毁或吞料**，它们会继续推进直到正常产出；在占用并行回落到新容量以内之前，机器不会接取超额的新批次。
+* **拆除仓室**：槽位内的线程物品会直接作为实体物品掉落（不会重复保存在掉落的仓室 NBT 中），同时控制器上已扣料的在途批次依然保留并跑完。
+
+</Column>
+
+<Column gap="2" fullWidth={true}>
+
+## 常见问题
+
+### Q: 装了配方线程仓后，机器原本的并行仓还能生效吗？
+**A:** 完全可以。<ItemLink id="gt_shanhai:recipe_thread_hatch" /> 只借用了并行仓与物品输入总线的**结构安装位置**，并没有声明原生的 `IParallelHatch` 接口，因此不会抢占或覆盖你安装的并行控制仓、太初分歧引擎或终焉聚合枢纽的并行度。
+
+### Q: 放多个配方线程仓能叠加批次数吗？
+**A:** 不能。同一控制器下的多个线程来源按**取最大值（Max）**规则结算，装一个放满线程物品的仓室即可。
+
+### Q: 为什么面板显示独立配方批次有 65，但机器还是只跑 1 条线程？
+**A:** 请检查两个条件：
+1. 机器当前的**整机总并行**是否大于 1（若总并行为 1，每个批次分到的并行只有 1，且总批次数被钳制为 1）。
+2. 当前输入仓是否有足够的額外原料，且机器剩余电压/功率预算是否足够启动下一批配方。
+
+### Q: 配方线程仓和终焉聚合枢纽里的「多线程并行」页签是什么关系？
+**A:** 两者底层共用同一套独立批次调度系统。<ItemLink id="gt_shanhai:maintenance_hatch" /> 的侧边栏「多线程并行」页签直接复用枢纽主页的线程增强槽来计算独立批次容量；而对没有安装终焉聚合枢纽的普通多方块机器，单独装一个 <ItemLink id="gt_shanhai:recipe_thread_hatch" /> 就能获得完全相同的独立批次能力。
+
+</Column>
+
+</Column>

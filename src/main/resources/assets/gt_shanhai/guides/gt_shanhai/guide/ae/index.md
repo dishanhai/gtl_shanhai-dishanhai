@@ -11,6 +11,7 @@ categories:
 
 * [AE 蒸汽供应](ae_steam_supply.md)
 * [并行](parallel_index.md)
+* [配方线程仓](recipe_thread_hatch.md)
 * [输入（含请求）](input_index.md)
 * [输出（回网）](output_index.md)
 * [FTBQ 任务自动化](ftbq_index.md)

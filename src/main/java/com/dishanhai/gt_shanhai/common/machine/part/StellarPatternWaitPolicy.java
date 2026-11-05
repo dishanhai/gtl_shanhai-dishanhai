@@ -13,6 +13,13 @@ final class StellarPatternWaitPolicy {
     boolean observe(long now, long timeout, long capacity, long allocated, long queuedSlots,
                     boolean working, boolean failed, int currentProgress, long successfulTicks,
                     int duration, Object currentBatch) {
+        return observe(now, timeout, capacity, allocated, queuedSlots, working, failed,
+                currentProgress, successfulTicks, duration, currentBatch, false);
+    }
+
+    boolean observe(long now, long timeout, long capacity, long allocated, long queuedSlots,
+                    boolean working, boolean failed, int currentProgress, long successfulTicks,
+                    int duration, Object currentBatch, boolean batchAdmissionBlocked) {
         boolean successfulAdvance = successfulTicks >= 0L && previousSuccessfulTicks >= 0L
                 && successfulTicks > previousSuccessfulTicks;
         long completed = 0L;
@@ -33,12 +40,14 @@ final class StellarPatternWaitPolicy {
         previousSuccessfulTicks = successfulTicks;
         initialized = true;
 
-        boolean competing = capacity > 0L && queuedSlots > 0L
+        boolean parallelCompeting = capacity > 0L && queuedSlots > 0L
                 && (allocated >= capacity || queuedSlots > capacity - Math.max(0L, allocated));
+        boolean competing = queuedSlots > 0L && (parallelCompeting || batchAdmissionBlocked);
         if (competing && cycleBudget == 0L) {
             // 固定本槽的等待機會，後續補料不能一直擴大額度而掩蓋飢餓。
             long contenders = add(queuedSlots, 1L);
-            cycleBudget = contenders / capacity + (contenders % capacity == 0L ? 0L : 1L);
+            cycleBudget = parallelCompeting
+                    ? contenders / capacity + (contenders % capacity == 0L ? 0L : 1L) : 1L;
         }
         return working && !failed && competing && missedCycles < cycleBudget
                 && now - lastAdvance >= 0L && now - lastAdvance < timeout;

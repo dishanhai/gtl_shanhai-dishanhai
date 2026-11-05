@@ -1361,7 +1361,9 @@ public class DShanhaiMachines {
                         new ResourceLocation(MOD_ID, "block/machine/part/recipe_thread_hatch")))
                 .register();
         RECIPE_THREAD_HATCH.setTooltipBuilder((stack, tooltips) -> {
-            for (int line = 0; line < 5; line++) {
+            tooltips.add(DShanhaiTextUtil.createElectricText("配方线程仓"));
+            tooltips.add(Component.literal(""));
+            for (int line = 0; line < 7; line++) {
                 tooltips.add(Component.translatable("gt_shanhai.recipe_threads.hatch.tooltip." + line));
             }
         });

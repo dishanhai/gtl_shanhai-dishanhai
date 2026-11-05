@@ -15,10 +15,12 @@ item_ids:
 
 * <ItemLink id="gt_shanhai:divergence_engine" />
 * <ItemLink id="gt_shanhai:super_parallel_core" />
+* [<ItemLink id="gt_shanhai:recipe_thread_hatch" />](recipe_thread_hatch.md)：独立配方批次扩展仓，让多批配方独立计时、分别完成。
 
 <Row gap="20">
 <ItemImage id="gt_shanhai:divergence_engine" scale="4" />
 <ItemImage id="gt_shanhai:super_parallel_core" scale="4" />
+<BlockImage id="gt_shanhai:recipe_thread_hatch" scale="4" />
 </Row>
 
 ## 说明
@@ -66,11 +68,18 @@ item_ids:
 
 这意味着它的目标不是通用生产，而是专门给分子装配机做极限合成用的。装上它后，机器就不再受普通整数上限的束缚。
 
+### <ItemLink id="gt_shanhai:recipe_thread_hatch" />
+
+<ItemLink id="gt_shanhai:recipe_thread_hatch" /> 是负责开启**独立配方批次（多线程并行）**的专用仓室，可装在并行仓或物品输入仓位（完整机制与界面说明见[配方线程仓](recipe_thread_hatch.md)）。
+
+* 不同于把多条配方捆绑成同一进度条的**跨配方合并**，独立配方批次会让每一批配方拥有独立的计时槽，快配方跑完立刻结算产出，不被慢配方拖慢。
+* 放入已注册的原初线程增强物品即可按 `1 + 倍率 × 数量` 扩展批次容量，配置物不消耗，也不会覆盖宿主原本的并行仓。
+
 <Column gap="2" fullWidth={true}>
 
-> 左边是 <ItemLink id="gt_shanhai:divergence_engine" />，右边是 <ItemLink id="gt_shanhai:super_parallel_core" />。\
-> 前者管单配方并行和跨配方线程，后者管分子装配机的无限并行。\
-> 你先分清楚“同一配方跑几份”和“同一时间跑几条线”，再决定该看哪一个。
+> 左边是 <ItemLink id="gt_shanhai:divergence_engine" />，中间是 <ItemLink id="gt_shanhai:super_parallel_core" />，右边是 <ItemLink id="gt_shanhai:recipe_thread_hatch" />。\
+> 前者管单配方并行和跨配方线程，中间管分子装配机的无限并行，后者管多批次独立计时与结算。\
+> 你先分清楚**同一配方跑几份**、**同一时间合并几条线**和**多批配方各自独立计时**，再决定该看哪一个。
 
 </Column>
 

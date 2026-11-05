@@ -8,6 +8,8 @@ import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
+import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
+import com.dishanhai.gt_shanhai.api.machine.RecipeThreadSnapshot;
 import com.dishanhai.gt_shanhai.api.PatternIdentityMatcher;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
@@ -84,6 +86,14 @@ public final class StellarPatternStuckWatch {
                 policy.observe(now, watch.timeout, -1L, 0L, 0L, false, false,
                         logic.getProgress(), logic.getTotalContinuousRunningTime(), logic.getDuration(), logic.getLastRecipe());
                 watch.hostProgress.put(controller.self(), policy);
+                if (logic instanceof IRecipeThreadDisplay display) {
+                    RecipeThreadSnapshot threadAssessment = display.getRecipeThreadSnapshot();
+                    if (threadAssessment != null) {
+                        var threadPolicy = new StellarPatternThreadWaitPolicy();
+                        threadPolicy.observe(now, watch.timeout, threadAssessment, 0L, false);
+                        watch.hostThreadProgress.put(controller.self(), threadPolicy);
+                    }
+                }
             }
         }
 
@@ -254,9 +264,17 @@ public final class StellarPatternStuckWatch {
                 failed |= work != null && !work.isSuccess();
             }
             String capacityLabel = logic instanceof PrimordialThreadedRecipeLogic ? "capacity_threads" : "capacity_total";
+            RecipeThreadSnapshot threadAssessment = logic instanceof IRecipeThreadDisplay display
+                    ? display.getRecipeThreadSnapshot() : null;
+            if (threadAssessment != null) {
+                capacity = threadAssessment.parallelCapacity();
+                allocated = threadAssessment.reservedParallel();
+                capacityLabel = "capacity_total";
+            }
             hosts.add(new HostAssessment(controller.self(), types, capacityLabel, capacity, threads, allocated, queued,
                     logic.isWorking() && host.isWorkingEnabled(), failed,
-                    logic.getProgress(), logic.getDuration(), logic.getTotalContinuousRunningTime(), batch));
+                    logic.getProgress(), logic.getDuration(), logic.getTotalContinuousRunningTime(), batch, threadAssessment,
+                    threadAssessment == null && logic instanceof MultipleRecipesLogic && batch != null && logic.isWorking()));
         }
         return new MachineAssessment(hosts, machine.getControllers().size() == 1);
     }
@@ -289,13 +307,29 @@ public final class StellarPatternStuckWatch {
                 mintFailure = !restriction.isEmpty();
                 if (mintFailure) watch.mintRestrictions.put(host.machine, restriction);
             }
-            var policy = watch.hostProgress.computeIfAbsent(host.machine, ignored -> new StellarPatternWaitPolicy());
-            boolean deferred = policy.observe(now, watch.timeout, host.capacity, host.allocated, host.queued,
-                    host.working, host.failed || strongFailure || mintFailure, host.progress, host.successfulTicks, host.duration, host.batch);
+            boolean deferred;
+            long deadline;
+            if (host.threadAssessment != null) {
+                var policy = watch.hostThreadProgress.computeIfAbsent(host.machine, ignored -> new StellarPatternThreadWaitPolicy());
+                deferred = policy.observe(now, watch.timeout, host.threadAssessment, host.queued,
+                        host.failed || strongFailure || mintFailure);
+                deadline = policy.progressDeadline(watch.timeout);
+            } else {
+                var policy = watch.hostProgress.computeIfAbsent(host.machine, ignored -> new StellarPatternWaitPolicy());
+                deferred = policy.observe(now, watch.timeout, host.capacity, host.allocated, host.queued,
+                        host.working, host.failed || strongFailure || mintFailure, host.progress, host.successfulTicks,
+                        host.duration, host.batch, host.aggregateAdmissionBlocked);
+                deadline = policy.progressDeadline(watch.timeout);
+            }
             waiting |= deferred;
-            if (deferred) watch.warningTick = Math.max(watch.warningTick, policy.progressDeadline(watch.timeout));
-            String assessmentKey = mintFailure ? "assessment_mint" : deferred ? "assessment_wait" : "assessment_none";
-            details.add(StellarPatternWarningText.join(List.of(
+            if (deferred) watch.warningTick = Math.max(watch.warningTick, deadline);
+            boolean threadWait = deferred && host.threadAssessment != null && host.threadAssessment.threadsFull();
+            boolean parallelWait = deferred && (host.threadAssessment == null
+                    || host.threadAssessment.parallelFull() || !host.threadAssessment.threadsFull());
+            String assessmentKey = mintFailure ? "assessment_mint"
+                    : deferred && host.aggregateAdmissionBlocked ? "assessment_batch_wait"
+                    : parallelWait ? "assessment_wait" : "assessment_none";
+            List<Component> hostDetails = new ArrayList<>(List.of(
                     StellarPatternWarningText.line("host_pos", host.machine.getPos().toShortString()),
                     StellarPatternWarningText.line("capacity_value",
                             StellarPatternWarningText.line(host.capacityLabel), amountText(host.capacity)),
@@ -304,7 +338,16 @@ public final class StellarPatternStuckWatch {
                             ? Component.literal(Long.toString(host.allocated)) : StellarPatternWarningText.line("unknown")),
                     StellarPatternWarningText.line("queued_slots", host.queued),
                     StellarPatternWarningText.line("progress", host.progress, host.duration),
-                    StellarPatternWarningText.line(assessmentKey))));
+                    StellarPatternWarningText.line(assessmentKey)));
+            if (host.threadAssessment != null) {
+                RecipeThreadSnapshot state = host.threadAssessment;
+                hostDetails.add(StellarPatternWarningText.line("recipe_thread_capacity", amountText(state.capacity())));
+                hostDetails.add(StellarPatternWarningText.line("recipe_thread_active", state.active(), state.running()));
+                hostDetails.add(StellarPatternWarningText.line("recipe_thread_progress", state.successfulTicks(), state.completedBatches()));
+                hostDetails.add(StellarPatternWarningText.line(state.draining() ? "assessment_thread_drain"
+                        : threadWait ? "assessment_thread_wait" : "assessment_thread_none"));
+            }
+            details.add(StellarPatternWarningText.join(hostDetails));
         }
         watch.parallelAssessment = StellarPatternWarningText.store(details.isEmpty()
                 ? StellarPatternWarningText.line("no_host")
@@ -350,7 +393,8 @@ public final class StellarPatternStuckWatch {
     private record MachineAssessment(List<HostAssessment> hosts, boolean onlyHost) {}
     private record HostAssessment(MetaMachine machine, List<String> types, String capacityLabel, long capacity, long threads,
                                   long allocated, long queued, boolean working, boolean failed,
-                                  int progress, int duration, long successfulTicks, GTRecipe batch) {}
+                                  int progress, int duration, long successfulTicks, GTRecipe batch,
+                                  @Nullable RecipeThreadSnapshot threadAssessment, boolean aggregateAdmissionBlocked) {}
 
     public static String currentHostStatus(RecipeTypePatternBufferPartMachine machine) {
         if (machine == null) return "";
@@ -487,6 +531,7 @@ public final class StellarPatternStuckWatch {
         private final long initialWarningTick;
         private final long timeout;
         private final Map<MetaMachine, StellarPatternWaitPolicy> hostProgress = new HashMap<>();
+        private final Map<MetaMachine, StellarPatternThreadWaitPolicy> hostThreadProgress = new HashMap<>();
         private final Map<MetaMachine, String> mintRestrictions = new HashMap<>();
         private String parallelAssessment = "";
         private final Snapshot snapshot;
