@@ -99,11 +99,11 @@ class RecipeTypePatternBufferVerticalSidebarTest {
         String machine = Files.readString(MACHINE);
         String method = extractBlock(machine, "public ModularUI createRemoteSlotCatalystUI(");
 
-        assertTrue(method.contains("UITemplate.bindPlayerInventory(player.getInventory(), GuiTextures.SLOT, 7, 184, true)"),
+        assertTrue(method.contains("UITemplate.bindPlayerInventory(player.getInventory(), StellarGlassTexture.slot(), 7, 184, true)"),
                 "远程催化剂槽界面必须显示玩家背包，否则无法把手里物品放进催化剂槽");
         assertTrue(method.contains("new ModularUI(176, 266, holder, player)"),
                 "窗口高度必须容纳上方催化剂面板和下方玩家背包");
-        assertTrue(method.contains("new WidgetGroup(0, 0, 176, 180)"),
+        assertTrue(method.contains("RecipeThreadPanelWidget.stellarRoot(176, 180)"),
                 "催化剂面板原尺寸保持不变，避免影响槽位坐标");
         assertTrue(method.contains("layoutRemoteCatalystContainers(manager)"),
                 "远程页面必须把流体催化剂容器移到物品容器右侧");

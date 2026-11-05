@@ -39,9 +39,12 @@ class RecipeEditorUiSourceTest {
         assertTrue(widgetSource.contains("STAGE_EDIT"));
         assertTrue(widgetSource.contains("STAGE_REVIEW"));
         assertTrue(widgetSource.contains("RecipeEditorResultPacket"));
-        assertTrue(animationSource.contains("DURATION_MS"));
-        assertTrue(animationSource.contains("advance"));
-        assertTrue(animationSource.contains("reset"));
+        assertTrue(animationSource.contains("extends PageTransition"));
+        String sharedAnimation = Files.readString(Path.of("..", "SH-Better-UI", "src", "main", "java",
+                "com", "dishanhai", "sh_better_ui", "client", "gui", "scaled", "PageTransition.java"));
+        assertTrue(sharedAnimation.contains("DURATION_MS"));
+        assertTrue(sharedAnimation.contains("advance"));
+        assertTrue(sharedAnimation.contains("reset"));
     }
 
     @Test

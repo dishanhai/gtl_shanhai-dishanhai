@@ -1423,6 +1423,12 @@
   "gt_shanhai.primordial.threads.unlimited": "无限",
   "gt_shanhai.primordial.threads.waiting_setup": "等待配方启动条件",
   "gt_shanhai.primordial.threads.waiting_machine": "等待机器恢复工作",
-  "gt_shanhai.primordial.threads.waiting_output": "等待配方输出空间"
+  "gt_shanhai.primordial.threads.waiting_output": "等待配方输出空间",
+  "config.gt_shanhai.ui.category": "山海界面外观",
+  "config.gt_shanhai.ui.clear_glass": "终极终端与样板生成工具使用浅色玻璃",
+  "config.gt_shanhai.ui.clear_glass.tooltip": "关闭：保留现有深色玻璃；开启：使用中性浅色透明玻璃。仅影响本机界面，重新打开界面后生效",
+  "gui.gt_shanhai.stellar.ui_mode.neutral": "灰",
+  "gui.gt_shanhai.stellar.ui_mode.blue": "蓝",
+  "gui.gt_shanhai.stellar.ui_mode.tooltip": "切换深蓝透明玻璃与中性烟灰玻璃（仅本机，立即生效）"
 }
 

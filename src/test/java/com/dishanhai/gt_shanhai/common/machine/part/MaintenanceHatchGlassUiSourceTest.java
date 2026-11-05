@@ -40,12 +40,12 @@ class MaintenanceHatchGlassUiSourceTest {
 
         assertTrue(page.contains("RecipeThreadPanelWidget.drawGlass(graphics"),
                 "配方线程舱玻璃绘制器应作为共享材质入口");
-        assertTrue(page.contains("setTabTexture(GlassPanelTexture.page())")
-                        && page.contains("setTabHoverTexture(GlassPanelTexture.display())")
-                        && page.contains("setTabPressedTexture(GlassPanelTexture.panel())"),
+        assertTrue(page.contains("setTabTexture(stellar ? StellarGlassTexture.page() : GlassPanelTexture.page())")
+                        && page.contains("setTabHoverTexture(stellar ? StellarGlassTexture.display() : GlassPanelTexture.display())")
+                        && page.contains("setTabPressedTexture(stellar ? StellarGlassTexture.panel() : GlassPanelTexture.panel())"),
                 "Fancy 侧栏页签必须使用玻璃普通、悬停和选中材质");
-        assertTrue(page.contains("setLeftButtonTexture(new GuiTextureGroup(GlassPanelTexture.button()")
-                        && page.contains("setRightButtonTexture(new GuiTextureGroup(GlassPanelTexture.button()"),
+        assertTrue(page.contains("setLeftButtonTexture(new GuiTextureGroup(stellar ? StellarGlassTexture.button() : GlassPanelTexture.button()")
+                        && page.contains("setRightButtonTexture(new GuiTextureGroup(stellar ? StellarGlassTexture.button() : GlassPanelTexture.button()"),
                 "Fancy 侧栏滚动按钮必须使用玻璃材质");
         assertTrue(panel.contains("ShopTheme.GLASS.rootShadow")
                         && panel.contains("ShopTheme.GLASS.backdrop")

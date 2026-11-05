@@ -76,6 +76,8 @@ public class ClientInit {
         // 商店玻璃主题的 tooltip：LOWEST 让别的模组先改完，我们再接管绘制
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
                 com.dishanhai.gt_shanhai.client.gui.shop.ShopGlassTooltip::onTooltipPre);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
+                com.dishanhai.gt_shanhai.client.gui.StellarGlassTooltip::onTooltipPre);
         // 山海：消费端只登记画面；独立库负责唯一 Post 事件、预热、关闭与资源重载。
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen);
@@ -83,7 +85,9 @@ public class ClientInit {
                 screen -> screen instanceof com.lowdragmc.lowdraglib.gui.modular.ModularUIGuiContainer container
                         && (container.modularUI.holder == com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory.INSTANCE
                         || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine
-                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.RecipeThreadHatchPartMachine));
+                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.RecipeThreadHatchPartMachine
+                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine
+                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder));
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen);
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(

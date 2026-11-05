@@ -99,6 +99,6 @@ config="gt_shanhai.enhancedcore.mixin.json"
 [[dependencies.gt_shanhai]]
     modId="sh_better_ui"
     mandatory=true
-    versionRange="[1.0.0,2.0.0)"
+    versionRange="[${sh_better_ui_version},2.0.0)"
     ordering="AFTER"
     side="BOTH"

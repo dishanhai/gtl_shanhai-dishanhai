@@ -113,7 +113,8 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         String machine = read("common/machine/part/RecipeTypePatternBufferPartMachine.java");
 
         String catalyst = method(machine, "public ModularUI createRemoteSlotCatalystUI(");
-        assertTrue(catalyst.contains("new MEPatternCatalystUIManager("));
+        assertTrue(catalyst.contains("createGlassCatalystUIManager(8)"));
+        assertTrue(machine.contains("new MEPatternCatalystUIManager(dockX, this.catalystItems, this.catalystFluids"));
         assertTrue(catalyst.contains("root.addWidget(manager)"));
         assertTrue(catalyst.contains("manager.toggleFor(slot)"),
                 "遠端催化頁必須開啟所選樣板槽的既有管理器");

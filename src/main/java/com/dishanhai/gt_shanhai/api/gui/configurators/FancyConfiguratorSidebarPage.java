@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.api.gui.configurators;
 
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.dishanhai.gt_shanhai.common.machine.part.ui.StellarGlassTexture;
 import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
@@ -105,7 +105,7 @@ public final class FancyConfiguratorSidebarPage implements IFancyUIProvider {
         int viewHeight = scroll ? maxPageHeight : pageHeight;
         int viewWidth = scroll ? pageWidth + SCROLL_BAR_WIDTH : pageWidth;
         WidgetGroup page = new WidgetGroup(0, 0, viewWidth, viewHeight);
-        page.setBackground(GuiTextures.BACKGROUND_INVERSE);
+        page.setBackground(StellarGlassTexture.page());
         WidgetGroup content = page;
         if (scroll) {
             DraggableScrollableWidgetGroup scroller = new DraggableScrollableWidgetGroup(0, 0, viewWidth, viewHeight);
@@ -215,7 +215,7 @@ public final class FancyConfiguratorSidebarPage implements IFancyUIProvider {
 
         private SyncedConfiguratorButton(IFancyConfiguratorButton button, int width) {
             super(width, 24, button);
-            ButtonWidget action = new ButtonWidget(0, 0, width, 24, GuiTextures.BUTTON,
+            ButtonWidget action = new ButtonWidget(0, 0, width, 24, StellarGlassTexture.button(),
                     clickData -> button.onClick(clickData)) {
                 @Override
                 public void updateScreen() {

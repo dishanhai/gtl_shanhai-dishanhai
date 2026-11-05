@@ -39,7 +39,7 @@ repositories {
 }
 
 // 山海：独立 UI 库的开发产物；正式游戏需单独安装发行 jar。
-def shBetterUiJar = file(findProperty('shBetterUiJar') ?: '../SH-Better-UI/build/libs/sh_better_ui-1.0.0-dev.jar')
+def shBetterUiJar = file(findProperty('shBetterUiJar') ?: "../SH-Better-UI/build/libs/sh_better_ui-${sh_better_ui_version}-dev.jar")
 
 dependencies {
     implementation files(shBetterUiJar)
@@ -113,6 +113,7 @@ processResources {
             mod_id: mod_id, mod_name: mod_name, mod_version: mod_version,
             mod_authors: mod_authors, mod_description: mod_description,
             minecraft_version: minecraft_version, forge_version: forge_version,
+            sh_better_ui_version: sh_better_ui_version,
     ]
     inputs.properties replaceProperties
     filesMatching(['META-INF/mods.toml']) {

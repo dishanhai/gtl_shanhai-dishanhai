@@ -1431,6 +1431,12 @@
   "gt_shanhai.shop.editor.currency": "Settlement Currency",
   "gt_shanhai.shop.editor.use_spark": "Settle with Spark (numeric balance)",
   "gt_shanhai.shop.editor.price": "Unit Price",
-  "gt_shanhai.shop.editor.category": "Category"
+  "gt_shanhai.shop.editor.category": "Category",
+  "config.gt_shanhai.ui.category": "Shanhai UI Appearance",
+  "config.gt_shanhai.ui.clear_glass": "Use clear glass for Ultimate Terminal and Pattern Generator",
+  "config.gt_shanhai.ui.clear_glass.tooltip": "Off: current dark glass. On: neutral clear glass. Client only; reopen the screen to apply",
+  "gui.gt_shanhai.stellar.ui_mode.neutral": "S",
+  "gui.gt_shanhai.stellar.ui_mode.blue": "B",
+  "gui.gt_shanhai.stellar.ui_mode.tooltip": "Switch deep blue transparent glass and neutral smoke glass (client only, applies immediately)"
 }
 
