@@ -36,6 +36,94 @@ class NativeRecipeThreadRuntimeTest {
     private static final Unsafe UNSAFE = unsafe();
     private static final long STATUS = offset("status"), ACTIVE = offset("isActive"), REASON = offset("waitingReason");
 
+    @Test void longestCandidateStartsAloneAndShortRecipeFinishesOnAnotherLane() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2; p.usePriority = true;
+        p.queue("fast", 2); p.queue("slow", 100);
+        p.runtime.tickAt(0);
+        assertEquals(1, p.inputs); assertEquals(1, p.pending.size());
+        assertEquals("fast", p.pending.peek().id.getPath());
+        p.runtime.tickAt(1); assertEquals(2, p.inputs);
+        p.runtime.tickAt(2); p.runtime.tickAt(3);
+        assertEquals(List.of("fast"), p.finished);
+        assertEquals(1, p.runtime.getActiveRecipeThreadCount());
+    }
+
+    @Test void unstartableLongCandidateDoesNotBlockShortRecipeOrConsumeItsInputs() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2; p.usePriority = true; p.blockedRecipe = "slow";
+        p.queue("fast", 2); p.queue("slow", 100);
+        p.runtime.tickAt(0);
+        assertEquals(1, p.inputs); assertEquals(1, p.pending.size());
+        assertEquals("slow", p.pending.peek().id.getPath());
+        p.runtime.tickAt(1); p.runtime.tickAt(2);
+        assertEquals(List.of("fast"), p.finished);
+    }
+
+    @Test void singleLaneKeepsTheOriginalNativeCandidateOrder() throws Exception {
+        Probe p = probe(); p.runtime.threads = 1; p.usePriority = true;
+        p.queue("fast", 2); p.queue("slow", 100);
+        p.runtime.tickAt(0);
+        assertEquals("slow", p.pending.peek().id.getPath());
+        assertEquals(1, p.inputs);
+    }
+
+    @Test void allUnstartableVirtualCandidatesFallBackToAnOrdinarySnapshot() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2;
+        GTRecipe virtual = recipe("virtual", 100), blocked = recipe("blocked", 80), ready = recipe("ready", 2);
+        int[] virtualAttempts = {0}, ordinaryAttempts = {0};
+        p.lookupAction = () -> {
+            if (p.runtime.tryVirtualCandidates(java.util.Set.of(virtual), candidate -> { virtualAttempts[0]++; return false; })) return;
+            var chosen = p.runtime.priorityCandidates(new java.util.LinkedHashSet<>(List.of(ready, blocked)));
+            if (chosen.isEmpty()) return;
+            ordinaryAttempts[0]++;
+            if (chosen.iterator().next() != ready) return;
+            p.inputs++; p.runtime.recordPaidRecipe(ready); p.setupRecipe(ready);
+        };
+        p.runtime.tickAt(0);
+        assertEquals(1, virtualAttempts[0]); assertEquals(2, ordinaryAttempts[0]);
+        assertEquals(1, p.inputs); assertEquals(1, p.runtime.getActiveRecipeThreadCount());
+        var outsideAdmission = java.util.Set.of(virtual, ready);
+        assertSame(outsideAdmission, p.runtime.priorityCandidates(outsideAdmission));
+    }
+
+    @Test void aRunnableSecondVirtualCandidateStillPrecedesOrdinaryRecipes() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2;
+        GTRecipe blocked = recipe("virtual_slow", 100), ready = recipe("virtual_ready", 20);
+        List<String> attempts = new ArrayList<>();
+        p.lookupAction = () -> {
+            boolean handled = p.runtime.tryVirtualCandidates(new java.util.LinkedHashSet<>(List.of(ready, blocked)), candidate -> {
+                attempts.add(candidate.id.getPath());
+                if (candidate == blocked) return false;
+                p.inputs++; p.runtime.recordPaidRecipe(candidate); p.setupRecipe(candidate); return true;
+            });
+            if (!handled) fail("普通搜尋不能越過可執行的第二個虛擬候選");
+        };
+        p.runtime.tickAt(0);
+        assertEquals(List.of("virtual_slow", "virtual_ready"), attempts);
+        assertEquals(1, p.inputs);
+    }
+
+    @Test void ordinarySearchSeesAllCandidatesBeforeNativeFirstMatchReduction() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2;
+        GTRecipe fast = recipe("fast", 2), slow = recipe("slow", 100);
+        int[] searches = {0};
+        p.lookupAction = () -> {
+            var iterator = p.runtime.prioritySearch(() -> { searches[0]++; return List.of(fast, slow).iterator(); });
+            assertNotNull(iterator);
+            assertSame(slow, iterator.next()); assertFalse(iterator.hasNext());
+            p.inputs++; p.runtime.recordPaidRecipe(slow); p.setupRecipe(slow);
+        };
+        p.runtime.tickAt(0);
+        assertEquals(1, searches[0]); assertEquals(1, p.inputs);
+    }
+
+    @Test void emptyOrdinarySearchLeavesTheNativeCustomRunnerFallbackAvailable() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2;
+        p.lookupAction = () -> assertNull(p.runtime.prioritySearch(java.util.Collections::emptyIterator));
+        p.runtime.tickAt(0);
+        assertEquals(0, p.inputs);
+        assertEquals(0, p.runtime.getActiveRecipeThreadCount());
+    }
+
     @Test void stellarSnapshotCountsAllAdvancingThreadsAndOnlyFinishedBatchesWithoutTransactions() throws Exception {
         Probe p = probe(); p.runtime.threads = 2;
         p.queue("slow", 100); p.runtime.tickAt(0);
@@ -258,13 +346,20 @@ class NativeRecipeThreadRuntimeTest {
         List<Long> settledShares;
         boolean outputAvailable = true, refuseSetup, payInLookup = true, drain, payAtFinish;
         boolean checkInputGates, sawPaidReplay, sawFinishInputRejection;
+        boolean usePriority;
+        String blockedRecipe;
         int inputs, setupCalls, blockedRenewals, machineWorkingCalls;
         Probe() { super(null); }
         @Override public NativeRecipeThreadRuntime shanhai$recipeThreads() { return runtime; }
         @Override public void findAndHandleRecipe() {
             if (runtime.isFinishing()) { blockedRenewals++; return; }
             if (lookupAction != null) { lookupAction.run(); return; }
-            GTRecipe recipe = pending.poll();
+            GTRecipe recipe;
+            if (usePriority) {
+                recipe = runtime.priorityCandidates(new java.util.LinkedHashSet<>(pending)).stream().findFirst().orElse(null);
+                if (recipe != null && recipe.id.getPath().equals(blockedRecipe)) return;
+                pending.remove(recipe);
+            } else recipe = pending.poll();
             if (recipe == null) return;
             shares.add(runtime.allowance(Long.MAX_VALUE));
             if (payInLookup && !payAtFinish) { inputs++; runtime.recordPaidRecipe(recipe); }

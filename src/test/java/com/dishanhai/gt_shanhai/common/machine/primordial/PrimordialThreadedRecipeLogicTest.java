@@ -40,6 +40,26 @@ class PrimordialThreadedRecipeLogicTest {
     private static final long ACTIVE = offset(RecipeLogic.class, "isActive");
     private static final long REASON = offset(RecipeLogic.class, "waitingReason");
 
+    @Test void priorityStartsTheLongestSourceAloneAndLeavesShortWorkForTheNextLane() throws Exception {
+        Probe logic = probe(); logic.usePriority = true;
+        logic.queue("short", 2); logic.queue("long", 100);
+        tick(logic, 0);
+        assertEquals(1, logic.inputTransactions);
+        assertEquals("short", logic.pending.peek().id.getPath());
+        tick(logic, 1); tick(logic, 2); tick(logic, 3);
+        assertEquals(2, logic.inputTransactions);
+        assertEquals(List.of("short"), logic.finished);
+    }
+
+    @Test void prioritySkipsARejectedLongSourceBeforeAnyInputTransaction() throws Exception {
+        Probe logic = probe(); logic.usePriority = true; logic.blockedRecipe = "long";
+        logic.queue("short", 2); logic.queue("long", 100);
+        tick(logic, 0);
+        assertEquals(1, logic.inputTransactions);
+        assertEquals("long", logic.pending.peek().id.getPath());
+        assertEquals(1, logic.getActiveRecipeThreadCount());
+    }
+
     @Test void stellarSnapshotObservesAllBatchProgressAndCountsOnlyReleasedBatches() throws Exception {
         Probe logic = probe();
         logic.queue("long", 100); tick(logic, 0);
@@ -630,6 +650,8 @@ class PrimordialThreadedRecipeLogicTest {
         List<Long> admittedShares;
         Map<String, Integer> energyTicks;
         boolean outputAvailable, failWorking, refuseSetup;
+        boolean usePriority;
+        String blockedRecipe;
         int lookups, inputTransactions, blockedFinishLookups, setupAttempts;
         RecipeResult recipeResult, workingResult;
         Probe() { super(null); }
@@ -637,6 +659,7 @@ class PrimordialThreadedRecipeLogicTest {
         @Override public SelectableRecipeTypeSetMachine getMachine() { return module; }
         @Override protected long getUnreservedTotalParallelLimit() { return 64L; }
         @Override public void updateTickSubscription() {}
+        @Override protected long estimateThreadRecipeTicks(GTRecipe recipe) { return 20L; }
         @Override protected boolean canFinishThreadBatch(GTRecipe recipe) { return outputAvailable; }
         @Override public void setRecipeStatus(RecipeResult result) { recipeResult = result; }
         @Override public RecipeResult getRecipeStatus() { return recipeResult; }
@@ -649,7 +672,12 @@ class PrimordialThreadedRecipeLogicTest {
                 return null;
             }
             lookups++;
-            GTRecipe next = pending.poll();
+            GTRecipe next;
+            if (usePriority) {
+                next = priorityCandidates(new java.util.LinkedHashSet<>(pending)).stream().findFirst().orElse(null);
+                if (next != null && next.id.getPath().equals(blockedRecipe)) return null;
+                pending.remove(next);
+            } else next = pending.poll();
             if (next != null) {
                 inputTransactions++;
                 admittedShares.add(getThreadParallelAllowance());

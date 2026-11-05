@@ -15,10 +15,12 @@ class ClientShopCatalogSearchSourceTest {
         String source = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
                 "gt_shanhai", "client", "shop", "ClientShopCatalog.java"));
 
-        assertTrue(source.contains("import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;"),
-                "商店目录搜索必须复用拼音感知搜索工具");
-        assertTrue(source.contains("AdvancedSearchUtil.match(searchText.toString(), normalized)"),
-                "商品显示名 + ID 的匹配必须走 AdvancedSearchUtil，才能继承 JECharacters 拼音搜索");
+        String index = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/shop/ShopCatalogSearchIndex.java"));
+        String matcher = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/scaled/AdvancedSearchUtil.java"));
+        assertTrue(source.contains("searchIndex.rebuild(manifest.stubs())"), "目录更新必须重建搜索索引");
+        assertTrue(index.contains("AdvancedSearchUtil.prepareText(text.toString())"), "文本必须使用现有规范化规则");
+        assertTrue(index.contains("AdvancedSearchUtil.prepareQuery(query)"), "每次查询只分词一次");
+        assertTrue(matcher.contains("PinyinSearchBridge.contains(text, token)"), "预建索引不能丢失拼音匹配");
         assertFalse(source.contains("haystack.toString().toLowerCase(Locale.ROOT).contains(normalized)"),
                 "不能退回纯 contains，否则拼音查询会把中文商品全部过滤掉");
     }

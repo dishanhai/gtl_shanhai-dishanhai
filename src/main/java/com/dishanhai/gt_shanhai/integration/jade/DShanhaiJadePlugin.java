@@ -7,6 +7,7 @@ import com.dishanhai.gt_shanhai.integration.jade.provider.InfiniteParallelProvid
 import com.dishanhai.gt_shanhai.integration.jade.provider.DShanhaiAENetworkInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.MatterCopierInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.ModuleBaseInfoProvider;
+import com.dishanhai.gt_shanhai.integration.jade.provider.RecipeThreadHatchInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.RecipeTypePatternBufferInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.SelfSynthesisChamberInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.NineIndustrialInfoProvider;
@@ -28,6 +29,7 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
     @Override
     public void register(IWailaCommonRegistration reg) {
         reg.registerBlockDataProvider(PrimordialRecipeThreadsProvider.INSTANCE, MetaMachineBlockEntity.class);
+        reg.registerBlockDataProvider(RecipeThreadHatchInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(HubInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(new InfiniteParallelProvider(), MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(ModuleBaseInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
@@ -47,6 +49,7 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
         reg.addTooltipCollectedCallback(PrimordialRecipeThreadsOverlay.INSTANCE);
         reg.addAfterRenderCallback(PrimordialRecipeThreadsOverlay.INSTANCE);
         reg.registerBlockComponent(PrimordialRecipeThreadsProvider.INSTANCE, MetaMachineBlock.class);
+        reg.registerBlockComponent(RecipeThreadHatchInfoProvider.INSTANCE, MetaMachineBlock.class);
         reg.registerBlockComponent(HubInfoProvider.INSTANCE, MetaMachineBlock.class);
         reg.registerBlockComponent(ModuleBaseInfoProvider.INSTANCE, MetaMachineBlock.class);
         reg.registerBlockComponent(PrimordialOmegaEngineInfoProvider.INSTANCE, MetaMachineBlock.class);
