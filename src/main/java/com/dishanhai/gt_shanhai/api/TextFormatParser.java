@@ -4,6 +4,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
+import net.minecraft.network.chat.contents.LiteralContents;
 
 import java.util.*;
 
@@ -213,6 +214,35 @@ public class TextFormatParser {
         if (flags.chase) info.append("|>");
         if (flags.obfuscated) info.append("|`");
         return info.toString();
+    }
+
+    /** 山海：量宽／断行前剥离内联码，将动态样式放入 insertion；保留节点样式及普通前后缀。 */
+    public static Component normalizeFcsComponent(Component component) {
+        String selfText = component.getContents() instanceof LiteralContents literal
+                ? literal.text() : MutableComponent.create(component.getContents()).getString();
+        MutableComponent base = null;
+        if (containsSpecialFormatting(selfText)) {
+            ParseResult parsed = parseFormatting(selfText);
+            String insertion = toFcsInsertion(parsed.flags);
+            if (insertion != null && !parsed.cleanText.equals(selfText) && !parsed.cleanText.isEmpty()) {
+                Style style = component.getStyle();
+                Style fcsStyle = style.getInsertion() == null ? style.withInsertion(insertion) : style;
+                base = Component.literal(parsed.prefix).setStyle(style);
+                base.append(Component.literal(parsed.cleanText.substring(parsed.prefix.length())).setStyle(fcsStyle));
+            }
+        }
+        List<Component> siblings = component.getSiblings();
+        List<Component> normalized = null;
+        for (int i = 0; i < siblings.size(); i++) {
+            Component child = siblings.get(i);
+            Component cleanChild = normalizeFcsComponent(child);
+            if (cleanChild != child && normalized == null) normalized = new ArrayList<>(siblings.subList(0, i));
+            if (normalized != null) normalized.add(cleanChild);
+        }
+        if (base == null && normalized == null) return component;
+        if (base == null) base = MutableComponent.create(component.getContents()).setStyle(component.getStyle());
+        for (Component child : normalized != null ? normalized : siblings) base.append(child);
+        return base;
     }
 
     private static boolean isEffectSymbol(char c) {

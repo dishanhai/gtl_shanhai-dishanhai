@@ -608,15 +608,11 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         }
         if (bypassTemperature
                 && (recipe.data.contains("ebf_temp") || recipe.data.contains("blastFurnaceTemp"))) {
-            // 抹掉配方温度需求，绕过所有机器的温度检查。
-            // 必须先换成自己的一份 data：GTRecipe.copy() 对 inputs/outputs 都做了 copyContents 新建，
-            // 唯独 data 是**按引用**直接传给新对象（GTRecipe.java:122 → 构造器 this.data = data），
-            // 所以传进来的这个「副本」与注册表里的原始配方共用同一个 CompoundTag。
-            // 直接 remove 会永久抹掉全服该配方的温度需求：原版 GTRecipeModifiers.ebfOverclock 判的是
-            // !data.contains("ebf_temp") → 直接 return null，所有电弧炉从此拒绝该配方。
+            // GTRecipe.copy() 仍共享 data，先隔离注册配方。
+            // 电弧炉检查 contains("ebf_temp")；保留键并清零，不能删除必需键。
             recipe.data = recipe.data.copy();
-            recipe.data.remove("ebf_temp");
-            recipe.data.remove("blastFurnaceTemp");
+            if (recipe.data.contains("ebf_temp")) recipe.data.putInt("ebf_temp", 0);
+            if (recipe.data.contains("blastFurnaceTemp")) recipe.data.putInt("blastFurnaceTemp", 0);
         }
         if (isChanceBypassEnabled()) {
             // 产出概率强制 100%（必定产出），输入概率强制 0%（永不消耗）

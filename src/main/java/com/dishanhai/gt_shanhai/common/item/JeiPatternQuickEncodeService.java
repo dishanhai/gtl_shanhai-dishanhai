@@ -19,6 +19,7 @@ import appeng.menu.me.items.PatternEncodingTermMenu;
 import appeng.menu.slot.RestrictedInputSlot;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.integration.enhancedcore.EnhancedCoreCloudCompat;
 import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
 import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter.MaterialEntry;
@@ -189,6 +190,8 @@ public final class JeiPatternQuickEncodeService {
                 PatternByproductOrder.setMarked(patterns.get(i), true);
             }
         }
+
+        if (craftingAnchor == null && tryUploadToCloudLibrary(player, menu, patterns)) return;
 
         List<UploadedPattern> uploaded = new ArrayList<>(patterns.size());
         List<UploadedPattern> duplicatePatterns = new ArrayList<>();
@@ -1321,6 +1324,22 @@ public final class JeiPatternQuickEncodeService {
             return null;
         }
         return new PatternSource(blankSlot, slotAmount, storage, networkAmount);
+    }
+
+    private static boolean tryUploadToCloudLibrary(ServerPlayer player, PatternEncodingTermMenu menu,
+            List<ItemStack> patterns) {
+        if (!EnhancedCoreCloudCompat.isAvailable()) return false;
+        var result = EnhancedCoreCloudCompat.tryUpload(player, menu, patterns, () -> {
+            PatternSource source = findPatternSource(menu, 1);
+            return source != null && consumePatternSource(menu, source);
+        });
+        if (result == null) return false;
+        for (int i = 0; i < result.encoded(); i++) GTLStats.awardPatternEncoded(player);
+        show(player, "message.gt_shanhai.jei.quick_encode.cloud_result", result.uploaded(), result.duplicates(),
+                result.encoded() - result.uploaded(), patterns.size() - result.encoded() - result.duplicates(),
+                Component.translatable("message.gt_shanhai.jei.quick_encode.cloud_status."
+                        + result.status().name().toLowerCase(java.util.Locale.ROOT)));
+        return true;
     }
 
     private static boolean consumePatternSource(PatternEncodingTermMenu menu, PatternSource source) {

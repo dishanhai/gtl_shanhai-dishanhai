@@ -4,15 +4,9 @@ import com.dishanhai.gt_shanhai.api.TextFormatParser;
 import net.minecraft.client.gui.components.ComponentRenderUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
-import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.network.chat.Style;
-import net.minecraft.network.chat.contents.LiteralContents;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 断行前 FCS 归一化（全局兜底）。
@@ -38,55 +32,9 @@ public class ComponentWrapFcsNormalizeMixin {
             if (raw == null || raw.isEmpty() || !TextFormatParser.containsSpecialFormatting(raw)) {
                 return text;
             }
-            return gtShanhai$normalize(comp);
+            return TextFormatParser.normalizeFcsComponent(comp);
         } catch (Exception e) {
             return text;
         }
-    }
-
-    /** 递归归一化：仅当子树确有变化时重建，否则原样返回（省分配） */
-    private static Component gtShanhai$normalize(Component comp) {
-        // 节点自身文本（不含 siblings）：literal 直取，其余（translatable 等）解析
-        String selfText = comp.getContents() instanceof LiteralContents lit
-                ? lit.text()
-                : MutableComponent.create(comp.getContents()).getString();
-
-        MutableComponent base = null;
-        if (selfText != null && TextFormatParser.containsSpecialFormatting(selfText)) {
-            TextFormatParser.ParseResult pr = TextFormatParser.parseFormatting(selfText);
-            if (pr.flags != null && pr.flags.gradientTheme != null && !pr.cleanText.isEmpty()) {
-                base = Component.literal(pr.cleanText);
-                Style style = comp.getStyle();
-                String insertion = TextFormatParser.toFcsInsertion(pr.flags);
-                if (insertion != null && style.getInsertion() == null) {
-                    style = style.withInsertion(insertion);
-                }
-                base.setStyle(style);
-            }
-        }
-
-        List<Component> siblings = comp.getSiblings();
-        List<Component> newSiblings = null;
-        for (int i = 0; i < siblings.size(); i++) {
-            Component child = siblings.get(i);
-            Component normalized = gtShanhai$normalize(child);
-            if (normalized != child && newSiblings == null) {
-                newSiblings = new ArrayList<>(siblings.subList(0, i));
-            }
-            if (newSiblings != null) {
-                newSiblings.add(normalized);
-            }
-        }
-
-        if (base == null && newSiblings == null) {
-            return comp;
-        }
-        if (base == null) {
-            base = MutableComponent.create(comp.getContents()).setStyle(comp.getStyle());
-        }
-        for (Component child : newSiblings != null ? newSiblings : siblings) {
-            base.append(child);
-        }
-        return base;
     }
 }

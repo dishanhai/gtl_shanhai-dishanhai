@@ -16,12 +16,14 @@ import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
+import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
 import com.lowdragmc.lowdraglib.gui.modular.IUIHolder;
 import com.lowdragmc.lowdraglib.utils.Position;
+import com.lowdragmc.lowdraglib.utils.Size;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
@@ -68,7 +70,11 @@ public final class RecipeThreadConfigurationPage implements IFancyUIProvider {
 
             @Override
             protected void setupFancyUI(IFancyUIProvider provider, boolean hasInventory) {
-                super.setupFancyUI(provider, hasInventory);
+                if (stellar) {
+                    setupStellarPage(provider, hasInventory, (RecipeTypePatternBufferPartMachine) machine);
+                } else {
+                    super.setupFancyUI(provider, hasInventory);
+                }
                 if (stellar) {
                     var panel = getConfiguratorPanel();
                     panel.attachConfigurators(StellarGlassTexture.appearanceConfigurator());
@@ -84,6 +90,52 @@ public final class RecipeThreadConfigurationPage implements IFancyUIProvider {
                         applyGlassTitleBar(getTitleBar(), getCurrentHomePage().getTitle(), false, true);
                     }
                 }
+            }
+
+            /** 山海：所有星律頁籤共用主樣板畫布，隱藏背包時仍保留其高度。 */
+            private void setupStellarPage(IFancyUIProvider provider, boolean hasInventory,
+                                          RecipeTypePatternBufferPartMachine machine) {
+                clearUI();
+                sideTabsWidget.selectTab(provider);
+                titleBar.updateState(currentHomePage, !previousPages.isEmpty(),
+                        allPages.size() > 1 && currentPage != pageSwitcher);
+                Widget page = provider.createMainPage(this);
+                Size canvas = new Size(Math.max(172, machine.stellarPatternUiWidth() + border * 2),
+                        Math.max(86, machine.stellarPatternUiHeight() + border * 2));
+                int inventoryHeight = playerInventory == null ? 0 : playerInventory.getSize().height;
+                setSize(new Size(canvas.width, canvas.height + inventoryHeight));
+                if (LDLib.isRemote() && getGui() != null) {
+                    getGui().setSize(getSize().width, getSize().height);
+                }
+                pageContainer.setSize(canvas);
+                sideTabsWidget.setSize(new Size(24, canvas.height));
+                tooltipsPanel.setSelfPosition(new Position(canvas.width + 2, 2));
+                if (playerInventory != null) {
+                    playerInventory.setSelfPosition(new Position(
+                            (canvas.width - playerInventory.getSize().width) / 2, canvas.height));
+                    playerInventory.setActive(hasInventory);
+                    playerInventory.setVisible(hasInventory);
+                }
+                int availableWidth = canvas.width - border * 2;
+                int availableHeight = canvas.height - border * 2;
+                if (page.getSize().width > availableWidth || page.getSize().height > availableHeight) {
+                    // 捲動條佔用額外空間，避免遮住內容最後一列／行。
+                    var viewport = new DraggableScrollableWidgetGroup(border, border, availableWidth, availableHeight);
+                    viewport.setXScrollBarHeight(4).setYScrollBarWidth(4);
+                    viewport.setXBarStyle(StellarGlassTexture.display(), StellarGlassTexture.button());
+                    viewport.setYBarStyle(StellarGlassTexture.display(), StellarGlassTexture.button());
+                    page.setSelfPosition(new Position(0, 0));
+                    viewport.addWidget(page);
+                    viewport.addWidget(new WidgetGroup(page.getSize().width + 3, page.getSize().height + 3, 1, 1));
+                    pageContainer.addWidget(viewport);
+                } else {
+                    page.setSelfPosition(new Position((canvas.width - page.getSize().width) / 2,
+                            (canvas.height - page.getSize().height) / 2));
+                    pageContainer.addWidget(page);
+                }
+                provider.attachConfigurators(configuratorPanel);
+                provider.attachTooltips(tooltipsPanel);
+                titleBar.setSize(new Size(canvas.width, titleBar.getSize().height));
             }
 
             @Override

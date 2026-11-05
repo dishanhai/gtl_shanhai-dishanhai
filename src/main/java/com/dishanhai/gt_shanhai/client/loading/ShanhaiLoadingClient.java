@@ -30,6 +30,9 @@ import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL30.*;
 
 import java.util.ArrayList;
+import java.util.Map;
+import com.google.gson.JsonElement;
+import net.minecraft.world.item.crafting.Recipe;
 
 /** 山海：資料適配與客戶端生命週期。所有 GL 工作限定在渲染執行緒。 */
 @Mod.EventBusSubscriber(modid = "gt_shanhai", value = Dist.CLIENT)
@@ -142,37 +145,39 @@ public final class ShanhaiLoadingClient {
         }
     }
 
-    public static void beginRecipes(int total) {
-        if (!WORLD.active()) return;
-        RecipeWork work = new RecipeWork(WORLD.session(), total);
+    public static Map<ResourceLocation, JsonElement> trackRecipes(Map<ResourceLocation, JsonElement> recipes) {
+        if (!WORLD.active()) return recipes;
+        RecipeWork work = new RecipeWork(WORLD.session(), recipes.size(), "recipes",
+                "gui.gt_shanhai.loading.recipes", "gui.gt_shanhai.loading.recipes.reading");
         RECIPE_WORK.set(work);
-        WORLD.update(work.session, "recipes", "解析配方", "讀取配方檔案 ...", 0, total);
+        work.begin();
+        return ShanhaiLoadingProgress.trackMap(recipes, entry -> work.processed(entry.getKey()));
     }
 
-    public static void parsedRecipe(ResourceLocation id) {
+    public static void recipesReady() {
         RecipeWork work = RECIPE_WORK.get();
-        if (work == null) return;
-        work.current++;
-        if (work.current == 1 || work.current % 128 == 0) {
-            WORLD.update(work.session, "recipes", "解析配方", id.toString(), work.current, work.total);
-            // 某些整合包會在主執行緒連續解析配方，這時 managedBlock 本身不會再進入等待。
-            // 非同步工作者只提交不可變資料；GL 一律留給等待中的主執行緒。
-            renderWhileWaiting(Minecraft.getInstance());
-        }
+        if (work != null) WORLD.complete(work.session, "recipes", work.label,
+                Component.translatable("gui.gt_shanhai.loading.recipes.ready", work.total).getString(), work.total);
     }
 
     public static void endRecipes() {
-        RecipeWork work = RECIPE_WORK.get();
         RECIPE_WORK.remove();
-        if (work != null) WORLD.complete(work.session, "recipes", "配方解析結束",
-                "候選檔案 " + work.total + "；實際解析 " + work.current + "（略過與錯誤詳見遊戲日誌）", work.current);
+    }
+
+    public static Iterable<Recipe<?>> trackSyncedRecipes(ClientPacketListener listener, Iterable<Recipe<?>> recipes, int count) {
+        Minecraft mc = Minecraft.getInstance();
+        if (!WORLD.active() || !mc.isSameThread() || listener != mc.getConnection()) return recipes;
+        RecipeWork work = new RecipeWork(WORLD.session(), count, "sync",
+                "gui.gt_shanhai.loading.sync", "gui.gt_shanhai.loading.sync.applying");
+        work.begin();
+        return ShanhaiLoadingProgress.track(recipes, recipe -> work.processed(recipe.getId()));
     }
 
     public static void syncRecipes(ClientPacketListener listener, int count, boolean done) {
         Minecraft mc = Minecraft.getInstance();
         if (!WORLD.active() || !mc.isSameThread() || listener != mc.getConnection()) return;
-        if (done) WORLD.complete(WORLD.session(), "sync", "同步配方", "伺服器配方同步完成", count);
-        else WORLD.update("sync", "同步配方", "正在接收伺服器配方 ...", 0, count);
+        if (done) WORLD.complete(WORLD.session(), "sync", Component.translatable("gui.gt_shanhai.loading.sync").getString(),
+                Component.translatable("gui.gt_shanhai.loading.sync.ready").getString(), count);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -185,6 +190,7 @@ public final class ShanhaiLoadingClient {
         } else if (next instanceof LevelLoadingScreen || next instanceof ReceivingLevelScreen) {
             if (WORLD.active()) sawTerrain = true;
             if (WORLD.active() && next instanceof ReceivingLevelScreen) {
+                WORLD.completeExisting(WORLD.session(), "terrain");
                 WORLD.complete(WORLD.session(), "connect", "伺服器連線", "連線已建立", -1);
             }
         } else if (next != null && !isLoadingScreen(next)) {
@@ -257,6 +263,7 @@ public final class ShanhaiLoadingClient {
         try {
             mc.getMainRenderTarget().bindWrite(true);
             GuiGraphics graphics = new GuiGraphics(mc, mc.renderBuffers().bufferSource());
+            updateTerrain(mc.screen);
             render(graphics, false, WORLD.snapshot(now, ShanhaiLoadingPreferences.reduceMotion()), 1, false);
             mc.getMainRenderTarget().unbindWrite();
             mc.getMainRenderTarget().blitToScreen(mc.getWindow().getWidth(), mc.getWindow().getHeight());
@@ -283,9 +290,11 @@ public final class ShanhaiLoadingClient {
         Minecraft mc = Minecraft.getInstance();
         if (screen instanceof LevelLoadingScreen && mc.getProgressListener() != null) {
             int progress = Math.max(0, Math.min(100, mc.getProgressListener().getProgress()));
-            WORLD.update("terrain", "出生區塊準備", "建立世界地形 ...", progress, 100);
+            WORLD.update("terrain", Component.translatable("gui.gt_shanhai.loading.terrain").getString(),
+                    Component.translatable("gui.gt_shanhai.loading.terrain.preparing").getString(), progress, 100);
         } else if (screen instanceof ReceivingLevelScreen) {
-            WORLD.update("terrain", "接收世界區塊", "等待伺服器傳送地形 ...", 0, -1);
+            WORLD.update("chunks", Component.translatable("gui.gt_shanhai.loading.chunks").getString(),
+                    Component.translatable("gui.gt_shanhai.loading.chunks.waiting").getString(), 0, -1);
         }
     }
 
@@ -304,7 +313,23 @@ public final class ShanhaiLoadingClient {
     private static final class RecipeWork {
         private final long session;
         private final int total;
+        private final String key, label, initialDetail;
         private int current;
-        private RecipeWork(long session, int total) { this.session = session; this.total = total; }
+        private long lastPublished;
+        private RecipeWork(long session, int total, String key, String labelKey, String detailKey) {
+            this.session = session; this.total = total; this.key = key;
+            this.label = Component.translatable(labelKey).getString();
+            this.initialDetail = Component.translatable(detailKey).getString();
+        }
+        private void begin() { WORLD.update(session, key, label, initialDetail, 0, total); }
+        private synchronized void processed(ResourceLocation id) {
+            current++;
+            if (current != 1 && current % 128 != 0 && current != total) return;
+            long now = Util.getMillis();
+            if (current != total && now - lastPublished < 50) return;
+            lastPublished = now;
+            WORLD.update(session, key, label, id == null ? initialDetail : id.toString(), current, total);
+            renderWhileWaiting(Minecraft.getInstance());
+        }
     }
 }

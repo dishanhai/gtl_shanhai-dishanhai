@@ -2211,7 +2211,8 @@ public class DShanhaiMachines {
         }
         if (MAINTENANCE_HATCH != null) {
             var hatchBlock = MAINTENANCE_HATCH.getBlock();
-            // 枢纽映射所有标准 PartAbility，可替换任意仓室
+            // 枢纽映射支持的能力；普通物品/流体 I/O 仅供结构入场，
+            // 由 ShanhaiHubIoPredicateMixin 排除材料仓计数，实际出入料仍需真实仓室。
             com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.MAINTENANCE.register(0, hatchBlock);
             com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.PARALLEL_HATCH.register(0, hatchBlock);
             com.gtladd.gtladditions.api.machine.GTLAddPartAbility.INSTANCE.getTHREAD_MODIFIER().register(0, hatchBlock);

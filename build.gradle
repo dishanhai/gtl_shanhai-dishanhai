@@ -36,6 +36,8 @@ sourceSets.main.resources { setSrcDirs(['src/main/resources', 'src/generated/res
 
 repositories {
     mavenCentral()
+    // 山海：讓 ForgeGradle 對本機可選 API／測試依賴執行 SRG → 開發映射。
+    flatDir { dirs 'libs' }
 }
 
 // 山海：独立 UI 库的开发产物；正式游戏需单独安装发行 jar。
@@ -52,7 +54,11 @@ dependencies {
     implementation kotlinForForge
 
     implementation fileTree(dir: 'libs', include: '*.jar',
-            excludes: ['sh_better_ui-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar'])
+            excludes: ['sh_better_ui-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar', 'GTL-Enhancedcore-*.jar'])
+    // 山海：雲端橋接只用一版 API 編譯，遊戲可不安裝 Enhancedcore。
+    compileOnly(fg.deobf('local:GTL-Enhancedcore:4.1.7')) { transitive = false }
+    testImplementation(fg.deobf('local:GTL-Enhancedcore:4.1.7')) { transitive = false }
+    testImplementation(fg.deobf('local:appliedenergistics2-forge:15.4.10')) { transitive = false }
     implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
@@ -73,6 +79,8 @@ dependencies {
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
+    // 主模組既有 AE2 file 依賴保留；單測使用同一原件的映射副本以執行 NBT 方法。
+    classpath = classpath.filter { it.name != 'appliedenergistics2-forge-15.4.10.jar' }
 }
 
 tasks.withType(JavaCompile).configureEach {

@@ -40,6 +40,13 @@ public final class ShanhaiLoadingState {
         if (tasks.size() > 8) tasks.remove(tasks.keySet().iterator().next());
     }
 
+    public synchronized void completeExisting(long owner, String key) {
+        if (!active || owner != session) return;
+        Task task = tasks.get(key);
+        if (task != null && !task.done()) tasks.put(key, new Task(task.label(), task.detail(),
+                task.total() > 0 ? task.total() : task.current(), task.total(), true));
+    }
+
     public synchronized void finish(long now) {
         if (!active) return;
         active = false;
