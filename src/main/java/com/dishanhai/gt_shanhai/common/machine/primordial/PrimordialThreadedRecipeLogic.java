@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.mixin.PrimordialRecipeThreadStateAccessor;
 import com.dishanhai.gt_shanhai.api.machine.RecipeThreadSnapshot;
+import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadPriority;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
@@ -32,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /** 山海：原初批次的多线程并行。所有庫存及能源交易仍在伺服器執行緒執行。 */
@@ -49,6 +51,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private long allowance;
     private long continuousTicks;
     private long completedThreadBatches;
+    private RecipeThreadPriority<GTRecipe> priority;
+    private boolean priorityInputHandled;
     private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
@@ -60,6 +64,18 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     }
 
     @Override public ManagedFieldHolder getFieldHolder() { return THREAD_FIELDS; }
+    public final Set<GTRecipe> priorityCandidates(Set<GTRecipe> candidates) {
+        return priorityCandidates(() -> candidates);
+    }
+
+    public final Set<GTRecipe> priorityCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup) {
+        return priority == null ? lookup.get() : new LinkedHashSet<>(priority.select(lookup));
+    }
+
+    protected long estimateThreadRecipeTicks(GTRecipe recipe) {
+        return Math.max(1, getLimited().getLimitedDuration());
+    }
+
     protected abstract long getUnreservedTotalParallelLimit();
 
     protected final long getBaseParallelCapacity() { return super.getTotalParallelLimit(); }
@@ -284,6 +300,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     /** 只在本邏輯當次查找內記錄真實扣料成功的配方，不讀取其他執行緒或新樣板。 */
     public final void onThreadRecipeInputHandled(GTRecipe recipe) {
         if (matchingRecipeSources == null) return;
+        if (priority != null) priorityInputHandled = true;
         var identity = PrimordialThreadRecipeIdentity.fromRecipe(recipe);
         if (identity != null) matchingRecipeSources.add(identity);
     }
@@ -372,10 +389,19 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                             apply(new Frame());
                             allowance = share;
                             admission = true;
+                            priorityInputHandled = false;
+                            priority = Math.min(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) > 1L
+                                    ? new RecipeThreadPriority<>(PrimordialThreadedRecipeLogic.this::estimateThreadRecipeTicks,
+                                            recipe -> recipe.duration) : null;
                             try {
-                                findAndHandleRecipe();
+                                do {
+                                    findAndHandleRecipe();
+                                    if (lastRecipe != null || priorityInputHandled) break;
+                                } while (priority != null && priority.retry());
                                 return lastRecipe != null && duration > 0 ? capture() : null;
                             } finally {
+                                priority = null;
+                                priorityInputHandled = false;
                                 admission = false;
                                 allowance = 0L;
                             }

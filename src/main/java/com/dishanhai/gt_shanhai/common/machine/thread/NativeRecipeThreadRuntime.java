@@ -44,6 +44,7 @@ import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Cooperatively multiplexes the original logic instance. Every recipe search, modifier,
@@ -58,6 +59,8 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
     private boolean initialized, ticking, admitting, finishing, drain, invalidating, replayingPaid;
     private long allowance, admittedParallel, currentShare, lastTick = Long.MIN_VALUE, continuous;
     private long completedThreadBatches;
+    private RecipeThreadPriority<GTRecipe> priority;
+    private RecipeThreadPriority<GTRecipe> virtualPriority;
     private BigInteger tickInput = BigInteger.ZERO, tickOutput = BigInteger.ZERO;
     private int sharedFuel, sharedMaxFuel;
     private boolean workedThisTick, workingResult, waitedThisTick;
@@ -86,6 +89,58 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
     public boolean isTicking() { return ticking; }
     public boolean isFinishing() { return finishing; }
     public boolean isAdmitting() { return admitting; }
+    public boolean isPrioritizing() { return priority != null; }
+
+    public Set<GTRecipe> priorityCandidates(Set<GTRecipe> candidates) {
+        return priorityCandidates(() -> candidates);
+    }
+
+    public Set<GTRecipe> priorityCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup) {
+        return priority == null ? lookup.get() : new LinkedHashSet<>(priority.select(lookup));
+    }
+
+    public boolean hasPrioritySnapshot() { return priority != null && priority.hasSnapshot(); }
+
+    /** null 表示交回原生搜尋，讓沒有普通候選時的 custom runner 保留原有時序。 */
+    public java.util.Iterator<GTRecipe> prioritySearch(java.util.function.Supplier<java.util.Iterator<GTRecipe>> lookup) {
+        if (priority == null) return null;
+        if (hasPrioritySnapshot()) return priorityCandidates(Set.of()).iterator();
+        var candidates = new LinkedHashSet<GTRecipe>();
+        var iterator = lookup.get();
+        if (iterator != null) iterator.forEachRemaining(recipe -> { if (recipe != null) candidates.add(recipe); });
+        return candidates.isEmpty() ? null : priorityCandidates(candidates).iterator();
+    }
+
+    /** 虛擬樣板保留既有搜尋優先權，與普通候選分開快照，避免回退時互相替換。 */
+    private Set<GTRecipe> priorityVirtualCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup) {
+        if (priority == null) return lookup.get();
+        if (virtualPriority == null) virtualPriority = new RecipeThreadPriority<>(this::estimateRecipeTicks, recipe -> recipe.duration);
+        return new LinkedHashSet<>(virtualPriority.select(lookup));
+    }
+
+    public boolean tryVirtualCandidates(Set<GTRecipe> candidates, java.util.function.Predicate<GTRecipe> start) {
+        return tryVirtualCandidates(() -> candidates, start);
+    }
+
+    public boolean tryVirtualCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup,
+                                        java.util.function.Predicate<GTRecipe> start) {
+        do {
+            for (GTRecipe recipe : priorityVirtualCandidates(lookup)) {
+                if (start.test(recipe) || admitting && (paidRecipe != null || admittedParallel > 0L)) return true;
+            }
+        } while (virtualPriority != null && virtualPriority.retry());
+        return false;
+    }
+
+    protected long estimateRecipeTicks(GTRecipe recipe) {
+        long voltage = logic.machine instanceof IOverclockMachine machine ? machine.getOverclockVoltage() : 0L;
+        if (logic instanceof RecipeThreadTiming timing) {
+            return timing.shanhai$estimateRecipeTicks(recipe, currentShare, voltage);
+        }
+        voltage = admissionVoltage(logic.machine, voltage);
+        long eut = recipe.tickInputs.isEmpty() ? 0L : RecipeHelper.getInputEUt(recipe);
+        return RecipeThreadPriority.standardTicks(recipe.duration, eut, voltage);
+    }
     public long allowance(long nativeLimit) {
         return admitting ? Math.min(nativeLimit, Math.max(0L, allowance - admittedParallel)) : nativeLimit;
     }
@@ -199,8 +254,13 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
                     apply(emptyFrame());
                     sources.clear(); paidRecipe = null;
                     currentShare = allowance = share; admittedParallel = 0L; admitting = true;
+                    priority = capacity() > 1L ? new RecipeThreadPriority<>(
+                            NativeRecipeThreadRuntime.this::estimateRecipeTicks, recipe -> recipe.duration) : null;
                     try {
-                        logic.findAndHandleRecipe();
+                        do {
+                            logic.findAndHandleRecipe();
+                            if (paidRecipe != null || admittedParallel > 0L || logic.getLastRecipe() != null) break;
+                        } while (priority != null && priority.retry());
                         if (logic.getLastRecipe() != null && logic.getDuration() > 0) return capture(false);
                         if (paidRecipe == null) return null;
                         // GTL builders have already paid before findAndHandleRecipe checks output.
@@ -210,6 +270,7 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
                         logic.setWaiting(Component.translatable("gt_shanhai.primordial.threads.waiting_setup"));
                         return capture(true);
                     } finally {
+                        priority = virtualPriority = null;
                         admitting = false; allowance = admittedParallel = 0L; paidRecipe = null; sources.clear();
                     }
                 }

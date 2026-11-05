@@ -505,7 +505,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     @Nullable
     protected ParallelData calculateParallels() {
         stellarLastAllocatedParallel = 0L;
-        Set<GTRecipe> recipes = lookupRecipeIterator();
+        Set<GTRecipe> recipes = com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadPriority.select(this, this::lookupRecipeIterator);
         if (recipes.isEmpty()) {
             invalidateLookupSetCache();
             return null;

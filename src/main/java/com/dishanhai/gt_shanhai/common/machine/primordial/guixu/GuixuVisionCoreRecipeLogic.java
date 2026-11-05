@@ -84,11 +84,27 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
         return host.getContainmentBonus().scaleParallel(super.getUnreservedTotalParallelLimit());
     }
 
-    /** 先規劃整批共享功率，原生 buildFinalWirelessRecipe 才真正扣料。 */
+    /** 山海：沿用功率規劃公式的唯讀單候選耗時估算。 */
+    @Override
+    protected long estimateThreadRecipeTicks(GTRecipe recipe) {
+        boolean consumer = recipeConsumesEnergy(recipe);
+        BigInteger power = getDirectionalHatchPower(consumer);
+        BigInteger cost = BigDecimal.valueOf((double) Math.max(1, recipe.duration) * getEuMultiplier())
+                .multiply(BigDecimal.valueOf(Math.max(0L, getWirelessRecipeEut(recipe))))
+                .setScale(0, RoundingMode.CEILING).toBigIntegerExact().max(BigInteger.ONE);
+        BigInteger eut = GuixuPowerBudget.ceilDivide(cost, BigInteger.valueOf(Math.max(1, recipe.duration)));
+        if (power.signum() <= 0) return Math.max(1, recipe.duration);
+        return host.getContainmentBonus().scaleDuration(GuixuPowerBudget.duration(
+                power, eut, Math.max(1, recipe.duration), host.getLimitedDuration()));
+    }
+
     @Override
     protected ParallelData calculateParallels() {
-        var candidates = new ArrayList<>(lookupRecipeIterator());
-        candidates.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        var candidates = new ArrayList<>(priorityCandidates(() -> {
+            var source = new ArrayList<>(lookupRecipeIterator());
+            source.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+            return new java.util.LinkedHashSet<>(source);
+        }));
         // 原生一次只封裝一個 EU 方向；輪轉類型時不能把燃料發電與耗電配方混成一批。
         for (boolean consumer : new boolean[]{!preferGeneration, preferGeneration}) {
             plannedConsumer = consumer;

@@ -2,13 +2,18 @@ package com.dishanhai.gt_shanhai.mixin;
 
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.common.machine.thread.NativeRecipeThreadRuntime;
+import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadPriority;
+import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadTiming;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gtladd.gtladditions.api.machine.logic.MutableRecipesLogic;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import java.math.BigInteger;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
@@ -16,7 +21,30 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = MutableRecipesLogic.class, remap = false)
-public abstract class RecipeThreadMutableLogicMixin {
+public abstract class RecipeThreadMutableLogicMixin implements RecipeThreadTiming {
+    @Shadow protected abstract double getEuMultiplier();
+    @Shadow protected abstract long getRecipeEut(GTRecipe recipe);
+
+    @Override public long shanhai$estimateRecipeTicks(GTRecipe recipe, long parallelLimit, long voltage) {
+        RecipeLogic logic = (RecipeLogic) (Object) this;
+        if (!((MutableRecipesLogic<?>) (Object) this).isMultipleRecipeMode()) {
+            return RecipeThreadPriority.standardTicks(recipe.duration, getRecipeEut(recipe),
+                    NativeRecipeThreadRuntime.admissionVoltage(logic.machine, voltage));
+        }
+        if (logic.machine instanceof com.gtladd.gtladditions.api.machine.IWirelessElectricMultiblockMachine wireless
+                && wireless.getWirelessNetworkEnergyHandler() != null) return 20L;
+        voltage = NativeRecipeThreadRuntime.admissionVoltage(logic.machine, voltage);
+        long parallel = Math.max(1L, org.gtlcore.gtlcore.api.recipe.IParallelLogic.getMaxParallel(logic.machine, recipe, parallelLimit));
+        return RecipeThreadPriority.energyTicks(getRecipeEut(recipe) * (double) recipe.duration * getEuMultiplier(),
+                parallel, voltage, 20);
+    }
+
+    @WrapOperation(method = "calculateParallels", at = @At(value = "INVOKE",
+            target = "Lcom/gtladd/gtladditions/api/machine/logic/MutableRecipesLogic;lookupRecipeSet()Ljava/util/Set;"))
+    private java.util.Set<GTRecipe> shanhai$longRecipeFirst(MutableRecipesLogic<?> logic,
+                                                           Operation<java.util.Set<GTRecipe>> lookup) {
+        return RecipeThreadPriority.select(logic, () -> lookup.call(logic));
+    }
     @ModifyVariable(method = "calculateParallel", at = @At("HEAD"), argsOnly = true, ordinal = 0)
     private long shanhai$limitNativeCandidate(long nativeLimit) {
         return NativeRecipeThreadRuntime.limitParallel(nativeLimit);

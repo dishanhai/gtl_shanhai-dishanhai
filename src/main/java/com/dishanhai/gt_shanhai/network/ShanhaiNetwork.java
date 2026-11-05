@@ -20,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "15";
+    private static final String PROTOCOL_VERSION = "16";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 

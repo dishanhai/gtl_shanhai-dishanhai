@@ -1,11 +1,22 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.integration.jade.provider.RecipeThreadHatchInfoProvider;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
+import snownee.jade.api.BlockAccessor;
+import snownee.jade.api.ITooltip;
+import snownee.jade.api.ui.IElement;
+import snownee.jade.api.ui.IElementHelper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -22,6 +33,8 @@ class RecipeThreadHatchPartMachineTest {
             "guides", "gt_shanhai", "guide", "ae", "recipe_thread_hatch.md");
     private static final Path PARALLEL_GUIDE = Path.of("src", "main", "resources", "assets", "gt_shanhai",
             "guides", "gt_shanhai", "guide", "ae", "parallel_index.md");
+    private static final Path JADE_PLUGIN = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+            "integration", "jade", "DShanhaiJadePlugin.java");
 
     @Test
     void threadHatchMustNotClaimNativeParallelHatchCapability() throws IOException {
@@ -86,6 +99,66 @@ class RecipeThreadHatchPartMachineTest {
 
         String parallelGuide = Files.readString(PARALLEL_GUIDE);
         assertTrue(parallelGuide.contains("recipe_thread_hatch.md"));
+    }
+
+    @Test
+    void jadeProviderRendersHatchStatusAndIsRegisteredInPlugin() throws IOException {
+        String plugin = Files.readString(JADE_PLUGIN);
+        assertTrue(plugin.contains("registerBlockDataProvider(RecipeThreadHatchInfoProvider.INSTANCE"));
+        assertTrue(plugin.contains("registerBlockComponent(RecipeThreadHatchInfoProvider.INSTANCE"));
+
+        var zh = JsonParser.parseString(Files.readString(LANG.resolve("zh_cn.json"))).getAsJsonObject();
+        var en = JsonParser.parseString(Files.readString(LANG.resolve("en_us.json"))).getAsJsonObject();
+        for (String key : List.of("gt_shanhai.recipe_threads.jade.item", "gt_shanhai.recipe_threads.jade.item_empty")) {
+            assertTrue(zh.has(key) && !zh.get(key).getAsString().isBlank(), key);
+            assertTrue(en.has(key) && !en.get(key).getAsString().isBlank(), key);
+        }
+
+        CompoundTag serverData = new CompoundTag();
+        CompoundTag hatchData = new CompoundTag();
+        hatchData.putBoolean("enabled", true);
+        hatchData.putLong("capacity", Long.MAX_VALUE);
+        hatchData.putInt("owners", 2);
+        hatchData.putLong("running", 5L);
+        hatchData.putLong("waiting", 1L);
+        hatchData.putLong("reserved", 128L);
+        hatchData.putLong("parallel", 1024L);
+        serverData.put(RecipeThreadHatchInfoProvider.getDataKey(), hatchData);
+
+        List<String> keys = new ArrayList<>();
+        IElement dummyElement = proxy(IElement.class, (method, args) -> null);
+        IElementHelper helper = proxy(IElementHelper.class, (method, args) -> {
+            if ("text".equals(method) && args != null && args.length == 1 && args[0] instanceof Component c
+                    && c.getContents() instanceof TranslatableContents tc) {
+                keys.add(tc.getKey());
+            }
+            return dummyElement;
+        });
+        ITooltip tooltip = proxy(ITooltip.class, (method, args) -> {
+            if ("getElementHelper".equals(method)) return helper;
+            return null;
+        });
+        BlockAccessor accessor = proxy(BlockAccessor.class,
+                (method, args) -> "getServerData".equals(method) ? serverData : null);
+
+        RecipeThreadHatchInfoProvider.INSTANCE.appendTooltip(tooltip, accessor, null);
+        assertEquals(List.of(
+                "gt_shanhai.recipe_threads.ui.title",
+                "gt_shanhai.recipe_threads.ui.state",
+                "gt_shanhai.recipe_threads.ui.capacity",
+                "gt_shanhai.recipe_threads.jade.item_empty",
+                "gt_shanhai.recipe_threads.ui.owners",
+                "gt_shanhai.recipe_threads.ui.activity",
+                "gt_shanhai.recipe_threads.ui.parallel"
+        ), keys);
+    }
+
+    private interface Call { Object invoke(String method, Object[] args); }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T proxy(Class<T> type, Call call) {
+        return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type},
+                (instance, method, args) -> call.invoke(method.getName(), args));
     }
 
 }

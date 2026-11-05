@@ -231,7 +231,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     protected ParallelData calculateParallels() {
         stellarLastAllocatedRecipes = 0L;
         matchableScaledRecipeCache.clear();
-        Set<GTRecipe> recipes = lookupRecipeIterator();
+        Set<GTRecipe> recipes = priorityCandidates(this::lookupRecipeIterator);
         if (recipes.isEmpty()) {
             // 与父类 calculateParallels 同款语义：是否清缓存必须先问 shouldInvalidateLookupCacheWhenNoRunnableRecipe()。
             // 此前三处无条件 invalidate 把模块的 200-tick 稳态缓存和该开关整体架空——空闲模块每 5 tick

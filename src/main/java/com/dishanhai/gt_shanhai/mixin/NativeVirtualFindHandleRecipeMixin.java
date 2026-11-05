@@ -78,48 +78,44 @@ public abstract class NativeVirtualFindHandleRecipeMixin {
         // 仅处理多方块宿主
         if (!(machine instanceof IMultiController)) return;
 
+        var threadRuntime = com.dishanhai.gt_shanhai.common.machine.thread.NativeRecipeThreadRuntime.of((RecipeLogic) (Object) this);
+        if (threadRuntime != null) {
+            if (threadRuntime.tryVirtualCandidates(() -> RecipeTypePatternSearchHelper.collectNativeVirtualRecipes(machine),
+                    this::gtShanhai$tryVirtualRecipe)) ci.cancel();
+            return;
+        }
         Set<GTRecipe> virtualRecipes = RecipeTypePatternSearchHelper.collectNativeVirtualRecipes(machine);
-        if (virtualRecipes.isEmpty()) return;
-
         for (GTRecipe virtual : virtualRecipes) {
-            if (virtual == null) continue;
-
-            GTRecipeType ownedInactive = gtShanhai$ownedInactiveType(virtual);
-            if (ownedInactive != null) {
-                NativeVirtualSetupState.beginOwnedInactiveType(ownedInactive);
+            if (gtShanhai$tryVirtualRecipe(virtual)) {
+                ci.cancel();
+                return;
             }
-            try {
-                GTRecipe modified = machine.fullModifyRecipe(virtual.copy(), ocParams, ocResult);
-                if (modified == null) continue;
+        }
+    }
 
-                boolean match = RecipeRunnerHelper.matchRecipe(machine, modified)
-                        && modified.matchTickRecipe(machine).isSuccess()
-                        && modified.checkConditions(machine.getRecipeLogic()).isSuccess();
-                if (!match) continue;
-
-                boolean bypassHostLimits = DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get();
-                if (bypassHostLimits) {
-                    NativeVirtualSetupState.beginVirtualExecution();
-                }
-                try {
-                    setupRecipe(modified);
-                } finally {
-                    if (bypassHostLimits) {
-                        NativeVirtualSetupState.endVirtualExecution();
-                    }
-                }
-
-                if (lastRecipe != null && getStatus() == RecipeLogic.Status.WORKING) {
-                    lastOriginRecipe = virtual;
-                    recipeDirty = false;
-                    ci.cancel();
-                    return;
-                }
-            } finally {
-                if (ownedInactive != null) {
-                    NativeVirtualSetupState.endOwnedInactiveType();
-                }
+    private boolean gtShanhai$tryVirtualRecipe(GTRecipe virtual) {
+        if (virtual == null) return false;
+        GTRecipeType ownedInactive = gtShanhai$ownedInactiveType(virtual);
+        if (ownedInactive != null) NativeVirtualSetupState.beginOwnedInactiveType(ownedInactive);
+        try {
+            GTRecipe modified = machine.fullModifyRecipe(virtual.copy(), ocParams, ocResult);
+            if (modified == null) return false;
+            boolean match = RecipeRunnerHelper.matchRecipe(machine, modified)
+                    && modified.matchTickRecipe(machine).isSuccess()
+                    && modified.checkConditions(machine.getRecipeLogic()).isSuccess();
+            if (!match) return false;
+            boolean bypassHostLimits = DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get();
+            if (bypassHostLimits) NativeVirtualSetupState.beginVirtualExecution();
+            try { setupRecipe(modified); }
+            finally { if (bypassHostLimits) NativeVirtualSetupState.endVirtualExecution(); }
+            if (lastRecipe != null && getStatus() == RecipeLogic.Status.WORKING) {
+                lastOriginRecipe = virtual;
+                recipeDirty = false;
+                return true;
             }
+            return false;
+        } finally {
+            if (ownedInactive != null) NativeVirtualSetupState.endOwnedInactiveType();
         }
     }
 

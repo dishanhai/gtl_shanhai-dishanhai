@@ -49,9 +49,39 @@ class RecipeThreadPriorityTest {
         assertFalse(priority.retry());
     }
 
+    @Test void retryDoesNotRebuildTheNativeLookupSnapshot() {
+        var searches = new AtomicInteger();
+        var priority = new RecipeThreadPriority<Integer>(i -> i, i -> i);
+        java.util.function.Supplier<List<Integer>> lookup = () -> { searches.incrementAndGet(); return List.of(1, 3, 2); };
+        assertEquals(List.of(3), priority.select(lookup));
+        assertTrue(priority.retry()); assertEquals(List.of(2), priority.select(lookup));
+        assertTrue(priority.retry()); assertEquals(List.of(1), priority.select(lookup));
+        assertEquals(1, searches.get());
+    }
+
     @Test void energyEstimateUsesPowerAndParallelWithoutOverflow() {
         assertEquals(200, RecipeThreadPriority.energyTicks(1000, 4, 20, 20));
         assertEquals(20, RecipeThreadPriority.energyTicks(1, 1, 100, 20));
         assertEquals(Integer.MAX_VALUE, RecipeThreadPriority.energyTicks(Double.MAX_VALUE, Long.MAX_VALUE, 1, 20));
+    }
+
+    @Test void standardOverclockCanReverseTheOriginalDurationOrder() throws Exception {
+        // 隔離 GTValues 的 Minecraft 靜態初始化，仍執行原生標準超頻邏輯。
+        var field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); field.setAccessible(true);
+        var unsafe = (sun.misc.Unsafe) field.get(null);
+        var previous = com.gregtechceu.gtceu.config.ConfigHolder.INSTANCE;
+        if (previous == null) {
+            var config = (com.gregtechceu.gtceu.config.ConfigHolder) unsafe.allocateInstance(com.gregtechceu.gtceu.config.ConfigHolder.class);
+            config.machines = (com.gregtechceu.gtceu.config.ConfigHolder.MachineConfigs)
+                    unsafe.allocateInstance(com.gregtechceu.gtceu.config.ConfigHolder.MachineConfigs.class);
+            config.machines.overclockDivisor = 2;
+            com.gregtechceu.gtceu.config.ConfigHolder.INSTANCE = config;
+        }
+        try {
+            long originallySlow = RecipeThreadPriority.standardTicks(160, 8, 2048, 4);
+            long originallyFast = RecipeThreadPriority.standardTicks(80, 2048, 2048, 0);
+            assertTrue(originallySlow < originallyFast);
+            assertEquals(80, originallyFast);
+        } finally { com.gregtechceu.gtceu.config.ConfigHolder.INSTANCE = previous; }
     }
 }
