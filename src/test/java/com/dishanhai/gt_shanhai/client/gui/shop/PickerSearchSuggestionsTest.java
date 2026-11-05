@@ -55,4 +55,21 @@ class PickerSearchSuggestionsTest {
         assertEquals("Water", suggest(index, "water", List.of(0)).get(0).completion());
         assertTrue(suggest(index, "iron", List.of(0, 5)).isEmpty());
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void paginatedCandidatesKeepTheFirstFiveAndAllRemainingPrefixMatches() throws Exception {
+        var entries = new java.util.ArrayList<PickerSortEntry>();
+        for (int i = 0; i < 12; i++) entries.add(entry(i, "Iron " + i, "mod:iron_" + i));
+        var index = index(entries);
+        var matches = java.util.stream.IntStream.range(0, 12).boxed().toList();
+        var method = index.getClass().getMethod("suggestAll", String.class, List.class);
+        var all = (List<ShopCatalogSearchIndex.Suggestion>) method.invoke(index, "iron", matches);
+        assertEquals(12, all.size());
+        assertEquals(suggest(index, "iron", matches), all.subList(0, 5));
+        var prefixed = (List<ShopCatalogSearchIndex.Suggestion>) method.invoke(index, "#conductors", matches);
+        assertEquals(12, prefixed.size());
+        assertEquals("*mod:iron_11", prefixed.get(11).completion());
+        assertEquals(2, ((List<?>) method.invoke(index, "iron", List.of(3, 8))).size());
+    }
 }

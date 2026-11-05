@@ -66,6 +66,8 @@ class StellarGlassUiCompatibilityTest {
         VersionRange range = VersionRange.createFromVersionSpec(requirement.group(1));
         assertFalse(range.containsVersion(new DefaultArtifactVersion("1.0.0")),
                 "The deployed 1.0.0 jar lacks smokePanel and must be rejected during mod loading");
+        assertFalse(range.containsVersion(new DefaultArtifactVersion("1.0.2")),
+                "Shop smoke themes require the GlassTheme.SMOKE API from UI library 1.0.3");
 
         Class<?> texture = Class.forName("com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture", false,
                 getClass().getClassLoader());

@@ -29,7 +29,9 @@ class ShopScreenCatalogSourceTest {
                         "src/main/java/com/dishanhai/gt_shanhai/client/shop/ClientShopCatalog.java"))
                         .contains("preferPinnedChunk")),
                 () -> assertTrue(source.contains("cardCategoryBadge")),
-                () -> assertTrue(source.contains("GuiRenderUtil.trimText(this.font, categoryBadge")),
+                () -> assertTrue(source.contains("cachedCategoryBadge(cc, favorite)")
+                        && source.contains("cardText(badge, cc.layout.badgeWidth(false))")
+                        && source.contains("cardText(badge, cc.layout.badgeWidth(true))")),
                 () -> assertFalse(source.contains("ShopConfig.getTopCategories")),
                 () -> assertFalse(source.contains("ShopConfig.getSubCategories")),
                 () -> assertFalse(source.contains("ShopConfig.getEntriesOfGroup")));

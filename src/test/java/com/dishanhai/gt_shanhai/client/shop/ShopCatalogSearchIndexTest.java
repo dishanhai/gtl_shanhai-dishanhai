@@ -114,4 +114,20 @@ class ShopCatalogSearchIndexTest {
         assertEquals("§b&$ultimate-Iron Ingot", property(result.get(0), "displayName"));
         assertEquals(List.of(1L), search(index, "iron ingot", "all", null));
     }
+
+    @Test
+    void expandedSuggestionsKeepTheOriginalTopFiveAndRankRemainingMatchesStably() {
+        var index = new ShopCatalogSearchIndex(List.of(
+                stub(1, false, "Copper", "mod:iron"), stub(2, false, "Cast Iron", "mod:cast"),
+                stub(3, false, "Iron Ingot", "mod:ingot"), stub(4, false, "Iron", "mod:metal"),
+                stub(5, false, "Iron Dust", "mod:dust"), stub(6, false, "Hot Iron", "mod:hot"),
+                stub(7, false, "Tin", "iron"), stub(8, false, "Gold", "iron:gold"),
+                stub(9, true, "Iron Secret", "mod:secret"), stub(10, false, "No Match", "mod:none")));
+        var all = index.suggest("iron", null, Integer.MAX_VALUE);
+        assertEquals(List.of(4L, 3L, 5L, 2L, 6L, 7L, 8L, 1L),
+                all.stream().map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+        assertEquals(index.suggest("iron", null, 5), all.subList(0, 5));
+        assertEquals(List.of(6L, 2L, 1L), index.suggest("iron", List.of(1L, 6L, 9L, 2L, 999L), 20)
+                .stream().map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+    }
 }

@@ -201,18 +201,38 @@ class ShopBatchOperationsSourceTest {
     @Test
     void glassThemeOwnsTooltipAndCardFlightLook() throws Exception {
         String tip = source("client/gui/shop/ShopGlassTooltip.java");
-        String tooltipRenderer = Files.readString(Path.of("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/glass/GlassTooltip.java"));
         String init = source("client/ClientInit.java");
         String screen = source("client/gui/shop/ShopScreen.java");
-        assertTrue(tip.contains("if (applies()) GlassTooltip.render(event)")
-                        && tooltipRenderer.contains("event.setCanceled(true)")
-                        && tooltipRenderer.contains("GlassTheme.GLASS.tooltipPanel("),
-                "玻璃主题下 tooltip 应由我们自己画成毛玻璃，不用原版黑底紫边");
-        assertTrue(init.contains("ShopGlassTooltip::onTooltipPre"), "tooltip 接管必须挂到 Forge 总线");
+        assertTrue(tip.contains("ShopTheme.current()") && tip.contains("theme.tooltipPanel(")
+                        && tip.contains("theme.rootPanel(") && !tip.contains("&& ShopTheme.current().glass")
+                        && tip.contains("event.setCanceled(true)"),
+                "商店三种主题的 tooltip 均须使用对应主题边框，玻璃继续复用共用材质");
+        assertTrue(tip.contains("getTooltipPositioner()") && tip.contains("c.renderText(") && tip.contains("c.renderImage("),
+                "更换边框仍须保留原定位器、文字及图片组件");
+        assertTrue(init.replace("\r\n", "\n").contains("addListener(EventPriority.HIGHEST,\n                com.dishanhai.gt_shanhai.client.gui.shop.ShopGlassTooltip::onTooltipPre)"),
+                "商店须先接管绘制，避免其他模组提前画出彩色 tooltip 框");
         assertTrue(screen.contains("theme.controlBackdrop(g, rx, ry, rw, rh, fade);"),
                 "玻璃主题的飞行卡片要先糊掉下面再画实一点的底，否则整块透明");
         assertTrue(screen.contains("// 不登记请求"),
                 "玻璃主题不再给详情列叠后处理折射");
+    }
+
+    @Test
+    void rewardNamesNormalizeBeforeWidthClippingAndWrapping() throws Exception {
+        String screen = source("client/gui/shop/ShopScreen.java");
+        int start = screen.indexOf("private int drawRewardOdds(");
+        int end = screen.indexOf("private static boolean rewardOddsChoice(", start);
+        String rows = screen.substring(start, end);
+        assertTrue(rows.contains("TextFormatParser.normalizeFcsComponent(Component.literal(line.name()))"));
+        assertTrue(rows.contains("this.font.substrByWidth(label, nameMax)"));
+        assertTrue(rows.contains("FormattedCharSequence name ="));
+        assertTrue(!rows.contains("GuiRenderUtil.trimText(this.font, line.name()"), "不能再裁断原始内联码");
+        for (String choice : new String[]{"RewardChoiceScreen", "FtbqRewardChoiceScreen"}) {
+            assertTrue(source("client/gui/shop/" + choice + ".java")
+                    .contains("this.font.split(TextFormatParser.normalizeFcsComponent(st.getHoverName()), nameW)"));
+        }
+        assertTrue(source("mixin/ComponentWrapFcsNormalizeMixin.java").contains("TextFormatParser.normalizeFcsComponent(comp)"),
+                "既有断行兜底须复用同一归一化逻辑");
     }
 
     @Test

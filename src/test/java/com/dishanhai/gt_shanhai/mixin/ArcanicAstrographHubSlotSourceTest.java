@@ -8,28 +8,33 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ArcanicAstrographHubSlotSourceTest {
 
     @Test
-    void hubDoesNotConsumeAstrographLimitedHatchAndKeepsItsOwnParallelFallback() throws Exception {
+    void sharedIoAdmissionReplacesAstrographBlanketSkipAndKeepsParallelFallback() throws Exception {
         String slot = Files.readString(Path.of(
                 "src", "main", "java", "com", "dishanhai", "gt_shanhai", "mixin",
-                "ArcanicAstrographHubSlotMixin.java"));
+                "ShanhaiHubIoPredicateMixin.java"));
         String parallel = Files.readString(Path.of(
                 "src", "main", "java", "com", "dishanhai", "gt_shanhai", "mixin",
                 "ArcanicAstrographHubParallelMixin.java"));
         String mixinConfig = MixinConfigs.readAll();
 
         assertTrue(slot.contains("method = \"testLimited\""));
-        assertTrue(slot.contains("instanceof ArcanicAstrograph"));
-        assertTrue(slot.contains("\"maintenance_hatch\""));
+        assertFalse(slot.contains("instanceof ArcanicAstrograph"));
+        assertTrue(slot.contains("gtShanhai$ioAdmissionOnly"));
+        assertTrue(slot.contains("putIfAbsent(self, 0)"));
         assertTrue(slot.contains("setReturnValue(false)"));
         assertTrue(parallel.contains("findCosmosSimulationRecipe"));
         assertTrue(parallel.contains("hatchParallel > limit"));
         assertTrue(parallel.contains("applied < maxParallel"));
         assertTrue(parallel.contains("ParallelLogic.applyParallel"));
-        assertTrue(mixinConfig.contains("\"ArcanicAstrographHubSlotMixin\""));
+        assertFalse(mixinConfig.contains("\"ArcanicAstrographHubSlotMixin\""));
+        assertTrue(mixinConfig.contains("\"ShanhaiHubIoPredicateMixin\""));
+        assertTrue(mixinConfig.contains("\"ShanhaiHubAbilityPredicateMixin\""));
+        assertTrue(mixinConfig.contains("\"ShanhaiHubAdmissionMixin\""));
         assertTrue(mixinConfig.contains("\"ArcanicAstrographHubParallelMixin\""));
     }
 }

@@ -21,7 +21,7 @@ class ShanhaiLoadingIntegrationTest {
     private static final List<String> MIXINS = List.of("ShanhaiLoadingOverlayMixin", "ShanhaiLoadingWorldMixin",
             "ShanhaiLoadingWaitMixin", "ShanhaiLoadingRecipeMixin", "ShanhaiLoadingSyncMixin", "ShanhaiLoadingConnectMixin", "ShanhaiLoadingReloadProfilerMixin",
             "ShanhaiLoadingJeiRecipesMixin", "ShanhaiLoadingJeiIndexMixin", "ShanhaiLoadingJeiPluginsMixin",
-            "ShanhaiLoadingJeiSearchMixin", "ShanhaiLoadingJeiSearchStorageMixin");
+            "ShanhaiLoadingJeiSearchMixin", "ShanhaiLoadingJeiSearchStorageMixin", "ShanhaiLoadingDataPackMixin");
 
     @Test void everyLoadingInjectionResolvesToExactlyOneActualTargetMethod() throws Exception {
         int checked = 0;
@@ -48,7 +48,7 @@ class ShanhaiLoadingIntegrationTest {
                 }
             }
         }
-        assertEquals(23, checked);
+        assertEquals(25, checked);
     }
 
     @Test void loadingMixinsAreRegisteredOnlyForClients() throws Exception {
@@ -56,10 +56,13 @@ class ShanhaiLoadingIntegrationTest {
         String clients = config.getAsJsonArray("client").toString();
         String common = config.getAsJsonArray("mixins").toString();
         var jeiConfig = JsonParser.parseString(Files.readString(Path.of("src/main/resources/gt_shanhai.jei.mixin.json"))).getAsJsonObject();
+        var gtceuConfig = JsonParser.parseString(Files.readString(Path.of("src/main/resources/gt_shanhai.gtceu.mixin.json"))).getAsJsonObject();
         for (String name : MIXINS) {
-            String expected = name.startsWith("ShanhaiLoadingJei") ? jeiConfig.getAsJsonArray("client").toString() : clients;
+            String expected = name.equals("ShanhaiLoadingDataPackMixin") ? gtceuConfig.getAsJsonArray("client").toString()
+                    : name.startsWith("ShanhaiLoadingJei") ? jeiConfig.getAsJsonArray("client").toString() : clients;
             assertTrue(expected.contains('"' + name + '"'), name);
             assertFalse(common.contains('"' + name + '"'), name);
+            assertFalse(gtceuConfig.getAsJsonArray("mixins").toString().contains('"' + name + '"'), name);
         }
         assertTrue(clients.contains("ShanhaiLoadingListenerAccessor"));
     }
@@ -93,7 +96,7 @@ class ShanhaiLoadingIntegrationTest {
                 else assertEquals(1, matches, name + ":" + method.name + " " + invocation);
             }
         }
-        assertEquals(2, groups.size());
+        assertEquals(3, groups.size());
         groups.forEach((name, matches) -> assertEquals(1, matches, name));
     }
 

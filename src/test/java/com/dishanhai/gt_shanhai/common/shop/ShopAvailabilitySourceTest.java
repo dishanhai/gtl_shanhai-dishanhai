@@ -129,11 +129,16 @@ class ShopAvailabilitySourceTest {
         assertTrue(shop.contains("handleDisabledClick(mx, my, btn)"));
         assertTrue(shop.indexOf("renderDisabledOverlay(g, mx, my)") < shop.indexOf("renderStageLockOverlay(g, mx, my)"));
         assertTrue(shop.indexOf("handleDisabledClick(mx, my, btn)") < shop.indexOf("return handleContextMenuClick(mx, my)"));
-        for (String method : new String[]{"universalMouseScrolled", "universalMouseDragged", "universalMouseReleased", "keyPressed", "charTyped"}) {
+        for (String method : new String[]{"universalMouseScrolled", "universalMouseDragged", "universalMouseReleased", "keyPressed"}) {
             int start = shop.indexOf(" " + method + "(");
             assertTrue(start >= 0, method);
             assertTrue(shop.substring(start, Math.min(shop.length(), start + 600)).contains("ClientShopAvailability.isDisabled()"), method);
         }
+        int chars = shop.indexOf("public boolean charTyped(");
+        assertTrue(chars >= 0 && shop.substring(chars, chars + 200).contains("modalLayerOpen()"),
+                "字元输入复用统一的禁用／浮层门控");
+        int modal = shop.indexOf("private boolean modalLayerOpen()");
+        assertTrue(modal >= 0 && shop.substring(modal, modal + 250).contains("ClientShopAvailability.isDisabled()"));
         assertTrue(shop.contains("ShopWelcomeScreen.availability(() -> this)"));
         assertTrue(shop.contains("§n[开启个人商店]"));
         assertTrue(shop.contains("§n[开启全局商店]"));
