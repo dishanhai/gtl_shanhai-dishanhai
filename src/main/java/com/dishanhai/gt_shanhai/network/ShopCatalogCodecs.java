@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogEntryPayload;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
+import com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.EncoderException;
 import net.minecraft.network.FriendlyByteBuf;
@@ -19,6 +20,8 @@ public final class ShopCatalogCodecs {
     public static final int MAX_ENTRY_JSON_CHARS = 1_048_576;
     public static final int MAX_CHUNK_JSON_CHARS = 2_097_152;
     public static final int MAX_GOODS_PER_STUB = 64;
+    /** 奖励表可能包含整个物品注册表；不能沿用编辑器一排的数量上限。 */
+    public static final int MAX_RESOURCES_PER_STUB = 65_536;
     public static final int MAX_CATEGORY_CHARS = 256;
     public static final int MAX_LINK_KEY_CHARS = 256;
     public static final int MAX_DISPLAY_NAME_CHARS = 1024;
@@ -61,6 +64,8 @@ public final class ShopCatalogCodecs {
             buf.writeUtf(stub.stableId(), MAX_STABLE_ID_CHARS);
             buf.writeUtf(stub.prereqQuestId(), MAX_QUEST_ID_CHARS);
             writeMatchKeys(buf, stub.goodsMatchKeys());
+            writeResources(buf, stub.goodsResources());
+            writeResources(buf, stub.costResources());
         }
         writeCategoryOrder(buf, manifest == null ? Map.of() : manifest.categoryOrder());
     }
@@ -114,7 +119,7 @@ public final class ShopCatalogCodecs {
             List<String> goodsMatchKeys = readMatchKeys(buf);
             stubs.add(new ShopCatalogManifest.Stub(
                     entryKey, top, sub, sub2, sub3, hidden, chunkId, linkKey, displayName, goodsIds, stableId,
-                    prereqQuestId, goodsMatchKeys));
+                    prereqQuestId, goodsMatchKeys, readResources(buf), readResources(buf)));
         }
         Map<String, List<String>> categoryOrder = readCategoryOrder(buf);
         return new ShopCatalogManifest(revision, ready, stubs, categoryOrder);
@@ -154,6 +159,26 @@ public final class ShopCatalogCodecs {
             payloads.add(new ShopCatalogEntryPayload(entryKey, json));
         }
         return List.copyOf(payloads);
+    }
+
+    private static void writeResources(FriendlyByteBuf buf, List<ShopResourceFilter.Resource> resources) {
+        requireEncodeSize("stub resources", resources.size(), MAX_RESOURCES_PER_STUB);
+        buf.writeVarInt(resources.size());
+        for (var resource : resources) {
+            buf.writeBoolean(resource.fluid());
+            buf.writeUtf(resource.id(), MAX_RESOURCE_ID_CHARS);
+            buf.writeUtf(resource.identity(), MAX_MATCH_KEY_CHARS);
+        }
+    }
+
+    private static List<ShopResourceFilter.Resource> readResources(FriendlyByteBuf buf) {
+        int count = readBoundedCount(buf, "stub resources", MAX_RESOURCES_PER_STUB);
+        List<ShopResourceFilter.Resource> resources = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            resources.add(new ShopResourceFilter.Resource(buf.readBoolean(),
+                    buf.readUtf(MAX_RESOURCE_ID_CHARS), buf.readUtf(MAX_MATCH_KEY_CHARS)));
+        }
+        return List.copyOf(resources);
     }
 
     private static void writeMatchKeys(FriendlyByteBuf buf, List<String> matchKeys) {

@@ -26,6 +26,8 @@ import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopGridViewport;
+import com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity;
+import com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter;
 import com.dishanhai.gt_shanhai.common.shop.ShopLinkNames;
 import com.dishanhai.gt_shanhai.common.shop.ShopMembership;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
@@ -44,6 +46,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -290,6 +293,13 @@ public class ShopScreen extends ScaledScreen {
     private long cardFlightStartMs;
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private AnimatableEditBox searchBox;
+    private String appliedSearch = "";
+    private List<ShopResourceFilter.Resource> resourceFilter = List.of();
+    private final List<ItemStack> resourceFilterItems = new ArrayList<>();
+    private final List<dev.architectury.fluid.FluidStack> resourceFilterFluids = new ArrayList<>();
+    private boolean resourceFilterCosts;
+    private long resourceFilterRevision = -1L;
+    private java.util.Set<Long> resourceFilterKeys = java.util.Set.of();
     private AnimatableEditBox amountBox;
     // AE 模式：交付优先注入绑定的 AE 网络。静态=跨界面实例保留（重开钱包不重置），仅本机会话级
     private static boolean aeMode = false;
@@ -695,6 +705,7 @@ public class ShopScreen extends ScaledScreen {
      * 商品卡片拖拽排序（本地下标语义按该字符串的同分类子序列算）才有意义，见 beginCardDrag。
      */
     private boolean isLeafCategoryView() {
+        if (selectedTop == null || selectedTop.isEmpty()) return false;
         if (hasSubTabs() && selectedSub.isEmpty()) return false;
         if (hasSubTabs2() && selectedSub2.isEmpty()) return false;
         if (hasSubTabs3() && selectedSub3.isEmpty()) return false;
@@ -731,7 +742,7 @@ public class ShopScreen extends ScaledScreen {
 
     /** 当前分类页是否被阶段提交限制锁定；打开商店编辑模式时保留管理视图。 */
     private String lockedStageForCurrentView() {
-        if (mode != Mode.BUY || catalogEditUnlocked) return null;
+        if (mode != Mode.BUY || catalogEditUnlocked || selectedTop == null || selectedTop.isEmpty()) return null;
         return missingStageSubmission(currentViewCategory());
     }
 
@@ -784,7 +795,7 @@ public class ShopScreen extends ScaledScreen {
     /** 网格/详情内容区顶部 Y（每显示一行子页签就再下移一行）。 */
     private int contentTop() {
         int rows = (hasSubTabs() ? 1 : 0) + (hasSubTabs2() ? 1 : 0) + (hasSubTabs3() ? 1 : 0);
-        return tabsY() + TAB_H + 6 + rows * (TAB_H + 2);
+        return Math.max(resourceFilterY() + 18, tabsY() + TAB_H + 6 + rows * (TAB_H + 2));
     }
 
     // ===== 分类切换：切页 + 记忆恢复（见反馈：切走再切回要带回原子页，不要求全部塌陷）=====
@@ -948,7 +959,7 @@ public class ShopScreen extends ScaledScreen {
         int y = rowY(level);
         int x = left + 14;
         int tabsRight = detailX() - 8;
-        if (level > 0) {
+        {
             int aw = Math.max(30, this.font.width("全部") + 10);
             if (hit(mx, my, x, y, aw, TAB_H)) {
                 armClickWave(mx, my);
@@ -985,7 +996,7 @@ public class ShopScreen extends ScaledScreen {
      */
     private int computeTabDropIndex(int level, double mx) {
         int x = left + 14;
-        if (level > 0) {
+        {
             int aw = Math.max(30, this.font.width("全部") + 10);
             x += aw + 3;
         }
@@ -1015,9 +1026,9 @@ public class ShopScreen extends ScaledScreen {
             int x = left + 14;
             int tabsRight = detailX() - 8;
             String parentPath = rowOrderParentPath(level);
-            if (level > 0) {
+            {
                 int aw = Math.max(30, this.font.width("全部") + 10);
-                if (hit(mx, my, x, y, aw, TAB_H)) return parentPath;
+                if (hit(mx, my, x, y, aw, TAB_H)) return level == 0 ? null : parentPath;
                 x += aw + 3;
             }
             for (String item : rowItems(level)) {
@@ -1135,12 +1146,12 @@ public class ShopScreen extends ScaledScreen {
         List<Integer> ws = new ArrayList<>();
         List<String> labels = new ArrayList<>();
         int selIdx = -1;
-        if (level > 0) {
+        {
             int aw = Math.max(30, this.font.width("全部") + 10);
             if (selected.isEmpty()) selIdx = 0;
             xs.add(x);
             ws.add(aw);
-            labels.add("§7全部");
+            labels.add(Component.translatable("gt_shanhai.shop.search.all").getString());
             x += aw + 3;
         }
         for (String item : rowItems(level)) {
@@ -1215,6 +1226,103 @@ public class ShopScreen extends ScaledScreen {
     // 搜索框仿 KE 放右侧详情列正上方（顶栏不再塞它）
     private int searchBoxX() { return detailX() + 4; }
     private int searchBoxY() { return tabsY() + 1; }
+    private int resourceFilterY() { return searchBoxY() + 16; }
+
+    private void selectAllForSearch() {
+        switchTop("");
+        selectedSub = selectedSub2 = selectedSub3 = "";
+        clearSelection();
+        this.init(Minecraft.getInstance(), this.width, this.height);
+    }
+
+    private void onShopSearchChanged(String value) {
+        boolean starting = appliedSearch.isBlank() && !value.isBlank();
+        appliedSearch = value;
+        if (starting) {
+            selectAllForSearch();
+            searchBox.setFocused(true);
+            setFocused(searchBox);
+        }
+        snapGridScroll(0);
+        recomputeVisible();
+        requestStagger(0.5f);
+    }
+
+    private String resourceModeLabel() {
+        return Component.translatable(resourceFilterCosts
+                ? "gt_shanhai.shop.filter.costs" : "gt_shanhai.shop.filter.goods").getString();
+    }
+
+    private void drawResourceFilter(GuiGraphics g, int mx, int my) {
+        int x = searchBoxX(), y = resourceFilterY();
+        drawButton(g, x, y, 64, 14,
+                Component.translatable("gt_shanhai.shop.filter.select", resourceFilter.size()).getString(), mx, my);
+        drawButton(g, x + 66, y, 62, 14, resourceModeLabel(), mx, my);
+        drawButton(g, x + 130, y, 20, 14,
+                Component.translatable("gt_shanhai.shop.filter.clear").getString(), mx, my);
+    }
+
+    private void resourceFilterChanged() {
+        resourceFilterRevision = -1L;
+        snapGridScroll(0);
+        recomputeVisible();
+        requestStagger(0.5f);
+    }
+
+    private void openResourceFilterPicker() {
+        List<ShopResourceFilter.Resource> draft = new ArrayList<>();
+        List<ItemStack> items = new ArrayList<>();
+        List<dev.architectury.fluid.FluidStack> fluids = new ArrayList<>();
+        MultiPickerScreen picker = new MultiPickerScreen(this, false, (stack, count) -> {
+            var id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            if (id == null || stack.isEmpty()) return;
+            ItemStack unit = stack.copy();
+            unit.setCount(1);
+            items.add(unit);
+            draft.add(new ShopResourceFilter.Resource(false, id.toString(),
+                    stack.hasTag() ? ShopGoodsIdentity.key(id.toString(), stack.getTag()) : ""));
+        }, fluid -> {
+            var id = ForgeRegistries.FLUIDS.getKey(fluid.getFluid());
+            if (id == null || fluid.isEmpty()) return;
+            fluids.add(dev.architectury.fluid.FluidStack.create(fluid.getFluid(), 1L));
+            draft.add(new ShopResourceFilter.Resource(true, id.toString(), ""));
+        });
+        for (ItemStack stack : resourceFilterItems) picker.preselect(stack, 1L);
+        for (var fluid : resourceFilterFluids) picker.preselect(fluid);
+        picker.setAfterConfirm(() -> {
+            boolean starting = resourceFilter.isEmpty() && !draft.isEmpty();
+            resourceFilter = List.copyOf(draft);
+            resourceFilterItems.clear();
+            resourceFilterItems.addAll(items);
+            resourceFilterFluids.clear();
+            resourceFilterFluids.addAll(fluids);
+            resourceFilterChanged();
+            if (starting) selectAllForSearch();
+        });
+        Minecraft.getInstance().setScreen(picker);
+    }
+
+    private boolean resourceFilterClicked(double mx, double my, int btn) {
+        if (btn != 0) return false;
+        int x = searchBoxX(), y = resourceFilterY();
+        if (buttonHit(mx, my, x, y, 64, 14)) {
+            openResourceFilterPicker();
+            return true;
+        }
+        if (buttonHit(mx, my, x + 66, y, 62, 14)) {
+            resourceFilterCosts = !resourceFilterCosts;
+            resourceFilterChanged();
+            return true;
+        }
+        if (buttonHit(mx, my, x + 130, y, 20, 14)) {
+            resourceFilter = List.of();
+            resourceFilterItems.clear();
+            resourceFilterFluids.clear();
+            resourceFilterChanged();
+            return true;
+        }
+        return false;
+    }
 
     // ===== 顶栏左侧按钮条（购买…商店设置）：放不下时可左右滚动，编辑模式多出「新增商品」也不再压到标题和右侧按钮 =====
     private static final int TOP_STRIP_STEP = 40;
@@ -1462,7 +1570,7 @@ public class ShopScreen extends ScaledScreen {
         panelHeight = Math.max(360, vHeight - 16);
 
         categories = ClientShopCatalog.topCategories();
-        if (selectedTop == null || !categories.contains(selectedTop)) {
+        if (selectedTop == null || (!selectedTop.isEmpty() && !categories.contains(selectedTop))) {
             selectedTop = categories.isEmpty() ? ShopEntry.DEFAULT_CATEGORY : categories.get(0);
         }
         // 以下只做「有效性收紧」，不做记忆恢复——记忆恢复只在 switchTop/switchSub/switchSub2 显式切换时触发一次
@@ -1485,11 +1593,13 @@ public class ShopScreen extends ScaledScreen {
         if (fresh && ClientShopUiSettings.rememberShopView()) {
             prev = ClientShopUiSettings.shopSearch();
         }
-        searchBox = new AnimatableEditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12, Component.literal("搜索"));
+        appliedSearch = prev;
+        searchBox = new AnimatableEditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12,
+                Component.translatable("gt_shanhai.shop.search.label"));
         searchBox.setValue(prev);
-        searchBox.setResponder(s -> { snapGridScroll(0); recomputeVisible(); requestStagger(0.5f); });
+        searchBox.setResponder(this::onShopSearchChanged);
         searchBox.setBordered(true);
-        searchBox.setHint(Component.literal("搜索名称/ID"));
+        searchBox.setHint(Component.translatable("gt_shanhai.shop.search.hint"));
         searchBox.setTextColor(0xFFFFFF);
         addRenderableWidget(searchBox);
 
@@ -1666,7 +1776,16 @@ public class ShopScreen extends ScaledScreen {
         String q = searchBox != null ? searchBox.getValue() : "";
         List<Long> keys = (q == null || q.isBlank())
                 ? ClientShopCatalog.keysOfGroup(selectedTop, selectedSub, selectedSub2, selectedSub3)
-                : ClientShopCatalog.searchKeys(q);
+                : ClientShopCatalog.searchKeys(q, selectedTop, selectedSub, selectedSub2, selectedSub3);
+        if (!resourceFilter.isEmpty()) {
+            if (resourceFilterRevision != ClientShopCatalog.revision()) {
+                resourceFilterKeys = java.util.Set.copyOf(ClientShopCatalog.resourceKeys(resourceFilter, resourceFilterCosts));
+                resourceFilterRevision = ClientShopCatalog.revision();
+            }
+            List<Long> filtered = new ArrayList<>(keys.size());
+            for (Long key : keys) if (resourceFilterKeys.contains(key)) filtered.add(key);
+            keys = filtered;
+        }
         // 只看收藏：在分类/搜索结果之上再收窄一层，按 stub 里的 stableId 判断（不需要等完整 ShopEntry 加载）。
         if (favoritesOnly) {
             List<Long> filtered = new ArrayList<>(keys.size());
@@ -1678,7 +1797,7 @@ public class ShopScreen extends ScaledScreen {
         }
         visibleEntryKeys = new ArrayList<>(keys);
         // 新 revision 已不含旧身份时清空详情，不能凭对象引用继续交易。
-        if (selectedEntryKey >= 0L && ClientShopCatalog.stub(selectedEntryKey) == null) clearSelection();
+        if (selectedEntryKey >= 0L && !visibleEntryKeys.contains(selectedEntryKey)) clearSelection();
     }
 
     // ============ 渲染 ============
@@ -1847,6 +1966,7 @@ public class ShopScreen extends ScaledScreen {
 
         // 左侧网格背景。分组切页不再整块横移，改由 drawGrid 里的卡片错峰入场承担；
         // 切页期间对网格做平滑高斯，落位后收干净，避免宽间距核把商品名打成残影。
+        drawResourceFilter(g, mx, my);
         int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = contentHeight();
         theme.regionBackdrop(g, gx, gy, gw, gh);
         g.fill(gx, gy, gx + gw, gy + gh, BOX_BG);
@@ -3115,6 +3235,7 @@ public class ShopScreen extends ScaledScreen {
 
     /** 网格为空时的下一步，避免玩家对着空白分类不知道该换页、清搜索还是先收藏。 */
     private String emptyGridHint() {
+        if (!resourceFilter.isEmpty()) return Component.translatable("gt_shanhai.shop.filter.empty").getString();
         if (favoritesOnly) return "§7没有收藏。右键商品可以收藏";
         if (searchBox != null && !searchBox.getValue().isBlank()) return "§7没有匹配。换个词，或清空右侧搜索";
         return "§7这个分类是空的。点上面的分类页签换一组";
@@ -4895,6 +5016,13 @@ public class ShopScreen extends ScaledScreen {
             }
             return true;
         }
+        if (btn == 1 && hit(mx, my, searchBoxX(), searchBoxY(), SEARCH_W, 12)) {
+            searchBox.setValue("");
+            searchBox.setFocused(true);
+            setFocused(searchBox);
+            return true;
+        }
+        if (resourceFilterClicked(mx, my, btn)) return true;
         // 撤销删除按钮（悬浮在面板上，优先于其他点击判定）
         if (undoDeleteLabel != null && System.currentTimeMillis() < undoDeleteUntilMs) {
             int[] b = undoDeleteBtnBounds();
@@ -5034,7 +5162,7 @@ public class ShopScreen extends ScaledScreen {
                     showMessage(Component.literal(already
                             ? "§b[山海商店] §7已在购物车里: §f" + entry.goodsDisplayName()
                             : "§b[山海商店] §a已加入购物车: §f" + entry.goodsDisplayName()));
-                } else if (btn == 0 && dragEnabled()
+                } else if (btn == 0 && dragEnabled() && resourceFilter.isEmpty()
                         && (searchBox == null || searchBox.getValue().isBlank())) {
                     // 开始潜在拖拽追踪；是否真正进入拖拽由 universalMouseDragged 阈值判定（见 dragCardEntryKey 注释）。
                     // 非叶子（聚合"全部"）视图下也允许起手：落到页签上走跨分类分组不需要叶子视图，
@@ -7448,9 +7576,24 @@ public class ShopScreen extends ScaledScreen {
                 return;
             }
             List<Component> topTip = topButtonTip(smx, smy);
+            if (hit(smx, smy, searchBoxX(), searchBoxY(), SEARCH_W, 12)) {
+                topTip = List.of(Component.translatable("gt_shanhai.shop.search.tip"));
+            } else if (hit(smx, smy, searchBoxX(), resourceFilterY(), SEARCH_W, 14)) {
+                List<Component> filterTip = new ArrayList<>();
+                filterTip.add(Component.translatable("gt_shanhai.shop.filter.tip", resourceModeLabel()));
+                int shown = 0;
+                for (var resource : resourceFilter) {
+                    if (shown++ >= 8) break;
+                    filterTip.add(Component.literal(resource.id()));
+                }
+                if (resourceFilter.size() > 8) filterTip.add(Component.translatable(
+                        "gt_shanhai.shop.filter.more", resourceFilter.size() - 8));
+                topTip = filterTip;
+            }
             if (topTip != null) {
+                List<Component> shownTopTip = topTip;
                 animateTooltip(g, List.of("top", topTip.get(0).getString()), mx, my,
-                        () -> g.renderComponentTooltip(this.font, topTip, mx, my));
+                        () -> g.renderComponentTooltip(this.font, shownTopTip, mx, my));
                 return;
             }
             List<net.minecraft.util.FormattedCharSequence> detailTip = detailButtonTip(smx, smy);

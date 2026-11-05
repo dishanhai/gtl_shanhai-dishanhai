@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.client.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogEntryPayload;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
@@ -199,21 +198,23 @@ public final class ClientShopCatalog {
         return subCategories3.getOrDefault(pathKey(top, sub, sub2), List.of());
     }
 
+    private static final ShopCatalogSearchIndex searchIndex = new ShopCatalogSearchIndex(List.of());
+
     public static List<Long> keysOfGroup(String top, String sub, String sub2, String sub3) {
         return groupKeys.getOrDefault(groupKey(top, sub, sub2, sub3), List.of());
     }
 
     public static List<Long> searchKeys(String query) {
-        String normalized = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
-        if (normalized.isEmpty()) return List.of();
-        List<Long> result = new ArrayList<>();
-        for (ShopCatalogManifest.Stub stub : manifest.stubs()) {
-            if (stub.hidden()) continue;
-            StringBuilder searchText = new StringBuilder(stub.displayName()).append(' ');
-            for (String goodsId : stub.goodsIds()) searchText.append(goodsId).append(' ');
-            if (AdvancedSearchUtil.match(searchText.toString(), normalized)) result.add(stub.entryKey());
-        }
-        return List.copyOf(result);
+        return searchIndex.search(query, "", null);
+    }
+
+    public static List<Long> searchKeys(String query, String top, String sub, String sub2, String sub3) {
+        return searchIndex.search(query, groupKey(top, sub, sub2, sub3), keysOfGroup(top, sub, sub2, sub3));
+    }
+
+    public static List<Long> resourceKeys(List<com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter.Resource> resources,
+                                          boolean costs) {
+        return com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter.keys(manifest.stubs(), resources, costs);
     }
 
     public static ShopEntry get(long entryKey) { return entriesByKey.get(entryKey); }
@@ -450,12 +451,14 @@ public final class ClientShopCatalog {
             subs3.computeIfAbsent(pathKey(top, sub, sub2), ignored -> new LinkedHashSet<>());
             if (!sub.isEmpty() && !sub2.isEmpty() && !sub3.isEmpty()) subs3.get(pathKey(top, sub, sub2)).add(sub3);
             addGroupKey(top, "", "", "", stub.entryKey());
+            addGroupKey("", "", "", "", stub.entryKey());
             if (!sub.isEmpty()) addGroupKey(top, sub, "", "", stub.entryKey());
             if (!sub.isEmpty() && !sub2.isEmpty()) addGroupKey(top, sub, sub2, "", stub.entryKey());
             if (!sub.isEmpty() && !sub2.isEmpty() && !sub3.isEmpty()) addGroupKey(top, sub, sub2, sub3, stub.entryKey());
         }
         // 应用服务端下发的显式排序（拖拽页签后落地，见 ShopConfig#moveCategoryTo）；order-key 跟
         // pathKey/顶级空串完全对齐，未出现在排序表里的分类按发现顺序追加在末尾，见 applyOrder。
+        searchIndex.rebuild(manifest.stubs());
         topCategories.addAll(applyOrder("", new ArrayList<>(tops)));
         for (Map.Entry<String, LinkedHashSet<String>> entry : subs.entrySet()) {
             subCategories.put(entry.getKey(), applyOrder(entry.getKey(), new ArrayList<>(entry.getValue())));

@@ -28,7 +28,7 @@ class ShopMotionSourceTest {
     @Test
     void overlaysRunOnSpringsAndKeepDrawingWhileClosing() throws Exception {
         String shop = read(BASE + "shop/ShopScreen.java");
-        String util = read(BASE + "scaled/GuiRenderUtil.java");
+        String util = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/gui/scaled/GuiRenderUtil.java");
 
         assertAll(
                 // 五个浮层各一根弹簧，旧的“打开时刻”字段全部消失
@@ -79,7 +79,10 @@ class ShopMotionSourceTest {
                 () -> assertTrue(shop.contains("scrollTarget = Math.max(0, Math.min(maxScroll, wanted))") && shop.contains("scrollTarget - (int) d * rowStride()")),
                 () -> assertTrue(shop.contains("detailScrollTarget = clampDetailScroll(wanted)") && shop.contains("detailScrollTarget - (int) d * 18")),
                 // 搜索清空、切分组、收藏筛选这些“上下文变了”的写入点直接到位
-                () -> assertTrue(shop.contains("searchBox.setResponder(s -> { snapGridScroll(0); recomputeVisible();")),
+                () -> assertTrue(shop.contains("searchBox.setResponder(this::onShopSearchChanged)")
+                        && shop.substring(shop.indexOf("private void onShopSearchChanged("),
+                                shop.indexOf("private String resourceModeLabel()"))
+                                .contains("snapGridScroll(0);\n        recomputeVisible();")),
                 // 预载范围看目标，画和点只看显示值
                 () -> assertTrue(shop.contains("gridRange(GRID_LOAD_OVERSCAN, scrollTarget)")),
                 () -> assertTrue(shop.contains("gridRange(1, scroll)")),
@@ -140,7 +143,7 @@ class ShopMotionSourceTest {
         }
         String box = read(BASE + "shop/AnimatableEditBox.java");
         assertTrue(box.contains("GuiRenderUtil.scaleAt("));
-        assertTrue(read(BASE + "scaled/GuiRenderUtil.java").contains("public static void scaleAt("));
+        assertTrue(read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/gui/scaled/GuiRenderUtil.java").contains("public static void scaleAt("));
     }
 
     @Test

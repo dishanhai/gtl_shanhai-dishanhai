@@ -485,7 +485,7 @@ public final class ShopPurchase {
     }
 
     /** 按 FTBQ 表 ID（十六进制字符串）查活的服务端奖励表实例；未加载/ID 非法返回 null。 */
-    private static dev.ftb.mods.ftbquests.quest.loot.RewardTable resolveFtbqTable(String hexId) {
+    static dev.ftb.mods.ftbquests.quest.loot.RewardTable resolveFtbqTable(String hexId) {
         if (hexId == null || hexId.isEmpty()) return null;
         dev.ftb.mods.ftbquests.quest.ServerQuestFile file = dev.ftb.mods.ftbquests.quest.ServerQuestFile.INSTANCE;
         if (file == null) return null;

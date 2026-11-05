@@ -26,6 +26,33 @@ public final class ShopCatalogSyncEventHandler {
 
     private ShopCatalogSyncEventHandler() {}
 
+    private static volatile boolean resourceIndexRefreshPending;
+
+    static {
+        if (net.minecraftforge.fml.ModList.get().isLoaded("ftbquests")) FtbqRefreshListener.register();
+    }
+
+    /** 隔离可选依赖；FTBQ 在 readDataFull 开头清缓存，此时还不能读取新奖励表。 */
+    private static final class FtbqRefreshListener {
+        static void register() {
+            dev.ftb.mods.ftbquests.events.ClearFileCacheEvent.EVENT.register(file -> {
+                if (file instanceof dev.ftb.mods.ftbquests.quest.ServerQuestFile) resourceIndexRefreshPending = true;
+            });
+        }
+    }
+
+    @SubscribeEvent
+    public static void onServerStarted(net.minecraftforge.event.server.ServerStartedEvent event) {
+        resourceIndexRefreshPending = true;
+    }
+
+    @SubscribeEvent
+    public static void onServerTick(net.minecraftforge.event.TickEvent.ServerTickEvent event) {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END || !resourceIndexRefreshPending) return;
+        resourceIndexRefreshPending = false;
+        ShopConfig.refreshResourceIndex();
+    }
+
     @SubscribeEvent
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         com.dishanhai.gt_shanhai.common.shop.ShopAvailability.clearPersonal(event.getEntity().getUUID());
@@ -33,6 +60,7 @@ public final class ShopCatalogSyncEventHandler {
 
     @SubscribeEvent
     public static void onServerStopped(net.minecraftforge.event.server.ServerStoppedEvent event) {
+        resourceIndexRefreshPending = false;
         com.dishanhai.gt_shanhai.common.shop.ShopAvailability.clearPersonal();
     }
 

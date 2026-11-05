@@ -20,7 +20,15 @@ public final class ShopCatalogSnapshot {
 
     public record Descriptor(String category, boolean hidden, String linkKey,
                              String displayName, List<String> goodsIds, int payloadBytes, String stableId,
-                             String prereqQuestId, List<String> goodsMatchKeys) {
+                             String prereqQuestId, List<String> goodsMatchKeys,
+                             List<ShopResourceFilter.Resource> goodsResources, List<ShopResourceFilter.Resource> costResources) {
+        public Descriptor(String category, boolean hidden, String linkKey,
+                          String displayName, List<String> goodsIds, int payloadBytes, String stableId,
+                          String prereqQuestId, List<String> goodsMatchKeys) {
+            this(category, hidden, linkKey, displayName, goodsIds, payloadBytes, stableId, prereqQuestId,
+                    goodsMatchKeys, List.of(), List.of());
+        }
+
         public Descriptor(String category, boolean hidden, String linkKey,
                           String displayName, List<String> goodsIds, int payloadBytes, String stableId,
                           String prereqQuestId) {
@@ -36,6 +44,8 @@ public final class ShopCatalogSnapshot {
             stableId = stableId == null ? "" : stableId;
             prereqQuestId = prereqQuestId == null ? "" : prereqQuestId;
             goodsMatchKeys = goodsMatchKeys == null ? List.of() : List.copyOf(goodsMatchKeys);
+            goodsResources = goodsResources == null ? List.of() : List.copyOf(goodsResources);
+            costResources = costResources == null ? List.of() : List.copyOf(costResources);
         }
     }
 
@@ -161,7 +171,7 @@ public final class ShopCatalogSnapshot {
             payloads.add(payload);
             descriptors.add(new Descriptor(entry.getCategory(), entry.isHidden() || !entry.isStructurallyValid(), entry.getLinkKey(),
                     entry.goodsDisplayName(), goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId(),
-                    entry.getPrerequisiteQuestId(), goodsMatchKeys));
+                    entry.getPrerequisiteQuestId(), goodsMatchKeys, goodsResources(entry), costResources(entry.getCost())));
             byKey.put(key, entry);
             byEntry.put(entry, key);
             byStableId.put(entry.getStableId(), entry);
@@ -178,6 +188,60 @@ public final class ShopCatalogSnapshot {
         }
         ShopCatalogManifest manifest = new ShopCatalogManifest(revision, true, layout.stubs(), categoryOrder);
         return new ShopCatalogSnapshot(revision, true, entries, byKey, byEntry, byStableId, layout, manifest, chunks);
+    }
+
+    static List<ShopResourceFilter.Resource> goodsResources(ShopEntry entry) {
+        return goodsResources(entry, () -> {
+            var table = ShopPurchase.resolveFtbqTable(entry.getFtbqTableId());
+            if (table == null) return List.of();
+            List<net.minecraft.world.item.ItemStack> items = new ArrayList<>();
+            for (var reward : table.getWeightedRewards()) {
+                if (reward.getReward() instanceof dev.ftb.mods.ftbquests.quest.reward.ItemReward itemReward) {
+                    items.add(itemReward.getItem());
+                }
+            }
+            return items;
+        });
+    }
+
+    /** 将 FTBQ 读取边界与目录分支分开，普通商品不触发第三方类初始化。 */
+    static List<ShopResourceFilter.Resource> goodsResources(ShopEntry entry,
+            java.util.function.Supplier<List<net.minecraft.world.item.ItemStack>> ftbqItems) {
+        Set<ShopResourceFilter.Resource> resources = new LinkedHashSet<>();
+        if (entry.getRewardMode() == ShopEntry.RewardMode.NONE) {
+            for (ShopEntry.GoodsStack goods : entry.getGoodsList()) {
+                if (goods == null || goods.id() == null || goods.isEnergy()) continue;
+                resources.add(new ShopResourceFilter.Resource(goods.isFluid(), goods.id().toString(),
+                        goods.isFluid() ? "" : ShopGoodsIdentity.key(goods.id().toString(), goods.nbt())));
+            }
+        } else if (entry.getRewardMode() == ShopEntry.RewardMode.FTBQ) {
+            for (var stack : ftbqItems.get()) addItemResource(resources, stack);
+        } else {
+            for (var reward : entry.getRewardPool()) {
+                addItemResource(resources, reward.item());
+            }
+        }
+        return List.copyOf(resources);
+    }
+
+    private static void addItemResource(Set<ShopResourceFilter.Resource> resources, net.minecraft.world.item.ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (id != null) resources.add(new ShopResourceFilter.Resource(false, id.toString(),
+                ShopGoodsIdentity.key(id.toString(), stack.getTag())));
+    }
+
+    static List<ShopResourceFilter.Resource> costResources(ShopCost cost) {
+        Set<ShopResourceFilter.Resource> resources = new LinkedHashSet<>();
+        for (var id : cost.coins.keySet()) {
+            resources.add(new ShopResourceFilter.Resource(false, id.toString(), ""));
+        }
+        for (var ingredient : cost.physical) {
+            if (ingredient == null || ingredient.id == null) continue;
+            resources.add(new ShopResourceFilter.Resource(ingredient.isFluid, ingredient.id.toString(),
+                    ingredient.isFluid || !ingredient.hasNbt() ? "" : ShopGoodsIdentity.key(ingredient.id.toString(), ingredient.nbt())));
+        }
+        return List.copyOf(resources);
     }
 
     public static Layout layout(List<Descriptor> descriptors, int maxChunkBytes, int maxChunkEntries) {
@@ -217,7 +281,8 @@ public final class ShopCatalogSnapshot {
             String top = path[0], sub = path[1], sub2 = path[2], sub3 = path[3];
             stubs.add(new ShopCatalogManifest.Stub(key, top, sub, sub2, sub3, descriptor.hidden(),
                     chunkByKey.getOrDefault(key, -1), descriptor.linkKey(), descriptor.displayName(), descriptor.goodsIds(),
-                    descriptor.stableId(), descriptor.prereqQuestId(), descriptor.goodsMatchKeys()));
+                    descriptor.stableId(), descriptor.prereqQuestId(), descriptor.goodsMatchKeys(),
+                    descriptor.goodsResources(), descriptor.costResources()));
             if (!descriptor.linkKey().isEmpty()) links.putIfAbsent(descriptor.linkKey(), key);
             if (descriptor.hidden()) continue;
             tops.add(top);

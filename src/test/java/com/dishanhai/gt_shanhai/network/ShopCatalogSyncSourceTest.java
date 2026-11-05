@@ -24,7 +24,7 @@ class ShopCatalogSyncSourceTest {
                 () -> assertTrue(state > manifest),
                 () -> assertTrue(registration(network, manifest).contains("NetworkDirection.PLAY_TO_CLIENT")),
                 () -> assertTrue(registration(network, state).contains("NetworkDirection.PLAY_TO_CLIENT")),
-                () -> assertTrue(network.contains("PROTOCOL_VERSION = \"15\"")));
+                () -> assertTrue(network.contains("PROTOCOL_VERSION = \"16\"")));
     }
 
     @Test

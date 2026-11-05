@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.client.gui.scaled;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -17,43 +16,28 @@ public class AdvancedSearchUtil {
         if (text == null || text.isBlank()) {
             return false;
         }
-        String cleanText = normalize(text);
-        String cleanQuery = normalize(query);
-        if (cleanQuery.isBlank()) {
-            return true;
-        }
-        String[] queryTokens = cleanQuery.split("\\s+");
-        List<String> textTokens = splitTokens(cleanText);
-        for (String queryToken : queryTokens) {
-            if (!queryToken.isBlank() && !matchToken(cleanText, textTokens, queryToken)) {
-                return false;
-            }
-        }
-        return true;
+        return prepareText(text).matches(prepareQuery(query));
     }
 
-    private static boolean matchToken(String cleanText, List<String> textTokens, String queryToken) {
-        if (cleanText.contains(queryToken)) {
+    /** 山海：目录更新时预处理文本，键入时只预处理一次查询，保留拼音桥接语义。 */
+    public record PreparedText(String text) {
+        public boolean matches(PreparedQuery query) {
+            for (String token : query.tokens()) {
+                if (!text.contains(token) && !PinyinSearchBridge.contains(text, token)) return false;
+            }
             return true;
         }
-        for (String textToken : textTokens) {
-            if (textToken.contains(queryToken)) {
-                return true;
-            }
-        }
-        // 纯子串未命中：用 JECharacters 拼音匹配兜底（全拼/首字母/汉字），
-        // 未装 JECharacters 时 contains 恒 false，等价于退回纯子串搜索。
-        return PinyinSearchBridge.contains(cleanText, queryToken);
     }
 
-    private static List<String> splitTokens(String text) {
-        List<String> tokens = new ArrayList<>();
-        for (String part : text.split("\\s+")) {
-            if (!part.isBlank()) {
-                tokens.add(part);
-            }
-        }
-        return tokens;
+    public record PreparedQuery(String text, List<String> tokens) {}
+
+    public static PreparedText prepareText(String text) {
+        return new PreparedText(normalize(text == null ? "" : text));
+    }
+
+    public static PreparedQuery prepareQuery(String query) {
+        String clean = normalize(query == null ? "" : query);
+        return new PreparedQuery(clean, clean.isEmpty() ? List.of() : List.of(clean.split("\\s+")));
     }
 
     private static String normalize(String input) {

@@ -201,9 +201,12 @@ class ShopBatchOperationsSourceTest {
     @Test
     void glassThemeOwnsTooltipAndCardFlightLook() throws Exception {
         String tip = source("client/gui/shop/ShopGlassTooltip.java");
+        String tooltipRenderer = Files.readString(Path.of("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/glass/GlassTooltip.java"));
         String init = source("client/ClientInit.java");
         String screen = source("client/gui/shop/ShopScreen.java");
-        assertTrue(tip.contains("event.setCanceled(true)") && tip.contains("ShopTheme.GLASS.tooltipPanel("),
+        assertTrue(tip.contains("if (applies()) GlassTooltip.render(event)")
+                        && tooltipRenderer.contains("event.setCanceled(true)")
+                        && tooltipRenderer.contains("GlassTheme.GLASS.tooltipPanel("),
                 "玻璃主题下 tooltip 应由我们自己画成毛玻璃，不用原版黑底紫边");
         assertTrue(init.contains("ShopGlassTooltip::onTooltipPre"), "tooltip 接管必须挂到 Forge 总线");
         assertTrue(screen.contains("theme.controlBackdrop(g, rx, ry, rw, rh, fade);"),

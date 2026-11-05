@@ -646,6 +646,14 @@ public final class ShopConfig {
         ShopCatalogManifestPacket.broadcast(built.manifest());
     }
 
+    /** 山海：任务奖励表加载/编辑完成后重建资源索引，保留当前商品与存档额度，不重读配置。 */
+    public static synchronized void refreshResourceIndex() {
+        ShopCatalogSnapshot current = snapshot();
+        if (current.entries().stream().anyMatch(entry -> entry.getRewardMode() == ShopEntry.RewardMode.FTBQ)) {
+            publish(current.entries());
+        }
+    }
+
     private static final com.google.gson.Gson GSON =
             new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 

@@ -7,6 +7,8 @@ plugins {
     id 'org.jetbrains.kotlin.jvm' version '2.2.21'
 }
 
+version = mod_version
+
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
     withSourcesJar()
@@ -191,6 +193,8 @@ tasks.register('verifyModJar') {
 }
 
 jar {
+    archiveClassifier = 'raw'
+    finalizedBy 'reobfJar'
     dependsOn 'writeKotlinForForgeMetadata'
     from(kotlinForForgeJar) {
         into 'META-INF/jarjar'
@@ -235,6 +239,21 @@ jar {
         }
     }
 }
+
+tasks.register('devJar', Jar) {
+    dependsOn classes
+    archiveClassifier = 'dev'
+    from sourceSets.main.output
+}
+
+tasks.register('releaseJar', Copy) {
+    dependsOn 'reobfJar'
+    from layout.buildDirectory.file('reobfJar/output.jar')
+    into layout.buildDirectory.dir('libs')
+    rename { "${mod_id}-${mod_version}.jar" }
+}
+
+tasks.named('build') { dependsOn 'devJar', 'releaseJar' }
 
 // .rtui 配方 UI 克隆
 task cloneRtui(type: JavaExec) {
