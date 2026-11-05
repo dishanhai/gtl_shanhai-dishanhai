@@ -2006,6 +2006,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return paginationUIManager.getUiWidth();
     }
 
+    public int stellarPatternUiHeight() {
+        return paginationUIManager.getUiHeight();
+    }
+
     @Override
     public @NotNull Widget createUIWidget() {
         return createFocusedUIWidget(-1);
