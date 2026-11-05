@@ -28,8 +28,12 @@ class ShopScreenResponsiveLayoutSourceTest {
 
         assertTrue(source.contains("left + panelWidth - 2 - DETAIL_W - 6"),
                 "商品网格只能在固定购买面板左侧自行压缩，不能通过缩小购买面板换空间");
-        assertTrue(source.contains("new AnimatableEditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W"),
-                "搜索框属于上方控件，不应随卡片尺寸/低分辨率缩放");
+        assertTrue(source.contains("new AnimatableEditBox(this.font, searchBoxX() + 4, searchBoxY() + 2, SEARCH_W - 8, 8"),
+                "搜索框文字在固定玻璃框内留出边距，不应随卡片尺寸/低分辨率缩放");
+        assertTrue(source.contains("searchBoxX(), searchBoxY(), SEARCH_W, 12, top + panelHeight - 6"),
+                "玻璃外框应保留原本固定的搜索区域尺寸");
+        assertTrue(source.contains("searchBox.setBordered(false)"),
+                "原版黑底白框不能覆盖玻璃搜索框");
         assertTrue(source.contains("new AnimatableEditBox(this.font, detailX() + 8, contentTop() + 66, DETAIL_W - 16"),
                 "购买面板内数量输入框必须维持固定 DETAIL_W 布局");
         assertTrue(source.contains("private int buyTabW() { return BUY_TAB_W; }"),

@@ -79,12 +79,13 @@ public class MultiPickerScreen extends ScaledScreen {
 
     /** 搜索框悬停提示：语法说明（同 JEI 习惯的 @/#/$/* 前缀）。 */
     private static final List<Component> SEARCH_HELP = List.of(
-            Component.literal("§f按物品名搜索"),
-            Component.literal("§8──────────────"),
-            Component.literal("§7用 §e@ §7按模组搜索 §8(@ae2)"),
-            Component.literal("§7用 §e# §7按标签搜索 §8(#ingot)"),
-            Component.literal("§7用 §e$ §7在工具提示中搜索 §8($抢夺)"),
-            Component.literal("§7用 §e* §7按物品id搜索 §8(*cell)"));
+            Component.translatable("gt_shanhai.shop.picker.search.help.name"),
+            Component.translatable("gt_shanhai.shop.picker.search.help.mod"),
+            Component.translatable("gt_shanhai.shop.picker.search.help.tag"),
+            Component.translatable("gt_shanhai.shop.picker.search.help.tooltip"),
+            Component.translatable("gt_shanhai.shop.picker.search.help.id"),
+            Component.translatable("gt_shanhai.shop.picker.search.help.complete"),
+            Component.translatable("gt_shanhai.shop.picker.search.help.prefix"));
 
     // ===== 全注册表缓存（首次打开构建，之后复用）=====
     private static List<ItemStack> ALL_ITEMS;
@@ -173,6 +174,9 @@ public class MultiPickerScreen extends ScaledScreen {
     private long modeChangedAtMs;
 
     private EditBox searchBox, countBox;
+    private ShopSearchSuggestions searchSuggestions;
+    private final PickerSearchSuggestions suggestionIndex = new PickerSearchSuggestions(List.of());
+    private int searchX, searchY, searchW, searchH;
     private int left, top, panelWidth, panelHeight;
     // 网格/清单几何（initScaled 计算）
     private int gridX, gridY, gridW, gridBottom, gridCols;
@@ -540,14 +544,27 @@ public class MultiPickerScreen extends ScaledScreen {
         selW = Math.round(list.getW()) - 6;
         sidebarX = left + Math.round(sidebar.getX());
         sidebarW = Math.round(sidebar.getW());
-        searchBox = new EditBox(this.font, left + Math.round(search.getX()), top + Math.round(search.getY()),
-                Math.round(search.getW()) - 18, Math.round(search.getH()), Component.literal("搜索"));
-        searchBox.setMaxLength(64);
-        searchBox.setBordered(true);
+        searchX = left + Math.round(search.getX());
+        searchY = top + Math.round(search.getY());
+        searchW = Math.max(10, Math.round(search.getW()) - 18);
+        searchH = Math.round(search.getH());
+        searchBox = new EditBox(this.font, searchX + 4, searchY + (searchH - 8) / 2,
+                searchW - 8, 8, Component.translatable("gt_shanhai.shop.search.label"));
+        searchBox.setMaxLength(32767);
+        searchBox.setBordered(false);
         searchBox.setTextColor(0xFFFFFF);
-        searchBox.setResponder(s -> rebuildFilter());
-        searchBox.setHint(Component.literal("§8@模组 #标签 $提示 *id"));
+        searchBox.setHint(Component.translatable("gt_shanhai.shop.picker.search.hint"));
         searchBox.setValue(keepQuery);
+        searchSuggestions = new ShopSearchSuggestions(this.font, searchBox,
+                searchX, searchY, searchW, searchH, gridBottom,
+                () -> !sortOpen && editingQuantity == null && !gridGesture && draggedSelection == null,
+                this::setFocused, (text, width) -> this.font.getSplitter().splitLines(text, width,
+                        net.minecraft.network.chat.Style.EMPTY).stream()
+                        .map(net.minecraft.network.chat.FormattedText::getString).toList());
+        searchBox.setResponder(s -> {
+            searchSuggestions.reopen();
+            rebuildFilter();
+        });
         searchBox.setFocused(true);
         setFocused(searchBox);
 
@@ -709,6 +726,7 @@ public class MultiPickerScreen extends ScaledScreen {
             filtered = cached;
             rebuildFilteredModuleCounts();
             rebuildGridRows();
+            refreshSearchSuggestions();
             return;
         }
         List<Integer> out = new ArrayList<>();
@@ -719,6 +737,12 @@ public class MultiPickerScreen extends ScaledScreen {
         filterResultCache.put(cacheKey, out);
         rebuildFilteredModuleCounts();
         rebuildGridRows();
+        refreshSearchSuggestions();
+    }
+
+    private void refreshSearchSuggestions() {
+        if (searchSuggestions != null)
+            searchSuggestions.update(suggestionIndex.suggest(searchBox.getValue(), filtered));
     }
 
     private void rebuildSource() {
@@ -741,14 +765,16 @@ public class MultiPickerScreen extends ScaledScreen {
             String namespace = id.contains(":") ? id.substring(0, id.indexOf(':')) : "minecraft";
             String display = moduleNames.computeIfAbsent(namespace, key -> net.minecraftforge.fml.ModList.get().getModContainerById(key)
                     .map(container -> container.getModInfo().getDisplayName()).orElse(key));
-            String name = names.get(index);
-            if (name.endsWith(" " + id)) name = name.substring(0, name.length() - id.length() - 1);
+            String name = mode == Mode.TEXTURE ? id
+                    : mode == Mode.FLUID || isBookmarkFluidIndex(index) ? fluidName(curFluid(index))
+                    : gridItem(index).getHoverName().getString();
             long count = mode == Mode.INVENTORY && index < invCounts.size() ? invCounts.get(index) : 1L;
             entries.add(new PickerSortEntry(index, name, namespace, display, id, count));
             modules.add(namespace);
             moduleCounts.merge(namespace, 1, Integer::sum);
         }
         sortEntries = List.copyOf(entries);
+        suggestionIndex.rebuild(sortEntries);
         sourceModules = List.copyOf(modules);
         moduleOrder = PickerSort.modules(sortEntries, sourceLanguage);
         rebuildModuleRows();
@@ -1018,9 +1044,12 @@ public class MultiPickerScreen extends ScaledScreen {
             for (int line = 0; line < originalLines.size(); line++)
                 g.drawString(this.font, originalLines.get(line), selX, top + 7 + line * this.font.lineHeight, GRAY, false);
         }
-        int clearX = searchBox.getX() + searchBox.getWidth() + 2;
-        if (!searchBox.getValue().isEmpty()) ui.draw(g, this.font, clearX, searchBox.getY(), 16, 16, "×", mx, my, true);
-        g.drawString(this.font, "§7匹配 " + filtered.size() + " / " + curNames().size(), selX, searchBox.getY() + 4, GRAY, false);
+        searchSuggestions.drawFrame(g, mx, my);
+        int clearX = searchX + searchW + 2;
+        if (!searchBox.getValue().isEmpty()) ui.draw(g, this.font, clearX, searchY, 16, 16,
+                Component.translatable("gt_shanhai.shop.filter.clear").getString(), mx, my, true);
+        g.drawString(this.font, Component.translatable("gt_shanhai.shop.picker.search.matches",
+                filtered.size(), curNames().size()), selX, searchY + 4, GRAY, false);
         drawSidebar(g, mx, my);
         drawGrid(g, mx, my);
         drawGridScrollbar(g, mx, my);
@@ -1305,6 +1334,7 @@ public class MultiPickerScreen extends ScaledScreen {
         try {
             g.pose().translate(offsetX, offsetY, 500);
             g.pose().scale(guiScale, guiScale, 1);
+            searchSuggestions.drawPopup(g, smx, smy, guiScale, offsetX, offsetY);
             if (sortOpen) {
                 int y = sortY + 20;
                 for (String option : sortOptions()) {
@@ -1318,9 +1348,10 @@ public class MultiPickerScreen extends ScaledScreen {
             }
         } finally { g.pose().popPose(); }
         if (sortOpen || draggedSelection != null && dragStarted) return;
+        if (searchSuggestions.contains(smx, smy) || (searchSuggestions.open() && searchSuggestions.inFrame(smx, smy))) return;
         if (hoverItem != null && !hoverItem.isEmpty()) g.renderTooltip(this.font, hoverItem, mx, my);
         else if (hoverFluidTip != null) g.renderComponentTooltip(this.font, hoverFluidTip, mx, my);
-        else if (GuiRenderUtil.isHovering(smx, smy, searchBox.getX(), searchBox.getY(), searchBox.getWidth(), searchBox.getHeight()))
+        else if (searchSuggestions.inFrame(smx, smy))
             g.renderComponentTooltip(this.font, SEARCH_HELP, mx, my);
     }
 
@@ -1353,6 +1384,10 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        if (searchSuggestions.contains(mx, my)) {
+            cancelGestures();
+            return searchSuggestions.mouseClicked(mx, my, btn);
+        }
         if (btn != 0 && btn != 1) return super.universalMouseClicked(mx, my, btn);
         cancelHold();
         if (sortOpen) {
@@ -1368,10 +1403,15 @@ public class MultiPickerScreen extends ScaledScreen {
         }
         if (editingQuantity != null && !GuiRenderUtil.isHovering(mx, my, countBox.getX(), countBox.getY(), countBox.getWidth(), countBox.getHeight()))
             commitQuantity();
+        if (searchSuggestions.mouseClicked(mx, my, btn)) {
+            cancelGestures();
+            if (btn == 0 && searchSuggestions.inFrame(mx, my)) setDragging(true);
+            return true;
+        }
         if (btn == 0) {
             if (ui.hit(mx, my, confirmX(), top + panelHeight - 24, 90, 16, true)) { confirm(); return true; }
             if (ui.hit(mx, my, cancelX(), top + panelHeight - 24, 56, 16, true)) { onClose(); return true; }
-            if (ui.hit(mx, my, searchBox.getX() + searchBox.getWidth() + 2, searchBox.getY(), 16, 16, !searchBox.getValue().isEmpty())) {
+            if (ui.hit(mx, my, searchX + searchW + 2, searchY, 16, 16, !searchBox.getValue().isEmpty())) {
                 searchBox.setValue("");
                 setFocused(searchBox);
                 return true;
@@ -1442,6 +1482,7 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (searchSuggestions.contains(mx, my)) return true;
         if (scrollbarOwner != 0) {
             int first = scrollbarOwner == 1
                     ? ui.drag(my, gridY, gridBottom - gridY, gridContentHeight(), gridBottom - gridY, gridMaxScroll())
@@ -1799,6 +1840,7 @@ public class MultiPickerScreen extends ScaledScreen {
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double delta) {
         if (sortOpen) return true;
+        if (searchSuggestions.mouseScrolled(mx, my, delta)) return true;
         commitQuantity();
         cancelHold();
         if (GuiRenderUtil.isHovering(mx, my, sidebarX, modulesY, sidebarW, gridBottom - modulesY)) {
@@ -1924,11 +1966,14 @@ public class MultiPickerScreen extends ScaledScreen {
         super.removed();
     }
 
-    /** Enter 确认、Esc 先退出搜索框再关；其余按键照常交给搜索框。 */
+    /** 搜索框 Enter 只补全，离焦后 Enter 确认；Esc 先收联想，再退出文本框或关闭。 */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (Screen.hasControlDown() && keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_F) {
             commitQuantity();
+            sortOpen = false;
+            cancelGestures();
+            searchSuggestions.reopen();
             setFocused(searchBox);
             return true;
         }
@@ -1941,6 +1986,7 @@ public class MultiPickerScreen extends ScaledScreen {
             if (ui.takeEnter()) {
                 if (editingQuantity != null) { commitQuantity(); return true; }
                 if (sortOpen) { sortOpen = false; return true; }
+                if (searchBox.isFocused()) { searchSuggestions.acceptSelected(); return true; }
                 ui.press(confirmX(), top + panelHeight - 24, 90, 16, true);
                 confirm();
             }
@@ -1949,10 +1995,12 @@ public class MultiPickerScreen extends ScaledScreen {
         if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
             if (sortOpen) { sortOpen = false; return true; }
             if (editingQuantity != null) { commitQuantity(); return true; }
+            if (searchSuggestions.dismiss()) return true;
             if (getFocused() instanceof EditBox) { setFocused(null); return true; }
             onClose();
             return true;
         }
+        if (searchSuggestions.navigationKey(keyCode)) return true;
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 

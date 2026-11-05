@@ -10,6 +10,18 @@ final class ShopDialogRows {
 
     private ShopDialogRows() {}
 
+    /** 山海：像素滚动可读完高度超过整个视口的换行候选，不按整行跳过文字。 */
+    static int clampPixelScroll(int wanted, int contentH, int viewportH) {
+        return Math.max(0, Math.min(wanted, Math.max(0, contentH - viewportH)));
+    }
+
+    static int pixelScrollToShow(int rowY, int rowH, int scroll, int viewportH, int contentH) {
+        int wanted = scroll;
+        if (rowY < scroll || rowH > viewportH) wanted = rowY;
+        else if (rowY + rowH > scroll + viewportH) wanted = rowY + rowH - viewportH;
+        return clampPixelScroll(wanted, contentH, viewportH);
+    }
+
     /** 从 {@code first} 起，{@code listH} 内放得下几行；至少 1 行（单行比列表还高时照样显示，不卡住）。 */
     static int fitFrom(int[] heights, int first, int listH) {
         int used = 0;

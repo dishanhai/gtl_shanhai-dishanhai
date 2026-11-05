@@ -53,4 +53,65 @@ class ShopCatalogSearchIndexTest {
         assertEquals(List.of(1L), search(index, "minecraft:iron", "all", null));
         assertEquals(List.of(1L, 2L), search(index, "", "all", null));
     }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> suggest(Object index, String query, List<Long> candidates, int limit) throws Exception {
+        return (List<Object>) index.getClass().getMethod("suggest", String.class, List.class, int.class)
+                .invoke(index, query, candidates, limit);
+    }
+
+    private Object property(Object suggestion, String name) throws Exception {
+        return suggestion.getClass().getMethod(name).invoke(suggestion);
+    }
+
+    @Test
+    void suggestionsRankExactNameBeforePrefixBeforeSubstringAndId() throws Exception {
+        var index = index(List.of(stub(1, false, "Copper", "mod:iron"),
+                stub(2, false, "Cast Iron", "mod:cast"), stub(3, false, "Iron Ingot", "mod:ingot"),
+                stub(4, false, "Iron", "mod:metal")));
+        var result = suggest(index, "iron", null, 5);
+        assertEquals(4, result.size());
+        assertEquals(4L, property(result.get(0), "entryKey"));
+        assertEquals(3L, property(result.get(1), "entryKey"));
+        assertEquals(2L, property(result.get(2), "entryKey"));
+        assertEquals(1L, property(result.get(3), "entryKey"));
+        assertEquals("Iron", property(result.get(0), "completion"));
+        assertEquals("mod:iron", property(result.get(3), "completion"));
+    }
+
+    @Test
+    void suggestionsRespectFiltersHiddenEntriesLimitAndStableOrder() throws Exception {
+        var index = index(List.of(stub(1, false, "Iron A", "mod:a"),
+                stub(2, false, "Iron B", "mod:b"), stub(3, true, "Iron C", "mod:c")));
+        var result = suggest(index, "iron", List.of(2L, 3L, 1L, 999L), 1);
+        assertEquals(1, result.size());
+        assertEquals(2L, property(result.get(0), "entryKey"));
+        assertTrue(suggest(index, "iron", List.of(), 5).isEmpty());
+        assertTrue(suggest(index, "iron", null, 0).isEmpty());
+        assertTrue(suggest(index, " , ", null, 5).isEmpty());
+    }
+
+    @Test
+    void suggestionsKeepChineseMultiWordMatchingAndRefreshOnRebuild() throws Exception {
+        var index = index(List.of(stub(1, false, "铁锭 Iron Ingot", "minecraft:iron_ingot")));
+        assertEquals("铁锭 Iron Ingot", property(suggest(index, "铁锭, ingot", null, 5).get(0), "completion"));
+        assertEquals("minecraft:iron_ingot", property(suggest(index, "minecraft:iron", null, 5).get(0), "completion"));
+        index.getClass().getMethod("rebuild", List.class).invoke(index,
+                List.of(stub(2, false, "Iron Dust", "mod:dust")));
+        var result = suggest(index, "iron", null, 5);
+        assertEquals(1, result.size());
+        assertEquals(2L, property(result.get(0), "entryKey"));
+        assertTrue(suggest(index, "铁锭", null, 5).isEmpty());
+    }
+
+    @Test
+    void formattedNamesCompleteVisibleTextAndKeepTheirDisplayStyle() throws Exception {
+        var index = index(List.of(stub(1, false, "§b&$ultimate-Iron Ingot", "mod:ingot"),
+                stub(2, false, "Cast Iron", "mod:cast")));
+        var result = suggest(index, "iron", null, 5);
+        assertEquals(1L, property(result.get(0), "entryKey"));
+        assertEquals("Iron Ingot", property(result.get(0), "completion"));
+        assertEquals("§b&$ultimate-Iron Ingot", property(result.get(0), "displayName"));
+        assertEquals(List.of(1L), search(index, "iron ingot", "all", null));
+    }
 }

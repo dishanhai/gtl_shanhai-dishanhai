@@ -9,6 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShopDialogRowsTest {
 
     @Test
+    void pixelScrollingCanReadEveryLineOfAnOversizedSuggestion() {
+        assertEquals(0, ShopDialogRows.clampPixelScroll(-12, 360, 140));
+        assertEquals(220, ShopDialogRows.clampPixelScroll(500, 360, 140));
+        assertEquals(0, ShopDialogRows.clampPixelScroll(20, 80, 140));
+        assertEquals(0, ShopDialogRows.pixelScrollToShow(0, 300, 180, 140, 360));
+        assertEquals(220, ShopDialogRows.pixelScrollToShow(300, 60, 0, 140, 360));
+        assertEquals(40, ShopDialogRows.pixelScrollToShow(60, 30, 40, 140, 360));
+    }
+
+    @Test
     void fitFromCountsRowsThatFitAndAlwaysShowsAtLeastOne() {
         int[] h = {20, 20, 29, 20};
         assertEquals(2, ShopDialogRows.fitFrom(h, 0, 60), "20+20 放得下，再加 29 超出");

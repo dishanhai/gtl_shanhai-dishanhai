@@ -212,6 +212,10 @@ public final class ClientShopCatalog {
         return searchIndex.search(query, groupKey(top, sub, sub2, sub3), keysOfGroup(top, sub, sub2, sub3));
     }
 
+    public static List<ShopCatalogSearchIndex.Suggestion> searchSuggestions(String query, List<Long> candidates, int limit) {
+        return searchIndex.suggest(query, candidates, limit);
+    }
+
     public static List<Long> resourceKeys(List<com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter.Resource> resources,
                                           boolean costs) {
         return com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter.keys(manifest.stubs(), resources, costs);

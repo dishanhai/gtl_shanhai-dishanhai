@@ -294,6 +294,7 @@ public class ShopScreen extends ScaledScreen {
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private AnimatableEditBox searchBox;
     private String appliedSearch = "";
+    private ShopSearchSuggestions searchSuggestions;
     private List<ShopResourceFilter.Resource> resourceFilter = List.of();
     private final List<ItemStack> resourceFilterItems = new ArrayList<>();
     private final List<dev.architectury.fluid.FluidStack> resourceFilterFluids = new ArrayList<>();
@@ -1236,6 +1237,7 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void onShopSearchChanged(String value) {
+        if (searchSuggestions != null) searchSuggestions.reopen();
         boolean starting = appliedSearch.isBlank() && !value.isBlank();
         appliedSearch = value;
         if (starting) {
@@ -1246,6 +1248,24 @@ public class ShopScreen extends ScaledScreen {
         snapGridScroll(0);
         recomputeVisible();
         requestStagger(0.5f);
+    }
+
+    /** 山海：联想和商品网格共用已经过分类、收藏及资源筛选的候选。 */
+    private void refreshSearchSuggestions() {
+        if (searchSuggestions != null)
+            searchSuggestions.update(ClientShopCatalog.searchSuggestions(currentSearch(), visibleEntryKeys, 5));
+    }
+
+    private void drawSearchFrame(GuiGraphics g, int mx, int my) {
+        searchSuggestions.drawFrame(g, mx, my);
+    }
+
+    private void drawSearchSuggestions(GuiGraphics g, int mx, int my) {
+        g.pose().pushPose();
+        try {
+            GuiRenderUtil.scaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openScale());
+            searchSuggestions.drawPopup(g, mx, my, guiScale, offsetX, offsetY);
+        } finally { g.pose().popPose(); }
     }
 
     private String resourceModeLabel() {
@@ -1594,14 +1614,23 @@ public class ShopScreen extends ScaledScreen {
             prev = ClientShopUiSettings.shopSearch();
         }
         appliedSearch = prev;
-        searchBox = new AnimatableEditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12,
+        boolean restoreSearchFocus = searchBox != null && searchBox.isFocused();
+        searchBox = new AnimatableEditBox(this.font, searchBoxX() + 4, searchBoxY() + 2, SEARCH_W - 8, 8,
                 Component.translatable("gt_shanhai.shop.search.label"));
+        searchBox.setMaxLength(32767);
         searchBox.setValue(prev);
         searchBox.setResponder(this::onShopSearchChanged);
-        searchBox.setBordered(true);
+        searchBox.setBordered(false);
         searchBox.setHint(Component.translatable("gt_shanhai.shop.search.hint"));
         searchBox.setTextColor(0xFFFFFF);
+        searchSuggestions = new ShopSearchSuggestions(this.font, searchBox,
+                searchBoxX(), searchBoxY(), SEARCH_W, 12, top + panelHeight - 6,
+                () -> !modalLayerOpen(), this::setFocused, (text, width) -> wrapFcs(text, width).lines());
         addRenderableWidget(searchBox);
+        if (restoreSearchFocus) {
+            searchBox.setFocused(true);
+            setFocused(searchBox);
+        }
 
         // 数量输入框（AE 风格，详情区数量位；仅选中商品时可见）
         amountBox = new AnimatableEditBox(this.font, detailX() + 8, contentTop() + 66, DETAIL_W - 16, 12, Component.literal("数量"));
@@ -1796,6 +1825,7 @@ public class ShopScreen extends ScaledScreen {
             keys = filtered;
         }
         visibleEntryKeys = new ArrayList<>(keys);
+        refreshSearchSuggestions();
         // 新 revision 已不含旧身份时清空详情，不能凭对象引用继续交易。
         if (selectedEntryKey >= 0L && !visibleEntryKeys.contains(selectedEntryKey)) clearSelection();
     }
@@ -1966,6 +1996,7 @@ public class ShopScreen extends ScaledScreen {
 
         // 左侧网格背景。分组切页不再整块横移，改由 drawGrid 里的卡片错峰入场承担；
         // 切页期间对网格做平滑高斯，落位后收干净，避免宽间距核把商品名打成残影。
+        drawSearchFrame(g, mx, my);
         drawResourceFilter(g, mx, my);
         int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = contentHeight();
         theme.regionBackdrop(g, gx, gy, gw, gh);
@@ -2288,6 +2319,7 @@ public class ShopScreen extends ScaledScreen {
             g.pose().scale(this.guiScale, this.guiScale, 1.0f);
             // 餘額與底部提示共用兩遍繪製，先完成所有玻璃，再畫所有文字。
             g.flush();
+            drawSearchSuggestions(g, smx, smy);
             drawFlashStack(g, now);
             if (!modalLayerOpen()) drawUndoButtons(g, smx, smy);
             // 跟随鼠标的浮动图标画在 scissor 外，避免拖出网格边界被裁掉；放在上层，不会被加载格的模糊糊掉。
@@ -5018,8 +5050,13 @@ public class ShopScreen extends ScaledScreen {
         }
         if (btn == 1 && hit(mx, my, searchBoxX(), searchBoxY(), SEARCH_W, 12)) {
             searchBox.setValue("");
+            searchSuggestions.reopen();
             searchBox.setFocused(true);
             setFocused(searchBox);
+            return true;
+        }
+        if (searchSuggestions.mouseClicked(mx, my, btn)) {
+            if (btn == 0 && searchSuggestions.inFrame(mx, my)) setDragging(true);
             return true;
         }
         if (resourceFilterClicked(mx, my, btn)) return true;
@@ -5661,6 +5698,7 @@ public class ShopScreen extends ScaledScreen {
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
         if (ClientShopAvailability.isDisabled()) return true;
+        if (searchSuggestions.mouseScrolled(mx, my, d)) return true;
         if (stageLockActive) return true;
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
@@ -5894,10 +5932,17 @@ public class ShopScreen extends ScaledScreen {
             if (cartOverlayOpen) { closeCartOverlay(); return true; } // 结算批次不清，见 handleCartOverlayClick 关闭分支
             if (descOverlayOpen) { closeDescOverlay(); return true; }
             if (guideOverlayOpen) { closeGuideOverlay(); return true; }
+            if (searchSuggestions.dismiss()) return true;
             if (clearTextFocus()) return true;
         }
+        if (searchSuggestions.navigationKey(keyCode)) return true;
         if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
             if (enterHeld) return true;
+            if (searchBox != null && searchBox.isFocused() && !modalLayerOpen()) {
+                enterHeld = true;
+                searchSuggestions.acceptSelected();
+                return true;
+            }
             if (selected != null && !modalLayerOpen() && (searchBox == null || !searchBox.isFocused())) {
                 enterHeld = true;
                 performConfirmTrade(true);
@@ -7562,6 +7607,8 @@ public class ShopScreen extends ScaledScreen {
         g.pose().translate(0.0f, 0.0f, 600.0f);
         try {
             if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
+            if (searchSuggestions.contains(smx, smy) || (searchSuggestions.open()
+                    && hit(smx, smy, searchBoxX(), searchBoxY(), SEARCH_W, 12))) return;
             if (hoveredTipPage != null) {
                 String text = "§b小提示 " + (hoveredTipPage.tipIndex() + 1) + "/" + hoveredTipPage.tipCount()
                         + "\n§7" + GuiRenderUtil.translateAmpCodes(hoveredTipPage.tip().text());
