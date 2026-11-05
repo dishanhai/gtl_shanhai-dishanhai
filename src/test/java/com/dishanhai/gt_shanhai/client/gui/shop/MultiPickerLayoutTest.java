@@ -1,8 +1,8 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassGeometry;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
-import com.dishanhai.gt_shanhai.client.gui.glass.PixelRect;
+import com.dishanhai.sh_better_ui.client.glass.GlassGeometry;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.glass.PixelRect;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -53,6 +53,25 @@ public final class PrimordialThreadScheduler<T> {
         lanes.sort(Comparator.comparingLong(Lane::index));
     }
 
+    private long nextIndex() {
+        long index = 0L;
+        for (Lane<T> lane : lanes) {
+            if (lane.index == index) index++;
+            else if (lane.index > index) break;
+        }
+        return index;
+    }
+
+    /** 唯讀的接單額度；供排程與告警共同判斷，包含降配後保留的舊預留。 */
+    public long admissionShare(long capacity, long threads) {
+        long count = Math.min(Math.max(0L, capacity), Math.max(1L, threads));
+        if (count <= 0L || lanes.size() >= count) return 0L;
+        long index = nextIndex();
+        if (index >= count) return 0L;
+        long share = capacity / count + (index < capacity % count ? 1L : 0L);
+        return share > capacity - Math.min(capacity, reserved()) ? 0L : share;
+    }
+
     public void tick(long now, long capacity, long threads, Runner<T> runner) {
         if (!enabled) return;
         // 必須先讓本 tick 開始時已有的批次各運行一次，新批次從下一 tick 起計時。
@@ -62,23 +81,15 @@ public final class PrimordialThreadScheduler<T> {
                 dirty = true;
             }
         }
-        long count = Math.min(Math.max(0L, capacity), Math.max(1L, threads));
-        if (count <= 0L || lanes.size() >= count) return;
+        long share = admissionShare(capacity, threads);
+        if (share <= 0L) return;
         if (lastSearch == now) return;
         // 成功工作可以逐 tick 接續（分子組裝原生為 1 tick），只有失敗後才限頻。
         if (!pushed && !lastSearchSucceeded && lastSearch != Long.MIN_VALUE
                 && now >= lastSearch && now - lastSearch < 5L) return;
         if (!dirty && now < nextSearch) return;
 
-        long index = 0L;
-        for (Lane<T> lane : lanes) {
-            if (lane.index == index) index++;
-            else if (lane.index > index) break;
-        }
-        if (index >= count) return;
-        long share = capacity / count + (index < capacity % count ? 1L : 0L);
-        // 容量或執行緒數縮小後，保留舊批次但不再超額接單。
-        if (share > capacity - Math.min(capacity, reserved())) return;
+        long index = nextIndex();
 
         dirty = false;
         pushed = false;

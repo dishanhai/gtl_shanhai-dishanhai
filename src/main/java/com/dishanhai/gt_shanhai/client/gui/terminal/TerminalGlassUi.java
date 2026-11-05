@@ -1,12 +1,12 @@
 package com.dishanhai.gt_shanhai.client.gui.terminal;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPanelTexture;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ButtonFeedback;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
-import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
+import com.dishanhai.sh_better_ui.client.gui.scaled.ButtonFeedback;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
 import net.minecraft.client.gui.Font;

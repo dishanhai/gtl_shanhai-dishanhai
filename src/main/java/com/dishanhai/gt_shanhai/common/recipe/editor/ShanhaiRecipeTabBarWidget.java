@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;

@@ -20,11 +20,11 @@ import static com.dishanhai.gt_shanhai.common.recipe.editor.RecipeEditorLayout.T
 import static com.dishanhai.gt_shanhai.common.recipe.editor.RecipeEditorLayout.share;
 import static com.dishanhai.gt_shanhai.common.recipe.editor.RecipeEditorLayout.shareX;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassMotion;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPanelTexture;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.glass.GlassBlur;
+import com.dishanhai.sh_better_ui.client.glass.GlassMotion;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.lowdragmc.lowdraglib.gui.ingredient.IGhostIngredientTarget;
 import com.lowdragmc.lowdraglib.gui.ingredient.Target;

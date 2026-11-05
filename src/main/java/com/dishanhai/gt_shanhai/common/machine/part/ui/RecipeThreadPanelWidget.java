@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part.ui;
 
 import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopTheme;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;

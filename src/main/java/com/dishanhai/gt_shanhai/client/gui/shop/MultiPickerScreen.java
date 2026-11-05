@@ -1,14 +1,17 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+import com.dishanhai.sh_better_ui.client.blur.GlassStyle;
+
 import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
-import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.client.gui.scaled.RepeatCurve;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassGeometry;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
-import com.dishanhai.gt_shanhai.client.gui.glass.PixelRect;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.glass.GlassGeometry;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.glass.PixelRect;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
 
@@ -560,7 +563,7 @@ public class MultiPickerScreen extends ScaledScreen {
 
         rebuildSource();
         rebuildSelectionRows();
-        ShopGaussBlur.warmUp();
+        GaussBlur.warmUp();
     }
 
     private static long parseLong(String s) {
@@ -982,7 +985,7 @@ public class MultiPickerScreen extends ScaledScreen {
         } catch (Exception ignored) {
             super.renderBackground(g);
         }
-        if (!ShopGaussBlur.isReady()) g.fill(0, 0, this.width, this.height, 0xB0101018);
+        if (!GaussBlur.isReady()) g.fill(0, 0, this.width, this.height, 0xB0101018);
     }
 
     @Override
@@ -1280,21 +1283,21 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
-        ShopGaussBlur.clear();
-        ShopGaussBlur.clearTopLayer();
+        GaussBlur.clear();
+        GaussBlur.clearTopLayer();
         Minecraft mc = Minecraft.getInstance();
-        if (ShopGaussBlur.isReady()) {
+        if (GaussBlur.isReady()) {
             PixelRect grid = toPixels(new GuiRect(gridX, gridY, gridW, gridBottom - gridY));
             float swap = Math.max(0, 1 - (System.currentTimeMillis() - modeChangedAtMs) / 180f);
             float strength = ClientShopUiSettings.reduceMotion() ? 0 : Math.min(0.8f, Math.max(Math.abs(gridVelocity) / 1800f - 0.08f, swap * 0.65f));
-            if (strength > 0.01f) ShopGaussBlur.requestDirectional(grid.getX(), grid.getY(), grid.getW(), grid.getH(),
-                    strength, 8 * guiScale, 0, 1, ShopGlassStyle.SWAP);
+            if (strength > 0.01f) GaussBlur.requestDirectional(grid.getX(), grid.getY(), grid.getW(), grid.getH(),
+                    strength, 8 * guiScale, 0, 1, GlassStyle.SWAP);
             PixelRect panel = toPixels(new GuiRect(left, top, panelWidth, panelHeight));
-            ShopGaussBlur.requestExtra(0, 0, mc.getMainRenderTarget().width, mc.getMainRenderTarget().height,
+            GaussBlur.requestExtra(0, 0, mc.getMainRenderTarget().width, mc.getMainRenderTarget().height,
                     Math.min(1, opening.value()) * 0.85f, 12 * guiScale,
-                    panel.getX(), panel.getY(), panel.getW(), panel.getH(), ShopGlassStyle.OVERLAY);
+                    panel.getX(), panel.getY(), panel.getW(), panel.getH(), GlassStyle.OVERLAY);
         }
-        ShopGaussBlur.deferTopLayer(this, topGraphics -> drawTopLayer(topGraphics, smx, smy, mx, my));
+        GaussBlur.deferTopLayer(this, topGraphics -> drawTopLayer(topGraphics, smx, smy, mx, my));
     }
 
     private void drawTopLayer(GuiGraphics g, int smx, int smy, int mx, int my) {
@@ -1904,8 +1907,8 @@ public class MultiPickerScreen extends ScaledScreen {
     public void onClose() {
         commitQuantity();
         cancelGestures();
-        ShopGaussBlur.clear();
-        ShopGaussBlur.clearTopLayer();
+        GaussBlur.clear();
+        GaussBlur.clearTopLayer();
         if (this.minecraft != null && parent != null) this.minecraft.setScreen(parent);
         else super.onClose();
     }
@@ -1916,8 +1919,8 @@ public class MultiPickerScreen extends ScaledScreen {
         cancelGestures();
         sortGeneration++;
         ui.cancel();
-        ShopGaussBlur.clear();
-        ShopGaussBlur.clearTopLayer();
+        GaussBlur.clear();
+        GaussBlur.clearTopLayer();
         super.removed();
     }
 

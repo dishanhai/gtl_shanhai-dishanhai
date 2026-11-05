@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.utils.Size;
@@ -10,9 +10,9 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
-import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.glass.GlassBlur;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 
 /**
  * Square toggle beside the query slot. Opening it lists recent searches.

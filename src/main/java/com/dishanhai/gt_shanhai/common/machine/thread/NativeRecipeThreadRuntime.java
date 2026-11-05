@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.machine.thread;
 
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
+import com.dishanhai.gt_shanhai.api.machine.RecipeThreadSnapshot;
 import com.dishanhai.gt_shanhai.api.machine.part.IRecipeThreadSource;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadRecipeIdentity;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadScheduler;
@@ -56,6 +57,7 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
     private PrimordialThreadScheduler<Frame> scheduler = new PrimordialThreadScheduler<>();
     private boolean initialized, ticking, admitting, finishing, drain, invalidating, replayingPaid;
     private long allowance, admittedParallel, currentShare, lastTick = Long.MIN_VALUE, continuous;
+    private long completedThreadBatches;
     private BigInteger tickInput = BigInteger.ZERO, tickOutput = BigInteger.ZERO;
     private int sharedFuel, sharedMaxFuel;
     private boolean workedThisTick, workingResult, waitedThisTick;
@@ -184,6 +186,7 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
                             setNativeDrain(true);
                             try { logic.onRecipeFinish(); }
                             finally { finishing = false; setNativeDrain(drain); }
+                            completedThreadBatches++;
                             clearCurrent();
                         }
                     }
@@ -455,6 +458,21 @@ public class NativeRecipeThreadRuntime implements IRecipeThreadDisplay {
         if (logic instanceof IRecipeStatus recipeStatus) {
             recipeStatus.setRecipeStatus(frame.recipeStatus); recipeStatus.setWorkingStatus(frame.workingStatus);
         }
+    }
+
+    @Override public RecipeThreadSnapshot getRecipeThreadSnapshot() {
+        if (!isManaged()) return null;
+        boolean enabled = scheduler.isEnabled() && !logic.isSuspend();
+        boolean available = enabled && available();
+        int running = 0;
+        for (var lane : scheduler.lanes()) {
+            Frame frame = lane.task();
+            if (available && !frame.pending && frame.status == RecipeLogic.Status.WORKING
+                    && frame.progress < frame.duration) running++;
+        }
+        return new RecipeThreadSnapshot(capacity(), scheduler.lanes().size(), running, enabled, nativeDrain(),
+                parallelCapacity(), scheduler.reserved(), continuous, completedThreadBatches,
+                scheduler.admissionShare(parallelCapacity(), capacity()) <= 0L);
     }
 
     @Override public CompoundTag getRecipeThreadDisplay(int first, int maximum) {

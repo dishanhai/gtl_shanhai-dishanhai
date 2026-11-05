@@ -4,6 +4,7 @@ import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.sh_better_ui.client.glass.*;
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;

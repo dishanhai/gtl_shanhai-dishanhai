@@ -19,8 +19,8 @@ class UltimateTerminalScreenSourceTest {
         assertTrue(shared.contains("reduceMotion()"));
         assertTrue(screen.contains("reduced()"));
         assertTrue(screen.contains("void removed()"));
-        assertTrue(screen.contains("ShopGaussBlur.clear()"));
-        assertTrue(screen.contains("ShopGaussBlur.clearTopLayer()"));
+        assertTrue(screen.contains("GaussBlur.clear()"));
+        assertTrue(screen.contains("GaussBlur.clearTopLayer()"));
         String rendering = screen.substring(screen.indexOf("void renderScaledBackground"), screen.indexOf("private float slideOffset"));
         assertFalse(rendering.contains("warmUp()"));
         for (String forbidden : new String[]{"TextType.HIDE", "LEFT_HIDE", ".substring(", "trimText(", "plainSubstrByWidth("})

@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
-import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
+import com.dishanhai.sh_better_ui.client.glass.GlassBlur;
+import com.dishanhai.sh_better_ui.client.glass.GuiRect;
 import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;

@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.client.loading;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
 import java.util.ArrayList;
 import java.util.List;
 

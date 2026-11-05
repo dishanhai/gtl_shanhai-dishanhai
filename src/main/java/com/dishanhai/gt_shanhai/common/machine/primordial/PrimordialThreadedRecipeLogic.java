@@ -4,6 +4,7 @@ package com.dishanhai.gt_shanhai.common.machine.primordial;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.mixin.PrimordialRecipeThreadStateAccessor;
+import com.dishanhai.gt_shanhai.api.machine.RecipeThreadSnapshot;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
@@ -47,6 +48,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private boolean drainRequested;
     private long allowance;
     private long continuousTicks;
+    private long completedThreadBatches;
     private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
@@ -89,6 +91,22 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     public final int getActiveRecipeThreadCount() { return activeRecipeThreads; }
     public final boolean isRecipeThreadDisplayAvailable() { return true; }
     public final long getReservedThreadParallel() { return reservedThreadParallel; }
+
+    public final RecipeThreadSnapshot getRecipeThreadSnapshot() {
+        boolean enabled = threads.isEnabled() && !isSuspend();
+        boolean available = enabled
+                && (!(getMachine() instanceof IMultiController controller) || controller.isFormed());
+        int running = 0;
+        for (var lane : threads.lanes()) {
+            Frame frame = lane.task();
+            if (available && frame.status == Status.WORKING && !frame.pendingSetup
+                    && frame.progress < frame.duration && frame.recipe != null) running++;
+        }
+        return new RecipeThreadSnapshot(getRecipeThreadCapacity(), threads.lanes().size(), running,
+                enabled, nativeDrainRequested(), getUnreservedTotalParallelLimit(), threads.reserved(),
+                continuousTicks, completedThreadBatches,
+                threads.admissionShare(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) <= 0L);
+    }
 
     /** Jade 唯讀快照：不切換 frame、不查配方、不交易庫存，僅分頁傳送有限的批次。 */
     public final CompoundTag getRecipeThreadDisplay(int first, int maximum) {
@@ -341,6 +359,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                                     setNativeDrain(false);
                                     try { onRecipeFinish(); }
                                     finally { setNativeDrain(drainRequested); }
+                                    completedThreadBatches++;
                                     lastRecipe = null;
                                     duration = progress = 0;
                                 }

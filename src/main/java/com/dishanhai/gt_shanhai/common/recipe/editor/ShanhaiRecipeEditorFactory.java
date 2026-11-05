@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPanelTexture;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.lowdragmc.lowdraglib.LDLib;
 import com.lowdragmc.lowdraglib.gui.factory.UIFactory;
 import com.lowdragmc.lowdraglib.gui.modular.IUIHolder;

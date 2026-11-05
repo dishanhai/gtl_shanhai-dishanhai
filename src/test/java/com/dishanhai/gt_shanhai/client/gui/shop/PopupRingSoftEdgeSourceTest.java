@@ -1,5 +1,8 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.blur.GaussBlur;
+import com.dishanhai.sh_better_ui.client.blur.GlassStyle;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -18,7 +21,7 @@ class PopupRingSoftEdgeSourceTest {
 
     @Test
     void shaderFadesTheRingEdgeAndKeepsPopupTextOutOfIt() throws Exception {
-        String fsh = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.fsh");
+        String fsh = read("../SH-Better-UI/src/main/resources/assets/sh_better_ui/shaders/program/shop_gauss_blur.fsh");
         assertAll(
                 // 所有取样都走 fetchUv，不再有直接夹进 Rect 的取样
                 () -> assertTrue(fsh.contains("vec2 fetchUv(vec2 p, vec2 origin, vec2 lo, vec2 hi)")),
@@ -38,31 +41,31 @@ class PopupRingSoftEdgeSourceTest {
 
     @Test
     void featherIsPlumbedOnlyIntoTheExtraSlot() throws Exception {
-        String blur = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGaussBlur.java");
-        String glass = read("src/main/kotlin/com/dishanhai/gt_shanhai/client/gui/glass/GlassBlur.kt");
-        String style = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGlassStyle.java");
+        String blur = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GaussBlur.java");
+        String glass = read("../SH-Better-UI/src/main/kotlin/com/dishanhai/sh_better_ui/client/glass/GlassBlur.kt");
+        String style = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GlassStyle.java");
         assertAll(
                 () -> assertTrue(blur.contains("motionAxisUniform.set(axisX, axisY, featherPx, 0f);")),
                 () -> assertTrue(blur.contains("NO_WAVE, 1f, 1f, glass2, partialTick, feather2")),
                 () -> assertTrue(blur.contains("NO_WAVE, axisX, axisY, glass, partialTick, 0f")),
-                () -> assertTrue(blur.contains("wave, 1f, 1f, ShopGlassStyle.NONE, partialTick, 0f")),
+                () -> assertTrue(blur.contains("wave, 1f, 1f, GlassStyle.NONE, partialTick, 0f")),
                 // 旧的 11 参重载保持原签名，商店其它调用点不用改，软边默认关闭
                 () -> assertTrue(blur.contains("holeX, holeY, holeW, holeH, glass, 0f);")),
                 () -> assertTrue(blur.contains("extraFeather = 0f;")),
                 // 弹层外圈走 POPUP 样式（无折射），并带软边宽度
                 () -> assertTrue(glass.contains("POPUP_FEATHER_VIRTUAL * view.pixelScale")),
-                () -> assertTrue(glass.contains("ShopGlassStyle.POPUP")),
-                () -> assertTrue(style.contains("public static final ShopGlassStyle POPUP"))
+                () -> assertTrue(glass.contains("GlassStyle.POPUP")),
+                () -> assertTrue(style.contains("public static final GlassStyle POPUP"))
         );
     }
 
     @Test
     void ringIsWiderThanTheSoftEdgeSoTheHoleEdgeStaysFullStrength() throws Exception {
-        String glass = read("src/main/kotlin/com/dishanhai/gt_shanhai/client/gui/glass/GlassBlur.kt");
+        String glass = read("../SH-Better-UI/src/main/kotlin/com/dishanhai/sh_better_ui/client/glass/GlassBlur.kt");
         float margin = constant(glass, "POPUP_MARGIN_VIRTUAL");
         float feather = constant(glass, "POPUP_FEATHER_VIRTUAL");
         // 13 点核有效半径约 4 倍模糊半径；外圈不够宽时外缘取样会全夹在矩形边上
-        assertTrue(margin >= 4 * ShopGaussBlur.BLUR_RADIUS_VIRTUAL,
+        assertTrue(margin >= 4 * GaussBlur.BLUR_RADIUS_VIRTUAL,
                 "外圈宽度 " + margin + " 小于核有效半径");
         // Hole 外缘离 Rect 外缘正好 margin：软边宽度不超过它，此处淡出系数才是 1
         assertTrue(feather > 0 && feather <= margin,

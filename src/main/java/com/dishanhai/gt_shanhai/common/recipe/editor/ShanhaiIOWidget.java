@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassCell;
+import com.dishanhai.sh_better_ui.client.glass.GlassCell;
 import com.lowdragmc.lowdraglib.gui.ingredient.IGhostIngredientTarget;
 import com.lowdragmc.lowdraglib.gui.ingredient.Target;
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;

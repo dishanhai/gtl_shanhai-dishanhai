@@ -14,8 +14,8 @@ class PatternGeneratorScreenSourceTest {
         assertTrue(screen.contains("extends ScaledScreen"));
         assertTrue(screen.contains("reduceMotion()"));
         assertTrue(screen.contains("void removed()"));
-        assertTrue(screen.contains("ShopGaussBlur.clear()"));
-        assertTrue(screen.contains("ShopGaussBlur.clearTopLayer()"));
+        assertTrue(screen.contains("GaussBlur.clear()"));
+        assertTrue(screen.contains("GaussBlur.clearTopLayer()"));
         assertTrue(screen.contains("deferTopLayer"));
         assertTrue(screen.contains("void tick()"));
         assertTrue(screen.contains("GlassBlur.warmUp()"));

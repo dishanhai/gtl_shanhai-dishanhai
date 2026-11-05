@@ -36,6 +36,44 @@ class NativeRecipeThreadRuntimeTest {
     private static final Unsafe UNSAFE = unsafe();
     private static final long STATUS = offset("status"), ACTIVE = offset("isActive"), REASON = offset("waitingReason");
 
+    @Test void stellarSnapshotCountsAllAdvancingThreadsAndOnlyFinishedBatchesWithoutTransactions() throws Exception {
+        Probe p = probe(); p.runtime.threads = 2;
+        p.queue("slow", 100); p.runtime.tickAt(0);
+        p.queue("fast", 2); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(1);
+        p.runtime.tickAt(2);
+        var state = p.runtime.getRecipeThreadSnapshot();
+        assertEquals(2, state.capacity()); assertEquals(2, state.active());
+        assertEquals(2, state.running()); assertTrue(state.threadsFull());
+        assertEquals(64, state.parallelCapacity()); assertEquals(64, state.reservedParallel());
+        assertEquals(3, state.successfulTicks()); assertEquals(0, state.completedBatches());
+        int inputs = p.inputs, setups = p.setupCalls;
+        assertEquals(state, p.runtime.getRecipeThreadSnapshot());
+        assertEquals(inputs, p.inputs); assertEquals(setups, p.setupCalls);
+        p.outputAvailable = false; p.runtime.tickAt(3);
+        assertEquals(0, p.runtime.getRecipeThreadSnapshot().completedBatches());
+        p.outputAvailable = true; p.runtime.tickAt(4);
+        state = p.runtime.getRecipeThreadSnapshot();
+        assertEquals(1, state.completedBatches()); assertEquals(1, state.active());
+        assertFalse(state.threadsFull());
+        p.setWorkingEnabled(false);
+        assertFalse(p.runtime.getRecipeThreadSnapshot().enabled());
+        assertEquals(0, p.runtime.getRecipeThreadSnapshot().running());
+    }
+
+    @Test void stellarSnapshotUsesTheSchedulersActualAdmissionGateAfterDowngrade() throws Exception {
+        Probe p = probe(); p.runtime.parallel = 100;
+        p.queue("a", 100); p.runtime.tickAt(0);
+        p.queue("b", 100); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(1);
+        p.queue("c", 100); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(2);
+        p.runtime.parallel = 90;
+        p.queue("waiting", 1); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(3);
+        var state = p.runtime.getRecipeThreadSnapshot();
+        assertEquals(4, state.capacity()); assertEquals(3, state.active());
+        assertEquals(75, state.reservedParallel()); assertEquals(90, state.parallelCapacity());
+        assertFalse(state.threadsFull()); assertFalse(state.parallelFull());
+        assertTrue(state.admissionBlocked()); assertEquals(3, p.inputs);
+    }
+
     @Test void independentBatchesShareOneMachineWorkingCallbackAndCannotAdvanceTwiceInOneTick() throws Exception {
         Probe p = probe();
         p.queue("slow", 100); p.runtime.tickAt(0);

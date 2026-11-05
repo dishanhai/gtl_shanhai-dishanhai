@@ -1,6 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;

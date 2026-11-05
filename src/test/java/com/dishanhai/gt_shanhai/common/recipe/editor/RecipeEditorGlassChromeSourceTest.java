@@ -22,8 +22,9 @@ class RecipeEditorGlassChromeSourceTest {
                 Path.of("client", "gui", "glass", "GlassPanelTexture.kt")));
         assertAll(
                 () -> assertTrue(palette.contains("object GlassPalette")),
-                () -> assertTrue(palette.contains("const val ACCENT")),
-                () -> assertTrue(palette.contains("const val TEXT ")),
+                () -> assertTrue(palette.contains("@JvmField val ACCENT")),
+                () -> assertTrue(palette.contains("@JvmField val TEXT ")),
+                () -> assertFalse(palette.contains("const val")),
                 () -> assertTrue(texture.contains(": IGuiTexture")),
                 () -> assertTrue(texture.contains("Spring(Spring.HOVER)")),
                 () -> assertTrue(texture.contains("enum class Style { ROOT, PANEL, DISPLAY, PAGE, BUTTON }"))

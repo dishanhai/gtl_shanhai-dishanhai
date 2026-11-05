@@ -73,24 +73,26 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onItemTooltip);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onClientTick);
-        // 商店内容区局部高斯模糊：在 Screen.render 之后对 main 做后处理。
-        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
-                com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur::onScreenRenderPost);
         // 商店玻璃主题的 tooltip：LOWEST 让别的模组先改完，我们再接管绘制
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
                 com.dishanhai.gt_shanhai.client.gui.shop.ShopGlassTooltip::onTooltipPre);
-        // 配方修改器借用同一条模糊管线：登记放行谓词，并在编辑器界面关闭时收掉残留请求。
-        com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur.install();
-        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+        // 山海：消费端只登记画面；独立库负责唯一 Post 事件、预热、关闭与资源重载。
+        com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
+                screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen);
+        com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
+                screen -> screen instanceof com.lowdragmc.lowdraglib.gui.modular.ModularUIGuiContainer container
+                        && (container.modularUI.holder == com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory.INSTANCE
+                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine
+                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.RecipeThreadHatchPartMachine));
+        com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen);
-        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+        com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.generator.PatternGeneratorScreen);
-        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+        com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.terminal.UltimateTerminalScreen);
-        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+        com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.terminal.TerminalReportScreen);
-        MinecraftForge.EVENT_BUS.addListener(
-                com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur::onScreenClosing);
+
         com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();
     }
 

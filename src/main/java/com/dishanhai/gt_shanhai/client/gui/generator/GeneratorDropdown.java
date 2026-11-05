@@ -1,6 +1,9 @@
 package com.dishanhai.gt_shanhai.client.gui.generator;
 
-import com.dishanhai.gt_shanhai.client.gui.glass.*;
+import com.dishanhai.sh_better_ui.client.glass.*;
+import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.dishanhai.gt_shanhai.client.gui.scaled.*;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;

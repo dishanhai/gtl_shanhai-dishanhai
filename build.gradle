@@ -36,7 +36,11 @@ repositories {
     mavenCentral()
 }
 
+// 山海：独立 UI 库的开发产物；正式游戏需单独安装发行 jar。
+def shBetterUiJar = file(findProperty('shBetterUiJar') ?: '../SH-Better-UI/build/libs/sh_better_ui-1.0.0-dev.jar')
+
 dependencies {
+    implementation files(shBetterUiJar)
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // 核心 Kotlin：只认这颗 jar（stdlib 2.2.21）。不要再依赖插件自带的 kotlin-stdlib。
@@ -46,7 +50,7 @@ dependencies {
     implementation kotlinForForge
 
     implementation fileTree(dir: 'libs', include: '*.jar',
-            excludes: ['spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar'])
+            excludes: ['sh_better_ui-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar'])
     implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
@@ -267,3 +271,15 @@ task convertTianjieSchematic(type: JavaExec) {
         'C:/Users/dishanhai/Desktop/gt_shanhai/src/main/resources/assets/gt_shanhai/multiblock/tianjie_navigation_tower_report.txt'
     ]
 }
+
+
+// 山海：防止缺少独立库时产生误导性的下游编译错误。
+tasks.register('verifyShBetterUiDependency') {
+    doLast {
+        if (!shBetterUiJar.isFile()) {
+            throw new GradleException('Build SH-Better-UI devJar first or pass -PshBetterUiJar=<dev-jar>.')
+        }
+    }
+}
+tasks.named('compileJava') { dependsOn 'verifyShBetterUiDependency' }
+tasks.named('compileKotlin') { dependsOn 'verifyShBetterUiDependency' }
