@@ -30,7 +30,8 @@ class RecipeTypePatternBufferStockRequestSourceTest {
                 "sharedInputsPage(parentConfigurators)", "patternBehaviorPage(parentConfigurators)" }) {
             assertTrue(machine.contains("sideTabs.attachSubTab(" + page + ")"), "侧栏必须挂载 " + page);
         }
-        assertEquals(6, count(machine, "sideTabs.attachSubTab("));
+        assertEquals(7, count(machine, "sideTabs.attachSubTab("));
+        assertTrue(machine.contains("new CloudPatternConfigurator()"), "雲端擴展必須提供獨立設定頁");
         assertTrue(ui.contains("machine::setStockTagWhite"));
         assertTrue(ui.contains("machine.submitStockRequest"));
         assertTrue(ui.contains("stock_request.amount"));

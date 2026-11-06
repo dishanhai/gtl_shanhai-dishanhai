@@ -18,7 +18,7 @@ class RecipeTypePatternBufferVerticalSidebarTest {
             "api", "gui", "configurators", "FancyConfiguratorSidebarPage.java");
 
     @Test
-    void patternBufferUsesSixSideTabsAndKeepsRefundAsOnlyFloatingControl() throws IOException {
+    void patternBufferUsesSevenSideTabsAndKeepsRefundAsOnlyFloatingControl() throws IOException {
         String machine = Files.readString(MACHINE);
         int configuratorsStart = machine.indexOf("public void attachConfigurators");
         int sideTabsStart = machine.indexOf("public void attachSideTabs", configuratorsStart);
@@ -26,8 +26,9 @@ class RecipeTypePatternBufferVerticalSidebarTest {
 
         assertTrue(machine.contains("public void attachSideTabs"),
                 "星律必须通过 VerticalTabsWidget 的 attachSideTabs 注册配置入口");
-        assertEquals(6, countOccurrences(machine, "sideTabs.attachSubTab("),
-                "强匹配与产出倍率均使用独立侧栏页面");
+        assertEquals(7, countOccurrences(machine, "sideTabs.attachSubTab("),
+                "强匹配、产出倍率与云端扩展均使用独立侧栏页面");
+        assertTrue(machine.contains("new CloudPatternConfigurator()"));
         assertTrue(machine.contains("new OutputMultiplierConfigurator()"),
                 "星律必须提供独立的样板产出倍率侧栏页");
         assertTrue(machine.contains("new StrongPatternMatchConfigurator()"),

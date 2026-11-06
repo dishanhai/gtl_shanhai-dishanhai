@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [" P ", "IHI", " E "],
+  "key": {
+    "P": {"item": "ae2:engineering_processor"},
+    "I": {"item": "ae2:interface"},
+    "H": {"item": "gtceu:ev_machine_hull"},
+    "E": {"item": "ae2:fluix_smart_cable"}
+  },
+  "result": {"item": "gt_shanhai:cloud_pattern_library_ae_core", "count": 1}
+}

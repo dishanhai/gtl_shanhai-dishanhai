@@ -24,7 +24,7 @@ public abstract class CraftingCpuLogicStellarContextMixin {
     private ExecutingCraftingJob job;
     @Shadow @Final private appeng.me.cluster.implementations.CraftingCPUCluster cluster;
 
-    // 山海：包住 CPU 本輪上下文，讓 Enhancedcore 仍可攔截 provider.pushPattern。
+    // 山海：包住 CPU 本輪上下文，保留 provider.pushPattern 的原有呼叫鏈。
     @WrapMethod(method = "executeCrafting", remap = false)
     private int gtShanhai$pushPatternWithStellarContext(int budget, CraftingService service,
             IEnergyService energy, Level level, Operation<Integer> original) {

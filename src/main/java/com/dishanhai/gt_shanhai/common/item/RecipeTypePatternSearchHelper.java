@@ -478,7 +478,8 @@ public final class RecipeTypePatternSearchHelper {
         return true;
     }
 
-    private static boolean hostAllowsVirtualRecipeType(IRecipeLogicMachine machine, GTRecipeType recipeType) {
+    /** 山海：雲端發布與本地配方搜尋共用同一個宿主准入判斷。 */
+    public static boolean hostAllowsVirtualRecipeType(IRecipeLogicMachine machine, GTRecipeType recipeType) {
         if (DShanhaiConfig.COMMON.recipeTypePatternAllowUnsupportedHostRecipeTypes.get()) return true;
         if (machine == null || recipeType == null) return false;
         GTRecipeType[] hostTypes = machine.getRecipeTypes();

@@ -108,7 +108,8 @@ public final class RecipeThreadConfigurationPage implements IFancyUIProvider {
                     getGui().setSize(getSize().width, getSize().height);
                 }
                 pageContainer.setSize(canvas);
-                sideTabsWidget.setSize(new Size(24, canvas.height));
+                sideTabsWidget.setSize(new Size(24,
+                        stellarSidebarHeight(canvas.height, sideTabsWidget.getSubTabs().size())));
                 tooltipsPanel.setSelfPosition(new Position(canvas.width + 2, 2));
                 if (playerInventory != null) {
                     playerInventory.setSelfPosition(new Position(
@@ -161,6 +162,11 @@ public final class RecipeThreadConfigurationPage implements IFancyUIProvider {
             }
         };
         return new ModularUI(176, 166, holder, player).widget(root);
+    }
+
+    /** 山海：原生側欄從 y=8 繪製每格 24px；命中高度必須包含主頁籤及全部子頁籤。 */
+    static int stellarSidebarHeight(int canvasHeight, int subTabCount) {
+        return Math.max(canvasHeight, 8 + 24 * (1 + subTabCount));
     }
 
     @OnlyIn(Dist.CLIENT)

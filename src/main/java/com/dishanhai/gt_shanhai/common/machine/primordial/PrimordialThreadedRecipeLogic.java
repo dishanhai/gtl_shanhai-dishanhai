@@ -53,10 +53,6 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private long completedThreadBatches;
     private RecipeThreadPriority<GTRecipe> priority;
     private boolean priorityInputHandled;
-    private boolean cloudAdmissionBlocked;
-    private List<GTRecipe> cloudReservedRecipes = List.of();
-    private List<PrimordialThreadScheduler.Lane<Frame>> cloudDisplayLanes = List.of();
-    private boolean cloudThreadsFull;
     private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
@@ -103,11 +99,6 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             BigInteger eut = wireless.getWirelessEuTickInputs();
             if (eut != null && (consumer ? eut.signum() < 0 : eut.signum() > 0)) used = used.add(eut.abs());
         }
-        for (GTRecipe recipe : cloudReservedRecipes) {
-            if (!(recipe instanceof IWirelessGTRecipe wireless)) continue;
-            BigInteger eut = wireless.getWirelessEuTickInputs();
-            if (eut != null && (consumer ? eut.signum() < 0 : eut.signum() > 0)) used = used.add(eut.abs());
-        }
         // 按已啟動批次的真實 EU/t 預留功率，避免「無限執行緒」將整數功率除為零。
         return fullPower.subtract(used).max(BigInteger.ZERO);
     }
@@ -131,8 +122,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         return new RecipeThreadSnapshot(getRecipeThreadCapacity(), lanes.size(), running,
                 enabled, nativeDrainRequested(), getUnreservedTotalParallelLimit(), displayReserved(),
                 continuousTicks, completedThreadBatches,
-                !cloudDisplayLanes.isEmpty() ? cloudThreadsFull
-                        : threads.admissionShare(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) <= 0L);
+                threads.admissionShare(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) <= 0L);
     }
 
     /** Jade 唯讀快照：不切換 frame、不查配方、不交易庫存，僅分頁傳送有限的批次。 */
@@ -270,12 +260,23 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                 : displayLanes().stream().map(lane -> lane.task().recipe).toList();
     }
 
+    /** 山海：唯讀在途引用，包含暫停、缺電及等待產物交付的批次。 */
+    public final boolean hasRunningRecipeMatching(Predicate<GTRecipe> predicate) {
+        if (threads == null) return false;
+        for (var lane : displayLanes()) {
+            Frame frame = lane.task();
+            GTRecipe running = frame.recipe != null ? frame.recipe : frame.origin;
+            if (running != null && predicate.test(running)) return true;
+        }
+        return false;
+    }
+
     private List<PrimordialThreadScheduler.Lane<Frame>> displayLanes() {
-        return cloudDisplayLanes.isEmpty() ? threads.lanes() : cloudDisplayLanes;
+        return threads.lanes();
     }
 
     private long displayReserved() {
-        return cloudDisplayLanes.isEmpty() ? threads.reserved() : reservedThreadParallel;
+        return threads.reserved();
     }
 
     public final void onThreadInputsChanged() {
@@ -338,103 +339,6 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     }
 
     protected void setupThreadRecipe(GTRecipe recipe) { super.setupRecipe(recipe); }
-
-    /** Optional adapters drain paid local lanes before taking exclusive ownership. */
-    public final boolean prepareForCloudExecution(boolean requested) {
-        importLegacyBatch();
-        cloudAdmissionBlocked = requested;
-        if (!requested) cloudDisplayLanes = List.of();
-        return threads.lanes().isEmpty();
-    }
-
-    public final long getCloudParallelCapacity() { return getUnreservedTotalParallelLimit(); }
-    public final boolean isCloudDrainRequested() { return nativeDrainRequested(); }
-    public final boolean isCloudExecutionAvailable() {
-        return threads.isEnabled() && !isSuspend()
-                && (!(getMachine() instanceof IMultiController controller) || controller.isFormed())
-                && (!(getMachine() instanceof PrimordialOmegaEngineModuleBase module) || module.canModuleWork());
-    }
-
-    public final boolean checkCloudCandidate(GTRecipe recipe) {
-        if (!isCloudRecipeSelected(recipe)) return false;
-        if (isLock() && getLockRecipe() != null
-                && (!getLockRecipe().id.equals(recipe.id) || getLockRecipe().recipeType != recipe.recipeType)) return false;
-        return checkRecipe(recipe);
-    }
-
-    public final boolean isCloudRecipeSelected(GTRecipe recipe) {
-        return recipe != null && recipe.recipeType != null && getMachine().isRecipeTypeSelected(recipe.recipeType);
-    }
-
-    /** The snapshot is owned by the cloud order, never inserted into local persisted lanes. */
-    public record CloudBatch(GTRecipe recipe, CompoundTag snapshot, int progress, int duration) {}
-
-    public final CloudBatch prepareCloudBatch(long share, List<GTRecipe> reservedRecipes) {
-        if (!threads.lanes().isEmpty() || share <= 0 || isSuspend() || nativeDrainRequested()) return null;
-        Frame previous = capture();
-        tickingThreads = admission = true;
-        allowance = share;
-        cloudReservedRecipes = reservedRecipes;
-        try {
-            apply(new Frame());
-            findAndHandleRecipe();
-            return lastRecipe == null || duration <= 0 ? null : cloudBatch(capture());
-        } finally {
-            admission = tickingThreads = false;
-            allowance = 0;
-            cloudReservedRecipes = List.of();
-            apply(previous);
-        }
-    }
-
-    public final CloudBatch advanceCloudBatch(CompoundTag snapshot) {
-        return advanceCloudFrame(Frame.load(snapshot));
-    }
-
-    private CloudBatch advanceCloudFrame(Frame frame) {
-        if (!threads.lanes().isEmpty()) throw new IllegalStateException("Cloud execution still has paid local lanes");
-        Frame previous = capture();
-        drainRequested = nativeDrainRequested();
-        tickingThreads = true;
-        try {
-            if (advanceFrame(frame)) return null;
-            return cloudBatch(frame);
-        } finally {
-            tickingThreads = false;
-            apply(previous);
-        }
-    }
-
-    private CloudBatch cloudBatch(Frame frame) {
-        return new CloudBatch(frame.recipe, frame.save(), frame.progress, frame.duration);
-    }
-
-    public static CloudBatch restoreCloudBatch(CompoundTag snapshot) {
-        Frame frame = Frame.load(snapshot);
-        return new CloudBatch(frame.recipe, snapshot, frame.progress, frame.duration);
-    }
-
-    public final void projectCloudBatch(CloudBatch batch, int active, long reserved,
-            List<CloudBatch> batches, List<Long> reservations, boolean full) {
-        Status previousStatus = getStatus();
-        var display = new java.util.ArrayList<PrimordialThreadScheduler.Lane<Frame>>(batches.size());
-        for (int i = 0; i < batches.size(); i++) display.add(new PrimordialThreadScheduler.Lane<>(
-                i, reservations.get(i), Frame.load(batches.get(i).snapshot)));
-        cloudDisplayLanes = List.copyOf(display);
-        cloudThreadsFull = full;
-        if (batch == null) apply(new Frame()); else apply(Frame.load(batch.snapshot));
-        activeRecipeThreads = active;
-        reservedThreadParallel = reserved;
-        totalContinuousRunningTime = continuousTicks;
-        Status aggregate = getStatus();
-        if (nativeDrainRequested() && active == 0) {
-            setNativeDrain(false);
-            threads.setEnabled(false);
-            aggregate = Status.SUSPEND;
-        }
-        access().shanhai$threadStatus(previousStatus);
-        super.setStatus(aggregate);
-    }
 
     private boolean advanceFrame(Frame frame) {
         apply(frame);
@@ -503,7 +407,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                             return advanceFrame(frame);
                         }
                         public Frame start(long share) {
-                            if (drainRequested || cloudAdmissionBlocked) return null;
+                            if (drainRequested) return null;
                             apply(new Frame());
                             allowance = share;
                             admission = true;

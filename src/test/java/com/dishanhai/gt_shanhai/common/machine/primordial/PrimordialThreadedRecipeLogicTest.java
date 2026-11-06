@@ -40,87 +40,21 @@ class PrimordialThreadedRecipeLogicTest {
     private static final long ACTIVE = offset(RecipeLogic.class, "isActive");
     private static final long REASON = offset(RecipeLogic.class, "waitingReason");
 
-    @Test void cloudCompletionRestoresThePreviousProjectionBeforePublishingItsStatus() throws Exception {
-        Probe logic = probe();
-        logic.shanhai$threadStatus(RecipeLogic.Status.WORKING);
-        Class<?> frameType = Class.forName(PrimordialThreadedRecipeLogic.class.getName() + "$Frame");
-        var constructor = frameType.getDeclaredConstructor();
-        constructor.setAccessible(true);
-        Object frame = constructor.newInstance();
-        set(frameType, "recipe", frame, recipe("cloud-completed", 1));
-        set(frameType, "duration", frame, 1);
-        set(frameType, "status", frame, RecipeLogic.Status.WORKING);
-        var advance = PrimordialThreadedRecipeLogic.class.getDeclaredMethod("advanceCloudFrame", frameType);
-        advance.setAccessible(true);
-        assertNull(advance.invoke(logic, frame));
-        assertEquals(List.of("cloud-completed"), logic.finished);
-        assertEquals(RecipeLogic.Status.WORKING, logic.getStatus(), "A private frame must not replace the public projection");
-        int before = logic.module.statusNotifications;
-        logic.projectCloudBatch(null, 0, 0, List.of(), List.of(), true);
-        assertEquals(before + 1, logic.module.statusNotifications);
-        assertEquals(RecipeLogic.Status.WORKING, logic.module.lastBeforeStatus);
-        assertEquals(RecipeLogic.Status.IDLE, logic.module.lastAfterStatus);
-    }
-
-    @Test void savingACloudDisplayProjectionDoesNotCreateAPersistedLocalLane() throws Exception {
-        Probe source = probe();
-        source.seedLegacy("cloud-projection", 30, 7);
-        set(PrimordialThreadedRecipeLogic.class, "initialized", source, true);
-        CompoundTag saved = new CompoundTag();
-        source.saveRecipeThreads(saved);
-        assertTrue(saved.getList("sh_primordial_recipe_threads", 10).isEmpty());
-        Probe restored = probe();
-        restored.seedLegacy("cloud-projection", 30, 7);
-        restored.loadRecipeThreads(saved);
-        tick(restored, 0);
-        assertTrue(restored.running().isEmpty());
-        assertEquals(0, restored.inputTransactions);
-        assertTrue(restored.finished.isEmpty());
-    }
-
-    @Test void cloudProjectionNotifiesTheOriginalMachineStatusTransitionOnce() throws Exception {
-        Probe logic = probe();
-        logic.shanhai$threadStatus(RecipeLogic.Status.WORKING);
-        int before = logic.module.statusNotifications;
-        logic.projectCloudBatch(null, 0, 0, List.of(), List.of(), true);
-        assertEquals(RecipeLogic.Status.IDLE, logic.getStatus());
-        assertEquals(before + 1, logic.module.statusNotifications);
-        assertEquals(RecipeLogic.Status.WORKING, logic.module.lastBeforeStatus);
-        assertEquals(RecipeLogic.Status.IDLE, logic.module.lastAfterStatus);
-        logic.projectCloudBatch(null, 0, 0, List.of(), List.of(), true);
-        assertEquals(before + 1, logic.module.statusNotifications);
-    }
-
-    @Test void cloudWaitsForPaidLocalBatchesAndBlocksOnlyNewLocalAdmission() throws Exception {
-        Probe logic = probe();
-        logic.queue("already_paid", 2);
-        tick(logic, 0);
-        logic.queue("local_must_wait", 10);
-        assertFalse(logic.prepareForCloudExecution(true));
-        tick(logic, 1);
-        tick(logic, 2);
-        assertEquals(List.of("already_paid"), logic.finished);
-        assertEquals(1, logic.inputTransactions);
-        assertEquals(Map.of("already_paid", 2), logic.energyTicks);
-        assertTrue(logic.prepareForCloudExecution(true));
-        assertTrue(logic.running().isEmpty());
-        assertEquals(1, logic.pending.size());
-        logic.prepareForCloudExecution(false);
-        logic.wake();
-        tick(logic, 3);
-        assertEquals(2, logic.inputTransactions);
-        assertEquals(List.of("local_must_wait"), logic.running());
-    }
-
-    @Test void legacyPaidProjectionMustDrainBeforeCloudCanOwnExecution() throws Exception {
-        Probe logic = probe();
-        logic.seedLegacy("legacy_paid", 3, 1);
-        assertFalse(logic.prepareForCloudExecution(true));
-        tick(logic, 0);
-        tick(logic, 1);
-        assertEquals(List.of("legacy_paid"), logic.finished);
-        assertEquals(0, logic.inputTransactions);
-        assertTrue(logic.prepareForCloudExecution(true));
+    @Test void cloudLeaseObservationIncludesSuspendedLanesWithoutBlockingUnrelatedRecipes() throws Exception {
+        Probe logic = probe(); logic.queue("cloud", 100); tick(logic, 0);
+        var method = PrimordialThreadedRecipeLogic.class.getMethod("hasRunningRecipeMatching", java.util.function.Predicate.class);
+        java.util.function.Predicate<GTRecipe> cloud = recipe -> recipe.id.getPath().equals("cloud");
+        java.util.function.Predicate<GTRecipe> unrelated = recipe -> recipe.id.getPath().equals("unrelated");
+        assertEquals(true, method.invoke(logic, cloud));
+        assertEquals(false, method.invoke(logic, unrelated));
+        logic.setWorkingEnabled(false);
+        assertEquals(true, method.invoke(logic, cloud));
+        var field = PrimordialThreadedRecipeLogic.class.getDeclaredField("threads");
+        field.setAccessible(true);
+        Object frame = ((PrimordialThreadScheduler<?>) field.get(logic)).lanes().getFirst().task();
+        var origin = frame.getClass().getDeclaredField("origin"); origin.setAccessible(true);
+        logic.queue("unrelated", 100); origin.set(frame, logic.pending.remove());
+        assertEquals(false, method.invoke(logic, unrelated), "有效執行配方不能被舊 origin 的身份覆蓋");
     }
 
     @Test void priorityStartsTheLongestSourceAloneAndLeavesShortWorkForTheNextLane() throws Exception {
@@ -700,8 +634,6 @@ class PrimordialThreadedRecipeLogicTest {
         set(RecipeLogic.class, "chanceCaches", logic, new IdentityHashMap<>());
         set(SelectableRecipeTypeSetRecipeLogic.class, "perTypeLookupCache", logic, new HashMap<>());
         set(PrimordialThreadedRecipeLogic.class, "threads", logic, new PrimordialThreadScheduler<>());
-        set(PrimordialThreadedRecipeLogic.class, "cloudReservedRecipes", logic, List.of());
-        set(PrimordialThreadedRecipeLogic.class, "cloudDisplayLanes", logic, List.of());
         logic.shanhai$threadStatus(RecipeLogic.Status.IDLE);
         logic.setWorkingEnabled(true);
         return logic;

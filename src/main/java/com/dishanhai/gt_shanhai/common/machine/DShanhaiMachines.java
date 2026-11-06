@@ -79,6 +79,8 @@ import com.dishanhai.gt_shanhai.common.machine.part.LogicalComputeHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.MEDiskHatchPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudLibraryMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudAECoreMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.MEStellarStockPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ReliableMEAsyncOutputPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
@@ -158,6 +160,8 @@ public class DShanhaiMachines {
     public static MachineDefinition SEVENTY_TWO_CHANGES;
     public static MachineDefinition ME_DISK_HATCH;
     public static MachineDefinition SELF_SYNTHESIS_CHAMBER;
+    public static MachineDefinition CLOUD_PATTERN_LIBRARY;
+    public static MachineDefinition CLOUD_PATTERN_LIBRARY_AE_CORE;
     public static MachineDefinition RECIPE_TYPE_PATTERN_BUFFER;
     public static MachineDefinition RECIPE_TYPE_PATTERN_BUFFER_PROXY;
     public static MachineDefinition RELIABLE_ME_ASYNC_OUTPUT_BUFFER;
@@ -1510,6 +1514,8 @@ public class DShanhaiMachines {
 
         // ========== 自合成仓 ==========
         SELF_SYNTHESIS_CHAMBER = SelfSynthesisChamberPartMachine.register();
+        CLOUD_PATTERN_LIBRARY_AE_CORE = StellarCloudAECoreMachine.register();
+        CLOUD_PATTERN_LIBRARY = StellarCloudLibraryMachine.register();
 
         // ========== 星律样板总成 ==========
         RECIPE_TYPE_PATTERN_BUFFER = MachineBuilder.create(

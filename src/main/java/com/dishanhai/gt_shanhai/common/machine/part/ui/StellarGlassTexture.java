@@ -154,6 +154,7 @@ public final class StellarGlassTexture {
     }
 
     private static IGuiTexture switchFace(IGuiTexture nativeTexture, boolean pressed) {
+        if (nativeTexture == null) return IGuiTexture.EMPTY;
         if (nativeTexture instanceof GuiTextureGroup group && group.textures.length == 1) {
             IGuiTexture child = group.textures[0];
             if (child instanceof ColorBorderTexture) {
