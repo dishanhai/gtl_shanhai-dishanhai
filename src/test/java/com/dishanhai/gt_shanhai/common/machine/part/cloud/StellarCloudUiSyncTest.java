@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -48,6 +49,37 @@ class StellarCloudUiSyncTest {
             StellarCloudUiSync.writeCore(buffer, core);
             assertEquals(core, StellarCloudUiSync.readCore(buffer));
             assertFalse(buffer.isReadable());
+        } finally { buffer.release(); }
+    }
+
+    @Test void matchingWireReceiptExposesLaterServerSelectionRejections() {
+        var request = new AtomicInteger();
+        var controller = new LibraryController(new LibraryActions() {
+            public void changeSearch(String value) {}
+            public void selectType(String value) {}
+            public void previousPage() {}
+            public void nextPage() {}
+            public void select(int index, UUID expected) {}
+            public void nextMember() {}
+            public void uploadOriginal(int id) { request.set(id); }
+            public void withdrawSelected(int id, UUID expected) {}
+            public void quickUpload(int id, int slot) {}
+            public void quickWithdraw(int id, int index, UUID expected) {}
+            public void changeAccess(int id, UUID expected, boolean grant) {}
+            public void refresh() {}
+        }, () -> 0);
+        controller.acceptSnapshot(new LibraryState(true, "", "", List.of(), 0, 1, 0, 0, List.of(),
+                new SelectionState(null, false, false, false, false), null, false, true, false,
+                Map.of(ActionKind.UPLOAD, ON)));
+        assertTrue(controller.uploadOriginal());
+        String rejection = "gt_shanhai.cloud.ui.list_changed";
+        assertEquals("pending", StellarCloudLibraryUi.Feedback.visible(controller, rejection, "pending"));
+        var buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            StellarCloudUiSync.writeResult(buffer, new ActionResult(request.get(), ActionKind.UPLOAD,
+                    ResultKind.SUCCESS, null, "gt_shanhai.cloud.status.uploaded"));
+            assertTrue(controller.acceptResult(StellarCloudUiSync.readResult(buffer)));
+            assertEquals(rejection, StellarCloudLibraryUi.Feedback.visible(controller, rejection, "old success"));
         } finally { buffer.release(); }
     }
 

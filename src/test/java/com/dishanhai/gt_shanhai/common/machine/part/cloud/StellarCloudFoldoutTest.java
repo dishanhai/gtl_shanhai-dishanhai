@@ -52,10 +52,13 @@ class StellarCloudFoldoutTest {
 
     @Test void selectionPacketsCarryDisplayedIdentityForBothNormalAndShiftClicks() throws Exception {
         String ui = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/part/cloud/StellarCloudLibraryUi.java"));
-        assertTrue(ui.contains("session.select(index, expected)"), "Normal selection must recheck the UUID shown to the client");
-        assertTrue(ui.contains("session.quickWithdraw(index, expected)"));
-        assertTrue(ui.contains("buffer.writeBoolean(quick)"));
-        assertTrue(ui.contains("buffer.writeUUID(expected)"));
+        String sync = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/part/cloud/StellarCloudUiSync.java"));
+        assertTrue(ui.contains("!identity.equals(rows.get(index).id())"));
+        assertTrue(ui.contains("controller.quickWithdraw(index)"));
+        assertTrue(ui.contains("controller.select(index)"));
+        assertTrue(sync.contains("buffer.writeUUID(expected)"));
+        assertTrue(sync.contains("session.select(buffer.readVarInt(), buffer.readUUID())"));
+        assertTrue(sync.contains("request(id, ActionKind.QUICK_WITHDRAW, target, index"));
     }
 
     @Test void openMenusOwnTheForegroundAndFoldoutHeadersConsumeOtherButtons() throws Exception {
@@ -63,23 +66,24 @@ class StellarCloudFoldoutTest {
         assertTrue(ui.contains("selector.isExpanded()"), "An open menu must suppress slot and inventory tooltips below it");
         assertTrue(ui.contains("selector.drawInForeground(graphics, mouseX, mouseY, partialTicks)"));
         assertTrue(ui.contains("select.setHoverTooltips(recipeTypeName(candidate))"));
-        assertTrue(ui.contains("return button != 0 || super.mouseClicked(x, y, button)"));
+        assertTrue(ui.contains("if (button != 0) return true"));
     }
 
     @Test void anEmptyCellCanClearSelectionWithoutSelectingANewlyArrivingOriginal() throws Exception {
         String ui = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/part/cloud/StellarCloudLibraryUi.java"));
         assertTrue(ui.contains("if (!isShiftDown()) writeClientAction(2, buffer -> {})"),
                 "Only a normal empty-cell click requests clearing the selected original");
-        assertTrue(ui.contains("else if (id == 2) session.clearSelection(index)"),
+        assertTrue(ui.contains("if (id == 2) session.clearSelection(index)"),
                 "The server must recheck that the clicked cell remains empty");
         assertFalse(ui.contains("session.select(index)"), "An empty cell cannot select a newly arrived row by index");
     }
 
     @Test void serverRejectionsReplacePreviousActionFeedback() throws Exception {
         String ui = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/part/cloud/StellarCloudLibraryUi.java"));
-        assertEquals(7, ui.split("session::showMessage", -1).length - 1,
-                "Every business action and page action needs server rejection feedback");
-        assertTrue(ui.contains("PREFIX + key, action, disabledReason, rejected"));
+        String sync = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/part/cloud/StellarCloudUiSync.java"));
+        assertTrue(ui.contains("controller.feedbackKey()"));
+        assertTrue(sync.contains("controller.acceptResult(result)"));
+        assertTrue(sync.contains("session.uiAction(kind, target, slot, expected)"));
     }
 
     private int number(Class<?> type, Object value, String field) throws Exception {

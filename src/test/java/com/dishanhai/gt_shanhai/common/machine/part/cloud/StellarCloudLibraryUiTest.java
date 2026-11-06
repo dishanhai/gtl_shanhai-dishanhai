@@ -69,6 +69,26 @@ class StellarCloudLibraryUiTest {
     }
 
     @Test
+    void inventoryHitTestingCoversSlotsAndExcludesGapsAndOuterEdges() {
+        for (int row = 0; row < 4; row++) {
+            int top = row == 3 ? 63 : 5 + row * 18;
+            for (int column = 0; column < 9; column++) {
+                int left = 5 + column * 18;
+                int expected = row == 3 ? column : (row + 1) * 9 + column;
+                assertEquals(expected, StellarCloudLibraryLayout.inventorySlot(left + 9, top + 9));
+                assertEquals(expected, StellarCloudLibraryLayout.inventorySlot(left, top));
+                assertEquals(expected, StellarCloudLibraryLayout.inventorySlot(left + 17.999, top + 17.999));
+            }
+        }
+        assertEquals(-1, StellarCloudLibraryLayout.inventorySlot(4.999, 10));
+        assertEquals(-1, StellarCloudLibraryLayout.inventorySlot(167, 10));
+        assertEquals(-1, StellarCloudLibraryLayout.inventorySlot(10, 4.999));
+        assertEquals(-1, StellarCloudLibraryLayout.inventorySlot(10, 59));
+        assertEquals(-1, StellarCloudLibraryLayout.inventorySlot(10, 62.999));
+        assertEquals(-1, StellarCloudLibraryLayout.inventorySlot(10, 81));
+    }
+
+    @Test
     void glassCompositionKeepsServerActionsAndReadOnlyCatalogSlots() throws Exception {
         assertTrue(Files.exists(ROOT.resolve("StellarCloudLibraryUi.java")), "Extract the library presentation");
         String ui = Files.readString(ROOT.resolve("StellarCloudLibraryUi.java"));
@@ -79,17 +99,17 @@ class StellarCloudLibraryUiTest {
         assertTrue(ui.contains("GlassPanelTexture.smokeButtonOverlay()"));
         assertTrue(shared.contains("GlassSurface.smokeControl("));
         assertFalse(ui.contains("GuiTextures."));
-        assertTrue(ui.contains("session::uploadOriginal") && ui.contains("session::withdrawSelected"));
-        assertTrue(ui.contains("session.access(true)") && ui.contains("session.access(false)"));
-        assertTrue(ui.contains("session.select(index, expected)"));
+        assertTrue(ui.contains("controller::uploadOriginal") && ui.contains("controller::withdrawSelected"));
+        assertTrue(ui.contains("controller.changeAccess(true)") && ui.contains("controller.changeAccess(false)"));
+        assertTrue(ui.contains("controller.select(index)"));
         assertTrue(ui.contains("session.rowPreview(index)"));
         assertTrue(ui.contains("new CachedPatternSlotWidget("), "Render output item/fluid and amount, not a generic pattern name");
         assertTrue(ui.contains("setCanTakeItems(false).setCanPutItems(false)"), "Catalog previews cannot insert or extract originals");
         assertTrue(ui.contains("session.rowTooltip(index)"));
         assertTrue(ui.contains("setSlotBackground("));
         assertTrue(shared.contains("enableScissor(") && shared.contains("disableScissor()"));
-        assertTrue(ui.contains("session::uploadDisabledReason") && ui.contains("session::withdrawDisabledReason"));
-        assertTrue(ui.contains("session::accessDisabledReason"));
+        assertTrue(ui.contains("controller.control(ActionKind.UPLOAD)") && ui.contains("controller.control(ActionKind.WITHDRAW)"));
+        assertTrue(ui.contains("controller.control(ActionKind.GRANT)") && ui.contains("controller.control(ActionKind.REVOKE)"));
         assertTrue(machine.contains("openingAuthorized(server)") && machine.contains("actionAuthorized(player)"));
     }
 
