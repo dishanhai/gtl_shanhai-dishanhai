@@ -11,10 +11,13 @@ import com.dishanhai.gt_shanhai.api.ftbq.FtbqSubmitterToastSuppressor;
 import com.dishanhai.gt_shanhai.api.ftbq.FtbqRewardBuffer;
 import com.dishanhai.gt_shanhai.common.machine.ae.DShanhaiAENetworkMachine;
 import com.dishanhai.gt_shanhai.common.shop.ShopAeNetwork;
+import com.dishanhai.sh_better_ui.client.glass.GlassBlur;
+import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
+import com.dishanhai.sh_better_ui.client.glass.GlassTheme;
+import com.dishanhai.sh_better_ui.compat.ldlib.GlassPanelTexture;
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
 import com.gregtechceu.gtceu.api.blockentity.MetaMachineBlockEntity;
 import com.gregtechceu.gtceu.api.data.RotationState;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.item.MetaMachineItem;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MachineDefinition;
@@ -29,8 +32,9 @@ import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
 import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.util.ClickData;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
-import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
+import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
@@ -50,6 +54,7 @@ import dev.ftb.mods.ftbquests.quest.task.ItemTask;
 import dev.ftb.mods.ftbquests.quest.task.Task;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -61,6 +66,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -72,6 +79,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
 
@@ -245,25 +254,80 @@ public class FtbqAeSubmitterMachine extends MetaMachine
 
     @Override
     public ModularUI createUI(Player player) {
-        ModularUI ui = new ModularUI(176, 154, this, player)
-                .background(new IGuiTexture[]{GuiTextures.BACKGROUND})
-                .widget(new LabelWidget(5, 5, "§6FTBQ AE 自动提交器"))
-                .widget(new LabelWidget(5, 20, () -> isOnline ? "§aAE 网络在线" : "§cAE 网络离线"))
-                .widget(new LabelWidget(5, 34, () -> "§7状态: §f" + status))
-                .widget(new LabelWidget(5, 48, () -> "§7UUID: §b" + submitterIdText))
-                .widget(new LabelWidget(5, 62, () -> "§7领取玩家: §b" + shortRewardPlayerId()))
-                .widget(new LabelWidget(5, 74, () -> "§7队列: §b" + queueSize + " §7提交: §b" + lastSubmitted + " §7奖励: §b" + lastClaimedRewards))
-                .widget(new LabelWidget(5, 102, () -> suppressCompletionToast ? "§7完成提示: §a已屏蔽自动提交" : "§7完成提示: §e正常显示"))
-                .widget(new LabelWidget(5, 116, () -> claimOnlyQueuedRewards ? "§7奖励领取: §a仅队列任务" : "§7奖励领取: §e全部任务"));
+        // 山海：固定文字视口，完整值由悬停滚动和 tooltip 展示；不截断持久化 UUID。
+        IGuiTexture glass = new IGuiTexture() {
+            private boolean warmed;
 
-        ui.widget(new LabelWidget(5, 88, "§e队伍UUID"));
-        ui.widget(new LabelWidget(58, 88, () -> teamIdText));
-
-        ui.widget(new ButtonWidget(5, 136, 38, 14, new TextTexture("绑定", -1), clickData -> bindPlayerTeam(player)));
-        ui.widget(new ButtonWidget(47, 136, 42, 14, new TextTexture("清队列", -1), clickData -> clearQueue()));
-        ui.widget(new ButtonWidget(93, 136, 38, 14, new TextTexture("提示", -1), clickData -> toggleSuppressCompletionToast()));
-        ui.widget(new ButtonWidget(135, 136, 36, 14, new TextTexture("奖励", -1), clickData -> toggleClaimOnlyQueuedRewards()));
+            @Override
+            @OnlyIn(Dist.CLIENT)
+            public void draw(GuiGraphics g, int mx, int my, float x, float y, int w, int h) {
+                if (!warmed) {
+                    GlassBlur.warmUp();
+                    warmed = true;
+                }
+                GlassTheme.GLASS.rootShadow(g, (int) x, (int) y, w, h);
+                GlassTheme.GLASS.backdrop(g, (int) x, (int) y, w, h);
+                GlassTheme.GLASS.box(g, (int) x, (int) y, w, h, GlassPalette.ROOT_EDGE,
+                        GlassTheme.GLASS.panelBg);
+            }
+        };
+        ModularUI ui = new ModularUI(232, 194, this, player).background(glass);
+        ui.widget(uiText(10, 8, 212, GlassPalette.TEXT_HEAD,
+                () -> Component.translatable("gt_shanhai.machine.ftbq_ae_submitter.name")));
+        ui.widget(uiText(10, 26, 212, GlassPalette.TEXT,
+                () -> Component.translatable(isOnline ? "gui.gt_shanhai.ftbq_submitter.online"
+                        : "gui.gt_shanhai.ftbq_submitter.offline")));
+        ui.widget(uiText(10, 42, 212, GlassPalette.TEXT,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.status", status)));
+        ui.widget(uiText(10, 60, 212, GlassPalette.TEXT_MUTED,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.uuid", uiId(submitterIdText))));
+        ui.widget(uiText(10, 78, 212, GlassPalette.TEXT_MUTED,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.team", uiId(teamIdText))));
+        ui.widget(uiText(10, 96, 212, GlassPalette.TEXT_MUTED,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.player", uiId(rewardPlayerIdText))));
+        ui.widget(uiText(10, 116, 68, GlassPalette.TEXT,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.queue", queueSize)));
+        ui.widget(uiText(82, 116, 68, GlassPalette.TEXT,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.submitted", lastSubmitted)));
+        ui.widget(uiText(154, 116, 68, GlassPalette.TEXT,
+                () -> Component.translatable("gui.gt_shanhai.ftbq_submitter.rewards", lastClaimedRewards)));
+        ui.widget(uiText(10, 134, 212, GlassPalette.TEXT,
+                () -> Component.translatable(suppressCompletionToast ? "gui.gt_shanhai.ftbq_submitter.toast.suppressed"
+                        : "gui.gt_shanhai.ftbq_submitter.toast.normal")));
+        ui.widget(uiText(10, 150, 212, GlassPalette.TEXT,
+                () -> Component.translatable(claimOnlyQueuedRewards ? "gui.gt_shanhai.ftbq_submitter.claim.queued"
+                        : "gui.gt_shanhai.ftbq_submitter.claim.all")));
+        ui.widget(uiButton(10, "gui.gt_shanhai.ftbq_submitter.bind", click -> bindPlayerTeam(player)));
+        ui.widget(uiButton(64, "gui.gt_shanhai.ftbq_submitter.clear", click -> clearQueue()));
+        ui.widget(uiButton(118, "gui.gt_shanhai.ftbq_submitter.toast", click -> toggleSuppressCompletionToast()));
+        ui.widget(uiButton(172, "gui.gt_shanhai.ftbq_submitter.claim", click -> toggleClaimOnlyQueuedRewards()));
         return ui;
+    }
+
+    private static Component uiId(String id) {
+        return id == null || id.isBlank() ? Component.translatable("gui.gt_shanhai.ftbq_submitter.unbound")
+                : Component.literal(id);
+    }
+
+    private static ImageWidget uiText(int x, int y, int width, int color, Supplier<Component> text) {
+        TextTexture texture = new TextTexture(() -> text.get().getString()).setColor(color)
+                .setWidth(width - 8).setType(TextTexture.TextType.LEFT_HIDE).setDropShadow(false);
+        return new ImageWidget(x, y, width, 12, texture) {
+            @Override
+            @OnlyIn(Dist.CLIENT)
+            public void updateScreen() {
+                super.updateScreen();
+                setHoverTooltips(text.get());
+            }
+        };
+    }
+
+    private static ButtonWidget uiButton(int x, String key, Consumer<ClickData> action) {
+        ButtonWidget button = new ButtonWidget(x, 170, 50, 16, action);
+        button.setButtonTexture(GlassPanelTexture.button(), new TextTexture(key, GlassPalette.TEXT)
+                .setWidth(38).setType(TextTexture.TextType.HIDE).setDropShadow(false));
+        button.setHoverTooltips(Component.translatable(key));
+        return button;
     }
 
     private void bindPlayerTeam(Player player) {
@@ -522,13 +586,6 @@ public class FtbqAeSubmitterMachine extends MetaMachine
             rewardClaimModeInitialized = true;
             markDirty();
         }
-    }
-
-    private String shortRewardPlayerId() {
-        UUID id = parseRewardPlayerId();
-        if (id == null) return "未绑定";
-        String text = id.toString();
-        return text.substring(0, 8);
     }
 
     private long extractFromAe(MEStorage storage, ItemTask task, TeamData data) {
