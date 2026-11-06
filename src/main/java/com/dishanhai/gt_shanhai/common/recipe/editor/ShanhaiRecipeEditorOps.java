@@ -14,15 +14,28 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
 
 public final class ShanhaiRecipeEditorOps {
 
     private static final AtomicLong REVISION = new AtomicLong();
 
     private final ShanhaiRecipeOverrideStore store;
+    private final BiFunction<String, String, ShanhaiRecipeBase> editableBases;
+    private final BiFunction<String, String, ShanhaiRecipeBase> originalBases;
 
     public ShanhaiRecipeEditorOps(ShanhaiRecipeOverrideStore store) {
+        this(store,
+                (type, id) -> ShanhaiRecipeBase.from(RecipeRebuildService.editableOf(type, id)),
+                (type, id) -> ShanhaiRecipeBase.from(RecipeOriginalSnapshotStore.copyOf(type, id)));
+    }
+
+    ShanhaiRecipeEditorOps(ShanhaiRecipeOverrideStore store,
+                          BiFunction<String, String, ShanhaiRecipeBase> editableBases,
+                          BiFunction<String, String, ShanhaiRecipeBase> originalBases) {
         this.store = Objects.requireNonNull(store, "store");
+        this.editableBases = Objects.requireNonNull(editableBases, "editableBases");
+        this.originalBases = Objects.requireNonNull(originalBases, "originalBases");
     }
 
     public record Edit(ShanhaiRecipeBase base, String baseFingerprint) {}
@@ -160,6 +173,12 @@ public final class ShanhaiRecipeEditorOps {
         if (!live.equals(opened) && liveIdTaken(live)) {
             return new Result(Result.Status.VALIDATION_ERROR, "这个配方 id 已经存在", REVISION.get());
         }
+        // Conflict detection uses the current editable recipe. Retirement must always compare
+        // against the original datapack source, including when editing a renamed addition.
+        ShanhaiRecipeBase source = originalBases.apply(edit.base().recipeTypeId(), upstream);
+        String sourceFingerprint = source != null
+                ? ShanhaiRecipeFingerprint.of(source)
+                : existing.map(ShanhaiRecipeOverrideStore.Entry::baseFingerprint).orElse(edit.baseFingerprint());
         try {
             if (openedCreated) {
                 ShanhaiRecipeBase written = live.equals(opened) ? edit.base() : withRecipeId(edit.base(), live);
@@ -168,9 +187,9 @@ public final class ShanhaiRecipeEditorOps {
                     store.remove(edit.base().recipeTypeId(), opened);
                 }
             } else if (!keepOriginal && live.equals(opened) && !openedAddition) {
-                store.put(edit.base(), edit.baseFingerprint(), "shanhai-recipe-editor");
+                store.put(edit.base(), sourceFingerprint, "shanhai-recipe-editor");
             } else {
-                store.putLinked(edit.base(), edit.baseFingerprint(), live, upstream,
+                store.putLinked(edit.base(), sourceFingerprint, live, upstream,
                         keepOriginal, "shanhai-recipe-editor");
             }
             return new Result(Result.Status.SUCCESS, "override-written", REVISION.incrementAndGet());
@@ -337,9 +356,7 @@ public final class ShanhaiRecipeEditorOps {
 
     private ShanhaiRecipeBase currentBase(ShanhaiRecipeBase requested) {
         if (requested == null) return null;
-        GTRecipe effective = RecipeRebuildService.editableOf(
-                requested.recipeTypeId(), requested.recipeId());
-        return effective == null ? null : ShanhaiRecipeBase.from(effective);
+        return editableBases.apply(requested.recipeTypeId(), requested.recipeId());
     }
 
     private static Set<String> affectedIds(

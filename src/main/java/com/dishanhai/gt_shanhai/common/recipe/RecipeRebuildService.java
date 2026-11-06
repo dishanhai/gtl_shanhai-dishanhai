@@ -518,11 +518,24 @@ public final class RecipeRebuildService {
             boolean datapackHasSource,
             String loadedSourceFingerprint,
             String legacySourceFingerprint) {
+        return shouldRetireOverride(created, baseFingerprint, datapackHasRecipeId, datapackHasSource,
+                loadedSourceFingerprint, legacySourceFingerprint, null);
+    }
+
+    static boolean shouldRetireOverride(
+            boolean created,
+            String baseFingerprint,
+            boolean datapackHasRecipeId,
+            boolean datapackHasSource,
+            String loadedSourceFingerprint,
+            String legacySourceFingerprint,
+            String v3SourceFingerprint) {
         if (created) return datapackHasRecipeId;
         if (!datapackHasSource) return false;
         if (baseFingerprint == null || baseFingerprint.isEmpty()) return false;
         if (baseFingerprint.equals(loadedSourceFingerprint)) return false;
         if (baseFingerprint.equals(legacySourceFingerprint)) return false;
+        if (baseFingerprint.equals(v3SourceFingerprint)) return false;
         return true;
     }
 
@@ -536,8 +549,9 @@ public final class RecipeRebuildService {
         }
         Map<String, String> loaded = new LinkedHashMap<>();
         Map<String, String> legacy = new LinkedHashMap<>();
+        Map<String, String> v3 = new LinkedHashMap<>();
         if (originals != null) {
-            for (GTRecipe original : originals) rememberFingerprint(original, loaded, legacy);
+            for (GTRecipe original : originals) rememberFingerprint(original, loaded, legacy, v3);
         }
         Map<String, ShanhaiRecipeOverrideStore.Entry> kept = new LinkedHashMap<>();
         for (Map.Entry<String, ShanhaiRecipeOverrideStore.Entry> item : overrides.entrySet()) {
@@ -550,7 +564,8 @@ public final class RecipeRebuildService {
                     loaded.containsKey(entry.recipeId()),
                     sourceId != null && loaded.containsKey(sourceId),
                     sourceId == null ? null : loaded.get(sourceId),
-                    sourceId == null ? null : legacy.get(sourceId));
+                    sourceId == null ? null : legacy.get(sourceId),
+                    sourceId == null ? null : v3.get(sourceId));
             if (!retire) {
                 kept.put(item.getKey(), entry);
                 continue;
@@ -568,7 +583,7 @@ public final class RecipeRebuildService {
     }
 
     private static void rememberFingerprint(
-            GTRecipe original, Map<String, String> loaded, Map<String, String> legacy) {
+            GTRecipe original, Map<String, String> loaded, Map<String, String> legacy, Map<String, String> v3) {
         if (original == null || original.getId() == null) return;
         try {
             ShanhaiRecipeBase base = ShanhaiRecipeBase.from(original);
@@ -576,6 +591,7 @@ public final class RecipeRebuildService {
             String id = original.getId().toString();
             loaded.put(id, ShanhaiRecipeFingerprint.of(base));
             legacy.put(id, ShanhaiRecipeFingerprint.legacySnapshotFingerprint(base));
+            v3.put(id, ShanhaiRecipeFingerprint.legacyV3Fingerprint(base));
         } catch (RuntimeException ignored) {
             // A recipe that cannot be fingerprinted is left under its annotation.
         }
