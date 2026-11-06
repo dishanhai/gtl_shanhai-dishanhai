@@ -13,6 +13,7 @@ import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.SwitchWidget;
+import com.lowdragmc.lowdraglib.gui.widget.TankWidget;
 import com.lowdragmc.lowdraglib.LDLib;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import net.minecraft.client.gui.GuiGraphics;
@@ -107,7 +108,8 @@ public final class StellarGlassTexture {
         }
         if (texture == GuiTextures.BACKGROUND || texture == GuiTextures.BACKGROUND_INVERSE) return panel();
         if (texture == GuiTextures.DISPLAY) return display();
-        if (texture == GuiTextures.SLOT) return slot();
+        if (texture == GuiTextures.SLOT || texture == GuiTextures.FLUID_SLOT
+                || texture == TankWidget.FLUID_SLOT_TEXTURE) return slot();
         if (texture instanceof GuiTextureGroup group) {
             IGuiTexture[] children = null;
             for (int i = 0; i < group.textures.length; i++) {
