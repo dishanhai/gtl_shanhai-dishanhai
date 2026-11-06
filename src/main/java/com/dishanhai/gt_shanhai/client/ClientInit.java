@@ -78,6 +78,7 @@ public class ClientInit {
                 com.dishanhai.gt_shanhai.client.gui.shop.ShopGlassTooltip::onTooltipPre);
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
                 com.dishanhai.gt_shanhai.client.gui.StellarGlassTooltip::onTooltipPre);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST, ClientInit::onFtbqSubmitterTooltipPre);
         // 山海：消费端只登记画面；独立库负责唯一 Post 事件、预热、关闭与资源重载。
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen
@@ -89,6 +90,7 @@ public class ClientInit {
                         || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine
                         || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.RecipeThreadHatchPartMachine
                         || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine
+                        || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.misc.FtbqAeSubmitterMachine
                         || container.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder));
         com.dishanhai.sh_better_ui.client.blur.GaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen);
@@ -104,6 +106,14 @@ public class ClientInit {
 
     private static void onClientChatReceived(ClientChatReceivedEvent event) {
         event.setMessage(JeiChatLinkHelper.makeLinks(event.getMessage()));
+    }
+
+    /** 山海：提交器长文本 tooltip 与根板共用商店玻璃，不影响其他机器。 */
+    private static void onFtbqSubmitterTooltipPre(net.minecraftforge.client.event.RenderTooltipEvent.Pre event) {
+        if (Minecraft.getInstance().screen instanceof com.lowdragmc.lowdraglib.gui.modular.ModularUIGuiContainer screen
+                && screen.modularUI.holder instanceof com.dishanhai.gt_shanhai.common.machine.misc.FtbqAeSubmitterMachine) {
+            com.dishanhai.sh_better_ui.client.glass.GlassTooltip.render(event);
+        }
     }
 
     private static void onMouseButtonPressed(ScreenEvent.MouseButtonPressed.Pre event) {
