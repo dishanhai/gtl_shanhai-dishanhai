@@ -11,6 +11,7 @@ import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
+import com.lowdragmc.lowdraglib.gui.widget.ComponentPanelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import net.minecraft.network.chat.Component;
@@ -35,13 +36,15 @@ final class StellarCloudAECoreUi {
     static WidgetGroup create(Function<Player, StellarCloudUiContract.CoreView> state,
                               BiFunction<Player, Boolean, String> changeBinding) {
         var bridge = new StellarCloudUiSync.Core(state, changeBinding);
+        var controller = bridge.controller;
         var root = create(() -> {
-                    var id = state.apply(null).boundPlayer();
+                    if (!controller.state().synchronizedReady()) return Component.translatable(StellarCloudUiContract.WAITING);
+                    var id = controller.state().boundPlayer();
                     return Component.translatable(PREFIX + "uuid", id == null
                             ? Component.translatable(PREFIX + "unbound") : id.toString());
-                }, () -> state.apply(null).networkOnline(), () -> state.apply(null).hostReady(),
-                () -> state.apply(null).boundPlayer() != null,
-                player -> state.apply(player).bind().reasonKey(), changeBinding);
+                }, () -> controller.state().networkOnline(), () -> controller.state().hostReady(),
+                () -> controller.state().boundPlayer() != null,
+                player -> controller.bindControl().reasonKey(), changeBinding, controller);
         root.addWidget(bridge);
         return root;
     }
@@ -49,40 +52,71 @@ final class StellarCloudAECoreUi {
     static WidgetGroup create(Supplier<Component> identity, BooleanSupplier online, BooleanSupplier hostReady,
                               BooleanSupplier bound, Function<Player, String> disabledReason,
                               BiFunction<Player, Boolean, String> changeBinding) {
+        return create(identity, online, hostReady, bound, disabledReason, changeBinding, null);
+    }
+
+    private static WidgetGroup create(Supplier<Component> identity, BooleanSupplier online, BooleanSupplier hostReady,
+                                      BooleanSupplier bound, Function<Player, String> disabledReason,
+                                      BiFunction<Player, Boolean, String> changeBinding,
+                                      StellarCloudUiContract.CoreController controller) {
         var root = new WidgetGroup(0, 0, 280, 188);
         root.setBackground(GlassPanelTexture.smokePanel());
         String[] status = {PREFIX + "status.idle"};
-        StellarCloudUiWidgets.text(root, 12, 10, 256, 12, COLORS.TEXT_HEAD,
-                () -> Component.translatable(PREFIX + "title"));
+        text(root, 12, 10, 256, 12, COLORS.TEXT_HEAD,
+                () -> Component.translatable(PREFIX + "title"), controller != null);
 
         var identityPanel = new WidgetGroup(8, 30, 264, 48);
         identityPanel.setBackground(StellarCloudUiWidgets.surface());
         identityPanel.setHoverTooltips(Component.translatable(PREFIX + "binding_hint"));
-        StellarCloudUiWidgets.text(identityPanel, 6, 5, 252, 12, COLORS.TEXT_MUTED,
-                () -> Component.translatable(PREFIX + "identity"));
-        StellarCloudUiWidgets.text(identityPanel, 6, 21, 252, 23, COLORS.TEXT, identity);
+        text(identityPanel, 6, 5, 252, 12, COLORS.TEXT_MUTED,
+                () -> Component.translatable(PREFIX + "identity"), controller != null);
+        text(identityPanel, 6, 21, 252, 23, COLORS.TEXT, identity, controller != null);
         root.addWidget(identityPanel);
 
         var connectionPanel = new WidgetGroup(8, 84, 264, 36);
         connectionPanel.setBackground(StellarCloudUiWidgets.surface());
-        StellarCloudUiWidgets.text(connectionPanel, 6, 5, 252, 12, COLORS.TEXT,
-                () -> Component.translatable(PREFIX + (online.getAsBoolean() ? "network.online" : "network.offline")));
-        StellarCloudUiWidgets.text(connectionPanel, 6, 20, 252, 12, COLORS.TEXT_MUTED,
-                () -> Component.translatable(PREFIX + (hostReady.getAsBoolean() ? "host.ready" : "host.invalid")));
+        text(connectionPanel, 6, 5, 252, 12, COLORS.TEXT,
+                () -> Component.translatable(controller != null && !controller.state().synchronizedReady()
+                        ? StellarCloudUiContract.WAITING : PREFIX + (online.getAsBoolean() ? "network.online" : "network.offline")),
+                controller != null);
+        text(connectionPanel, 6, 20, 252, 12, COLORS.TEXT_MUTED,
+                () -> Component.translatable(controller != null && !controller.state().synchronizedReady()
+                        ? StellarCloudUiContract.WAITING : PREFIX + (hostReady.getAsBoolean() ? "host.ready" : "host.invalid")),
+                controller != null);
         root.addWidget(connectionPanel);
 
-        Supplier<String> reason = () -> disabledReason.apply(root.getGui() == null ? null : root.getGui().entityPlayer);
-        StellarCloudUiWidgets.action(root, 12, 126, 120, 22, PREFIX + "bind",
-                () -> status[0] = changeBinding.apply(root.getGui().entityPlayer, true), reason,
-                reasonKey -> status[0] = reasonKey);
-        StellarCloudUiWidgets.action(root, 148, 126, 120, 22, PREFIX + "unbind",
-                () -> status[0] = changeBinding.apply(root.getGui().entityPlayer, false), () -> {
-                    String denied = reason.get();
-                    return !denied.isEmpty() ? denied : bound.getAsBoolean() ? "" : PREFIX + "status.already_unbound";
-                }, reasonKey -> status[0] = reasonKey);
-        StellarCloudUiWidgets.text(root, 12, 154, 256, 26, COLORS.TEXT,
-                () -> Component.translatable(status[0]));
+        if (controller != null) {
+            StellarCloudUiWidgets.intent(root, 12, 126, 120, 22, PREFIX + "bind",
+                    controller::bind, controller::bindControl);
+            StellarCloudUiWidgets.intent(root, 148, 126, 120, 22, PREFIX + "unbind",
+                    controller::unbind, controller::unbindControl);
+        } else {
+            // 舊 supplier 入口保留服務端動作；同步入口只建立上述意圖控件。
+            Supplier<String> reason = () -> disabledReason.apply(root.getGui() == null ? null : root.getGui().entityPlayer);
+            StellarCloudUiWidgets.action(root, 12, 126, 120, 22, PREFIX + "bind",
+                    () -> status[0] = changeBinding.apply(root.getGui().entityPlayer, true), reason,
+                    reasonKey -> status[0] = reasonKey);
+            StellarCloudUiWidgets.action(root, 148, 126, 120, 22, PREFIX + "unbind",
+                    () -> status[0] = changeBinding.apply(root.getGui().entityPlayer, false), () -> {
+                        String denied = reason.get();
+                        return !denied.isEmpty() ? denied : bound.getAsBoolean() ? "" : PREFIX + "status.already_unbound";
+                    }, reasonKey -> status[0] = reasonKey);
+        }
+        var resultPanel = new WidgetGroup(8, 152, 264, 30);
+        resultPanel.setBackground(StellarCloudUiWidgets.surface());
+        text(resultPanel, 4, 3, 256, 24, COLORS.TEXT,
+                () -> Component.translatable(controller == null ? status[0]
+                        : !controller.state().synchronizedReady() ? StellarCloudUiContract.WAITING : controller.feedbackKey()),
+                controller != null);
+        root.addWidget(resultPanel);
         return root;
+    }
+
+    private static ComponentPanelWidget text(WidgetGroup root, int x, int y, int width, int height, int color,
+                                             Supplier<Component> value, boolean clientState) {
+        var label = StellarCloudUiWidgets.text(root, x, y, width, height, color, value);
+        if (clientState) label.setClientSideWidget();
+        return label;
     }
 
     private StellarCloudAECoreUi() {}
