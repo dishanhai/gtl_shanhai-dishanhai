@@ -12,8 +12,27 @@ public final class StellarCloudLibraryLayout {
     public static final Rect STATUS = new Rect(8, 188, 190, 34);
     public static final Rect INVENTORY = new Rect(8, 228, 172, 86);
     public static final Rect ACCESS = new Rect(188, 228, 116, 86);
+    // 山海：文字、槽位與按鈕均由畫布給出固定命中區，收合不搬移常駐操作。
+    public static final Rect SEARCH = new Rect(40, 44, 84, 14);
+    public static final Rect TYPE = new Rect(130, 42, 64, 18);
+    public static final Rect INPUT_SLOT = new Rect(222, 72, 18, 18);
+    public static final Rect OUTPUT_SLOT = new Rect(270, 72, 18, 18);
+    public static final Rect UPLOAD = new Rect(210, 98, 44, 24);
+    public static final Rect WITHDRAW = new Rect(258, 98, 44, 24);
+    public static final Rect PREVIOUS = new Rect(PAGER.x(), PAGER.y(), 44, PAGER.height());
+    public static final Rect NEXT = new Rect(PAGER.x() + PAGER.width() - 44, PAGER.y(), 44, PAGER.height());
 
     public record Rect(int x, int y, int width, int height) {}
+
+    /** 與 PlayerInventoryWidget 的原生槽一致；排除熱鍵列上方空隙及右／下邊界。 */
+    public static int inventorySlot(double x, double y) {
+        x -= 5;
+        y -= 5;
+        if (x < 0 || x >= 162 || y < 0) return -1;
+        int column = (int) x / 18;
+        if (y < 54) return ((int) y / 18 + 1) * 9 + column;
+        return y >= 58 && y < 76 ? column : -1;
+    }
 
     /** 折疊只記錄本次畫面的呈現狀態，不保存或改動 Session。 */
     public static final class Foldouts {
