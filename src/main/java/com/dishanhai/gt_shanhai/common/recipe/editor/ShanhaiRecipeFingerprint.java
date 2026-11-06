@@ -6,13 +6,18 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.GsonBuilder;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public final class ShanhaiRecipeFingerprint {
 
-    public static final String PREFIX = "v3.sorted:json:";
+    public static final String PREFIX = "v4.sorted:sha256:";
+    private static final String LEGACY_PREFIX = "v3.sorted:json:";
 
     private ShanhaiRecipeFingerprint() {}
 
@@ -21,7 +26,7 @@ public final class ShanhaiRecipeFingerprint {
     }
 
     public static String legacySnapshotFingerprint(ShanhaiRecipeBase base) {
-        if (base == null) return fingerprint(JsonNull.INSTANCE);
+        if (base == null) return legacyFingerprint(JsonNull.INSTANCE);
         JsonObject payload = new JsonObject();
         payload.addProperty("recipeTypeId", base.recipeTypeId());
         payload.addProperty("recipeId", base.recipeId());
@@ -31,16 +36,30 @@ public final class ShanhaiRecipeFingerprint {
         payload.add("outputs", base.outputs());
         payload.add("tickInputs", base.tickInputs());
         payload.add("conditions", new JsonArray());
-        return fingerprint(payload);
+        return legacyFingerprint(payload);
     }
 
-    public static String fingerprint(JsonElement value) {
-        JsonElement canonical = canonicalize(value);
-        String serialized = new GsonBuilder().disableHtmlEscaping().create().toJson(canonical);
+    /** Previous full snapshot format; read-only compatibility for existing override files. */
+    public static String legacyV3Fingerprint(ShanhaiRecipeBase base) {
+        return legacyFingerprint(base == null ? JsonNull.INSTANCE : base.fingerprintJson());
+    }
+
+    private static String legacyFingerprint(JsonElement value) {
+        String serialized = new GsonBuilder().disableHtmlEscaping().create().toJson(canonicalize(value));
         if (serialized.length() > 400) {
             serialized = serialized.substring(0, 220) + "~~" + serialized.substring(serialized.length() - 180);
         }
-        return PREFIX + serialized;
+        return LEGACY_PREFIX + serialized;
+    }
+
+    public static String fingerprint(JsonElement value) {
+        String serialized = new GsonBuilder().disableHtmlEscaping().create().toJson(canonicalize(value));
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(serialized.getBytes(StandardCharsets.UTF_8));
+            return PREFIX + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 
     public static JsonElement canonicalize(JsonElement value) {

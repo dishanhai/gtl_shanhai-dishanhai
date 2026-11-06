@@ -111,39 +111,18 @@ public final class RecipeSyncPacket {
 
     /**
      * 定向同步：帶完整配方內容，專用伺服器上的 override 結果才會出現在客戶端 JEI。
-     * 一次最多 {@link #MAX_RECIPE_UPDATES} 條，超過的部分由後續全量刷新補上。
+     * 每包最多 {@link #MAX_RECIPE_UPDATES} 條；完整查找後分批發送更新與真正的刪除。
      */
     public static void syncRecipesToAll(String recipeTypeId, Collection<String> recipeIds) {
         if (CHANNEL == null || recipeTypeId == null || recipeTypeId.isEmpty()
                 || recipeIds == null || recipeIds.isEmpty()) return;
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null || server.getPlayerList() == null) return;
-        GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
-                .get(new ResourceLocation(recipeTypeId));
-        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return;
-
-        Set<String> wanted = new LinkedHashSet<>();
-        for (String recipeId : recipeIds) {
-            if (recipeId != null && !recipeId.isEmpty()) wanted.add(recipeId);
+        for (RecipeSyncPacket packet : overridePackets(recipeTypeId, recipeIds)) {
+            sendToAll(server, packet);
+            LOG.info("[RecipeSync] 定向同步 type={} 更新={} 移除={}", recipeTypeId,
+                    packet.recipeUpdates.size(), packet.removedRecipeIds.size());
         }
-        Map<String, GTRecipe> updates = new LinkedHashMap<>();
-        List<String> removed = new ArrayList<>();
-        type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
-            if (recipe == null || recipe.getId() == null) return;
-            String id = recipe.getId().toString();
-            if (wanted.contains(id) && updates.size() < MAX_RECIPE_UPDATES) {
-                updates.put(id, recipe.copy());
-            }
-        });
-        for (String recipeId : wanted) {
-            if (!updates.containsKey(recipeId)) removed.add(recipeId);
-        }
-        RecipeSyncPacket packet = new RecipeSyncPacket(
-                DShanhaiRecipeModifierAPI.getRecipeRevision(),
-                List.of(recipeTypeId), false, updates, removed);
-        sendToAll(server, packet);
-        LOG.info("[RecipeSync] 定向同步 type={} 更新={} 移除={}", recipeTypeId,
-                packet.recipeUpdates.size(), packet.removedRecipeIds.size());
     }
 
     public static void syncRecipeToAll(String recipeTypeId, String recipeId) {
@@ -167,9 +146,9 @@ public final class RecipeSyncPacket {
         if (server == null) return;
         Map<String, Set<String>> idsByType = overrideRecipeIds();
         for (Map.Entry<String, Set<String>> entry : idsByType.entrySet()) {
-            RecipeSyncPacket packet = overridePacket(entry.getKey(), entry.getValue());
-            if (packet == null) continue;
-            CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
+            for (RecipeSyncPacket packet : overridePackets(entry.getKey(), entry.getValue())) {
+                CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
+            }
         }
     }
 
@@ -187,25 +166,23 @@ public final class RecipeSyncPacket {
         return idsByType;
     }
 
-    private static RecipeSyncPacket overridePacket(String recipeTypeId, Set<String> recipeIds) {
+    private static List<RecipeSyncPacket> overridePackets(String recipeTypeId, Collection<String> recipeIds) {
         GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
                 .get(ResourceLocation.tryParse(recipeTypeId));
-        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return null;
-        Map<String, GTRecipe> updates = new LinkedHashMap<>();
-        List<String> removed = new ArrayList<>();
+        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return List.of();
+        Set<String> wanted = new LinkedHashSet<>(recipeIds);
+        Map<String, GTRecipe> available = new LinkedHashMap<>();
         type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
             if (recipe == null || recipe.getId() == null) return;
             String id = recipe.getId().toString();
-            if (recipeIds.contains(id) && updates.size() < MAX_RECIPE_UPDATES) {
-                updates.put(id, recipe.copy());
-            }
+            if (wanted.contains(id)) available.put(id, recipe.copy());
         });
-        for (String recipeId : recipeIds) {
-            if (!updates.containsKey(recipeId)) removed.add(recipeId);
+        long revision = DShanhaiRecipeModifierAPI.getRecipeRevision();
+        List<RecipeSyncPacket> packets = new ArrayList<>();
+        for (RecipeSyncBatcher.Batch<GTRecipe> batch : RecipeSyncBatcher.partition(wanted, available, MAX_RECIPE_UPDATES)) {
+            packets.add(new RecipeSyncPacket(revision, List.of(recipeTypeId), false, batch.updates(), batch.removed()));
         }
-        if (updates.isEmpty() && removed.isEmpty()) return null;
-        return new RecipeSyncPacket(DShanhaiRecipeModifierAPI.getRecipeRevision(),
-                List.of(recipeTypeId), false, updates, removed);
+        return List.copyOf(packets);
     }
 
     public static void encode(RecipeSyncPacket msg, FriendlyByteBuf buf) {
