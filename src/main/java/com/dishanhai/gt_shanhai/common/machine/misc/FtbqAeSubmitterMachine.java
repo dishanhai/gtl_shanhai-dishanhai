@@ -8,6 +8,7 @@ import appeng.api.stacks.AEKey;
 import appeng.api.storage.MEStorage;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.api.ftbq.FtbqSubmitterToastSuppressor;
+import com.dishanhai.gt_shanhai.api.ftbq.FtbqRewardBuffer;
 import com.dishanhai.gt_shanhai.common.machine.ae.DShanhaiAENetworkMachine;
 import com.dishanhai.gt_shanhai.common.shop.ShopAeNetwork;
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
@@ -20,6 +21,7 @@ import com.gregtechceu.gtceu.api.machine.MachineDefinition;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.feature.IInteractedMachine;
+import com.gregtechceu.gtceu.api.machine.feature.IDropSaveMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IUIMachine;
 import com.gregtechceu.gtceu.api.registry.registrate.MachineBuilder;
 import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
@@ -29,17 +31,18 @@ import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
-import com.lowdragmc.lowdraglib.gui.widget.TextFieldWidget;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import dev.ftb.mods.ftbquests.integration.item_filtering.ItemMatchingSystem;
+import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbquests.quest.Quest;
 import dev.ftb.mods.ftbquests.quest.ServerQuestFile;
 import dev.ftb.mods.ftbquests.quest.TeamData;
 import dev.ftb.mods.ftbquests.quest.loot.WeightedReward;
 import dev.ftb.mods.ftbquests.quest.reward.ChoiceReward;
 import dev.ftb.mods.ftbquests.quest.reward.LootReward;
+import dev.ftb.mods.ftbquests.quest.reward.ItemReward;
 import dev.ftb.mods.ftbquests.quest.reward.RandomReward;
 import dev.ftb.mods.ftbquests.quest.reward.Reward;
 import dev.ftb.mods.ftbquests.quest.reward.RewardClaimType;
@@ -48,6 +51,9 @@ import dev.ftb.mods.ftbquests.quest.task.Task;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -56,9 +62,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 
-import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
@@ -73,7 +76,7 @@ import java.util.UUID;
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
 
 public class FtbqAeSubmitterMachine extends MetaMachine
-        implements IInteractedMachine, IUIMachine, DShanhaiAENetworkMachine, ShopAeNetwork.Provider {
+        implements IInteractedMachine, IUIMachine, IDropSaveMachine, DShanhaiAENetworkMachine, ShopAeNetwork.Provider {
 
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             FtbqAeSubmitterMachine.class, MetaMachine.MANAGED_FIELD_HOLDER);
@@ -113,6 +116,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
     @DescSynced
     private long lastClaimedRewards;
     private TickableSubscription tickSubscription;
+    private final FtbqRewardBuffer<AEItemKey> pendingRewards = new FtbqRewardBuffer<>();
 
     public FtbqAeSubmitterMachine(IMachineBlockEntity holder) {
         super(holder);
@@ -153,6 +157,39 @@ public class FtbqAeSubmitterMachine extends MetaMachine
                 LOADED_SUBMITTERS.remove(id);
             }
             ShopAeNetwork.unregister(this);
+        }
+    }
+
+    @Override
+    public boolean savePickClone() {
+        // Creative pick must not duplicate claimed rewards or the submitter UUID.
+        return false;
+    }
+
+    @Override
+    public void saveCustomPersistedData(CompoundTag tag, boolean forDrop) {
+        super.saveCustomPersistedData(tag, forDrop);
+        ListTag pending = new ListTag();
+        pendingRewards.snapshot().forEach((key, amount) -> {
+            CompoundTag entry = new CompoundTag();
+            entry.put("key", key.toTag());
+            entry.putLong("amount", amount);
+            pending.add(entry);
+        });
+        // Keep the outbox on the dropped machine as well as in chunk saves.
+        tag.put("FtbqPendingRewards", pending);
+    }
+
+    @Override
+    public void loadCustomPersistedData(CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        pendingRewards.clear();
+        ListTag pending = tag.getList("FtbqPendingRewards", Tag.TAG_COMPOUND);
+        for (int i = 0; i < pending.size(); i++) {
+            CompoundTag entry = pending.getCompound(i);
+            AEItemKey key = AEItemKey.fromTag(entry.getCompound("key"));
+            long amount = entry.getLong("amount");
+            if (key != null && amount > 0L) pendingRewards.add(key, amount);
         }
     }
 
@@ -220,14 +257,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
                 .widget(new LabelWidget(5, 116, () -> claimOnlyQueuedRewards ? "§7奖励领取: §a仅队列任务" : "§7奖励领取: §e全部任务"));
 
         ui.widget(new LabelWidget(5, 88, "§e队伍UUID"));
-        TextFieldWidget teamField = new TextFieldWidget(58, 86, 112, 14,
-                () -> teamIdText,
-                value -> {
-                    teamIdText = value.trim();
-                    markDirty();
-                });
-        teamField.setCurrentString(teamIdText);
-        ui.widget(teamField);
+        ui.widget(new LabelWidget(58, 88, () -> teamIdText));
 
         ui.widget(new ButtonWidget(5, 136, 38, 14, new TextTexture("绑定", -1), clickData -> bindPlayerTeam(player)));
         ui.widget(new ButtonWidget(47, 136, 42, 14, new TextTexture("清队列", -1), clickData -> clearQueue()));
@@ -238,7 +268,15 @@ public class FtbqAeSubmitterMachine extends MetaMachine
 
     private void bindPlayerTeam(Player player) {
         if (isRemote() || player == null || ServerQuestFile.INSTANCE == null) return;
+        if (!pendingRewards.isEmpty()) {
+            status = "奖励待回网，暂不能重新绑定";
+            return;
+        }
         TeamData data = ServerQuestFile.INSTANCE.getOrCreateTeamData(player);
+        if (!data.getTeamId().equals(parseTeamId())) {
+            queuedTaskIds.clear();
+            saveQueuedTasksToText();
+        }
         teamIdText = data.getTeamId().toString();
         rewardPlayerIdText = player.getUUID().toString();
         status = "已绑定队伍和领取玩家";
@@ -276,6 +314,8 @@ public class FtbqAeSubmitterMachine extends MetaMachine
 
     private void runQueuedWork() {
         if (isRemote()) return;
+        lastSubmitted = 0L;
+        lastClaimedRewards = 0L;
         if (!isOnline) {
             status = "AE 网络离线";
             return;
@@ -300,24 +340,41 @@ public class FtbqAeSubmitterMachine extends MetaMachine
             status = "领取玩家 UUID 无效";
             return;
         }
+        MEStorage storage = grid.getStorageService().getInventory();
+        lastClaimedRewards = pendingRewards.flush(
+                (key, amount) -> storage.insert(key, amount, Actionable.MODULATE, IActionSource.empty()), this::markDirty);
+        if (!pendingRewards.isEmpty()) {
+            status = "奖励待回网：AE 空间不足";
+            return;
+        }
         TeamData data = file.getOrCreateTeamData(teamId);
+        if (data.isLocked()) {
+            status = "队伍任务已锁定";
+            return;
+        }
+        UUID currentRewardTeam = FTBTeamsAPI.api().getManager().getTeamForPlayerID(rewardPlayerId)
+                .map(team -> team.getTeamId()).orElse(null);
+        if (!teamId.equals(currentRewardTeam)) {
+            status = "领取玩家已离队，请重新绑定";
+            return;
+        }
         if (queuedTaskIds.isEmpty()) {
             lastSubmitted = 0L;
-            lastClaimedRewards = claimRewardsToAe(file, grid.getStorageService().getInventory(), data, rewardPlayerId);
-            status = lastClaimedRewards > 0L ? "领取奖励 " + lastClaimedRewards : "等待任务登记";
+            lastClaimedRewards += claimRewardsToAe(file, grid.getStorageService().getInventory(), data, rewardPlayerId);
+            status = !pendingRewards.isEmpty() ? "奖励待回网：AE 空间不足"
+                    : lastClaimedRewards > 0L ? "领取奖励 " + lastClaimedRewards : "等待任务登记";
             updateQueueSize();
             markDirty();
             return;
         }
 
-        long submittedTotal = 0L;
-        int removed = pruneAndSubmitQueuedTasks(file, data, grid.getStorageService().getInventory());
-        submittedTotal += lastSubmitted;
-        long claimed = claimRewardsToAe(file, grid.getStorageService().getInventory(), data, rewardPlayerId);
-        lastClaimedRewards = claimed;
+        int removed = pruneAndSubmitQueuedTasks(file, data, storage);
+        lastClaimedRewards += claimRewardsToAe(file, storage, data, rewardPlayerId);
         updateQueueSize();
-        if (submittedTotal > 0L || claimed > 0L || removed > 0) {
-            status = "提交 " + submittedTotal + " / 奖励 " + claimed;
+        if (!pendingRewards.isEmpty()) {
+            status = "奖励待回网：AE 空间不足";
+        } else if (lastSubmitted > 0L || lastClaimedRewards > 0L || removed > 0) {
+            status = "提交 " + lastSubmitted + " / 奖励 " + lastClaimedRewards;
             markDirty();
         } else {
             status = "AE 中缺少队列目标物品";
@@ -342,9 +399,6 @@ public class FtbqAeSubmitterMachine extends MetaMachine
             }
             if (!submitItemTask(storage, data, itemTask)) {
                 continue;
-            }
-            if (data.isCompleted(itemTask)) {
-                return removed;
             }
             return removed;
         }
@@ -419,7 +473,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
     }
 
     private boolean submitItemTask(MEStorage storage, TeamData data, ItemTask itemTask) {
-        if (!data.canStartTasks(itemTask.getQuest())) {
+        if (data.isLocked() || !data.canStartTasks(itemTask.getQuest()) || itemTask.isOnlyFromCrafting()) {
             return false;
         }
         if (!itemTask.consumesResources()) {
@@ -482,12 +536,10 @@ public class FtbqAeSubmitterMachine extends MetaMachine
         if (remaining <= 0L) return 0L;
 
         ItemStack targetStack = task.getItemStack();
-        long extracted = extractExactTarget(storage, targetStack, remaining);
-        if (extracted > 0L) return extracted;
-        if (ItemMatchingSystem.INSTANCE.isItemFilter(targetStack)) {
-            return extractMatchingTargets(storage, task, remaining);
-        }
-        return 0L;
+        // Never consume the filter item itself. ItemTask.test also handles weak/ignored NBT.
+        boolean filter = ItemMatchingSystem.INSTANCE.isItemFilter(targetStack);
+        long extracted = !filter && task.test(targetStack) ? extractExactTarget(storage, targetStack, remaining) : 0L;
+        return extracted + (extracted < remaining ? extractMatchingTargets(storage, task, remaining - extracted) : 0L);
     }
 
     private long extractExactTarget(MEStorage storage, ItemStack targetStack, long remaining) {
@@ -499,8 +551,13 @@ public class FtbqAeSubmitterMachine extends MetaMachine
 
     private long extractMatchingTargets(MEStorage storage, ItemTask task, long remaining) {
         long extractedTotal = 0L;
+        // Extraction may change the underlying inventory; iterate a key snapshot.
+        List<AEItemKey> keys = new ArrayList<>();
         for (Object2LongMap.Entry<AEKey> entry : storage.getAvailableStacks()) {
-            if (!(entry.getKey() instanceof AEItemKey itemKey)) continue;
+            if (entry.getKey() instanceof AEItemKey key) keys.add(key);
+        }
+        for (AEItemKey itemKey : keys) {
+            if (ItemMatchingSystem.INSTANCE.isItemFilter(task.getItemStack()) && itemKey.matches(task.getItemStack())) continue;
             if (!task.test(itemKey.toStack())) continue;
             long extracted = storage.extract(itemKey, remaining - extractedTotal, Actionable.MODULATE, IActionSource.empty());
             extractedTotal += extracted;
@@ -521,6 +578,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
                 if (inserted > 0L) {
                     claimed += inserted;
                 }
+                if (!pendingRewards.isEmpty()) return claimed;
             }
         }
         return claimed;
@@ -545,171 +603,60 @@ public class FtbqAeSubmitterMachine extends MetaMachine
     }
 
     private long claimOneRewardToAe(MEStorage storage, TeamData data, UUID rewardPlayerId, Reward reward) {
-        if (reward instanceof RandomReward randomReward) {
-            return claimRandomRewardToAe(storage, data, rewardPlayerId, randomReward);
-        }
-        List<ItemStack> rewardStacks = new ArrayList<>();
-        ServerPlayer player = getLevel().getServer() == null ? null : getLevel().getServer().getPlayerList().getPlayer(rewardPlayerId);
-        if (!reward.automatedClaimPre(getHolder().self(), rewardStacks, getLevel().getRandom(), rewardPlayerId, player)) {
-            return 0L;
-        }
-        if (rewardStacks.isEmpty()) {
-            return 0L;
-        }
-        long total = insertRewardStacks(storage, rewardStacks, true);
-        if (total <= 0L) return 0L;
-        if (!gtShanhai$claimReward(data, rewardPlayerId, reward, player)) {
-            return 0L;
-        }
-        insertRewardStacks(storage, rewardStacks, false);
-        reward.automatedClaimPost(getHolder().self(), rewardPlayerId, player);
-        return total;
-    }
-
-    private long claimRandomRewardToAe(MEStorage storage, TeamData data, UUID rewardPlayerId, RandomReward randomReward) {
-        if (randomReward instanceof ChoiceReward) return 0L;
-        var table = randomReward.getTable();
-        if (table == null) return 0L;
-
-        boolean includeEmpty = randomReward instanceof LootReward;
-        List<ItemStack> rewardStacks = new ArrayList<>();
-        List<Reward> selectedRewards = new ArrayList<>();
-        ServerPlayer player = getLevel().getServer() == null ? null : getLevel().getServer().getPlayerList().getPlayer(rewardPlayerId);
-        for (WeightedReward weightedReward : table.generateWeightedRandomRewards(getLevel().getRandom(), 1, includeEmpty)) {
-            Reward selected = weightedReward.getReward();
-            if (selected == null) continue;
-            List<ItemStack> selectedStacks = new ArrayList<>();
-            if (!selected.automatedClaimPre(getHolder().self(), selectedStacks, getLevel().getRandom(), rewardPlayerId, player)) {
-                continue;
-            }
-            if (selectedStacks.isEmpty()) {
-                selected.automatedClaimPost(getHolder().self(), rewardPlayerId, player);
-                continue;
-            }
-            rewardStacks.addAll(selectedStacks);
-            selectedRewards.add(selected);
-        }
-        if (rewardStacks.isEmpty()) return 0L;
-        long total = insertRewardStacks(storage, rewardStacks, true);
-        if (total <= 0L) return 0L;
-        if (!gtShanhai$claimReward(data, rewardPlayerId, randomReward, player)) return 0L;
-        insertRewardStacks(storage, rewardStacks, false);
-        for (Reward selected : selectedRewards) {
-            selected.automatedClaimPost(getHolder().self(), rewardPlayerId, player);
-        }
-        return total;
-    }
-
-    // FTBQ 跨版本兼容：1.4.22 的 claimReward(ServerPlayer, ...) 会再次直接发奖，
-    // 因此 AE 已完成模拟插入后优先只标记 markRewardAsClaimed，避免把同一奖励发两次。
-    // 旧版没有该方法时才回退到 claimReward 的反射兼容路径。
-    private static volatile Method gtShanhai$claimRewardMethod;
-    private static volatile Method gtShanhai$legacyClaimRewardMethod;
-    private static volatile boolean gtShanhai$claimRewardResolved;
-    private static volatile boolean gtShanhai$legacyClaimRewardResolved;
-
-    private static Method gtShanhai$resolveClaimReward(TeamData data, ServerPlayer player) {
-        if (player == null && gtShanhai$legacyClaimRewardResolved) return gtShanhai$legacyClaimRewardMethod;
-        if (player != null && gtShanhai$claimRewardResolved) return gtShanhai$claimRewardMethod;
-        synchronized (FtbqAeSubmitterMachine.class) {
-            if (player == null && gtShanhai$legacyClaimRewardResolved) return gtShanhai$legacyClaimRewardMethod;
-            if (player != null && gtShanhai$claimRewardResolved) return gtShanhai$claimRewardMethod;
-            Method found = null;
-            if (player != null) {
-                for (Method method : data.getClass().getMethods()) {
-                    if (!"claimReward".equals(method.getName())) continue;
-                    Class<?>[] p = method.getParameterTypes();
-                    if (p.length == 4
-                            && p[0] == ServerPlayer.class
-                            && Reward.class.isAssignableFrom(p[1])
-                            && p[2] == boolean.class
-                            && (p[3] == long.class || p[3] == Long.class)) {
-                        found = method;
-                        break;
-                    }
-                    if (p.length == 3
-                            && p[0] == ServerPlayer.class
-                            && Reward.class.isAssignableFrom(p[1])
-                            && p[2] == boolean.class) {
-                        found = method;
-                        break;
-                    }
-                }
-                gtShanhai$claimRewardMethod = found;
-                gtShanhai$claimRewardResolved = true;
-            } else {
-                for (Method method : data.getClass().getMethods()) {
-                    if (!"claimReward".equals(method.getName())) continue;
-                    Class<?>[] p = method.getParameterTypes();
-                    if (p.length == 3 && p[0] == UUID.class && Reward.class.isAssignableFrom(p[1])) {
-                        Class<?> third = p[2];
-                        if (third == long.class || third == Long.class
-                                || java.util.Date.class.isAssignableFrom(third)) {
-                            found = method;
-                            break;
-                        }
-                    }
-                }
-                gtShanhai$legacyClaimRewardMethod = found;
-                gtShanhai$legacyClaimRewardResolved = true;
-            }
-            return found;
-        }
-    }
-
-    private boolean gtShanhai$claimReward(TeamData data, UUID player, Reward reward, ServerPlayer serverPlayer) {
-        long now = System.currentTimeMillis();
-        try {
-            return data.markRewardAsClaimed(player, reward, now);
-        } catch (NoSuchMethodError ignored) {
-            // 舊版 FTBQ 沒有 markRewardAsClaimed，繼續走反射兼容路徑。
-        }
-
-        Method method = gtShanhai$resolveClaimReward(data, serverPlayer);
-        if (method == null) method = gtShanhai$resolveClaimReward(data, null);
-        if (method != null) {
-            try {
-                Class<?>[] p = method.getParameterTypes();
-                Object result;
-                if (p[0] == ServerPlayer.class) {
-                    Object[] args = p.length == 4
-                            ? new Object[]{serverPlayer, reward, Boolean.FALSE, Long.valueOf(now)}
-                            : new Object[]{serverPlayer, reward, Boolean.FALSE};
-                    result = method.invoke(data, args);
-                } else {
-                    Class<?> third = p[2];
-                    Object thirdArg = java.util.Date.class.isAssignableFrom(third)
-                            ? new java.util.Date(now) : Long.valueOf(now);
-                    result = method.invoke(data, player, reward, thirdArg);
-                }
-                return !(result instanceof Boolean) || (Boolean) result;
-            } catch (ReflectiveOperationException e) {
-                GTDishanhaiMod.LOGGER.warn("[FtbqAeSubmitter] 调用 TeamData.claimReward 失败: {}", e.toString());
-            }
-        }
-
-        GTDishanhaiMod.LOGGER.warn("[FtbqAeSubmitter] 未找到兼容的 TeamData.claimReward 重载，跳过奖励领取");
-        return false;
-    }
-
-    private long insertRewardStacks(MEStorage storage, List<ItemStack> rewardStacks, boolean simulate) {
-        long total = 0L;
-        for (ItemStack stack : rewardStacks) {
+        // Validate the whole random table before rolling: unsupported outcomes must not be rerolled away.
+        if (!isItemRewardTree(reward, new HashSet<>())) return 0L;
+        List<ItemStack> stacks = new ArrayList<>();
+        ServerPlayer player = getLevel().getServer().getPlayerList().getPlayer(rewardPlayerId);
+        if (!collectRewardItems(reward, stacks, rewardPlayerId, player)) return 0L;
+        FtbqRewardBuffer<AEItemKey> prepared = new FtbqRewardBuffer<>();
+        for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             AEItemKey key = AEItemKey.of(stack);
             if (key == null) return 0L;
-            long amount = stack.getCount();
-            long accepted = storage.insert(key, amount, simulate ? Actionable.SIMULATE : Actionable.MODULATE, IActionSource.empty());
-            if (accepted < amount) return 0L;
-            total += amount;
+            prepared.add(key, stack.getCount());
         }
-        return total;
+        // 2001.4.22: claimReward(ServerPlayer, ...) delivers a second copy. Only mark the claim.
+        if (!data.markRewardAsClaimed(rewardPlayerId, reward, System.currentTimeMillis())) return 0L;
+        prepared.snapshot().forEach(pendingRewards::add);
+        markDirty();
+        return pendingRewards.flush(
+                (key, amount) -> storage.insert(key, amount, Actionable.MODULATE, IActionSource.empty()), this::markDirty);
+    }
+
+    private boolean isItemRewardTree(Reward reward, Set<Reward> visiting) {
+        if (reward == null || reward instanceof ChoiceReward || !visiting.add(reward)) return false;
+        try {
+            if (reward.getClass() == ItemReward.class) return true;
+            if (reward.getClass() != RandomReward.class && reward.getClass() != LootReward.class) return false;
+            RandomReward random = (RandomReward) reward;
+            if (random.getTable() == null) return false;
+            for (WeightedReward entry : random.getTable().getWeightedRewards()) {
+                if (!isItemRewardTree(entry.getReward(), visiting)) return false;
+            }
+            return true;
+        } finally {
+            visiting.remove(reward);
+        }
+    }
+
+    private boolean collectRewardItems(Reward reward, List<ItemStack> stacks, UUID playerId, ServerPlayer player) {
+        if (reward instanceof RandomReward random) {
+            for (WeightedReward selected : random.getTable().generateWeightedRandomRewards(
+                    getLevel().getRandom(), 1, random instanceof LootReward)) {
+                if (!collectRewardItems(selected.getReward(), stacks, playerId, player)) return false;
+            }
+            // An empty loot roll is still a consumed reward, never a reason to roll again.
+            return true;
+        }
+        return reward.automatedClaimPre(getHolder().self(), stacks, getLevel().getRandom(), playerId, player);
     }
 
     public boolean addQueuedTask(long taskId, UUID teamId) {
         if (isRemote() || !isValidTaskId(taskId) || teamId == null) return false;
         UUID boundTeamId = parseTeamId();
-        if (boundTeamId == null || !boundTeamId.equals(teamId)) return false;
+        if (boundTeamId == null || !boundTeamId.equals(teamId) || ServerQuestFile.INSTANCE == null) return false;
+        Task task = ServerQuestFile.INSTANCE.getTask(taskId);
+        if (!(task instanceof ItemTask itemTask) || !itemTask.consumesResources() || itemTask.isOnlyFromCrafting()) return false;
         if (queuedTaskIds.contains(taskId)) {
             status = "任务已在队列";
             updateQueueSize();

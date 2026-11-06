@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class FtbqAeSubmitterCompatibilitySourceTest {
 
@@ -27,20 +28,28 @@ class FtbqAeSubmitterCompatibilitySourceTest {
             "mixin", "FtbViewQuestPanelEditMenuMixin.java");
 
     @Test
-    void ftbq422UsesServerPlayerClaimRewardContractAndBuildsAgainstUpdatedJar() throws IOException {
+    void ftbq422MarksClaimWithoutDeliveringTwiceAndBuildsAgainstUpdatedJar() throws IOException {
         String submitter = Files.readString(SUBMITTER);
         String build = Files.readString(BUILD);
 
         assertTrue(build.contains("ftb-quests-forge-2001.4.22.jar"),
                 "編譯依賴必須與遊戲端 FTBQ 1.4.22 一致");
-        assertTrue(submitter.contains("gtShanhai$resolveClaimReward(TeamData data, ServerPlayer player)"),
-                "獎勵領取解析必須接收 1.4.22 所需的 ServerPlayer");
-        assertTrue(submitter.contains("p[0] == ServerPlayer.class"),
-                "必須優先解析 TeamData.claimReward(ServerPlayer, ...)");
-        assertTrue(submitter.contains("p[2] == boolean.class"),
-                "1.4.22 的 claimReward 第三參數必須是通知開關");
-        assertTrue(submitter.contains("data.markRewardAsClaimed(player, reward"),
-                "離線或兼容回退必須能直接以 UUID 標記獎勵已領取");
+        assertTrue(submitter.contains("data.markRewardAsClaimed(rewardPlayerId, reward"),
+                "AE 回网只能标记领取，不能再次调用会直接发奖的 claimReward");
+        assertFalse(submitter.contains("method.invoke(data"), "禁止回退到会重复发奖的反射路径");
+        assertTrue(submitter.contains("FtbqPendingRewards"), "未交付的奖励必须随机器存档");
+
+    }
+
+    @Test
+    void pendingRewardsSurviveMachineDropWithoutCreativeCloning() throws IOException {
+        String submitter = Files.readString(SUBMITTER);
+        assertTrue(submitter.contains("IUIMachine, IDropSaveMachine"));
+        assertTrue(submitter.contains("public boolean savePickClone()"));
+        assertTrue(submitter.contains("key.toTag()"));
+        assertTrue(submitter.contains("AEItemKey.fromTag"));
+        assertTrue(Files.isRegularFile(Path.of("src/main/resources/data/gt_shanhai/loot_tables/blocks/ftbq_ae_submitter.json")),
+                "显式掉落表让 GTCEu 执行 IDropSaveMachine，避免被缺失掉落表的回退 Mixin 截断");
     }
 
     @Test
