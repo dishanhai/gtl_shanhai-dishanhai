@@ -51,6 +51,7 @@ import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudMaterials;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudRecoveryState;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudLibraryMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudConfiguratorUi;
+import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudUiContract;
 import com.dishanhai.gt_shanhai.mixin.MEPatternBufferSlot2PatternAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
@@ -3314,23 +3315,31 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private String changeCloudEnabled(Player player, boolean enabled) {
         String prefix = "gui.gt_shanhai.stellar_cloud.";
-        if (!(player instanceof ServerPlayer server) || server.serverLevel() != getLevel()
-                || !(server.containerMenu instanceof ModularUIContainer menu) || menu.getModularUI().holder != this
-                || server.distanceToSqr(getPos().getX() + .5, getPos().getY() + .5, getPos().getZ() + .5) > 64
-                || !server.serverLevel().mayInteract(server, getPos())) return prefix + "settings_denied";
+        String denied = cloudUiDisabledReason(player);
+        if (!denied.isEmpty()) return denied;
+        ServerPlayer server = (ServerPlayer) player;
         // 舊 GTL 節點的 p=-1 不能用於庫權限檢查；僅在玩家明確啟用時補綁本人。
         if (enabled) StellarCloudAEIdentity.bindUnowned(getMainNode(), IPlayerRegistry.getPlayerId(server));
         cloudEnabled = enabled; cloudScannedRevision = Long.MIN_VALUE; markDirty();
         return prefix + "settings_applied";
     }
 
+    private String cloudUiDisabledReason(Player player) {
+        if (!(player instanceof ServerPlayer server) || server.serverLevel() != getLevel()
+                || !(server.containerMenu instanceof ModularUIContainer menu) || menu.getModularUI().holder != this
+                || server.distanceToSqr(getPos().getX() + .5, getPos().getY() + .5, getPos().getZ() + .5) > 64
+                || !server.serverLevel().mayInteract(server, getPos())) return "gui.gt_shanhai.stellar_cloud.settings_denied";
+        return "";
+    }
+
     private final class CloudPatternConfigurator implements IFancyConfigurator {
         @Override public Component getTitle() { return Component.translatable("gui.gt_shanhai.stellar_cloud.title"); }
         @Override public IGuiTexture getIcon() { return STOCK_INPUT_ICON; }
         @Override public Widget createConfigurator() {
-            return StellarCloudConfiguratorUi.create(() -> cloudEnabled, RecipeTypePatternBufferPartMachine.this::changeCloudEnabled,
-                    () -> Component.translatable(cloudStatus, cloudPublishedCount),
-                    () -> cloudPublishedCount, () -> cloudPublishedPatterns);
+            return StellarCloudConfiguratorUi.create(player -> new StellarCloudUiContract.ConfiguratorView(
+                            true, cloudEnabled, "gui.gt_shanhai.stellar_cloud.source_native", cloudStatus, cloudPublishedCount,
+                            StellarCloudUiContract.control(cloudUiDisabledReason(player))),
+                    RecipeTypePatternBufferPartMachine.this::changeCloudEnabled, () -> cloudPublishedPatterns);
         }
     }
 

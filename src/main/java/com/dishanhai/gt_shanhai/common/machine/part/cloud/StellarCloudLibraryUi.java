@@ -56,6 +56,8 @@ final class StellarCloudLibraryUi {
             }
         };
         root.setBackground(GlassPanelTexture.smokePanel());
+        // 山海：第⑤步可直接使用此橋的 controller；既有原件槽與 tooltip 保留各自同步。
+        root.addWidget(new StellarCloudUiSync.Library(session, player, inbox));
         Foldouts foldouts = new Foldouts();
         for (Rect area : new Rect[]{FILTER, CATALOG, TRANSFER, DETAIL, STATUS, INVENTORY, ACCESS}) {
             var panel = new WidgetGroup(area.x(), area.y(), area.width(), area.height());

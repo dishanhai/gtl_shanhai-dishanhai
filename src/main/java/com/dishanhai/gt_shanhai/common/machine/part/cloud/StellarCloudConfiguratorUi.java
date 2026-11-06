@@ -27,6 +27,19 @@ public final class StellarCloudConfiguratorUi {
     private static final String PREFIX = "gui.gt_shanhai.stellar_cloud.";
     private static final GlassColors COLORS = GlassColors.SMOKE;
 
+    public static WidgetGroup create(java.util.function.Function<Player, StellarCloudUiContract.ConfiguratorView> state,
+                                     BiFunction<Player, Boolean, String> setEnabled,
+                                     Supplier<List<IPatternDetails>> patterns) {
+        var bridge = new StellarCloudUiSync.Configurator(state, setEnabled);
+        var root = create(() -> state.apply(null).enabled(), setEnabled,
+                () -> {
+                    var view = state.apply(null);
+                    return Component.translatable(view.statusKey(), view.publishedCount());
+                }, () -> state.apply(null).publishedCount(), patterns);
+        root.addWidget(bridge);
+        return root;
+    }
+
     public static WidgetGroup create(BooleanSupplier enabled, BiFunction<Player, Boolean, String> setEnabled,
                                      Supplier<Component> status, IntSupplier count,
                                      Supplier<List<IPatternDetails>> patterns) {

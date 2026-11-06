@@ -182,12 +182,14 @@ public final class StellarCloudAECoreMachine extends MultiblockPartMachine
     @Override public boolean hasPlayerInventory() { return false; }
 
     @Override public WidgetGroup createUIWidget() {
-        return StellarCloudAECoreUi.create(() -> Component.translatable(PREFIX + "uuid", boundPlayer == null
-                        ? Component.translatable(PREFIX + "unbound") : boundPlayer.toString()),
-                this::isOnline, () -> getControllers().stream()
+        return StellarCloudAECoreUi.create(this::cloudUiView, (player, bind) -> changeBinding(player, bind));
+    }
+
+    private StellarCloudUiContract.CoreView cloudUiView(Player player) {
+        String denied = player instanceof ServerPlayer server && allowed(server) ? "" : PREFIX + "status.denied";
+        return new StellarCloudUiContract.CoreView(true, boundPlayer, isOnline(), getControllers().stream()
                 .anyMatch(controller -> controller instanceof StellarCloudLibraryMachine library
-                        && library.aeBindingReady()), () -> boundPlayer != null,
-                player -> player instanceof ServerPlayer server && allowed(server) ? "" : PREFIX + "status.denied",
-                (player, bind) -> changeBinding(player, bind));
+                        && library.aeBindingReady()), StellarCloudUiContract.control(denied),
+                StellarCloudUiContract.control(!denied.isEmpty() ? denied : boundPlayer != null ? "" : PREFIX + "status.already_unbound"));
     }
 }

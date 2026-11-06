@@ -32,6 +32,20 @@ final class StellarCloudAECoreUi {
         return new ModularUI(280, 188, machine, player).widget(new SmokeFrame(machine));
     }
 
+    static WidgetGroup create(Function<Player, StellarCloudUiContract.CoreView> state,
+                              BiFunction<Player, Boolean, String> changeBinding) {
+        var bridge = new StellarCloudUiSync.Core(state, changeBinding);
+        var root = create(() -> {
+                    var id = state.apply(null).boundPlayer();
+                    return Component.translatable(PREFIX + "uuid", id == null
+                            ? Component.translatable(PREFIX + "unbound") : id.toString());
+                }, () -> state.apply(null).networkOnline(), () -> state.apply(null).hostReady(),
+                () -> state.apply(null).boundPlayer() != null,
+                player -> state.apply(player).bind().reasonKey(), changeBinding);
+        root.addWidget(bridge);
+        return root;
+    }
+
     static WidgetGroup create(Supplier<Component> identity, BooleanSupplier online, BooleanSupplier hostReady,
                               BooleanSupplier bound, Function<Player, String> disabledReason,
                               BiFunction<Player, Boolean, String> changeBinding) {

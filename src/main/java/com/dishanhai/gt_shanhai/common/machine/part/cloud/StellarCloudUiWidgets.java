@@ -34,6 +34,16 @@ public final class StellarCloudUiWidgets {
 
     private StellarCloudUiWidgets() {}
 
+    /** 客戶端意圖按鈕：沿用玻璃動效與命中，動作透過 UiSync 取得伺服端回執。 */
+    public static ButtonWidget intent(WidgetGroup root, int x, int y, int width, int height,
+                                      String labelKey, Runnable clientAction,
+                                      Supplier<StellarCloudUiContract.ControlState> control) {
+        var button = new ActionButton(x, y, width, height, labelKey, () -> {}, () -> control.get().reasonKey(), ignored -> {});
+        button.clientIntent = clientAction;
+        root.addWidget(button);
+        return button;
+    }
+
     public static ButtonWidget action(WidgetGroup root, int x, int y, int width, int height,
                                       String fullLabelKey, Runnable serverAction, Supplier<String> disabledReason) {
         return action(root, x, y, width, height, fullLabelKey, serverAction, disabledReason, ignored -> {});
@@ -117,6 +127,7 @@ public final class StellarCloudUiWidgets {
         private final TextTexture label;
         private final ButtonFeedback feedback = new ButtonFeedback();
         private String reason = WAITING;
+        private Runnable clientIntent;
 
         ActionButton(int x, int y, int width, int height, String labelKey,
                      Runnable serverAction, Supplier<String> disabledReason, Consumer<String> rejected) {
@@ -134,10 +145,11 @@ public final class StellarCloudUiWidgets {
         }
 
         private String currentReason() { return Objects.requireNonNullElse(disabledReason.get(), WAITING); }
+        private String displayedReason() { return clientIntent == null ? reason : currentReason(); }
 
         @Override public void writeInitialData(FriendlyByteBuf buffer) {
             super.writeInitialData(buffer);
-            reason = currentReason();
+            reason = clientIntent == null ? currentReason() : WAITING;
             buffer.writeUtf(reason);
         }
 
@@ -148,6 +160,7 @@ public final class StellarCloudUiWidgets {
 
         @Override public void detectAndSendChanges() {
             super.detectAndSendChanges();
+            if (clientIntent != null) return;
             String current = currentReason();
             if (!reason.equals(current)) {
                 reason = current;
@@ -163,11 +176,14 @@ public final class StellarCloudUiWidgets {
         @Override @OnlyIn(Dist.CLIENT)
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
             if (!isMouseOverElement(mouseX, mouseY)) return false;
-            boolean enabled = reason.isEmpty();
+            boolean enabled = displayedReason().isEmpty();
             if (button == 0) {
                 feedback.press(0, getPosition().x, getPosition().y, getSize().width, getSize().height,
                         enabled, PageTransition.nowMs());
-                if (enabled) return super.mouseClicked(mouseX, mouseY, button);
+                if (enabled) {
+                    if (clientIntent != null) { clientIntent.run(); return true; }
+                    return super.mouseClicked(mouseX, mouseY, button);
+                }
             }
             // 停用與非左鍵仍佔住命中區，不能落到下層樣板或背包槽位。
             return true;
@@ -184,7 +200,7 @@ public final class StellarCloudUiWidgets {
             long now = PageTransition.nowMs();
             feedback.pointer(mouseX, mouseY, now);
             feedback.tick(now);
-            boolean enabled = reason.isEmpty();
+            boolean enabled = displayedReason().isEmpty();
             float hover = feedback.hover(0, enabled && isMouseOverElement(mouseX, mouseY), now);
             var visual = feedback.visual(0, 0, enabled, now, false);
             int x = getPosition().x, y = getPosition().y, width = getSize().width, height = getSize().height;
@@ -203,7 +219,8 @@ public final class StellarCloudUiWidgets {
 
         @Override @OnlyIn(Dist.CLIENT)
         public void drawInForeground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-            setHoverTooltips(Component.translatable(reason.isEmpty() ? labelKey : reason));
+            String displayed = displayedReason();
+            setHoverTooltips(Component.translatable(displayed.isEmpty() ? labelKey : displayed));
             super.drawInForeground(graphics, mouseX, mouseY, partialTicks);
         }
     }

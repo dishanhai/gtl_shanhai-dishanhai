@@ -277,6 +277,57 @@ public final class StellarCloudLibraryMachine extends MultiblockControllerMachin
         private final StellarCloudPreviewBudget searchBudget = new StellarCloudPreviewBudget();
         private boolean searchPending;
         Session(Player player) { this.player = player; }
+        /** 山海：只發送當前頁身份及呈現狀態，原件與 tooltip 繼續沿用原槽同步。 */
+        StellarCloudUiContract.LibraryState uiSnapshot() {
+            var filtered = rows();
+            page = StellarCloudGridPage.clamp(page, filtered.size());
+            var visible = new ArrayList<StellarCloudUiContract.RowState>();
+            for (int index = 0; index < PAGE_SIZE; index++) {
+                var row = row(index);
+                if (row != null) visible.add(new StellarCloudUiContract.RowState(row.id(), row.leased(), row.withdrawRequested(),
+                        StellarCloudUiContract.control(StellarCloudTransferUiState.withdraw(actionAuthorized(player), true,
+                                output.getStackInSlot(0).isEmpty(), row.leased() && row.withdrawRequested()))));
+            }
+            var selectedRow = selectedRow();
+            boolean onPage = visible.stream().anyMatch(row -> row.id().equals(selected));
+            String withdrawReason = !onPage && selectedRow != null ? PREFIX + "ui.selection_hidden" : withdrawDisabledReason();
+            var controls = new EnumMap<StellarCloudUiContract.ActionKind, StellarCloudUiContract.ControlState>(StellarCloudUiContract.ActionKind.class);
+            controls.put(StellarCloudUiContract.ActionKind.UPLOAD, StellarCloudUiContract.control(uploadDisabledReason()));
+            controls.put(StellarCloudUiContract.ActionKind.WITHDRAW, StellarCloudUiContract.control(withdrawReason));
+            controls.put(StellarCloudUiContract.ActionKind.QUICK_UPLOAD, StellarCloudUiContract.control(!actionAuthorized(player)
+                    ? PREFIX + "status.denied" : uploadOperation != null || !inbox.getStackInSlot(0).isEmpty()
+                    ? PREFIX + "ui.input_occupied" : ""));
+            controls.put(StellarCloudUiContract.ActionKind.GRANT, StellarCloudUiContract.control(accessDisabledReason()));
+            controls.put(StellarCloudUiContract.ActionKind.REVOKE, StellarCloudUiContract.control(accessDisabledReason()));
+            return new StellarCloudUiContract.LibraryState(true, search, type, availableTypes(), page, pages(), total(), filtered.size(),
+                    visible, new StellarCloudUiContract.SelectionState(selected, selectedRow != null, onPage,
+                    selectedRow != null && selectedRow.leased(), selectedRow != null && selectedRow.withdrawRequested()), selectedMember,
+                    canRead() && library() != null && library().owner().equals(player.getUUID()), canRead(), searchPending, controls);
+        }
+
+        /** UI 回呼只包裝既有流程；目標與來源在執行時重新核對。 */
+        String uiAction(StellarCloudUiContract.ActionKind action, UUID target, int slot, ItemStack expected) {
+            if (!actionAuthorized(player)) return status = PREFIX + "status.denied";
+            switch (action) {
+                case UPLOAD -> {
+                    if (!ItemStack.matches(inbox.getStackInSlot(0), expected)) return status = PREFIX + "ui.source_changed";
+                    uploadOriginal();
+                }
+                case QUICK_UPLOAD -> quickUpload(slot, expected);
+                case WITHDRAW -> {
+                    if (target == null || !target.equals(selected) || !uiSnapshot().selection().visibleOnPage())
+                        return status = PREFIX + "ui.list_changed";
+                    withdrawSelected();
+                }
+                case QUICK_WITHDRAW -> quickWithdraw(slot, target);
+                case GRANT, REVOKE -> {
+                    if (target == null || !target.equals(selectedMember)) return status = PREFIX + "status.invalid_member";
+                    access(action == StellarCloudUiContract.ActionKind.GRANT);
+                }
+                default -> { return status = PREFIX + "ui.request_rejected"; }
+            }
+            return status;
+        }
         private boolean canRead() { return player instanceof ServerPlayer server && openingAuthorized(server); }
         boolean inboxAccessible() { return uploadOperation == null && actionAuthorized(player); }
         boolean outputAccessible() { return actionAuthorized(player); }
