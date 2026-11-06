@@ -154,18 +154,18 @@ final class StellarCloudLibraryUi {
         text(details, 2, 2, 80, 18, COLORS.TEXT, session::selectedName);
         text(details, 2, 26, 80, 12, COLORS.ACCENT, session::selectedState);
         text(details, 2, 46, 80, 18, COLORS.TEXT_MUTED, session::selectedType);
-        // 原有檢索／選取提示繼續同步；業務操作以 controller 配對的回執覆蓋，不預報成功。
+        // Session 同步業務結果與選取拒絕；只在 pending 時覆蓋，避免舊回執永久遮住新訊息。
         var message = StellarCloudUiWidgets.text(root, STATUS.x() + 6, STATUS.y() + 4,
                 STATUS.width() - 12, 26, COLORS.TEXT, session::message);
         var feedback = clientText(root, STATUS.x() + 6, STATUS.y() + 4, STATUS.width() - 12, 26,
-                () -> feedbackColor(controller), () -> Component.translatable(!controller.state().synchronizedReady()
+                () -> controller.pendingRequestId().isPresent() ? COLORS.ACCENT : COLORS.TEXT,
+                () -> Component.translatable(!controller.state().synchronizedReady()
                         ? WAITING : !controller.state().authorized() ? PREFIX + "status.denied" : controller.feedbackKey()), true);
         root.addWidget(new Widget(0, 0, 0, 0) {
             @Override public void updateScreen() {
-                boolean show = !controller.state().synchronizedReady() || !controller.state().authorized()
-                        || controller.pendingRequestId().isPresent() || controller.lastResult() != null;
-                message.setVisible(!show);
-                feedback.setVisible(show);
+                Widget visible = Feedback.visible(controller, message, feedback);
+                message.setVisible(visible == message);
+                feedback.setVisible(visible == feedback);
             }
         });
 
@@ -212,6 +212,15 @@ final class StellarCloudLibraryUi {
         selector.setHoverTooltips(tr("ui.type_hint"));
         root.addWidget(selector);
         return new ModularUI(WIDTH, HEIGHT, machine, player).widget(root);
+    }
+
+    /** 山海：文字與控件測試共用同一個實際可見回饋選擇接點。 */
+    static final class Feedback {
+        static <T> T visible(LibraryController controller, T serverMessage, T actionFeedback) {
+            boolean override = !controller.state().synchronizedReady() || !controller.state().authorized()
+                    || controller.pendingRequestId().isPresent();
+            return override ? actionFeedback : serverMessage;
+        }
     }
 
     /** 山海：原生點擊、拖放與 shift-click 共用此閘門；只在服務端查閱即時授權。 */
@@ -563,17 +572,6 @@ final class StellarCloudLibraryUi {
         if (!state.synchronizedReady()) return new ControlState(false, WAITING);
         return new ControlState(next ? state.page() + 1 < state.pages() : state.page() > 0,
                 PREFIX + (next ? "ui.last_page" : "ui.first_page"));
-    }
-
-    private static int feedbackColor(LibraryController controller) {
-        if (controller.pendingRequestId().isPresent()) return COLORS.ACCENT;
-        var result = controller.lastResult();
-        if (result == null) return COLORS.TEXT;
-        return switch (result.kind()) {
-            case SUCCESS -> COLORS.OK;
-            case REJECTED -> 0xFFFF8A80;
-            case WAITING, RECOVERY -> COLORS.ACCENT;
-        };
     }
 
     private static ButtonWidget button(WidgetGroup root, Rect area, String key, Runnable action,
