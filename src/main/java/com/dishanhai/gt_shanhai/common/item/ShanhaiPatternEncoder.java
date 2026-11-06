@@ -22,9 +22,14 @@ import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.SmithingRecipe;
+import net.minecraft.world.item.crafting.StonecutterRecipe;
 
 import org.gtlcore.gtlcore.api.item.tool.ae2.patternTool.Ae2GtmProcessingPattern;
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
@@ -101,6 +106,38 @@ public final class ShanhaiPatternEncoder {
         if (!hasInput || output.isEmpty()) return ItemStack.EMPTY;
 
         return PatternDetailsHelper.encodeCraftingPattern(recipe, inputs, output, false, false);
+    }
+
+    /** 山海：復用 AE2 專用樣板；鍛造裝飾與基底 NBT 由實際選定原料計算。 */
+    public static ItemStack encodeMolecular(Recipe<Container> recipe, ServerPlayer player,
+                                           PatternEncodingTermMenu menu) {
+        if (recipe == null || player == null
+                || !(recipe instanceof SmithingRecipe || recipe instanceof StonecutterRecipe)) {
+            return ItemStack.EMPTY;
+        }
+        List<Ingredient> ingredients = CraftingRecipeUtil.getIngredients(recipe);
+        int expectedInputs = recipe instanceof SmithingRecipe ? 3 : 1;
+        if (ingredients.size() != expectedInputs) return ItemStack.EMPTY;
+
+        CandidatePriority priority = CandidatePriority.from(menu);
+        SimpleContainer inputs = new SimpleContainer(expectedInputs);
+        for (int slot = 0; slot < expectedInputs; slot++) {
+            ItemStack input = bestIngredientStack(ingredients.get(slot), priority, false);
+            if (input.isEmpty()) return ItemStack.EMPTY;
+            input.setCount(1);
+            inputs.setItem(slot, input);
+        }
+        if (!recipe.matches(inputs, player.level())) return ItemStack.EMPTY;
+        ItemStack output = recipe.assemble(inputs, player.level().registryAccess());
+        if (output.isEmpty()) return ItemStack.EMPTY;
+
+        if (recipe instanceof SmithingRecipe smithing) {
+            return PatternDetailsHelper.encodeSmithingTablePattern(smithing,
+                    AEItemKey.of(inputs.getItem(0)), AEItemKey.of(inputs.getItem(1)),
+                    AEItemKey.of(inputs.getItem(2)), AEItemKey.of(output), false);
+        }
+        return PatternDetailsHelper.encodeStonecuttingPattern((StonecutterRecipe) recipe,
+                AEItemKey.of(inputs.getItem(0)), AEItemKey.of(output), false);
     }
 
     private static void appendItemInputs(GTRecipe recipe, List<GenericStack> inputs,

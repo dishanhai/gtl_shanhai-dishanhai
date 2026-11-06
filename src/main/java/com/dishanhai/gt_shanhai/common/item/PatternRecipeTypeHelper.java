@@ -15,9 +15,12 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
+import net.minecraft.world.item.crafting.SmithingRecipe;
+import net.minecraft.world.item.crafting.StonecutterRecipe;
 import net.minecraft.world.level.Level;
 
 import java.util.List;
@@ -30,6 +33,8 @@ public final class PatternRecipeTypeHelper {
     public static final String TAG_RECIPE_TYPE = "gt_shanhai_recipe_type";
     public static final String TAG_RECIPE_ID = "gt_shanhai_recipe_id";
     public static final String VANILLA_CRAFTING_RECIPE_TYPE_ID = "minecraft:crafting";
+    public static final String VANILLA_SMITHING_RECIPE_TYPE_ID = "minecraft:smithing";
+    public static final String VANILLA_STONECUTTING_RECIPE_TYPE_ID = "minecraft:stonecutting";
     private static final String VANILLA_SMELTING_RECIPE_TYPE_ID = "minecraft:smelting";
     private static final String VANILLA_SMELTING_RECIPE_TYPE_PATH = "smelting";
     private static final String GTCEU_ELECTRIC_FURNACE_RECIPE_TYPE_ID = "gtceu:electric_furnace";
@@ -609,6 +614,25 @@ public final class PatternRecipeTypeHelper {
 
     public static boolean isVanillaCraftingRecipe(Level level, String recipeId) {
         return resolveVanillaCraftingRecipe(level, recipeId) != null;
+    }
+
+    /** 山海：按服務端精確 ID 解析原版鍛造／切石配方，不以輸入輸出猜配方。 */
+    public static Recipe<?> resolveVanillaMolecularRecipe(Level level, String recipeId) {
+        if (level == null || recipeId == null) return null;
+        ResourceLocation expected = ResourceLocation.tryParse(recipeId.trim());
+        if (expected == null) return null;
+        try {
+            Recipe<?> recipe = level.getRecipeManager().byKey(expected).orElse(null);
+            return recipe instanceof SmithingRecipe || recipe instanceof StonecutterRecipe ? recipe : null;
+        } catch (RuntimeException exception) {
+            LOG.debug("Failed vanilla molecular recipe lookup id={}", expected, exception);
+            return null;
+        }
+    }
+
+    public static boolean isVanillaMolecularRecipeType(String recipeTypeId) {
+        return VANILLA_SMITHING_RECIPE_TYPE_ID.equals(recipeTypeId)
+                || VANILLA_STONECUTTING_RECIPE_TYPE_ID.equals(recipeTypeId);
     }
 
     public static GTRecipe toElectricFurnaceRecipe(SmeltingRecipe recipe) {

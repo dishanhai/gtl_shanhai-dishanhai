@@ -95,6 +95,10 @@ public final class JeiPatternQuickEncodeButtons {
     }
 
     private static <T> ResourceLocation extractRecipeId(IRecipeLayoutDrawable<T> recipeLayout) {
+        // 山海：原版 CraftingRecipe／SmeltingRecipe／SmithingRecipe／StonecutterRecipe 使用自身精確 ID。
+        if (recipeLayout.getRecipe() instanceof Recipe<?> recipe) {
+            return recipe.getId();
+        }
         T recipe = recipeLayout.getRecipe();
         try {
             ResourceLocation categoryRecipeId = recipeLayout.getRecipeCategory().getRegistryName(recipe);

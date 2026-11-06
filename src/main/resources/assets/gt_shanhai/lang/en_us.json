@@ -1153,6 +1153,7 @@
   "message.gt_shanhai.jei.quick_encode.encode_failed": "Recipe encoding failed; no patterns were uploaded: %s",
   "message.gt_shanhai.jei.quick_encode.fail.not_encoded": "Result is not an encoded pattern (%s)",
   "message.gt_shanhai.jei.quick_encode.fail.not_crafting": "Result is not a crafting pattern (%s)",
+  "message.gt_shanhai.jei.quick_encode.fail.molecular_pattern": "Could not validate the smithing or stonecutting pattern recipe (%s)",
   "message.gt_shanhai.jei.quick_encode.fail.not_processing": "Result is not a processing pattern (%s)",
   "message.gt_shanhai.jei.quick_encode.fail.type_mismatch": "Pattern type mismatch (%s), expected %s, actual %s",
   "message.gt_shanhai.jei.quick_encode.fail.encode_error": "Encoding failed (%s, %s)",

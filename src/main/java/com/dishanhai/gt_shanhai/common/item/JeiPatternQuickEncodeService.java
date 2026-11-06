@@ -14,6 +14,8 @@ import appeng.api.storage.MEStorage;
 import appeng.core.definitions.AEItems;
 import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.crafting.pattern.AECraftingPattern;
+import appeng.crafting.pattern.AESmithingTablePattern;
+import appeng.crafting.pattern.AEStonecuttingPattern;
 import appeng.helpers.patternprovider.PatternContainer;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 import appeng.menu.slot.RestrictedInputSlot;
@@ -37,6 +39,7 @@ import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.resources.ResourceKey;
@@ -55,8 +58,11 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import org.gtlcore.gtlcore.config.ConfigHolder;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
+import net.minecraft.world.item.crafting.SmithingRecipe;
+import net.minecraft.world.item.crafting.StonecutterRecipe;
 import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.item.tool.ae2.patternTool.Ae2GtmProcessingPattern;
@@ -132,9 +138,12 @@ public final class JeiPatternQuickEncodeService {
             String anchorRecipeId, boolean wholeRecipeType, boolean orderByproducts) {
         CraftingRecipe craftingAnchor = PatternRecipeTypeHelper.resolveVanillaCraftingRecipe(
                 player.level(), anchorRecipeId);
-        GTRecipe anchor = craftingAnchor == null
+        Recipe<?> molecularAnchor = PatternRecipeTypeHelper.resolveVanillaMolecularRecipe(
+                player.level(), anchorRecipeId);
+        GTRecipe anchor = craftingAnchor == null && molecularAnchor == null
                 ? PatternRecipeTypeHelper.resolveRecipe(player.level(), anchorRecipeId) : null;
-        if (craftingAnchor == null && (anchor == null || anchor.id == null || anchor.recipeType == null
+        if (craftingAnchor == null && molecularAnchor == null
+                && (anchor == null || anchor.id == null || anchor.recipeType == null
                 || anchor.recipeType.registryName == null)) {
             GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] recipe resolve failed id={} dimension={}",
                     anchorRecipeId, player.level().dimension().location());
@@ -161,6 +170,18 @@ public final class JeiPatternQuickEncodeService {
             }
             recipeCount = recipes.size();
             patterns = encodeCraftingPatterns(player, menu, recipes, failure);
+        } else if (molecularAnchor != null) {
+            List<Recipe<?>> recipes = wholeRecipeType
+                    ? collectVanillaMolecularRecipes(player.level(), molecularAnchor, failure)
+                    : List.of(molecularAnchor);
+            if (recipes.isEmpty()) {
+                showEncodeFailed(player, failure);
+                return;
+            }
+            recipeTypeId = BuiltInRegistries.RECIPE_TYPE.getKey(molecularAnchor.getType()).toString();
+            for (Recipe<?> recipe : recipes) recipeIds.add(recipe.getId().toString());
+            recipeCount = recipes.size();
+            patterns = encodeMolecularPatterns(player, menu, recipes, recipeTypeId, failure);
         } else {
             boolean vanillaSmelting = PatternRecipeTypeHelper.isVanillaSmeltingRecipe(
                     player.level(), anchorRecipeId);
@@ -597,6 +618,61 @@ public final class JeiPatternQuickEncodeService {
         return recipes;
     }
 
+    private static List<Recipe<?>> collectVanillaMolecularRecipes(Level level, Recipe<?> anchor,
+            EncodeFailure failure) {
+        Map<ResourceLocation, Recipe<?>> unique = new LinkedHashMap<>();
+        try {
+            List<? extends Recipe<?>> candidates = anchor instanceof SmithingRecipe
+                    ? level.getRecipeManager().getAllRecipesFor(RecipeType.SMITHING)
+                    : level.getRecipeManager().getAllRecipesFor(RecipeType.STONECUTTING);
+            for (Recipe<?> recipe : candidates) {
+                if (recipe != null && recipe.getId() != null && recipe.getType() == anchor.getType()) {
+                    unique.putIfAbsent(recipe.getId(), recipe);
+                }
+            }
+        } catch (RuntimeException exception) {
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.recipe_table", anchor.getType());
+            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] molecular recipe table read failed type={}",
+                    anchor.getType(), exception);
+            return List.of();
+        }
+        List<Recipe<?>> recipes = new ArrayList<>(unique.values());
+        recipes.sort(Comparator.comparing(recipe -> recipe.getId().toString()));
+        if (recipes.isEmpty()) failure.set("message.gt_shanhai.jei.quick_encode.fail.empty_recipes");
+        return recipes;
+    }
+
+    private static List<ItemStack> encodeMolecularPatterns(ServerPlayer player, PatternEncodingTermMenu menu,
+            List<Recipe<?>> recipes, String recipeTypeId, EncodeFailure failure) {
+        List<ItemStack> patterns = new ArrayList<>(recipes.size());
+        for (Recipe<?> recipe : recipes) {
+            String recipeId = recipe.getId().toString();
+            try {
+                ItemStack pattern = recipe instanceof SmithingRecipe smithing
+                        ? ShanhaiPatternEncoder.encodeMolecular(smithing, player, menu)
+                        : recipe instanceof StonecutterRecipe stonecutting
+                                ? ShanhaiPatternEncoder.encodeMolecular(stonecutting, player, menu)
+                                : ItemStack.EMPTY;
+                if (!isExactValidPattern(player, recipeTypeId, pattern, failure, recipeId)) {
+                    GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] rejected molecular pattern recipe={} reason={}",
+                            recipeId, failure.key);
+                    return List.of();
+                }
+                pattern = pattern.copy();
+                pattern.setCount(1);
+                PatternQuickUploadMetadata.writeRecipeTypeId(pattern, new ResourceLocation(recipeTypeId));
+                PatternEncoderMetadata.writeEncoder(pattern, player.getUUID(), player.getGameProfile().getName());
+                patterns.add(pattern);
+            } catch (RuntimeException exception) {
+                failure.replace("message.gt_shanhai.jei.quick_encode.fail.encode_error",
+                        recipeId, exception.getClass().getSimpleName());
+                GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] molecular encode failed recipe={}", recipeId, exception);
+                return List.of();
+            }
+        }
+        return patterns;
+    }
+
     private static List<ItemStack> encodePatterns(ServerPlayer player, PatternEncodingTermMenu menu,
             List<GTRecipe> recipes, EncodeFailure failure) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
@@ -677,6 +753,16 @@ public final class JeiPatternQuickEncodeService {
             return false;
         }
         IPatternDetails details = PatternDetailsHelper.decodePattern(pattern, player.level());
+        if (PatternRecipeTypeHelper.isVanillaMolecularRecipeType(recipeTypeId)) {
+            if (PatternRecipeTypeHelper.VANILLA_SMITHING_RECIPE_TYPE_ID.equals(recipeTypeId)
+                    && details instanceof AESmithingTablePattern smithing
+                    && smithing.getRecipeId().toString().equals(recipeId)) return true;
+            if (PatternRecipeTypeHelper.VANILLA_STONECUTTING_RECIPE_TYPE_ID.equals(recipeTypeId)
+                    && details instanceof AEStonecuttingPattern stonecutting
+                    && stonecutting.getRecipeId().toString().equals(recipeId)) return true;
+            failure.set("message.gt_shanhai.jei.quick_encode.fail.molecular_pattern", recipeId);
+            return false;
+        }
         if (PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID.equals(recipeTypeId)) {
             if (details instanceof AECraftingPattern) return true;
             failure.set("message.gt_shanhai.jei.quick_encode.fail.not_crafting", recipeId);
@@ -711,6 +797,12 @@ public final class JeiPatternQuickEncodeService {
             if (details instanceof AECraftingPattern) {
                 return PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID;
             }
+            if (details instanceof AESmithingTablePattern) {
+                return PatternRecipeTypeHelper.VANILLA_SMITHING_RECIPE_TYPE_ID;
+            }
+            if (details instanceof AEStonecuttingPattern) {
+                return PatternRecipeTypeHelper.VANILLA_STONECUTTING_RECIPE_TYPE_ID;
+            }
         } catch (RuntimeException exception) {
             GTDishanhaiMod.LOGGER.debug("[JEIQuickEncode] pattern type decode failed", exception);
         }
@@ -729,6 +821,10 @@ public final class JeiPatternQuickEncodeService {
             return List.of();
         }
 
+        // 山海：鍛造與切石由分子操縱者接手，直接復用其公開目標搜尋。
+        if (PatternRecipeTypeHelper.isVanillaMolecularRecipeType(recipeTypeId)) {
+            return findPublicStellarTargets(player, networkNode, pattern, recipeTypeId);
+        }
         List<PatternQuickUploadService.Target> cachedTargets = findCachedStellarTargets(
                 player, networkNode.getGrid(), pattern, recipeTypeId);
         if (!cachedTargets.isEmpty()) return cachedTargets;
@@ -1230,7 +1326,8 @@ public final class JeiPatternQuickEncodeService {
 
     private static PatternQuickUploadService.Target filterToSupportedTarget(MinecraftServer server,
             PatternQuickUploadService.Target target, String recipeTypeId) {
-        PatternQuickUploadService.Target stellar = filterToStellarTarget(server, target, recipeTypeId);
+        PatternQuickUploadService.Target stellar = PatternRecipeTypeHelper.isVanillaMolecularRecipeType(recipeTypeId)
+                ? null : filterToStellarTarget(server, target, recipeTypeId);
         if (stellar != null) return stellar;
         if (isMolecularAssemblerTarget(server, target)) {
             GTDishanhaiMod.LOGGER.info(

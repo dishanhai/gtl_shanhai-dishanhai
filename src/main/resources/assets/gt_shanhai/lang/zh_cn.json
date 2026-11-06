@@ -1380,6 +1380,7 @@
   "message.gt_shanhai.jei.quick_encode.encode_failed": "配方编码失败，未写入任何样板：%s",
   "message.gt_shanhai.jei.quick_encode.fail.not_encoded": "结果不是已编码样板（%s）",
   "message.gt_shanhai.jei.quick_encode.fail.not_crafting": "结果不是合成样板（%s）",
+  "message.gt_shanhai.jei.quick_encode.fail.molecular_pattern": "无法校验锻造或切石样板的配方（%s）",
   "message.gt_shanhai.jei.quick_encode.fail.not_processing": "结果不是处理样板（%s）",
   "message.gt_shanhai.jei.quick_encode.fail.type_mismatch": "样板类型不符（%s），期望 %s，实际 %s",
   "message.gt_shanhai.jei.quick_encode.fail.encode_error": "编码过程出错（%s，%s）",
