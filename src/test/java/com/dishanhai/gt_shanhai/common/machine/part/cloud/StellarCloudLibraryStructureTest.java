@@ -158,7 +158,10 @@ class StellarCloudLibraryStructureTest {
         assertTrue(machine.contains(".pattern(StellarCloudLibraryStructure::createPattern)"));
         assertTrue(machine.contains("RotationState.NON_Y_AXIS"));
         assertTrue(machine.contains("return online && isFormed();"));
-        assertTrue(machine.contains("!main.isFormed()"), "未成形主庫不得被任何星律發現");
+        assertTrue(machine.contains("private boolean connectedTo(ServerLevel level, IGrid grid)"));
+        assertTrue(machine.contains("if (!isFormed() || getLevel() == null"));
+        assertTrue(machine.contains("if (!main.connectedTo(level, grid)) continue;"),
+                "遠端上傳與星律供給都應透過同一成形及網路檢查");
         int onLoad = machine.indexOf("@Override public void onLoad()");
         int superLoad = machine.indexOf("super.onLoad()", onLoad);
         assertTrue(machine.substring(onLoad, superLoad).contains("isFormed = false"),

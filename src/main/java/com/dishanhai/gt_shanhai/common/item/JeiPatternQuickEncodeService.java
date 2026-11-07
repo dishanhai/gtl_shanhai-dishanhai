@@ -27,6 +27,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter.MaterialEntry;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
+import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudLibraryMachine;
 import com.dishanhai.gt_shanhai.mixin.PatternEncodingTermMenuAccessor;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
@@ -109,6 +110,30 @@ public final class JeiPatternQuickEncodeService {
     public static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
             String anchorRecipeId, boolean wholeRecipeType) {
         encodeAndUpload(player, menu, anchorRecipeId, wholeRecipeType, false);
+    }
+
+    public static void encodeRecipeToCloud(ServerPlayer player, PatternEncodingTermMenu menu, String recipeId) {
+        GTRecipe recipe = PatternRecipeTypeHelper.resolveRecipe(player.level(), recipeId);
+        if (recipe == null || recipe.id == null || recipe.recipeType == null
+                || recipe.recipeType.registryName == null) {
+            show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+            return;
+        }
+        EncodeFailure failure = new EncodeFailure();
+        List<ItemStack> patterns = encodePatterns(player, menu, List.of(recipe), failure);
+        if (patterns.isEmpty()) {
+            showEncodeFailed(player, failure);
+            return;
+        }
+        uploadEncodedToCloud(player, menu, patterns.get(0));
+    }
+
+    public static void uploadEncodedToCloud(ServerPlayer player, PatternEncodingTermMenu menu, ItemStack pattern) {
+        boolean uploaded = StellarCloudLibraryMachine.uploadFromTerminal(player, menu.getNetworkNode(), pattern, () -> {
+            PatternSource source = findPatternSource(menu, 1);
+            return source != null && consumePatternSource(menu, source);
+        });
+        if (uploaded) GTLStats.awardPatternEncoded(player);
     }
 
     public static void encodeMultiblockAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,

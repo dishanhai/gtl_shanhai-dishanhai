@@ -4,6 +4,8 @@ import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** 山海：原件與租約以真實 NBT 目錄驗證，不需啟動遊戲。 */
@@ -24,6 +26,24 @@ class StellarCloudCatalogTest {
         var a = catalog.upload(UUID.randomUUID(), tag, new CompoundTag(), Set.of("gtceu:lathe"));
         var b = catalog.upload(UUID.randomUUID(), tag, new CompoundTag(), Set.of("gtceu:lathe"));
         assertFalse(b.inserted()); assertEquals(a.entry(), b.entry()); assertEquals(1, catalog.size());
+    }
+    @Test void remoteUploadDebitsOnlyOnceAndSkipsAnIdenticalOriginal() {
+        var catalog = new StellarCloudCatalog();
+        var debits = new AtomicInteger();
+        BooleanSupplier debit = () -> debits.incrementAndGet() == 1;
+        var original = pattern("ae2:processing_pattern");
+
+        assertTrue(catalog.upload(UUID.randomUUID(), original, new CompoundTag(), Set.of(), debit).inserted());
+        assertFalse(catalog.upload(UUID.randomUUID(), original, new CompoundTag(), Set.of(), debit).inserted());
+        assertEquals(1, debits.get());
+        assertEquals(1, catalog.size());
+    }
+    @Test void remoteUploadWithAnUnavailableSourceLeavesCatalogUntouched() {
+        var catalog = new StellarCloudCatalog();
+        assertNull(catalog.upload(UUID.randomUUID(), pattern("ae2:processing_pattern"),
+                new CompoundTag(), Set.of(), () -> false));
+        assertEquals(0, catalog.size());
+        assertEquals(0L, catalog.revision());
     }
     @Test void exclusiveLeaseBlocksWithdrawalAndForeignRelease() {
         var catalog = new StellarCloudCatalog(); UUID entry = catalog.upload(UUID.randomUUID(), pattern("a"), new CompoundTag(), Set.of("x")).entry();

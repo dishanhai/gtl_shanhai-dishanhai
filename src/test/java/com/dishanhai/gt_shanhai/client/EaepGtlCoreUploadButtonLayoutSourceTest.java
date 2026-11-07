@@ -45,6 +45,15 @@ class EaepGtlCoreUploadButtonLayoutSourceTest {
                 "首次移动必须记录前后坐标，供实机日志验真");
     }
 
+    @Test
+    void registersAnIndependentCloudUploadWidgetAboveQuickUpload() throws IOException {
+        String source = Files.readString(MIXIN);
+        assertTrue(source.contains("addRenderableWidget(gtShanhai$cloudUploadButton)"));
+        assertTrue(source.contains("cloudMenu.gtShanhai$requestCloudUpload(\"\")"));
+        assertTrue(source.contains("quickUpload.getY() - gtShanhai$cloudUploadButton.getHeight() - 2"));
+        assertTrue(source.contains("Component.translatable(\"gt_shanhai.cloud.ui.upload_from_terminal\")"));
+    }
+
     private static void assertOrder(String source, String first, String second, String message) {
         int firstIndex = source.indexOf(first);
         int secondIndex = source.indexOf(second);

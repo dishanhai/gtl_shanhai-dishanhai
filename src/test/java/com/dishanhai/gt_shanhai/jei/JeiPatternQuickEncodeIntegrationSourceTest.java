@@ -20,7 +20,7 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
     private static final Path EN_US = lang("en_us.json");
 
     @Test
-    void registersTwoJeiRecipeButtonsWithExactTooltips() throws Exception {
+    void registersSeparateSingleRecipeBatchAndCloudButtons() throws Exception {
         String buttons = Files.readString(BUTTONS);
         String plugin = Files.readString(PLUGIN);
         String zhCn = Files.readString(ZH_CN);
@@ -29,7 +29,9 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
         assertTrue(plugin.contains("void registerAdvanced(IAdvancedRegistration registration)"));
         assertTrue(plugin.contains("JeiPatternQuickEncodeButtons.register(registration)"));
         assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(patternIcon, false))"));
-        assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(patternIcon, true))"));
+        assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(recipeTypeIcon, true))"));
+        assertTrue(buttons.contains("addRecipeButtonFactory(new CloudUploadFactory(cloudIcon))"));
+        assertTrue(buttons.contains("cloudMenu.gtShanhai$requestCloudUpload(recipeId.toString())"));
         assertTrue(buttons.contains("instanceof Recipe<?> recipe"));
         assertTrue(buttons.contains("recipeLayout.getRecipeCategory().getRegistryName(recipe)"));
         assertTrue(buttons.contains("state.setVisible(true)"));
@@ -42,6 +44,8 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
         assertTrue(enUs.contains("\"tooltip.gt_shanhai.jei.quick_encode_pattern\""));
         assertTrue(enUs.contains("\"tooltip.gt_shanhai.jei.quick_encode_recipe_type\""));
         assertTrue(enUs.contains("\"message.gt_shanhai.jei.quick_encode.open_terminal\""));
+        assertTrue(zhCn.contains("\"gt_shanhai.cloud.ui.upload_from_terminal\": \"上传到星律样板库\""));
+        assertTrue(enUs.contains("\"gt_shanhai.cloud.ui.upload_from_terminal\""));
     }
 
     @Test

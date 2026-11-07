@@ -4,7 +4,10 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import org.jetbrains.annotations.Nullable;
+
 import java.util.*;
+import java.util.function.BooleanSupplier;
 
 /** 山海：原件權威目錄。所有可變 NBT 都在邊界複製；租約不因卸載逾時而釋放。 */
 public final class StellarCloudCatalog {
@@ -40,6 +43,12 @@ public final class StellarCloudCatalog {
     }
 
     public Upload upload(UUID operation, CompoundTag original, CompoundTag configuration, Set<String> types) {
+        return upload(operation, original, configuration, types, () -> true);
+    }
+
+    /** Checks duplicates before debiting a live source. A failed debit leaves the catalog unchanged. */
+    @Nullable Upload upload(UUID operation, CompoundTag original, CompoundTag configuration, Set<String> types,
+            BooleanSupplier debitSource) {
         Objects.requireNonNull(operation);
         Objects.requireNonNull(original);
         if (original.isEmpty()) throw new IllegalArgumentException("Empty cloud original");
@@ -54,6 +63,7 @@ public final class StellarCloudCatalog {
         }
         UUID id = UUID.randomUUID();
         Row row = new Row(id, single, configuration, types);
+        if (!debitSource.getAsBoolean()) return null;
         entries.put(id, row); receipts.put(operation, id); index(row); revision++;
         return new Upload(id, true);
     }

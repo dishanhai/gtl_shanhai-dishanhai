@@ -6,6 +6,7 @@ import appeng.menu.me.common.MEStorageMenu;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
+import com.dishanhai.gt_shanhai.common.ae2.CloudPatternUploadMenu;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.JeiBookmarkMode;
 import com.dishanhai.gt_shanhai.network.JeiBookmarkMissingItemsRequestPacket;
@@ -48,6 +49,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluid;
@@ -72,6 +74,8 @@ public final class JeiPatternQuickEncodeButtons {
         IGuiHelper guiHelper = registration.getJeiHelpers().getGuiHelper();
         IDrawable patternIcon = guiHelper.createDrawableItemStack(AEItems.PROCESSING_PATTERN.stack());
         registration.addRecipeButtonFactory(new Factory(patternIcon, false));
+        IDrawable cloudIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.ENDER_CHEST));
+        registration.addRecipeButtonFactory(new CloudUploadFactory(cloudIcon));
         IDrawable recipeTypeIcon = guiHelper.createDrawableItemStack(AEItems.CRAFTING_PATTERN.stack());
         registration.addRecipeButtonFactory(new Factory(recipeTypeIcon, true));
         IDrawable bookmarkIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.BOOK));
@@ -181,7 +185,18 @@ public final class JeiPatternQuickEncodeButtons {
             if (recipeId == null) {
                 return null;
             }
-            return new Controller(icon, recipeId, wholeRecipeType, recipeLayout);
+            return new Controller(icon, recipeId, wholeRecipeType, false, recipeLayout);
+        }
+    }
+
+    private record CloudUploadFactory(IDrawable icon) implements IRecipeButtonControllerFactory {
+        @Override
+        public <T> IIconButtonController createButtonController(IRecipeLayoutDrawable<T> recipeLayout) {
+            Object recipe = recipeLayout.getRecipe();
+            if (!(recipe instanceof GTRecipe || recipe instanceof GTRecipeWrapper
+                    || recipe instanceof SmeltingRecipe)) return null;
+            ResourceLocation recipeId = extractRecipeId(recipeLayout);
+            return recipeId == null ? null : new Controller(icon, recipeId, false, true, recipeLayout);
         }
     }
 
@@ -192,14 +207,16 @@ public final class JeiPatternQuickEncodeButtons {
         private final IDrawable icon;
         private final ResourceLocation recipeId;
         private final boolean wholeRecipeType;
+        private final boolean cloudUpload;
         private final IRecipeLayoutDrawable<?> recipeLayout;
         private long confirmationExpiresAt;
 
-        private Controller(IDrawable icon, ResourceLocation recipeId, boolean wholeRecipeType,
+        private Controller(IDrawable icon, ResourceLocation recipeId, boolean wholeRecipeType, boolean cloudUpload,
                            IRecipeLayoutDrawable<?> recipeLayout) {
             this.icon = icon;
             this.recipeId = recipeId;
             this.wholeRecipeType = wholeRecipeType;
+            this.cloudUpload = cloudUpload;
             this.recipeLayout = recipeLayout;
         }
 
@@ -240,6 +257,12 @@ public final class JeiPatternQuickEncodeButtons {
                 return false;
             }
             if (!input.isSimulate()) {
+                if (cloudUpload) {
+                    if (menu instanceof CloudPatternUploadMenu cloudMenu) {
+                        cloudMenu.gtShanhai$requestCloudUpload(recipeId.toString());
+                    }
+                    return true;
+                }
                 if (wholeRecipeType && !confirmationPending()) {
                     armConfirmation();
                     minecraft.player.displayClientMessage(Component.translatable(
@@ -255,7 +278,9 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public void getTooltips(ITooltipBuilder tooltip) {
-            if (wholeRecipeType && confirmationPending()) {
+            if (cloudUpload) {
+                tooltip.add(Component.translatable("gt_shanhai.cloud.ui.upload_from_terminal"));
+            } else if (wholeRecipeType && confirmationPending()) {
                 tooltip.add(Component.translatable(
                         "tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm"));
             } else {

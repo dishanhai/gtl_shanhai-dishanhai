@@ -9,8 +9,12 @@ import appeng.menu.me.items.PatternEncodingTermMenu;
 import appeng.menu.slot.RestrictedInputSlot;
 
 import com.dishanhai.gt_shanhai.common.ae2.ByproductOrderMenu;
+import com.dishanhai.gt_shanhai.common.ae2.CloudPatternUploadMenu;
 import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
+import com.dishanhai.gt_shanhai.common.item.JeiPatternQuickEncodeService;
+import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudLibraryMachine;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -18,6 +22,7 @@ import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.PacketDistributor;
 
+import org.gtlcore.gtlcore.common.data.GTLStats;
 import org.gtlcore.gtlcore.integration.ae2.pattern.PatternQuickUploadSelectionMenu;
 import org.gtlcore.gtlcore.integration.ae2.pattern.PatternQuickUploadService;
 import org.gtlcore.gtlcore.integration.ae2.wireless.WirelessAePackets;
@@ -32,6 +37,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 样板终端的副产物标识，和一条独立的带标识上传。
@@ -39,7 +45,11 @@ import java.util.List;
  * 只在对方开始普通快速上传时清掉我们自己的待选目标，避免选目标时串线。
  */
 @Mixin(value = PatternEncodingTermMenu.class, priority = 1100, remap = false)
-public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu implements ByproductOrderMenu {
+public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu
+        implements ByproductOrderMenu, CloudPatternUploadMenu {
+
+    @Unique
+    private static final String gtShanhai$CLOUD_UPLOAD_ACTION = "gtShanhaiUploadCloudPattern";
 
     @Shadow(remap = false)
     @Final
@@ -61,6 +71,9 @@ public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu im
     @Unique
     private boolean gtShanhai$markByproductOnEncode;
 
+    @Unique
+    private long gtShanhai$cloudUploadSequence;
+
     protected PatternEncodingByproductMenuMixin(MenuType<?> menuType, int id, Inventory ip, ITerminalHost host) {
         super(menuType, id, ip, host);
     }
@@ -73,6 +86,56 @@ public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu im
         registerClientAction("gtShanhaiUploadByproductPattern", this::gtShanhai$uploadByproductPattern);
         registerClientAction("gtShanhaiSetMarkByproductOnEncode", Boolean.class,
                 this::gtShanhai$setMarkByproductOnEncode);
+        registerClientAction(gtShanhai$CLOUD_UPLOAD_ACTION, CloudPatternUploadMenu.Request.class,
+                this::gtShanhai$uploadCloudPattern);
+    }
+
+    @Override
+    public void gtShanhai$requestCloudUpload(String recipeId) {
+        if (!isClientSide()) return;
+        sendClientAction(gtShanhai$CLOUD_UPLOAD_ACTION, new CloudPatternUploadMenu.Request(
+                ++gtShanhai$cloudUploadSequence, recipeId, gtShanhai$outputSignature(this.encodedPatternSlot.getItem())));
+    }
+
+    @Unique
+    private void gtShanhai$uploadCloudPattern(CloudPatternUploadMenu.Request request) {
+        if (!(getPlayer() instanceof ServerPlayer player) || player.containerMenu != (Object) this
+                || !stillValid(player) || request == null || request.sequence() <= gtShanhai$cloudUploadSequence
+                || request.recipeId() == null || request.recipeId().length() > 512) return;
+        gtShanhai$cloudUploadSequence = request.sequence();
+        PatternEncodingTermMenu menu = (PatternEncodingTermMenu) (Object) this;
+        if (!request.recipeId().isEmpty()) {
+            JeiPatternQuickEncodeService.encodeRecipeToCloud(player, menu, request.recipeId());
+            return;
+        }
+
+        ItemStack output = this.encodedPatternSlot.getItem();
+        if (request.expectedOutput() != gtShanhai$outputSignature(output)) {
+            player.displayClientMessage(Component.translatable("gt_shanhai.cloud.status.terminal_output_changed"), true);
+            return;
+        }
+        boolean fromOutput = !output.isEmpty();
+        boolean needsEncoding = !fromOutput || AEItems.BLANK_PATTERN.isSameAs(output);
+        ItemStack pattern = needsEncoding ? encodePattern() : output;
+        if (pattern == null || pattern.isEmpty()) {
+            player.displayClientMessage(Component.translatable("gt_shanhai.cloud.status.invalid"), true);
+            return;
+        }
+        if (fromOutput) {
+            boolean uploaded = StellarCloudLibraryMachine.uploadFromTerminal(player, getNetworkNode(), pattern, () -> {
+                this.encodedPatternSlot.set(output.copyWithCount(output.getCount() - 1));
+                return true;
+            });
+            if (needsEncoding && uploaded) GTLStats.awardPatternEncoded(player);
+        } else {
+            JeiPatternQuickEncodeService.uploadEncodedToCloud(player, menu, pattern);
+        }
+    }
+
+    @Unique
+    private static int gtShanhai$outputSignature(ItemStack stack) {
+        if (stack.isEmpty()) return 0;
+        return Objects.hash(BuiltInRegistries.ITEM.getKey(stack.getItem()), stack.getTag(), stack.getCount());
     }
 
     @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), remap = false, require = 0)

@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.machine.part.cloud;
 
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.networking.IGrid;
+import appeng.api.networking.IGridNode;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
@@ -34,6 +35,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 import java.util.*;
+import java.util.function.BooleanSupplier;
 
 /** 山海：原件留在世界庫，成形主庫提供同一 AE 網路的管理與發現入口。 */
 public final class StellarCloudLibraryMachine extends MultiblockControllerMachine
@@ -71,7 +73,7 @@ public final class StellarCloudLibraryMachine extends MultiblockControllerMachin
                 .pattern(StellarCloudLibraryStructure::createPattern)
                 .renderer(() -> new com.dishanhai.gt_shanhai.client.renderer.machine.StellarCloudLibraryRenderer(
                         new ResourceLocation("gtlcore", "block/casings/iridium_casing"),
-                        new ResourceLocation("gt_shanhai", "block/machine/part/recipe_type_pattern_buffer")))
+                        new ResourceLocation("gt_shanhai", "block/machine/part/cloud_pattern_library")))
                 .hasTESR(true)
                 .register();
         definition.setTooltipBuilder((stack, lines) -> {
@@ -540,6 +542,53 @@ public final class StellarCloudLibraryMachine extends MultiblockControllerMachin
         }
     }
 
+    /** The terminal's active grid and the requesting player determine the only valid destination. */
+    public static boolean uploadFromTerminal(ServerPlayer player, @Nullable IGridNode node, ItemStack original,
+            BooleanSupplier debitSource) {
+        ServerLevel level = player.serverLevel();
+        if (!level.getServer().isSameThread()) return false;
+        if (node == null || !node.isActive()) return terminalUploadFeedback(player, "no_library");
+        IGrid grid = node.getGrid();
+        StellarCloudLibraryMachine selected = null;
+        for (var main : List.copyOf(LOADED)) {
+            if (!main.connectedTo(level, grid)) continue;
+            var library = main.library();
+            if (library == null || !library.authorized(player.getUUID())) continue;
+            if (selected != null && !Objects.equals(selected.libraryId, main.libraryId)) {
+                return terminalUploadFeedback(player, "ambiguous_library");
+            }
+            selected = main;
+        }
+        if (selected == null) return terminalUploadFeedback(player, "no_library");
+        if (!selected.accepts(original)) return terminalUploadFeedback(player, "invalid");
+        Set<String> types;
+        try {
+            types = selected.patternTypes(original);
+        } catch (RuntimeException malformed) {
+            return terminalUploadFeedback(player, "invalid");
+        }
+        var result = selected.library().catalog().upload(UUID.randomUUID(),
+                original.copyWithCount(1).save(new CompoundTag()), new CompoundTag(), types, debitSource);
+        if (result == null) return terminalUploadFeedback(player, "missing_blank");
+        if (!result.inserted()) return terminalUploadFeedback(player, "duplicate");
+        selected.changed();
+        return terminalUploadFeedback(player, "uploaded");
+    }
+
+    private static boolean terminalUploadFeedback(ServerPlayer player, String status) {
+        player.displayClientMessage(Component.translatable(PREFIX + "status." + status), true);
+        return status.equals("uploaded");
+    }
+
+    private boolean connectedTo(ServerLevel level, IGrid grid) {
+        if (!isFormed() || getLevel() == null || getLevel().getServer() != level.getServer()
+                || getHolder().getSelf().isRemoved()) return false;
+        var core = aeCore();
+        if (core == null || !aeBindingReady()) return false;
+        var node = core.getMainNode().getNode();
+        return node != null && node.isActive() && node.getGrid() == grid;
+    }
+
     private static @Nullable StellarCloudLibraryMachine binding(RecipeTypePatternBufferPartMachine machine, @Nullable UUID expected) {
         if (!(machine.getLevel() instanceof ServerLevel level) || !level.getServer().isSameThread()) return null;
         var node = machine.getMainNode().getNode();
@@ -547,12 +596,7 @@ public final class StellarCloudLibraryMachine extends MultiblockControllerMachin
         IGrid grid = node.getGrid(); UUID actor = node.getOwningPlayerProfileId();
         StellarCloudLibraryMachine selected = null;
         for (var main : List.copyOf(LOADED)) {
-            if (!main.isFormed()) continue;
-            if (main.getLevel() == null || main.getLevel().getServer() != level.getServer()) continue;
-            var core = main.aeCore();
-            if (core == null || !main.aeBindingReady()) continue;
-            var mainNode = core.getMainNode().getNode();
-            if (mainNode == null || !mainNode.isActive() || mainNode.getGrid() != grid || main.getHolder().getSelf().isRemoved()) continue;
+            if (!main.connectedTo(level, grid)) continue;
             if (selected != null && !Objects.equals(selected.libraryId, main.libraryId)) return null;
             selected = main;
         }

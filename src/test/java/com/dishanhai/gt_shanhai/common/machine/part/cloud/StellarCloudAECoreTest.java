@@ -49,8 +49,9 @@ class StellarCloudAECoreTest {
         assertTrue(machine.contains("public @Nullable UUID boundPlayerId()"));
         assertFalse(machine.contains("new GridNodeHolder(this)"), "The controller cannot bypass its AE part");
         assertTrue(machine.contains("core.readyFor(this, owner)"));
-        assertTrue(machine.contains("var mainNode = core.getMainNode().getNode()"));
-        assertTrue(machine.contains("!main.aeBindingReady()"));
+        assertTrue(machine.contains("if (core == null || !aeBindingReady()) return false;"));
+        assertTrue(machine.contains("var node = core.getMainNode().getNode()"));
+        assertTrue(machine.contains("node.getGrid() == grid"));
         assertTrue(machine.contains("data.defaultLibrary(owner).id()"));
     }
 
