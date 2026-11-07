@@ -23,6 +23,7 @@ import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.api.machine.part.IMaintenanceBypassPart;
 import com.dishanhai.gt_shanhai.api.machine.part.IRecipeThreadSource;
 import com.dishanhai.gt_shanhai.common.machine.part.ui.RecipeThreadConfigurationPage;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadSources;
 import com.dishanhai.gt_shanhai.common.machine.trait.InfiniteCWUContainer;
 import com.gregtechceu.gtceu.api.GTValues;
@@ -501,7 +502,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     @Override
     public int getThreadCount() {
         if (!threadEnabled) return 0;
-        if (hasParallelOverdriver()) return Integer.MAX_VALUE;
+        if (hasParallelOverdriver()) return PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
         long multiplier = getThreadBoostFromSlot();
         long base = Math.min(threadCount, threadMax);
         if (multiplier > 1) {
@@ -527,11 +528,16 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     /** 获取原始 long 线程值（突破 Integer.MAX_VALUE 限制） */
     public long getRawThreadCount() {
         if (!threadEnabled) return 0;
-        if (hasParallelOverdriver()) return Long.MAX_VALUE;
+        if (hasParallelOverdriver()) return PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
         long multiplier = getThreadBoostFromSlot();
         long base = Math.min(threadCount, threadMax);
         long result = base * multiplier;
         return result < base ? Long.MAX_VALUE : result; // 溢出保护
+    }
+
+    private static Component overdriverThreadInfo() {
+        return Component.translatable("gt_shanhai.recipe_threads.overdriver_capacity",
+                PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY);
     }
 
     @Override
@@ -847,8 +853,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         boostSlotWidget.setHoverTooltips(
                 Component.literal("§e§l线程增强"),
                 Component.literal("§7世线残片 — 倍率叠加至线程数"),
-                Component.literal("§7§6寰宇并行超限器 — 每个配方独立 MAX 并行"),
-                Component.literal("§7§6超限器同时锁定线程为 Long.MAX_VALUE"));
+                overdriverThreadInfo());
         group.addWidget(boostSlotWidget);
 
         return group;
@@ -904,11 +909,10 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         boolean isCompressed = "gtladditions:compressed_astral_array".equals(astralId);
         boolean isRegular = "gtladditions:astral_array".equals(astralId);
 
-        if (hasParallelOverdriver()) {
-            // 超限器直接旁路"解锁物"门槛（getRawThreadCount 已经这么做了），这里的范围提示
-            // 之前没跟上，会显示"[0~0] 未放入解锁物"跟上面已经拉满的线程数自相矛盾。
-            threadInfo = "§7§6寰宇并行超限器 → 线程已解锁至 MAX";
-            displayThreadMax = Long.MAX_VALUE;
+        boolean overdriver = hasParallelOverdriver();
+        if (overdriver) {
+            threadInfo = "";
+            displayThreadMax = PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
         } else if (hasCreateMkModule()) {
             threadInfo = "§d◇ 创始现实修改模块 → 线程范围 0~4,294,967,294";
             displayThreadMax = 4294967294L;
@@ -952,7 +956,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
             }
         }
 
-        list.add(Component.literal("  " + threadInfo));
+        list.add(overdriver ? overdriverThreadInfo() : Component.literal("  " + threadInfo));
         var threadMod = Component.literal("§r调整 ");
         threadMod.append(ComponentPanelWidget.withButton(Component.literal("[-]"), "tsub"));
         threadMod.append(" ");
@@ -968,7 +972,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         if (!boostStack.isEmpty()) {
             String boostId = BuiltInRegistries.ITEM.getKey(boostStack.getItem()).toString();
             if ("dishanhai:universal_parallel_overdriver".equals(boostId)) {
-                list.add(Component.literal(" §d◆ 寰宇并行超限器 → 并行/线程 MAX"));
+                list.add(overdriverThreadInfo());
             } else {
                 list.add(Component.literal(" §7  └ 世线残片×" + boostStack.getCount()
                         + " (基础倍率×" + String.format("%,d",

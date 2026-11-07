@@ -17,6 +17,11 @@ public class PrimordialOmegaVoidInductionArmatureLogic extends PrimordialModuleR
     }
 
     @Override
+    protected boolean tracksActualParallel() {
+        return false; // 直接執行原配方，未建立原初無線批次。
+    }
+
+    @Override
     public GTRecipe getGTRecipe() {
         if (!isThreadRecipeLookupAllowed()) return null;
         if (containmentBonus().locked()) return null;

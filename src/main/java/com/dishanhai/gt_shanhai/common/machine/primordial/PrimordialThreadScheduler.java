@@ -12,6 +12,9 @@ public final class PrimordialThreadScheduler<T> {
     public interface Runner<T> {
         boolean advance(T task);
         T start(long allowance);
+
+        /** 提供已啟動批次的實際並行量。無實績時保留完整額度。 */
+        default long reservation(T task, long allowance) { return allowance; }
     }
 
     private final List<Lane<T>> lanes = new ArrayList<>();
@@ -64,24 +67,48 @@ public final class PrimordialThreadScheduler<T> {
 
     /** 唯讀的接單額度；供排程與告警共同判斷，包含降配後保留的舊預留。 */
     public long admissionShare(long capacity, long threads) {
+        return admissionShare(capacity, threads, false);
+    }
+
+    public long admissionShare(long capacity, long threads, boolean tracksActualParallel) {
+        return admissionShare(capacity, threads, tracksActualParallel, false);
+    }
+
+    public long admissionShare(long capacity, long threads, boolean tracksActualParallel, boolean independentRecipePools) {
         long count = Math.min(Math.max(0L, capacity), Math.max(1L, threads));
         if (count <= 0L || lanes.size() >= count) return 0L;
+        if (independentRecipePools) return capacity;
+        long remaining = capacity - Math.min(capacity, reserved());
+        if (tracksActualParallel) {
+            // 有限執行緒均分尚未占用的額度。無限執行緒則由配方需求決定當批大小。
+            return threads == Long.MAX_VALUE ? remaining : Math.ceilDiv(remaining, count - lanes.size());
+        }
         long index = nextIndex();
         if (index >= count) return 0L;
         long share = capacity / count + (index < capacity % count ? 1L : 0L);
-        return share > capacity - Math.min(capacity, reserved()) ? 0L : share;
+        return share > remaining ? 0L : share;
     }
 
     public void tick(long now, long capacity, long threads, Runner<T> runner) {
+        tick(now, capacity, threads, false, runner);
+    }
+
+    public void tick(long now, long capacity, long threads, boolean tracksActualParallel, Runner<T> runner) {
+        tick(now, capacity, threads, tracksActualParallel, false, runner);
+    }
+
+    public void tick(long now, long capacity, long threads, boolean tracksActualParallel,
+                     boolean independentRecipePools, Runner<T> runner) {
         if (!enabled) return;
         // 必須先讓本 tick 開始時已有的批次各運行一次，新批次從下一 tick 起計時。
         for (var iterator = lanes.iterator(); iterator.hasNext();) {
             if (runner.advance(iterator.next().task)) {
                 iterator.remove();
                 dirty = true;
+                if (independentRecipePools) pushed = true; // 已結算的批次可能釋出原先用滿的配方池。
             }
         }
-        long share = admissionShare(capacity, threads);
+        long share = admissionShare(capacity, threads, tracksActualParallel, independentRecipePools);
         if (share <= 0L) return;
         if (lastSearch == now) return;
         // 成功工作可以逐 tick 接續（分子組裝原生為 1 tick），只有失敗後才限頻。
@@ -98,7 +125,9 @@ public final class PrimordialThreadScheduler<T> {
         T task = runner.start(share);
         lastSearchSucceeded = task != null;
         if (task != null) {
-            restore(index, share, task);
+            long reservation = tracksActualParallel
+                    ? Math.clamp(runner.reservation(task, share), 1L, share) : share;
+            restore(index, reservation, task);
             dirty = true;
         }
     }

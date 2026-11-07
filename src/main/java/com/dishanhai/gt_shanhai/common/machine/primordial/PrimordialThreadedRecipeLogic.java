@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.mixin.PrimordialRecipeThreadStateAccessor;
 import com.dishanhai.gt_shanhai.api.machine.RecipeThreadSnapshot;
 import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadPriority;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialThreadRecipeIdentity.Identity;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
@@ -54,6 +55,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private RecipeThreadPriority<GTRecipe> priority;
     private boolean priorityInputHandled;
     private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
+    private Map<Identity, Long> recipePoolReservations;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
 
@@ -69,7 +71,12 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     }
 
     public final Set<GTRecipe> priorityCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup) {
-        return priority == null ? lookup.get() : new LinkedHashSet<>(priority.select(lookup));
+        if (priority == null) return lookup.get();
+        return new LinkedHashSet<>(priority.select(() -> {
+            Set<GTRecipe> candidates = lookup.get();
+            return recipePoolReservations == null ? candidates
+                    : candidates.stream().filter(recipe -> getThreadRecipePoolRemaining(recipe) > 0L).toList();
+        }));
     }
 
     protected long estimateThreadRecipeTicks(GTRecipe recipe) {
@@ -77,6 +84,44 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     }
 
     protected abstract long getUnreservedTotalParallelLimit();
+
+    /** 只有能在最終批次提供實際並行數的配方路徑才可啟用。 */
+    protected boolean tracksActualParallel() { return false; }
+
+    public final boolean usesIndependentRecipePools() {
+        return getMachine() instanceof PrimordialOmegaEngineModuleBase module
+                && tracksActualParallel() && module.hasParallelOverdriver();
+    }
+
+    protected final long getThreadRecipePoolRemaining(GTRecipe recipe) {
+        return Long.MAX_VALUE - recipePoolReserved(recipe);
+    }
+
+    private long recipePoolReserved(GTRecipe recipe) {
+        if (recipePoolReservations == null) return 0L;
+        Identity source = PrimordialThreadRecipeIdentity.fromRecipe(recipe);
+        if (source == null) return Long.MAX_VALUE;
+        long unknown = recipePoolReservations.getOrDefault(null, 0L);
+        long known = recipePoolReservations.getOrDefault(source, 0L);
+        return unknown + Math.min(known, Long.MAX_VALUE - unknown);
+    }
+
+    private Map<Identity, Long> collectRecipePoolReservations() {
+        Map<Identity, Long> reserved = new HashMap<>();
+        for (var lane : threads.lanes()) {
+            Frame frame = lane.task();
+            var sources = PrimordialThreadRecipeIdentity.sourcesOf(frame.recipe);
+            if (sources.isEmpty()) {
+                // 舊版沒有保存來源時，保守占用每個池，直到該批結算。
+                sources = java.util.Collections.singletonList(PrimordialThreadRecipeIdentity.fromRecipe(frame.origin));
+            }
+            // 舊跨配方批次沒有逐配方數量，先用原批次預留保護各來源。
+            for (Identity source : sources) {
+                reserved.merge(source, lane.reserved(), (a, b) -> a + Math.min(b, Long.MAX_VALUE - a));
+            }
+        }
+        return reserved;
+    }
 
     protected final long getBaseParallelCapacity() { return super.getTotalParallelLimit(); }
 
@@ -119,10 +164,13 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             if (available && frame.status == Status.WORKING && !frame.pendingSetup
                     && frame.progress < frame.duration && frame.recipe != null) running++;
         }
-        return new RecipeThreadSnapshot(getRecipeThreadCapacity(), lanes.size(), running,
-                enabled, nativeDrainRequested(), getUnreservedTotalParallelLimit(), displayReserved(),
+        long capacity = getUnreservedTotalParallelLimit();
+        long configuredThreads = getConfiguredRecipeThreadCapacity();
+        boolean independentPools = usesIndependentRecipePools();
+        return new RecipeThreadSnapshot(Math.min(Math.max(0L, capacity), configuredThreads), lanes.size(), running,
+                enabled, nativeDrainRequested(), independentPools ? 0L : capacity, displayReserved(),
                 continuousTicks, completedThreadBatches,
-                threads.admissionShare(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) <= 0L);
+                threads.admissionShare(capacity, configuredThreads, tracksActualParallel(), independentPools) <= 0L);
     }
 
     /** Jade 唯讀快照：不切換 frame、不查配方、不交易庫存，僅分頁傳送有限的批次。 */
@@ -140,6 +188,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         data.putLong("capacity", getRecipeThreadCapacity());
         data.putLong("reserved", displayReserved());
         data.putLong("parallelCapacity", getUnreservedTotalParallelLimit());
+        data.putBoolean("independentRecipePools", usesIndependentRecipePools());
         data.putBoolean("draining", nativeDrainRequested());
         data.putInt("offset", offset);
         BigInteger consumption = BigInteger.ZERO, production = BigInteger.ZERO;
@@ -247,12 +296,18 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     }
 
     public final long getRecipeThreadCapacity() {
+        return Math.min(Math.max(0L, getUnreservedTotalParallelLimit()), getConfiguredRecipeThreadCapacity());
+    }
+
+    private long getConfiguredRecipeThreadCapacity() {
+        if (getMachine() instanceof PrimordialOmegaEngineModuleBase module && module.hasParallelOverdriver()) {
+            return PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
+        }
         long configured = getMachine() instanceof PrimordialOmegaEngineModuleBase module
                 ? module.getParallelRecipeThreadCount()
                 : getMachine() instanceof PrimordialOmegaEngineMachine host
                 ? host.getParallelRecipeThreadCount() : 1L;
-        configured = com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadSources.capacity(machine, configured);
-        return Math.min(Math.max(0L, getUnreservedTotalParallelLimit()), configured);
+        return com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadSources.capacity(machine, configured);
     }
 
     protected final List<GTRecipe> getRunningThreadRecipes() {
@@ -399,22 +454,32 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
         Status previousStatus = getStatus();
         drainRequested = nativeDrainRequested();
+        boolean independentPools = usesIndependentRecipePools();
         tickingThreads = true;
         try {
-            threads.tick(getMachine().getOffsetTimer(), getUnreservedTotalParallelLimit(), getRecipeThreadCapacity(),
+            threads.tick(getMachine().getOffsetTimer(), getUnreservedTotalParallelLimit(),
+                    getConfiguredRecipeThreadCapacity(),
+                    tracksActualParallel(), independentPools,
                     new PrimordialThreadScheduler.Runner<>() {
                         public boolean advance(Frame frame) {
                             return advanceFrame(frame);
                         }
+
+                        @Override public long reservation(Frame frame, long share) {
+                            long actual = frame.recipe.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY);
+                            return actual > 0L ? actual : share;
+                        }
+
                         public Frame start(long share) {
                             if (drainRequested) return null;
                             apply(new Frame());
                             allowance = share;
                             admission = true;
                             priorityInputHandled = false;
+                            if (independentPools) recipePoolReservations = collectRecipePoolReservations();
                             priority = Math.min(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) > 1L
                                     ? new RecipeThreadPriority<>(PrimordialThreadedRecipeLogic.this::estimateThreadRecipeTicks,
-                                            recipe -> recipe.duration) : null;
+                                            recipe -> recipe.duration, PrimordialThreadedRecipeLogic.this::recipePoolReserved) : null;
                             try {
                                 do {
                                     findAndHandleRecipe();
@@ -423,6 +488,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                                 return lastRecipe != null && duration > 0 ? capture() : null;
                             } finally {
                                 priority = null;
+                                recipePoolReservations = null;
                                 priorityInputHandled = false;
                                 admission = false;
                                 allowance = 0L;
@@ -431,6 +497,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                     });
         } finally {
             admission = false;
+            recipePoolReservations = null;
             tickingThreads = false;
             project(previousStatus);
         }

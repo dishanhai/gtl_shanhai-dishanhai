@@ -45,8 +45,7 @@ public enum ModuleBaseInfoProvider implements IBlockComponentProvider, IServerDa
             }
 
             // 线程倍率
-            long boost = mod.getThreadBoost();
-            tag.putLong("threadBoost", boost);
+            tag.putLong("crossRecipeMultiplier", mod.getRecipeLogicThreadMultiplier());
 
             // 超限器
             tag.putBoolean("overdriver", mod.hasParallelOverdriver());
@@ -111,9 +110,10 @@ public enum ModuleBaseInfoProvider implements IBlockComponentProvider, IServerDa
         }
 
         // 线程倍率
-        long boost = data.getLong("threadBoost");
-        if (boost > 0) {
-            tooltip.add(helper.text(Component.literal("§5跨配方线程: §f×" + formatNum(boost))));
+        long multiplier = data.getLong("crossRecipeMultiplier");
+        if (multiplier > 1) {
+            tooltip.add(helper.text(Component.translatable("gt_shanhai.recipe_threads.cross_recipe_multiplier",
+                    formatNum(multiplier))));
         }
         if (data.getBoolean("overdriver")) {
             tooltip.add(helper.text(Component.literal("§d∞ 超限模式已激活")));

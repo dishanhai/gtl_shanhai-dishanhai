@@ -8,6 +8,7 @@ import com.dishanhai.gt_shanhai.common.heat.ShanhaiHostMountSource;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuContainmentBonus;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
+import com.google.common.collect.Iterables;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
@@ -42,6 +43,7 @@ import org.jetbrains.annotations.Nullable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +56,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     public static final String ACTUAL_PARALLEL_KEY = "sh_primordial_actual_parallel";
     private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;
     private long stellarLastAllocatedRecipes;
+    private int crossTypeCandidateOffset;
 
     // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions。
     // true / false 均为短期缓存（各带 TTL），过期后重新检查，避免一次瞬时结果被永久固化。
@@ -221,17 +224,17 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                 && shanhai$conditionsPass(recipe);
     }
 
-    /**
-     * 原初模块的"高级产出"不做基类那种"总池按 recipes.size() 均分再水位填补"的公平分配——
-     * 同時選中多個配方類型時，各配方共用目前執行緒的預留份額。
-     * 每次分配後扣除 remaining，避免同一批內或不同執行緒重複占用整機並行上限。
-     */
+    /** 跨配方模式的可行配方共用當前批次額度，單配方模式使用執行緒優先順序。 */
     @Override
     @Nullable
     protected ParallelData calculateParallels() {
         stellarLastAllocatedRecipes = 0L;
         matchableScaledRecipeCache.clear();
-        Set<GTRecipe> recipes = priorityCandidates(this::lookupRecipeIterator);
+        long crossTypeThreads = getMachine() instanceof PrimordialOmegaEngineModuleBase module
+                && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : 0L;
+        boolean independentPools = usesIndependentRecipePools();
+        boolean crossType = crossTypeThreads > 0L && !independentPools;
+        Set<GTRecipe> recipes = crossType ? lookupRecipeIterator() : priorityCandidates(this::lookupRecipeIterator);
         if (recipes.isEmpty()) {
             // 与父类 calculateParallels 同款语义：是否清缓存必须先问 shouldInvalidateLookupCacheWhenNoRunnableRecipe()。
             // 此前三处无条件 invalidate 把模块的 200-tick 稳态缓存和该开关整体架空——空闲模块每 5 tick
@@ -244,21 +247,32 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
             invalidateLookupSetCacheIfConfigured();
             return null;
         }
-        long[] parallels = new long[recipes.size()];
+        int candidateLimit = independentPools ? 1 : crossType
+                ? (int) Math.min(recipes.size(), Math.min(crossTypeThreads, totalParallel))
+                : recipes.size();
+        Iterable<GTRecipe> candidates = recipes;
+        if (crossType && recipes.size() > 1) {
+            // 即使整批容得下所有候選，也輪流讓各配方先扣共用原料。
+            int offset = crossTypeCandidateOffset % recipes.size();
+            crossTypeCandidateOffset = offset + 1;
+            candidates = Iterables.concat(Iterables.skip(recipes, offset), Iterables.limit(recipes, offset));
+        }
+
+        long[] parallels = new long[candidateLimit];
         long remaining = totalParallel;
         int index = 0;
-        ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(recipes.size());
-        long crossTypeThreads = getMachine() instanceof PrimordialOmegaEngineModuleBase module
-                && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : Long.MAX_VALUE;
-        for (GTRecipe recipe : recipes) {
-            if (remaining <= 0L || recipeList.size() >= crossTypeThreads) break;
-            long parallel = getMaxParallel(recipe, remaining);
+        ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(candidateLimit);
+        for (GTRecipe recipe : candidates) {
+            if (remaining <= 0L || index >= candidateLimit) break;
+            long recipeLimit = independentPools ? Math.min(remaining, getThreadRecipePoolRemaining(recipe)) : remaining;
+            if (recipeLimit <= 0L) continue;
+            long parallel = getMaxParallel(recipe, recipeLimit);
             if (parallel <= 0L) {
                 continue;
             }
             recipeList.add(recipe);
             parallels[index] = parallel;
-            remaining -= parallel;
+            if (!crossType) remaining -= parallel;
             index++;
         }
         if (recipeList.isEmpty()) {
@@ -268,8 +282,25 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
         // 原初模組已在上方逐配方完成輸入/輸出可行性計算，這裡必須標記為可處理，
         // 讓 buildFinalWirelessRecipe 進入真實扣料分支。GTLAdd 的 helper 在空餘配額為
         // 0 時固定回傳 shouldProcess=false；直接使用該結果會只收集輸出而跳過扣料。
-        stellarLastAllocatedRecipes = recipeList.size();
-        return new ParallelData((List<GTRecipe>) recipeList, java.util.Arrays.copyOf(parallels, index), true, null);
+        stellarLastAllocatedRecipes = index;
+        long[] limits = Arrays.copyOf(parallels, index);
+        long[] allocated = crossType && index > 1 ? allocateCrossTypeParallels(limits, totalParallel) : limits;
+        return new ParallelData((List<GTRecipe>) recipeList, allocated, true, null);
+    }
+
+    private static long[] allocateCrossTypeParallels(long[] limits, long remaining) {
+        long[] allocated = new long[limits.length];
+        for (int i = 0; i < limits.length; i++) {
+            allocated[i] = Math.min(limits[i], Math.ceilDiv(remaining, limits.length - i));
+            remaining -= allocated[i];
+        }
+        // 後面的配方若先達到上限，將餘額還給前面仍有需求的配方。
+        for (int i = 0; i < limits.length && remaining > 0L; i++) {
+            long extra = Math.min(limits[i] - allocated[i], remaining);
+            allocated[i] += extra;
+            remaining -= extra;
+        }
+        return allocated;
     }
 
     /** 山海：保留批次內候選名額診斷；星律的在途占用另讀多執行緒調度器。 */
@@ -288,11 +319,16 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     protected long getUnreservedTotalParallelLimit() {
         MetaMachine machine = getMachine();
         if (machine instanceof PrimordialOmegaEngineModuleBase mod && mod.hasParallelOverdriver()) {
-            // 超限器供給整機共享 Long.MAX_VALUE 並行；不能依賴
+            // 超限器給出 Long.MAX_VALUE 的配方上限；不能依賴
             // getAdditionalThread() 的 int 轉型或 GTLAdd 的固定執行緒上限。
             return Long.MAX_VALUE;
         }
         return containmentBonus().scaleParallel(getBaseParallelCapacity());
+    }
+
+    @Override
+    protected boolean tracksActualParallel() {
+        return getMachine().getWirelessNetworkEnergyHandler() != null;
     }
 
     /** 山海：給 UI／AR 的當前可用上限，與分配共用公式，不觸發配方搜尋或扣料。 */

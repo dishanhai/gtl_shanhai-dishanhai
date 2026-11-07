@@ -84,8 +84,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     public boolean isCrossTypeParallelActive() {
         if (isRemote()) return crossTypeModeActive;
         var current = getHost();
-        boolean active = isFormed() && current != null && current.isFormed()
-                && current.grantsCrossTypeParallel() && !getDefinition().isGenerator()
+        boolean active = isFormed() && !getDefinition().isGenerator()
+                && (usesIndependentRecipePools()
+                        || current != null && current.isFormed() && current.grantsCrossTypeParallel())
                 && !(current instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu
                         && guixu.isContainmentLocked())
                 && !PrimordialOmegaEngineMachine.isRecipeLockedForDisplay(getRecipeLogic());
@@ -127,7 +128,8 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     // ========== 全局线程倍率物品注册表 ==========
     // 存储字符串 ID 避免 startup 阶段 ForgeRegistries 不可用
     private static final Map<String, Long> GLOBAL_THREAD_BOOST_IDS = new java.util.LinkedHashMap<>();
-    private static final Map<Item, Long> GLOBAL_THREAD_BOOST_CACHE = new java.util.HashMap<>();
+    private static final String OVERDRIVER_ID = "dishanhai:universal_parallel_overdriver";
+    public static final int OVERDRIVER_THREAD_CAPACITY = 96;
     private static final String DARK_ENERGY_MULTIPLIER_ID = "dishanhai:dark_energy_multiplier";
     private static final String ANNIHILATION_CORE_ID = "dishanhai:annihilation_core";
     private static final String HYPERSTABLE_BLACK_HOLE_SEED_ID = "dishanhai:bhd_hyper_seed";
@@ -157,30 +159,23 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 提供给外部类查询线程倍率 */
     public static long getThreadBoostValue(String itemId) {
+        if (OVERDRIVER_ID.equals(itemId)) return OVERDRIVER_THREAD_CAPACITY - 1L;
         Long v = GLOBAL_THREAD_BOOST_IDS.get(itemId);
         return v == null ? 0 : v;
     }
 
-    /** 惰性解析 item → 倍率（运行时可查到） */
-    private static long getThreadBoostForItem(Item item) {
-        if (item == null || item == net.minecraft.world.item.Items.AIR) return 0L;
-        Long cached = GLOBAL_THREAD_BOOST_CACHE.get(item);
-        if (cached != null) return cached;
-        String regId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(item).toString();
-        Long boost = GLOBAL_THREAD_BOOST_IDS.get(regId);
-        if (boost != null) {
-            GLOBAL_THREAD_BOOST_CACHE.put(item, boost);
-            return boost;
-        }
-        return 0L;
+    static long getThreadBoostValue(String itemId, int count) {
+        if (count <= 0) return 0L;
+        long base = getThreadBoostValue(itemId);
+        if (OVERDRIVER_ID.equals(itemId)) return base;
+        return base <= 0L ? 0L : base > Long.MAX_VALUE / count ? Long.MAX_VALUE : base * count;
     }
 
     /** 山海：主機與模組共用同一線程物品註冊表及堆疊飽和運算。 */
     public static long getThreadBoostForStack(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return 0L;
-        long base = getThreadBoostForItem(stack.getItem());
-        return base <= 0L ? 0L : base > Long.MAX_VALUE / stack.getCount()
-                ? Long.MAX_VALUE : base * stack.getCount();
+        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id == null ? 0L : getThreadBoostValue(id.toString(), stack.getCount());
     }
 
     /** 获取线程倍率（已乘以堆叠数量） */
@@ -218,7 +213,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         };
         threadBoostSlot.setFilter(stack -> {
             if (stack == null || stack.isEmpty()) return true;
-            return getThreadBoostForItem(stack.getItem()) > 0;
+            return getThreadBoostForStack(stack) > 0;
         });
         moduleSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH);
         moduleSlot.setFilter(stack -> {
@@ -683,6 +678,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     public int getAdditionalThread() {
+        if (hasParallelOverdriver()) return OVERDRIVER_THREAD_CAPACITY - 1;
         long boost = hasInfiniteMatterThreads() ? Long.MAX_VALUE : getThreadBoost();
         return boost > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) boost;
     }
@@ -693,6 +689,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     }
 
     public long getRecipeLogicThreadMultiplier() {
+        if (hasParallelOverdriver()) return OVERDRIVER_THREAD_CAPACITY;
         if (hasInfiniteMatterThreads()) return Long.MAX_VALUE;
         long boost = getThreadBoost();
         return boost > 0L ? boost : 1L;
@@ -724,10 +721,26 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 检测线程倍率槽是否装有寰宇并行超限器 */
     public boolean hasParallelOverdriver() {
+        if (threadBoostSlot == null) return false;
         var stack = threadBoostSlot.storage.getStackInSlot(0);
         if (stack.isEmpty()) return false;
         var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
-        return id != null && "dishanhai:universal_parallel_overdriver".equals(id.toString());
+        return id != null && OVERDRIVER_ID.equals(id.toString());
+    }
+
+    private boolean usesIndependentRecipePools() {
+        return getRecipeLogic() instanceof PrimordialThreadedRecipeLogic logic && logic.usesIndependentRecipePools();
+    }
+
+    private Component overdriverParallelDisplay() {
+        return Component.translatable(usesIndependentRecipePools()
+                ? "gt_shanhai.primordial.overdriver.independent"
+                : "gt_shanhai.primordial.overdriver.shared").withStyle(ChatFormatting.GRAY);
+    }
+
+    private Component crossRecipeMultiplierDisplay() {
+        return Component.translatable("gt_shanhai.recipe_threads.cross_recipe_multiplier",
+                threadCountText(getRecipeLogicThreadMultiplier()));
     }
 
     /** 检测额外挂载槽是否装有暗能量倍增器；多个槽位或堆叠只生效一次。 */
@@ -1326,21 +1339,12 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 .append(Component.literal("同时处理至多"))
                 .append(parallelText)
                 .append(Component.literal("个配方")));
-        long boost = getThreadBoost();
-        var threadText = threadCountText(getRecipeLogicThreadMultiplier());
-        textList.add(Component.literal("")
-                .append(Component.literal("跨配方线程: "))
-                .append(threadText));
+        textList.add(crossRecipeMultiplierDisplay());
         addParallelRecipeThreadDisplay(textList);
-        if (boost > 0) {
-            textList.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createElectricText("线程倍率: "))
-                    .append(Component.literal("×")).append(threadCountText(boost)));
-        }
         if (hasParallelOverdriver()) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("◆ 超限模式 · 已激活"))
-                    .append(Component.literal(" §7整机共享 Long.MAX_VALUE 并行")));
+                    .append(overdriverParallelDisplay()));
         }
         if (hasDarkEnergyMultiplierMounted()) {
             textList.add(Component.literal("§b◆ 暗能量倍增器 · 配方 EU 消耗 -50%"));
@@ -1368,20 +1372,12 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 供子类 addParallelDisplay 调用来显示线程倍率信息 */
     protected void addThreadBoostDisplay(List<Component> textList) {
-        long boost = getThreadBoost();
-        textList.add(Component.literal("")
-                .append(DShanhaiTextUtil.createElectricText("跨配方线程: "))
-                .append(threadCountText(getRecipeLogicThreadMultiplier())));
+        textList.add(crossRecipeMultiplierDisplay());
         addParallelRecipeThreadDisplay(textList);
-        if (boost > 0) {
-            textList.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createElectricText("线程倍率: "))
-                    .append(Component.literal("×")).append(threadCountText(boost)));
-        }
         if (hasParallelOverdriver()) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("◆ 超限模式 · 已激活"))
-                    .append(Component.literal(" §7整机共享 Long.MAX_VALUE 并行")));
+                    .append(overdriverParallelDisplay()));
         }
         if (hasDarkEnergyMultiplierMounted()) {
             textList.add(Component.literal("§b◆ 暗能量倍增器 · 配方 EU 消耗 -50%"));

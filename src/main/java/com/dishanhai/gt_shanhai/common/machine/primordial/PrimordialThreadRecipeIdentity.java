@@ -10,6 +10,8 @@ import net.minecraft.resources.ResourceLocation;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.ArrayList;
 
 /** 山海：保留真實已扣料來源，DUMMY 僅是運行包裝，不能作為 Jade 的配方身份。 */
 public final class PrimordialThreadRecipeIdentity {
@@ -47,6 +49,21 @@ public final class PrimordialThreadRecipeIdentity {
         }
         result.data = result.data.copy();
         result.data.put(KEY, list);
+    }
+
+    static List<Identity> sourcesOf(GTRecipe recipe) {
+        if (recipe == null) return List.of();
+        ListTag saved = recipe.data.getList(KEY, 10);
+        if (saved.isEmpty()) {
+            Identity identity = fromRecipe(recipe);
+            return identity == null ? List.of() : List.of(identity);
+        }
+        var sources = new ArrayList<Identity>(saved.size());
+        for (int i = 0; i < saved.size(); i++) {
+            CompoundTag source = saved.getCompound(i);
+            sources.add(new Identity(source.getString("recipeType"), source.getString("recipeId")));
+        }
+        return sources;
     }
 
     public static void appendDisplay(CompoundTag row, GTRecipe recipe) {

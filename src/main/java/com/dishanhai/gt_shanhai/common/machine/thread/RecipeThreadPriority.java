@@ -17,15 +17,22 @@ import java.util.function.Supplier;
 
 /** 山海：一次接單的唯讀候選快照；每次原生建構只看一個候選，未扣料失敗才往後試。 */
 public final class RecipeThreadPriority<T> {
-    private record Candidate<T>(T recipe, long ticks, int originalTicks) {}
+    private record Candidate<T>(T recipe, long reserved, long ticks, int originalTicks) {}
     private final ToLongFunction<T> estimate;
     private final ToIntFunction<T> originalDuration;
+    private final ToLongFunction<T> reservation;
     private List<Candidate<T>> ordered;
     private int index;
 
     public RecipeThreadPriority(ToLongFunction<T> estimate, ToIntFunction<T> originalDuration) {
+        this(estimate, originalDuration, ignored -> 0L);
+    }
+
+    public RecipeThreadPriority(ToLongFunction<T> estimate, ToIntFunction<T> originalDuration,
+                                ToLongFunction<T> reservation) {
         this.estimate = estimate;
         this.originalDuration = originalDuration;
+        this.reservation = reservation;
     }
 
     public List<T> select(Collection<T> candidates) {
@@ -37,10 +44,11 @@ public final class RecipeThreadPriority<T> {
             Collection<T> candidates = lookup.get();
             ordered = new ArrayList<>(candidates.size());
             for (T recipe : candidates) {
-                if (recipe != null) ordered.add(new Candidate<>(recipe,
+                if (recipe != null) ordered.add(new Candidate<>(recipe, reservation.applyAsLong(recipe),
                         Math.max(1L, estimate.applyAsLong(recipe)), originalDuration.applyAsInt(recipe)));
             }
-            ordered.sort(Comparator.<Candidate<T>>comparingLong(Candidate::ticks).reversed()
+            ordered.sort(Comparator.<Candidate<T>>comparingLong(Candidate::reserved)
+                    .thenComparing(Comparator.comparingLong(Candidate<T>::ticks).reversed())
                     .thenComparing(Comparator.comparingInt(Candidate<T>::originalTicks).reversed()));
         }
         return index < ordered.size() ? List.of(ordered.get(index).recipe) : List.of();

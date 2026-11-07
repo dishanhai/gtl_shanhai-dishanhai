@@ -19,6 +19,8 @@ import net.minecraft.resources.ResourceLocation;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.machine.ISuspendableMachine;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
@@ -116,6 +118,134 @@ class PrimordialThreadedRecipeLogicTest {
         assertEquals(Map.of("long", 3, "short", 2), logic.energyTicks);
         assertEquals(1, logic.getActiveRecipeThreadCount());
         assertEquals(16L, logic.getReservedThreadParallel());
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {64L, Long.MAX_VALUE / 1000L})
+    void unlimitedSharedPoolReservesTheActualParallelOfTwentyBatches(long parallelPerBatch) throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.configuredThreads = Long.MAX_VALUE;
+        logic.useActualParallel = true;
+        for (int i = 0; i < 20; i++) {
+            GTRecipe batch = new WirelessGTRecipe(recipe("parallel_batch_" + i, 20), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, parallelPerBatch);
+            logic.pending.add(batch);
+            tick(logic, i);
+        }
+
+        assertEquals(20, logic.getActiveRecipeThreadCount());
+        assertEquals(Long.MAX_VALUE, logic.admittedShares.getFirst());
+        assertEquals(Long.MAX_VALUE - 19L * parallelPerBatch, logic.admittedShares.getLast());
+        assertEquals(20L * parallelPerBatch, logic.getReservedThreadParallel());
+        assertEquals(parallelPerBatch, display(logic).getList("threads", 10).getCompound(0).getLong("reserved"));
+        assertFalse(logic.getRecipeThreadSnapshot().threadsFull());
+    }
+
+    @Test void overdriverCanStartThreeDifferentFullPoolsAtTheSameTime() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.configuredThreads = Long.MAX_VALUE;
+        logic.module.overdriver = true;
+        logic.useActualParallel = true;
+        for (String id : List.of("sulfur", "iron", "copper")) {
+            var batch = new WirelessGTRecipe(recipe(id, 20), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            logic.pending.add(batch);
+        }
+
+        tick(logic, 0); tick(logic, 1); tick(logic, 2);
+
+        assertEquals(List.of("sulfur", "iron", "copper"), logic.running());
+        assertEquals(List.of(Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE), logic.admittedShares);
+        assertFalse(logic.getRecipeThreadSnapshot().admissionBlocked());
+        assertFalse(logic.getRecipeThreadSnapshot().parallelFull());
+        assertTrue(display(logic).getBoolean("independentRecipePools"));
+    }
+
+    @Test void overdriverStopsAtNinetySixEvenWithAStrongerAttachedThreadSource() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.configuredThreads = 96L;
+        logic.module.attached = List.of(sourcePart(4097L));
+        logic.module.overdriver = true;
+        logic.useActualParallel = true;
+        for (int i = 0; i < 97; i++) {
+            var batch = new WirelessGTRecipe(recipe("recipe_" + i, 200), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            logic.pending.add(batch);
+            tick(logic, i);
+        }
+
+        assertEquals(96L, logic.getRecipeThreadCapacity());
+        assertEquals(96, logic.getActiveRecipeThreadCount());
+        assertEquals(1, logic.pending.size());
+        assertTrue(logic.getRecipeThreadSnapshot().threadsFull());
+    }
+
+    @Test void overdriverPrefersUnusedRecipeAndOnlyReusesTheSamePoolRemainder() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.configuredThreads = Long.MAX_VALUE;
+        logic.module.overdriver = true;
+        logic.useActualParallel = true;
+        logic.usePriority = true;
+        var first = new WirelessGTRecipe(recipe("sulfur", 4), BigInteger.ZERO);
+        first.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE - 64L);
+        logic.pending.add(first);
+        tick(logic, 0);
+
+        for (String id : List.of("sulfur", "sulfur", "copper")) {
+            var batch = new WirelessGTRecipe(recipe(id, id.equals("sulfur") ? 100 : 20), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            logic.pending.add(batch);
+        }
+        tick(logic, 1);
+        tick(logic, 2);
+        tick(logic, 3);
+
+        assertEquals(List.of("sulfur", "copper", "sulfur"), logic.running());
+        assertEquals(List.of(Long.MAX_VALUE, Long.MAX_VALUE, 64L), logic.admittedShares);
+        assertEquals(1, logic.pending.size(), "同一配方池用滿後不得再扣料");
+
+        tick(logic, 4);
+        assertTrue(logic.pending.isEmpty(), "已結算的額度可在同 tick 接單");
+        assertEquals(Long.MAX_VALUE - 64L, logic.admittedShares.getLast());
+    }
+
+    @Test void limitedThreadsRedistributeUnusedParallelToTheRemainingSlots() throws Exception {
+        Probe logic = probe();
+        logic.useActualParallel = true;
+        long[] actual = {4L, 20L, 20L, 20L};
+        for (int i = 0; i < actual.length; i++) {
+            GTRecipe batch = new WirelessGTRecipe(recipe("finite_share_" + i, 20), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, actual[i]);
+            logic.pending.add(batch);
+            tick(logic, i);
+            if (i == 0) {
+                assertEquals(4L, logic.getRecipeThreadSnapshot().reservedParallel());
+            }
+        }
+
+        assertEquals(List.of(16L, 20L, 20L, 20L), logic.admittedShares);
+        assertEquals(64L, logic.getReservedThreadParallel());
+        assertEquals(4L, display(logic).getList("threads", 10).getCompound(0).getLong("reserved"));
+        assertTrue(logic.getRecipeThreadSnapshot().threadsFull());
+    }
+
+    @Test void unlimitedThreadSourceCanUseTheRemainingFiniteMachineParallel() throws Exception {
+        Probe logic = probe();
+        logic.useActualParallel = true;
+        logic.module.configuredThreads = Long.MAX_VALUE;
+        GTRecipe batch = new WirelessGTRecipe(recipe("finite_machine", 20), BigInteger.ZERO);
+        batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, 32L);
+        logic.pending.add(batch);
+
+        tick(logic, 0);
+
+        assertEquals(64L, logic.getRecipeThreadSnapshot().capacity());
+        assertEquals(List.of(64L), logic.admittedShares);
+        assertEquals(32L, logic.getReservedThreadParallel());
     }
 
     @Test void nativeFinishIsBlockedButCentralAdmissionMayStartTheNextBatchInTheSameTick() throws Exception {
@@ -629,6 +759,7 @@ class PrimordialThreadedRecipeLogicTest {
         logic.finished = new ArrayList<>();
         logic.admittedShares = new ArrayList<>();
         logic.energyTicks = new HashMap<>();
+        logic.parallelCapacity = 64L;
         logic.outputAvailable = true;
         set(RecipeLogic.class, "machine", logic, module);
         set(RecipeLogic.class, "chanceCaches", logic, new IdentityHashMap<>());
@@ -643,6 +774,7 @@ class PrimordialThreadedRecipeLogicTest {
         long now;
         long configuredThreads;
         boolean formed;
+        boolean overdriver;
         boolean suspendAfterFinish;
         List<IMultiPart> attached;
         Probe logic;
@@ -654,6 +786,7 @@ class PrimordialThreadedRecipeLogicTest {
         @Override public List<IMultiPart> getParts() { return attached == null ? List.of() : attached; }
         @Override protected boolean canModuleWork() { return formed; }
         @Override public long getParallelRecipeThreadCount() { return configuredThreads; }
+        @Override public boolean hasParallelOverdriver() { return overdriver; }
         @Override public Probe getRecipeLogic() { return logic; }
         @Override public void notifyStatusChanged(RecipeLogic.Status before, RecipeLogic.Status after) {
             statusNotifications++;
@@ -672,15 +805,17 @@ class PrimordialThreadedRecipeLogicTest {
         List<String> finished;
         List<Long> admittedShares;
         Map<String, Integer> energyTicks;
+        long parallelCapacity;
         boolean outputAvailable, failWorking, refuseSetup;
-        boolean usePriority;
+        boolean usePriority, useActualParallel;
         String blockedRecipe;
         int lookups, inputTransactions, blockedFinishLookups, setupAttempts;
         RecipeResult recipeResult, workingResult;
         Probe() { super(null); }
 
         @Override public SelectableRecipeTypeSetMachine getMachine() { return module; }
-        @Override protected long getUnreservedTotalParallelLimit() { return 64L; }
+        @Override protected long getUnreservedTotalParallelLimit() { return parallelCapacity; }
+        @Override protected boolean tracksActualParallel() { return useActualParallel; }
         @Override public void updateTickSubscription() {}
         @Override protected long estimateThreadRecipeTicks(GTRecipe recipe) { return 20L; }
         @Override protected boolean canFinishThreadBatch(GTRecipe recipe) { return outputAvailable; }
@@ -695,18 +830,21 @@ class PrimordialThreadedRecipeLogicTest {
                 return null;
             }
             lookups++;
-            GTRecipe next;
-            if (usePriority) {
-                next = priorityCandidates(new java.util.LinkedHashSet<>(pending)).stream().findFirst().orElse(null);
-                if (next != null && next.id.getPath().equals(blockedRecipe)) return null;
-                pending.remove(next);
-            } else next = pending.poll();
-            if (next != null) {
-                inputTransactions++;
-                admittedShares.add(getThreadParallelAllowance());
-                for (GTRecipe source : sourceRecipes == null ? List.of(next) : sourceRecipes) {
-                    onThreadRecipeInputHandled(source);
-                }
+            GTRecipe next = usePriority
+                    ? priorityCandidates(new java.util.LinkedHashSet<>(pending)).stream().findFirst().orElse(null)
+                    : pending.peek();
+            if (next == null || usePriority && next.id.getPath().equals(blockedRecipe)) return null;
+            long share = module.overdriver ? getThreadRecipePoolRemaining(next) : getThreadParallelAllowance();
+            if (share <= 0L) return null;
+            pending.remove(next);
+            if (module.overdriver) {
+                long actual = next.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY);
+                next.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Math.min(actual, share));
+            }
+            inputTransactions++;
+            admittedShares.add(share);
+            for (GTRecipe source : sourceRecipes == null ? List.of(next) : sourceRecipes) {
+                onThreadRecipeInputHandled(source);
             }
             return next;
         }

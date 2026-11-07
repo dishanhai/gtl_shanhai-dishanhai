@@ -59,9 +59,11 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
         addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.activity",
                 data.getInt("running"), data.getInt("waiting"))
                 .withStyle(ChatFormatting.GRAY));
-        addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.parallel",
-                NumberUtils.formatLong(data.getLong("reserved")), capacityText(data.getLong("parallelCapacity")))
-                .withStyle(ChatFormatting.GRAY));
+        Component parallel = data.getBoolean("independentRecipePools")
+                ? Component.translatable("gt_shanhai.primordial.threads.parallel_independent")
+                : Component.translatable("gt_shanhai.primordial.threads.parallel",
+                        NumberUtils.formatLong(data.getLong("reserved")), capacityText(data.getLong("parallelCapacity")));
+        addThreadText(tooltip, parallel.copy().withStyle(ChatFormatting.GRAY));
         addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.total_consumption",
                 data.getString("consumption")).withStyle(ChatFormatting.GOLD));
         addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.total_production",

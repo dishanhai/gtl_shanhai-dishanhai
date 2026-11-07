@@ -45,9 +45,12 @@ class PrimordialThreadEntrySourceTest {
         assertFalse(body.contains("getAllLevels"));
     }
 
-    @Test void overdriverTooltipsDescribeTheSharedMachineBudget() throws Exception {
+    @Test void overdriverUsesTheIndependentPoolLabelAndCanEnableCrossTypeWithoutAHost() throws Exception {
         String module = Files.readString(ROOT.resolve("primordial/PrimordialOmegaEngineModuleBase.java"));
-        assertFalse(module.contains("每个配方独立 Long.MAX_VALUE 并行"));
-        assertEquals(2, module.split("整机共享 Long.MAX_VALUE 并行", -1).length - 1);
+        assertTrue(module.contains("gt_shanhai.primordial.overdriver.independent"));
+        assertTrue(module.contains("gt_shanhai.primordial.overdriver.shared"));
+        assertTrue(module.contains("(usesIndependentRecipePools()"));
+        assertTrue(module.contains("|| current != null && current.isFormed() && current.grantsCrossTypeParallel()"));
+        assertTrue(module.contains("!PrimordialOmegaEngineMachine.isRecipeLockedForDisplay(getRecipeLogic())"));
     }
 }

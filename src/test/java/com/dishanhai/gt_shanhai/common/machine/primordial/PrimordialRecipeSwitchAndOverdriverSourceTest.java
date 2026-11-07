@@ -32,12 +32,12 @@ class PrimordialRecipeSwitchAndOverdriverSourceTest {
         String source = Files.readString(PRIMORDIAL_LOGIC_SOURCE);
         String method = extractBlock(source, "protected ParallelData calculateParallels() {");
 
-        assertTrue(method.contains("new ParallelData((List<GTRecipe>) recipeList, java.util.Arrays.copyOf(parallels, index), true, null)"),
+        assertTrue(method.contains("new ParallelData((List<GTRecipe>) recipeList, allocated, true, null)"),
                 "原初配方必須進入 buildFinalWirelessRecipe 的真實扣料分支");
         assertTrue(source.contains("mod.hasParallelOverdriver()"),
                 "超限器必須由原初配方邏輯直接識別");
         assertTrue(source.contains("return Long.MAX_VALUE;"),
-                "超限器必須為整機提供共享 Long.MAX_VALUE 級上限");
+                "超限器必須為單一配方池提供 Long.MAX_VALUE 級上限");
     }
 
     private static String extractBlock(String source, String declaration) {

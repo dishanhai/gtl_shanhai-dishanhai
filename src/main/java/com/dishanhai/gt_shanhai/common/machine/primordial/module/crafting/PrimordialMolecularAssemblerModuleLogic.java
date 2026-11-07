@@ -31,6 +31,11 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
     }
 
     @Override
+    protected boolean tracksActualParallel() {
+        return false; // AE 直接返回已取出的配方，不經原初無線批次計數。
+    }
+
+    @Override
     protected boolean checkBeforeWorking() {
         return getMachine() instanceof PrimordialMolecularAssemblerModule module
                 && module.canRunMolecularAssembly();

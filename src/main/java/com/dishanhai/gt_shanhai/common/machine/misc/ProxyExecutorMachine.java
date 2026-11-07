@@ -349,18 +349,7 @@ public class ProxyExecutorMachine extends SelectableRecipeTypeSetMachine {
     }
 
     private long getThreadBoost() {
-        ItemStack stack = threadBoostSlot.getStackInSlot(0);
-        ResourceLocation id = getItemId(stack);
-        if (id == null) {
-            return 0L;
-        }
-        long base = PrimordialOmegaEngineModuleBase.getThreadBoostValue(id.toString());
-        if (base <= 0) {
-            return 0L;
-        }
-        long count = Math.max(1, stack.getCount());
-        long value = base * count;
-        return value < 0 ? Long.MAX_VALUE : value;
+        return PrimordialOmegaEngineModuleBase.getThreadBoostForStack(threadBoostSlot.getStackInSlot(0));
     }
 
     private int getBoostMultiplier() {

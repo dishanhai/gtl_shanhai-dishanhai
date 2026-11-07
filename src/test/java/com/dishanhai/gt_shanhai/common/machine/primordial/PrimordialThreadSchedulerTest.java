@@ -107,12 +107,33 @@ class PrimordialThreadSchedulerTest {
 
     @Test void hugeThreadCountsAllocateOnlyRunningLanesAndNeverOverflow() {
         inputs.add(new Task("A", 100));
-        tick(0, Long.MAX_VALUE, Long.MAX_VALUE);
+        tick(0, 64L, Long.MAX_VALUE);
         assertEquals(1, scheduler.lanes().size());
         assertEquals(1L, scheduler.reserved());
         assertEquals(Long.MAX_VALUE, PrimordialThreadScheduler.threadCount(Long.MAX_VALUE));
         assertEquals(1L, PrimordialThreadScheduler.threadCount(0));
         assertEquals(4L, PrimordialThreadScheduler.threadCount(3));
+    }
+
+    @Test void unlimitedThreadsCanUseTheRemainingUnlimitedParallelBudget() {
+        scheduler.restore(0L, 64L, new Task("paid", 100));
+
+        assertEquals(Long.MAX_VALUE - 64L, scheduler.admissionShare(Long.MAX_VALUE, Long.MAX_VALUE, true));
+        assertEquals(64L, scheduler.admissionShare(128L, Long.MAX_VALUE, true));
+
+        scheduler.restore(1L, Long.MAX_VALUE - 64L, new Task("full", 100));
+        assertEquals(0L, scheduler.admissionShare(Long.MAX_VALUE, Long.MAX_VALUE, true));
+    }
+
+    @Test void defaultUnlimitedSchedulerKeepsIndependentSlotsWithoutActualParallelData() {
+        inputs.add(new Task("first", 100));
+        inputs.add(new Task("second", 100));
+
+        tick(0, Long.MAX_VALUE, Long.MAX_VALUE);
+        tick(1, Long.MAX_VALUE, Long.MAX_VALUE);
+
+        assertEquals(2, scheduler.lanes().size());
+        assertEquals(2L, scheduler.reserved());
     }
 
     @Test void zeroCapacityDoesNotSearchOrAllocate() {
