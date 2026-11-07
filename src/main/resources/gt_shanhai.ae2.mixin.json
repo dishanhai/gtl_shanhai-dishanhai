@@ -14,6 +14,7 @@
     "PatternProviderLogicCircuitMixin",
     "MEStorageMenuBroadcastOptimizationMixin",
     "PatternAccessTermMenuIncrementalThrottleMixin",
+    "ShanhaiAe2PacketPayloadAccessor",
     "CraftConfirmMenuOverflowGuardMixin",
     "FeasiblePatternDemotionMixins$Calculation",
     "FeasiblePatternDemotionMixins$PlanBuild",

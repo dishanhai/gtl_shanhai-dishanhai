@@ -10,6 +10,7 @@ import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShanhaiPatternRemoteConfigPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiPatternRemoteConfigPacket.Operation;
+import com.dishanhai.gt_shanhai.network.ShanhaiPatternTerminalUpdateChunkPacket;
 import com.glodblock.github.extendedae.client.gui.GuiExPatternTerminal;
 import de.mari_023.ae2wtlib.wut.CycleTerminalButton;
 import de.mari_023.ae2wtlib.wut.IUniversalTerminalCapable;
@@ -88,6 +89,8 @@ public final class ShanhaiPatternManagementScreen
     private final List<StellarHeaderTarget> headerTargets = new ArrayList<>();
     private final List<DetailHit> detailHits = new ArrayList<>();
     private final Set<Integer> stellarHeaderRows = new HashSet<>();
+    private final ShanhaiPatternTerminalUpdateChunkPacket.Assembler patternUpdateChunks =
+            new ShanhaiPatternTerminalUpdateChunkPacket.Assembler();
     private boolean controlOpen;
     private List<Long> controlServerIds = List.of();
     private long selectedServerId;
@@ -105,6 +108,10 @@ public final class ShanhaiPatternManagementScreen
             this.widgets.add("toolbox", new ToolboxPanel(style, menu.getToolbox().getName()));
         }
         this.widgets.add("singularityBackground", new BackgroundPanel(style.getImage("singularityBackground")));
+    }
+
+    public byte[] acceptPatternUpdateChunk(ShanhaiPatternTerminalUpdateChunkPacket chunk) {
+        return patternUpdateChunks.accept(chunk);
     }
 
     @Override

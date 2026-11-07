@@ -41,4 +41,12 @@ class PatternAccessTermMenuIncrementalThrottleSourceTest {
         assertTrue(json.contains("\"PatternAccessTermMenuIncrementalThrottleMixin\""),
                 "mixin 必须注册进对应分组的 gt_shanhai.*.mixin.json 的 mixins 数组");
     }
+
+    @Test
+    void bothPatternTerminalUpdatePathsCheckPayloadBeforeSending() throws IOException {
+        String source = Files.readString(MIXIN);
+        assertTrue(source.contains("method = {\"sendFullUpdate\", \"sendIncrementalUpdate\"}")
+                        && source.contains("gtShanhai$sendPatternUpdate"),
+                "全量和增量样板同步都必须在 AE2 发送前检查封包大小");
+    }
 }

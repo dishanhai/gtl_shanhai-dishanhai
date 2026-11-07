@@ -1,8 +1,15 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import appeng.core.sync.BasePacket;
+import appeng.core.sync.packets.PatternAccessTerminalPacket;
 import appeng.helpers.InventoryAction;
 import appeng.menu.implementations.PatternAccessTermMenu;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu;
+import com.dishanhai.gt_shanhai.network.ShanhaiPatternTerminalUpdateChunkPacket;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 
 import org.spongepowered.asm.mixin.Mixin;
@@ -50,5 +57,26 @@ public abstract class PatternAccessTermMenuIncrementalThrottleMixin {
     private void gtShanhai$fullSpeedAfterInteraction(ServerPlayer player, InventoryAction action, int slot, long id,
                                                      CallbackInfo ci) {
         gtShanhai$burstUntilTick = gtShanhai$incrementalTick + INTERACTION_BURST_TICKS;
+    }
+
+    @WrapOperation(method = {"sendFullUpdate", "sendIncrementalUpdate"}, at = @At(value = "INVOKE",
+            target = "Lappeng/menu/implementations/PatternAccessTermMenu;sendPacketToClient(Lappeng/core/sync/BasePacket;)V"))
+    private void gtShanhai$sendPatternUpdate(PatternAccessTermMenu menu, BasePacket packet, Operation<Void> original) {
+        if (!(menu instanceof ShanhaiPatternManagementMenu) || !(packet instanceof PatternAccessTerminalPacket)) {
+            original.call(menu, packet);
+            return;
+        }
+        FriendlyByteBuf payload = ((ShanhaiAe2PacketPayloadAccessor) packet).gtShanhai$getPayload();
+        if (payload.readableBytes() <= ShanhaiPatternTerminalUpdateChunkPacket.MAX_NATIVE_BYTES) {
+            original.call(menu, packet);
+            return;
+        }
+        try {
+            if (menu.getPlayer() instanceof ServerPlayer player && player.containerMenu == menu) {
+                ShanhaiPatternTerminalUpdateChunkPacket.send(player, menu.containerId, payload);
+            }
+        } finally {
+            payload.release();
+        }
     }
 }

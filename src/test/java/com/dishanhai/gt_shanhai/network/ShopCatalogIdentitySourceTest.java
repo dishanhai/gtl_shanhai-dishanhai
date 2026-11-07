@@ -63,7 +63,7 @@ class ShopCatalogIdentitySourceTest {
     @Test
     void wireFormatUsesResourceFilterProtocolVersion() throws Exception {
         String network = source("network/ShanhaiNetwork.java");
-        assertTrue(network.contains("PROTOCOL_VERSION = \"16\""));
+        assertTrue(network.contains("PROTOCOL_VERSION = \"17\""));
     }
 
     private static String source(String relative) throws Exception {
