@@ -104,4 +104,37 @@ class ChangelogMarkdownSourceTest {
         assertTrue(history.contains("documents"),
                 "历史更新列表应使用完整公告集合");
     }
+
+    @Test
+    void screenSupportsSwitchingBetweenSimplifiedChineseAndEnglish() throws Exception {
+        String config = source("common/config/ChangelogConfig.java");
+        String screen = source("client/gui/ChangelogScreen.java");
+        String changelog491 = Files.readString(Path.of("config/gt_shanhai/changelog/Update-4.9.1.md"));
+        assertTrue(config.contains("ENGLISH_SECTION_MARKER"),
+                "公告配置应支持英文段落分隔标记");
+        assertTrue(config.contains("Language"),
+                "公告配置应提供中英文语言枚举");
+        assertTrue(screen.contains("toggleLanguage"),
+                "公告画面应支持切换中英文显示");
+        assertTrue(changelog491.contains("<!-- lang:en -->"),
+                "Update-4.9.1.md 应包含英文版本内容以供切换");
+
+        var latest = com.dishanhai.gt_shanhai.common.config.ChangelogConfig.parseMarkdownFile(
+                Path.of("config/gt_shanhai/changelog/Update-4.9.1.md"));
+        org.junit.jupiter.api.Assertions.assertNotNull(latest, "应能读取最新公告");
+        org.junit.jupiter.api.Assertions.assertEquals("4.9.1", latest.version(), "最新公告版本应为 4.9.1");
+        assertTrue(latest.hasEnglish(), "4.9.1 公告应解析出英文内容");
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "gt_shanhai 4.9.1 更新公告",
+                latest.titleFor(com.dishanhai.gt_shanhai.common.config.ChangelogConfig.Language.ZH_CN));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "gt_shanhai 4.9.1 Release Notes",
+                latest.titleFor(com.dishanhai.gt_shanhai.common.config.ChangelogConfig.Language.EN_US));
+        assertTrue(latest.linesFor(com.dishanhai.gt_shanhai.common.config.ChangelogConfig.Language.ZH_CN)
+                        .stream().anyMatch(line -> line.text().contains("联机兼容")),
+                "中文模式应包含简体中文标题");
+        assertTrue(latest.linesFor(com.dishanhai.gt_shanhai.common.config.ChangelogConfig.Language.EN_US)
+                        .stream().anyMatch(line -> line.text().contains("Multiplayer Compatibility")),
+                "英文模式应包含英文标题");
+    }
 }

@@ -37,8 +37,13 @@ import java.util.regex.Pattern;
  */
 public final class ChangelogConfig {
 
-    private static final Path CHANGELOG_DIR = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.changelog();
-    private static final Path SEEN_FILE = CHANGELOG_DIR.resolve("changelog_seen.txt");
+    private static Path changelogDir() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.changelog();
+    }
+
+    private static Path seenFile() {
+        return changelogDir().resolve("changelog_seen.txt");
+    }
     private static final Pattern VERSION_IN_FILE_NAME = Pattern.compile(
             "(?:^|[-_])([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:[-+]([0-9A-Za-z.-]+))?\\.md$",
             Pattern.CASE_INSENSITIVE);
@@ -98,20 +103,88 @@ public final class ChangelogConfig {
     public record ChangelogLink(String text, String url, String description) {
 
         public MutableComponent asComponent() {
-            String suffix = this.description.isBlank() ? "" : " - " + this.description;
+            return asComponent(Language.ZH_CN);
+        }
+
+        public MutableComponent asComponent(Language language) {
+            String desc = this.description;
+            int split = desc.indexOf(" / ");
+            if (split >= 0) {
+                desc = language == Language.EN_US
+                        ? desc.substring(split + 3).trim()
+                        : desc.substring(0, split).trim();
+            }
+            String suffix = desc.isBlank() ? "" : " - " + desc;
             return Component.literal(this.text + suffix)
                     .withStyle(style -> style.withColor(0x55AAFF).withUnderlined(true));
         }
     }
 
+    public enum Language {
+        ZH_CN("简体中文"),
+        EN_US("English");
+
+        private final String label;
+
+        Language(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return this.label;
+        }
+
+        public Language toggle() {
+            return this == ZH_CN ? EN_US : ZH_CN;
+        }
+    }
+
+    public static final String ENGLISH_SECTION_MARKER = "<!-- lang:en -->";
+
     public record ChangelogDocument(
             String version,
             String title,
+            String titleEn,
             boolean enabled,
             Path source,
             String fileVersion,
             List<ChangelogLink> links,
-            List<MarkdownLine> lines) {
+            List<MarkdownLine> lines,
+            List<MarkdownLine> linesEn) {
+
+        public ChangelogDocument(
+                String version,
+                String title,
+                boolean enabled,
+                Path source,
+                String fileVersion,
+                List<ChangelogLink> links,
+                List<MarkdownLine> lines) {
+            this(version, title, title, enabled, source, fileVersion, links, lines, List.of());
+        }
+
+        public boolean hasEnglish() {
+            for (MarkdownLine line : this.linesEn) {
+                if (line.kind() != LineKind.BLANK && !line.text().isBlank()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public String titleFor(Language language) {
+            if (language == Language.EN_US && !this.titleEn.isBlank()) {
+                return this.titleEn;
+            }
+            return this.title;
+        }
+
+        public List<MarkdownLine> linesFor(Language language) {
+            if (language == Language.EN_US && hasEnglish()) {
+                return this.linesEn;
+            }
+            return this.lines;
+        }
 
         public boolean hasContent() {
             for (MarkdownLine line : this.lines) {
@@ -157,18 +230,20 @@ public final class ChangelogConfig {
             return;
         }
         try {
-            Files.createDirectories(SEEN_FILE.getParent());
-            Files.writeString(SEEN_FILE, latest.version(), StandardCharsets.UTF_8);
+            Path seen = seenFile();
+            Files.createDirectories(seen.getParent());
+            Files.writeString(seen, latest.version(), StandardCharsets.UTF_8);
         } catch (IOException exception) {
-            GTDishanhaiMod.LOGGER.error("[Changelog] 写入已读版本失败: {}", SEEN_FILE, exception);
+            GTDishanhaiMod.LOGGER.error("[Changelog] 写入已读版本失败: {}", seenFile(), exception);
         }
     }
 
     private static List<ChangelogDocument> load() {
+        Path dir = changelogDir();
         try {
-            Files.createDirectories(CHANGELOG_DIR);
+            Files.createDirectories(dir);
             List<ChangelogDocument> documents = new ArrayList<>();
-            try (var paths = Files.walk(CHANGELOG_DIR)) {
+            try (var paths = Files.walk(dir)) {
                 paths.filter(Files::isRegularFile)
                         .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md"))
                         .forEach(path -> {
@@ -187,7 +262,7 @@ public final class ChangelogConfig {
             });
             return Collections.unmodifiableList(documents);
         } catch (IOException exception) {
-            GTDishanhaiMod.LOGGER.error("[Changelog] 读取公告目录失败: {}", CHANGELOG_DIR, exception);
+            GTDishanhaiMod.LOGGER.error("[Changelog] 读取公告目录失败: {}", dir, exception);
             return List.of();
         }
     }
@@ -195,6 +270,10 @@ public final class ChangelogConfig {
     /**
      * 按文件名提取版本并解析 front matter；正文只保留全屏公告所需的基础 Markdown。
      */
+    public static ChangelogDocument parseMarkdownFile(Path path) {
+        return parseMarkdown(path);
+    }
+
     private static ChangelogDocument parseMarkdown(Path path) {
         Matcher matcher = VERSION_IN_FILE_NAME.matcher(path.getFileName().toString());
         if (!matcher.find()) {
@@ -204,15 +283,32 @@ public final class ChangelogConfig {
         String fileVersion = matcher.group(1) + "." + matcher.group(2) + "." + matcher.group(3);
         Map<String, String> frontMatter = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         List<String> linkValues = new ArrayList<>();
-        List<String> body = new ArrayList<>();
+        List<String> bodyZh = new ArrayList<>();
+        List<String> bodyEn = new ArrayList<>();
         try {
             List<String> rawLines = Files.readAllLines(path, StandardCharsets.UTF_8);
             int bodyStart = 0;
             if (!rawLines.isEmpty() && rawLines.get(0).trim().equals("---")) {
                 bodyStart = readFrontMatter(rawLines, frontMatter, linkValues);
             }
+            boolean inEnglish = false;
             for (int i = bodyStart; i < rawLines.size(); i++) {
-                body.add(rawLines.get(i));
+                String rawLine = rawLines.get(i);
+                String trimmed = rawLine.trim();
+                if (trimmed.equalsIgnoreCase(ENGLISH_SECTION_MARKER)
+                        || trimmed.equalsIgnoreCase("<details>")
+                        || trimmed.equalsIgnoreCase("</details>")
+                        || trimmed.startsWith("<summary>") && trimmed.endsWith("</summary>")) {
+                    if (trimmed.equalsIgnoreCase(ENGLISH_SECTION_MARKER)) {
+                        inEnglish = true;
+                    }
+                    continue;
+                }
+                if (inEnglish) {
+                    bodyEn.add(rawLine);
+                } else {
+                    bodyZh.add(rawLine);
+                }
             }
         } catch (Exception exception) {
             GTDishanhaiMod.LOGGER.error("[Changelog] 读取公告失败: {}", path, exception);
@@ -222,14 +318,18 @@ public final class ChangelogConfig {
         boolean enabled = !"false".equalsIgnoreCase(frontMatter.getOrDefault("enabled", "true").trim());
         String version = frontMatter.getOrDefault("version", fileVersion).trim();
         String title = frontMatter.getOrDefault("title", "更新公告 " + fileVersion).trim();
+        String resolvedTitle = title.isEmpty() ? "更新公告 " + fileVersion : title;
+        String titleEn = frontMatter.getOrDefault("title_en", "Release Notes " + fileVersion).trim();
         return new ChangelogDocument(
                 version.isEmpty() ? fileVersion : version,
-                title,
+                resolvedTitle,
+                titleEn.isEmpty() ? resolvedTitle : titleEn,
                 enabled,
                 path,
                 fileVersion,
                 parseLinks(linkValues),
-                parseMarkdown(body));
+                parseMarkdown(bodyZh),
+                parseMarkdown(bodyEn));
     }
 
     private static int readFrontMatter(
@@ -346,11 +446,12 @@ public final class ChangelogConfig {
 
     private static String readSeenVersion() {
         try {
-            if (Files.exists(SEEN_FILE)) {
-                return Files.readString(SEEN_FILE, StandardCharsets.UTF_8).trim();
+            Path seen = seenFile();
+            if (Files.exists(seen)) {
+                return Files.readString(seen, StandardCharsets.UTF_8).trim();
             }
         } catch (IOException exception) {
-            GTDishanhaiMod.LOGGER.error("[Changelog] 读取已读版本失败: {}", SEEN_FILE, exception);
+            GTDishanhaiMod.LOGGER.error("[Changelog] 读取已读版本失败: {}", seenFile(), exception);
         }
         return "";
     }

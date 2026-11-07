@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.gui;
 
 import com.dishanhai.gt_shanhai.common.config.ChangelogConfig;
 import com.dishanhai.gt_shanhai.common.config.ChangelogConfig.ChangelogDocument;
+import com.dishanhai.gt_shanhai.common.config.ChangelogConfig.Language;
 import com.dishanhai.gt_shanhai.common.config.ChangelogConfig.LineKind;
 import com.dishanhai.gt_shanhai.common.config.ChangelogConfig.MarkdownLine;
 
@@ -44,6 +45,7 @@ public final class ChangelogScreen extends Screen {
     private final Screen parent;
     private final ChangelogDocument document;
     private final List<RenderLine> lines = new ArrayList<>();
+    private Language language;
     private int panelLeft;
     private int panelTop;
     private int panelHeight;
@@ -56,6 +58,24 @@ public final class ChangelogScreen extends Screen {
         super(Component.literal(document.title()));
         this.parent = parent;
         this.document = document;
+        this.language = defaultLanguage(document);
+    }
+
+    private static Language defaultLanguage(ChangelogDocument document) {
+        if (!document.hasEnglish()) {
+            return Language.ZH_CN;
+        }
+        try {
+            var mc = Minecraft.getInstance();
+            if (mc != null && mc.getLanguageManager() != null) {
+                String selected = mc.getLanguageManager().getSelected();
+                if (selected != null && selected.toLowerCase(java.util.Locale.ROOT).startsWith("en")) {
+                    return Language.EN_US;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return Language.ZH_CN;
     }
 
     public static void open(Screen parent) {
@@ -87,42 +107,61 @@ public final class ChangelogScreen extends Screen {
         contentHeight = panelHeight - chromeHeight;
         scrollOffset = Math.min(scrollOffset, maxScroll());
 
-        int buttonCount = ChangelogConfig.getHistory().isEmpty() ? 2 : 3;
-        int totalWidth = BUTTON_WIDTH * buttonCount + BUTTON_GAP * (buttonCount - 1);
+        boolean hasHistory = !ChangelogConfig.getHistory().isEmpty();
+        boolean hasLanguageToggle = document.hasEnglish();
+        int buttonCount = 2 + (hasHistory ? 1 : 0) + (hasLanguageToggle ? 1 : 0);
+        int buttonWidth = buttonCount >= 4 ? 114 : BUTTON_WIDTH;
+        int totalWidth = buttonWidth * buttonCount + BUTTON_GAP * (buttonCount - 1);
         int buttonX = (this.width - totalWidth) / 2;
         int buttonY = panelTop + panelHeight - PADDING - BUTTON_HEIGHT;
-        this.addRenderableWidget(Button.builder(Component.literal("确定"), button -> onClose())
-                .bounds(buttonX, buttonY, BUTTON_WIDTH, BUTTON_HEIGHT).build());
-        this.addRenderableWidget(Button.builder(Component.literal("不再提示"), button -> {
+        boolean english = language == Language.EN_US;
+        int col = 0;
+        this.addRenderableWidget(Button.builder(Component.literal(english ? "OK" : "确定"), button -> onClose())
+                .bounds(buttonX + (buttonWidth + BUTTON_GAP) * col++, buttonY, buttonWidth, BUTTON_HEIGHT).build());
+        this.addRenderableWidget(Button.builder(Component.literal(english ? "Don't Show Again" : "不再提示"), button -> {
                     if (document == ChangelogConfig.getLatest()) {
                         ChangelogConfig.markSeen();
                     }
                     onClose();
                 })
-                .bounds(buttonX + BUTTON_WIDTH + BUTTON_GAP, buttonY, BUTTON_WIDTH, BUTTON_HEIGHT).build());
-        if (buttonCount == 3) {
-            this.addRenderableWidget(Button.builder(Component.literal("历史更新"),
+                .bounds(buttonX + (buttonWidth + BUTTON_GAP) * col++, buttonY, buttonWidth, BUTTON_HEIGHT).build());
+        if (hasHistory) {
+            this.addRenderableWidget(Button.builder(Component.literal(english ? "History / 历史更新" : "历史更新"),
                             button -> ChangelogHistoryScreen.open(this))
-                    .bounds(buttonX + (BUTTON_WIDTH + BUTTON_GAP) * 2, buttonY,
-                            BUTTON_WIDTH, BUTTON_HEIGHT).build());
+                    .bounds(buttonX + (buttonWidth + BUTTON_GAP) * col++, buttonY,
+                            buttonWidth, BUTTON_HEIGHT).build());
         }
+        if (hasLanguageToggle) {
+            this.addRenderableWidget(Button.builder(
+                            Component.literal(english ? "语言: 简体中文" : "Lang: English"),
+                            button -> toggleLanguage())
+                    .bounds(buttonX + (buttonWidth + BUTTON_GAP) * col, buttonY,
+                            buttonWidth, BUTTON_HEIGHT).build());
+        }
+    }
+
+    private void toggleLanguage() {
+        this.language = this.language.toggle();
+        this.scrollOffset = 0;
+        this.rebuildWidgets();
     }
 
     private void buildLines() {
         lines.clear();
         int textWidth = PANEL_WIDTH - PADDING * 2 - SCROLLBAR_WIDTH - 2;
-        if (!document.title().isBlank()) {
-            lines.add(new RenderLine(Component.literal(document.title()), TITLE_COLOR, true));
+        String activeTitle = document.titleFor(language);
+        if (!activeTitle.isBlank()) {
+            lines.add(new RenderLine(Component.literal(activeTitle), TITLE_COLOR, true));
             lines.add(new RenderLine(Component.empty(), BODY_COLOR, false));
         }
         for (ChangelogConfig.ChangelogLink link : document.links()) {
-            List<FormattedCharSequence> wrapped = font.split(link.asComponent(), textWidth);
+            List<FormattedCharSequence> wrapped = font.split(link.asComponent(language), textWidth);
             for (FormattedCharSequence sequence : wrapped) {
                 lines.add(new RenderLine(sequence, 0xFF55AAFF, false, link));
             }
             lines.add(new RenderLine(Component.empty(), BODY_COLOR, false));
         }
-        for (MarkdownLine sourceLine : document.lines()) {
+        for (MarkdownLine sourceLine : document.linesFor(language)) {
             if (sourceLine.kind() == LineKind.BLANK) {
                 lines.add(new RenderLine(Component.empty(), BODY_COLOR, false));
                 continue;
