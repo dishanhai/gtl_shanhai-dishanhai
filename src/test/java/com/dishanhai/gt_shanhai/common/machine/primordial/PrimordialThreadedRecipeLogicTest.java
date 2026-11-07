@@ -9,6 +9,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.module.generator.Primo
 import com.dishanhai.gt_shanhai.mixin.PrimordialRecipeThreadStateAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
+import com.gregtechceu.gtceu.api.machine.trait.MachineTrait;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
@@ -181,6 +182,205 @@ class PrimordialThreadedRecipeLogicTest {
         assertEquals(96, logic.getActiveRecipeThreadCount());
         assertEquals(1, logic.pending.size());
         assertTrue(logic.getRecipeThreadSnapshot().threadsFull());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 20})
+    void shortRecipesFillAllNinetySixSlotsFromOneLookup(int duration) throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.configuredThreads = 96;
+        logic.module.overdriver = true;
+        logic.useActualParallel = true;
+        logic.usePriority = true;
+        for (int i = 0; i < 97; i++) {
+            var batch = new WirelessGTRecipe(recipe("short_pool_" + i, duration), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            logic.pending.add(batch);
+        }
+
+        tick(logic, 0);
+
+        assertEquals(96, logic.getActiveRecipeThreadCount());
+        assertEquals(96, logic.inputTransactions);
+        assertEquals(1, logic.candidateLookups);
+        assertEquals(1, logic.pending.size());
+        assertTrue(logic.energyTicks.isEmpty(), "新批次從下一 tick 開始工作");
+        for (int i = 1; i < duration; i++) tick(logic, i);
+        assertEquals(96, logic.getActiveRecipeThreadCount());
+        assertTrue(logic.energyTicks.values().stream().allMatch(ticks -> ticks == duration - 1));
+        assertEquals(1, logic.candidateLookups);
+        tick(logic, duration);
+        assertEquals(96, logic.finished.size());
+        assertEquals(1, logic.getActiveRecipeThreadCount());
+    }
+
+    @Test void twentyTwoEligiblePoolsDoNotDuplicateWorkToFillNinetySixSlots() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.configuredThreads = 96;
+        logic.module.overdriver = true;
+        logic.useActualParallel = true;
+        logic.usePriority = true;
+        for (int i = 0; i < 22; i++) {
+            var batch = new WirelessGTRecipe(recipe("overworld_" + i, 20), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            logic.pending.add(batch);
+        }
+        tick(logic, 0);
+        assertEquals(22, logic.getActiveRecipeThreadCount());
+        assertEquals(22, logic.inputTransactions);
+        assertEquals(1, logic.candidateLookups);
+        tick(logic, 1);
+        tick(logic, 2);
+        assertEquals(2, logic.candidateLookups, "候選用盡後保留失敗退避");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void sameRecipeMergesAtMostFourPaidBatchesAndKeepsLogicalThreadAccounting(boolean overdriver) throws Exception {
+        Probe logic = probe();
+        logic.module.configuredThreads = 5;
+        logic.module.overdriver = overdriver;
+        logic.useActualParallel = true;
+        logic.usePriority = true;
+        GTRecipe source = recipe("mergeable", 20);
+        for (int i = 0; i < 5; i++) {
+            var batch = new WirelessGTRecipe(source.copy(), BigInteger.valueOf(-3));
+            batch.data = batch.data.copy();
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, 4);
+            logic.pending.add(batch);
+        }
+        tick(logic, 0);
+        assertEquals(5, logic.inputTransactions);
+        assertEquals(5, logic.getActiveRecipeThreadCount());
+        assertEquals(2, logic.getRecipeExecutionBatchCount());
+        assertEquals(20, logic.getReservedThreadParallel());
+        assertEquals(!overdriver, logic.getRecipeThreadSnapshot().threadsFull());
+        var view = display(logic);
+        assertEquals(5, view.getInt("running"));
+        assertEquals("15", view.getString("consumption"));
+        assertEquals(4, view.getList("threads", 10).getCompound(0).getInt("mergedBatches"));
+        assertEquals(1, view.getList("threads", 10).getCompound(1).getInt("mergedBatches"));
+        tick(logic, 1);
+        assertEquals(2, logic.energyTicks.get("mergeable"));
+        assertEquals(5, logic.getRecipeThreadSnapshot().successfulTicks());
+        CompoundTag saved = new CompoundTag();
+        logic.saveRecipeThreads(saved);
+        Probe restored = probe();
+        restored.module.configuredThreads = 5;
+        restored.module.overdriver = overdriver;
+        restored.useActualParallel = true;
+        restored.loadRecipeThreads(saved);
+        assertEquals(5, restored.getActiveRecipeThreadCount());
+        assertEquals(2, restored.getRecipeExecutionBatchCount());
+        assertEquals(20, restored.getReservedThreadParallel());
+        assertEquals("15", display(restored).getString("consumption"));
+        tick(restored, 2);
+        assertEquals(0, restored.inputTransactions, "讀檔只繼續已扣料合併批次");
+        assertEquals(2, restored.energyTicks.get("mergeable"));
+        logic.outputAvailable = false;
+        for (int i = 2; i <= 20; i++) tick(logic, i);
+        assertEquals(5, logic.getActiveRecipeThreadCount());
+        assertEquals(20, logic.getReservedThreadParallel());
+        logic.outputAvailable = true;
+        tick(logic, 21);
+        assertEquals(0, logic.getActiveRecipeThreadCount());
+        assertEquals(5, logic.getRecipeThreadSnapshot().completedBatches());
+    }
+
+    @Test void sameRecipeWithDifferentProgressKeepsSeparateExecutionBatches() throws Exception {
+        Probe logic = probe();
+        logic.useActualParallel = true;
+        GTRecipe source = recipe("different_progress", 20);
+        for (int i = 0; i < 2; i++) {
+            var batch = new WirelessGTRecipe(source.copy(), BigInteger.valueOf(-3));
+            batch.data = batch.data.copy();
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, 4);
+            logic.pending.add(batch);
+            logic.wake();
+            tick(logic, i);
+        }
+        assertEquals(2, logic.getRecipeExecutionBatchCount());
+        assertEquals(1, display(logic).getList("threads", 10).getCompound(0).getInt("progress"));
+        assertEquals(0, display(logic).getList("threads", 10).getCompound(1).getInt("progress"));
+    }
+
+    @Test void groupedOutputsKeepAllVariantsAndSumBeyondLongMaxValue() {
+        ListTag outputs = new ListTag();
+        for (int variant = 0; variant < 6; variant++) {
+            CompoundTag item = new CompoundTag();
+            item.putString("id", "minecraft:raw_gold");
+            CompoundTag tag = new CompoundTag();
+            tag.putInt("variant", variant);
+            item.put("tag", tag);
+            CompoundTag output = new CompoundTag();
+            output.put("item", item);
+            output.putLong("amount", Long.MAX_VALUE);
+            outputs.add(output);
+        }
+        outputs.add(outputs.getCompound(0).copy());
+        ListTag grouped = PrimordialThreadedRecipeLogic.groupThreadOutputs(outputs);
+        assertEquals(6, grouped.size());
+        assertEquals("18446744073709551614", grouped.getCompound(0).getString("amountExact"));
+        assertEquals(5, grouped.getCompound(5).getCompound("item").getCompound("tag").getInt("variant"));
+        assertEquals(Long.MAX_VALUE, outputs.getCompound(0).getLong("amount"));
+    }
+
+    @Test void crossRecipeMergesPreserveEachFullPoolAcrossSaveAndRestore() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = Long.MAX_VALUE;
+        logic.module.overdriver = true;
+        logic.useActualParallel = logic.usePriority = true;
+        GTRecipe wrapper = recipe("paid_wrapper", 20);
+        for (int i = 0; i < 96; i++) {
+            GTRecipe source = recipe("source_" + i, 20);
+            var batch = new WirelessGTRecipe(wrapper.copy(), BigInteger.valueOf(-7));
+            batch.data = batch.data.copy();
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            logic.pending.add(source);
+            logic.preparedBatches.put(source, batch);
+        }
+        tick(logic, 0);
+        assertEquals(96, logic.getActiveRecipeThreadCount());
+        assertEquals(24, logic.getRecipeExecutionBatchCount());
+        assertTrue(logic.hasMergedRecipeBatches());
+        assertEquals(1, logic.candidateLookups);
+        var row = display(logic).getList("threads", 10).getCompound(0);
+        assertEquals(4, row.getInt("mergedBatches"));
+        assertEquals(4, row.getList("recipes", 10).size());
+        for (var element : row.getList("recipes", 10)) {
+            assertEquals(Long.MAX_VALUE, ((CompoundTag) element).getLong("reserved"));
+        }
+        CompoundTag saved = new CompoundTag();
+        logic.saveRecipeThreads(saved);
+        Probe restored = probe();
+        restored.parallelCapacity = Long.MAX_VALUE;
+        restored.module.overdriver = true;
+        restored.useActualParallel = restored.usePriority = true;
+        restored.loadRecipeThreads(saved);
+        assertEquals(96, restored.getActiveRecipeThreadCount());
+        assertEquals(24, restored.getRecipeExecutionBatchCount());
+        assertEquals("672", display(restored).getString("consumption"));
+        // 釋放一個無關組的四個槽，滿池配方仍不得重複扣料。
+        var schedulerField = PrimordialThreadedRecipeLogic.class.getDeclaredField("threads");
+        schedulerField.setAccessible(true);
+        var scheduler = (PrimordialThreadScheduler<?>) schedulerField.get(restored);
+        Object other = scheduler.lanes().getLast().task();
+        Field duration = other.getClass().getDeclaredField("duration");
+        duration.setAccessible(true);
+        duration.setInt(other, 1);
+        for (String id : List.of("source_0", "new_source")) {
+            var batch = new WirelessGTRecipe(recipe(id, 20), BigInteger.valueOf(-1));
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Long.MAX_VALUE);
+            restored.pending.add(batch);
+        }
+        tick(restored, 1);
+        assertEquals(1, restored.inputTransactions);
+        assertEquals("source_0", restored.pending.getFirst().id.getPath());
+        assertEquals(93, restored.getActiveRecipeThreadCount());
+        assertEquals(4, restored.getRecipeThreadSnapshot().completedBatches());
+        assertEquals(24, restored.energyTicks.get("paid_wrapper"));
     }
 
     @Test void overdriverPrefersUnusedRecipeAndOnlyReusesTheSamePoolRemainder() throws Exception {
@@ -495,6 +695,81 @@ class PrimordialThreadedRecipeLogicTest {
         assertEquals(1, logic.pending.size());
     }
 
+    @Test void idleBackoffSkipsCapacityAndStillPollsForUnannouncedInputs() throws Exception {
+        Probe logic = probe();
+        tick(logic, 0);
+        int capacityChecks = logic.capacityChecks;
+        logic.queue("ae_input", 10);
+        for (int now = 1; now < 20; now++) tick(logic, now);
+        assertEquals(capacityChecks, logic.capacityChecks);
+        assertEquals(1, logic.lookups);
+
+        tick(logic, 20);
+        assertEquals(2, logic.lookups);
+        assertEquals(List.of("ae_input"), logic.running());
+    }
+
+    @Test void idleBackoffStillAppliesNativeDrain() throws Exception {
+        Probe logic = probe();
+        tick(logic, 0);
+        logic.module.gtlcore$setSuspendAfterFinish(true);
+        tick(logic, 1);
+        assertFalse(logic.isWorkingEnabled());
+        assertFalse(logic.module.gtlcore$isSuspendAfterFinish());
+        assertEquals(1, logic.lookups);
+    }
+
+    @Test void continuousWarehouseUpdatesKeepWorkingCandidatesPastTwentyTicks() throws Exception {
+        Probe logic = probe();
+        logic.queue("working", 100);
+        tick(logic, 0);
+        var cache = seedLookupCache(logic);
+        var notify = SelectableRecipeTypeSetRecipeLogic.class.getDeclaredMethod("noteNoisyHandlerContentsChanged");
+        notify.setAccessible(true);
+        for (int now = 0; now <= 199; now++) {
+            logic.module.now = now;
+            notify.invoke(logic);
+            assertNotNull(cache.get(logic), "连续数量通知不应提前清除加工中的候选，tick " + now);
+        }
+
+        logic.module.now = 200;
+        logic.module.lookupTypes = new GTRecipeType[] {null};
+        notify.invoke(logic);
+        assertNull(cache.get(logic), "选择器变化必须立即清除候选");
+    }
+
+    @Test void freshWarehouseEventAndIdleMachineStillInvalidateStaleCandidates() throws Exception {
+        Probe logic = probe();
+        logic.queue("working", 100);
+        tick(logic, 0);
+        var cache = seedLookupCache(logic);
+        var notify = SelectableRecipeTypeSetRecipeLogic.class.getDeclaredMethod("noteNoisyHandlerContentsChanged");
+        notify.setAccessible(true);
+        logic.module.now = 0;
+        notify.invoke(logic);
+        logic.module.now = 25;
+        notify.invoke(logic);
+        assertNull(cache.get(logic), "安静后的新通知可刷新老候选");
+
+        Probe idle = probe();
+        seedLookupCache(idle);
+        for (int now = 0; now <= 20; now++) {
+            idle.module.now = now;
+            notify.invoke(idle);
+        }
+        assertNull(cache.get(idle), "空闲时连续通知仍会刷新老候选");
+    }
+
+    private static Field seedLookupCache(Probe logic) throws Exception {
+        var owner = SelectableRecipeTypeSetRecipeLogic.class;
+        var cache = owner.getDeclaredField("cachedLookupRecipes");
+        cache.setAccessible(true);
+        cache.set(logic, Set.of(recipe("cached", 100)));
+        set(owner, "cachedLookupTick", logic, 0L);
+        set(owner, "lastContentNotifyTick", logic, Long.MIN_VALUE);
+        return cache;
+    }
+
     @Test void pauseAndResumePreserveProgressAndDoNotConsumeInputsTwice() throws Exception {
         Probe logic = probe();
         logic.queue("paid", 30);
@@ -756,6 +1031,7 @@ class PrimordialThreadedRecipeLogicTest {
         module.logic = logic;
         logic.module = module;
         logic.pending = new ArrayDeque<>();
+        logic.preparedBatches = new IdentityHashMap<>();
         logic.finished = new ArrayList<>();
         logic.admittedShares = new ArrayList<>();
         logic.energyTicks = new HashMap<>();
@@ -776,6 +1052,7 @@ class PrimordialThreadedRecipeLogicTest {
         boolean formed;
         boolean overdriver;
         boolean suspendAfterFinish;
+        GTRecipeType[] lookupTypes;
         List<IMultiPart> attached;
         Probe logic;
         int statusNotifications;
@@ -784,6 +1061,10 @@ class PrimordialThreadedRecipeLogicTest {
         @Override public long getOffsetTimer() { return now; }
         @Override public boolean isFormed() { return formed; }
         @Override public List<IMultiPart> getParts() { return attached == null ? List.of() : attached; }
+        @Override public List<MachineTrait> getTraits() { return List.of(); }
+        @Override public GTRecipeType[] getRecipeTypes() {
+            return lookupTypes == null ? new GTRecipeType[0] : lookupTypes;
+        }
         @Override protected boolean canModuleWork() { return formed; }
         @Override public long getParallelRecipeThreadCount() { return configuredThreads; }
         @Override public boolean hasParallelOverdriver() { return overdriver; }
@@ -809,14 +1090,38 @@ class PrimordialThreadedRecipeLogicTest {
         boolean outputAvailable, failWorking, refuseSetup;
         boolean usePriority, useActualParallel;
         String blockedRecipe;
-        int lookups, inputTransactions, blockedFinishLookups, setupAttempts;
+        int lookups, candidateLookups, inputTransactions, blockedFinishLookups, setupAttempts, capacityChecks;
         RecipeResult recipeResult, workingResult;
+        Map<GTRecipe, GTRecipe> preparedBatches;
         Probe() { super(null); }
 
         @Override public SelectableRecipeTypeSetMachine getMachine() { return module; }
-        @Override protected long getUnreservedTotalParallelLimit() { return parallelCapacity; }
+        @Override protected long getUnreservedTotalParallelLimit() {
+            capacityChecks++;
+            return parallelCapacity;
+        }
         @Override protected boolean tracksActualParallel() { return useActualParallel; }
         @Override public void updateTickSubscription() {}
+        // 隔離依賴 jar 的 SRG codec，仍執行真實 Frame NBT 與排程還原。
+        @Override protected com.gregtechceu.gtceu.syncdata.GTRecipePayload threadRecipePayload() {
+            return new com.gregtechceu.gtceu.syncdata.GTRecipePayload() {
+                @Override public net.minecraft.nbt.Tag serializeNBT() {
+                    CompoundTag tag = new CompoundTag();
+                    tag.putString("id", getPayload().id.getPath());
+                    tag.putInt("duration", getPayload().duration);
+                    tag.put("data", getPayload().data.copy());
+                    return tag;
+                }
+                @Override public void deserializeNBT(net.minecraft.nbt.Tag value) {
+                    CompoundTag tag = (CompoundTag) value;
+                    try {
+                        GTRecipe decoded = recipe(tag.getString("id"), tag.getInt("duration"));
+                        decoded.data = tag.getCompound("data").copy();
+                        setPayload(decoded);
+                    } catch (Exception error) { throw new AssertionError(error); }
+                }
+            };
+        }
         @Override protected long estimateThreadRecipeTicks(GTRecipe recipe) { return 20L; }
         @Override protected boolean canFinishThreadBatch(GTRecipe recipe) { return outputAvailable; }
         @Override public void setRecipeStatus(RecipeResult result) { recipeResult = result; }
@@ -831,22 +1136,30 @@ class PrimordialThreadedRecipeLogicTest {
             }
             lookups++;
             GTRecipe next = usePriority
-                    ? priorityCandidates(new java.util.LinkedHashSet<>(pending)).stream().findFirst().orElse(null)
+                    ? priorityCandidates(() -> {
+                        candidateLookups++;
+                        return new java.util.LinkedHashSet<>(pending);
+                    }).stream().findFirst().orElse(null)
                     : pending.peek();
+            if (usePriority && next != null) {
+                GTRecipe candidate = next;
+                next = pending.stream().filter(batch -> batch.id.equals(candidate.id)).findFirst().orElse(null);
+            }
             if (next == null || usePriority && next.id.getPath().equals(blockedRecipe)) return null;
             long share = module.overdriver ? getThreadRecipePoolRemaining(next) : getThreadParallelAllowance();
             if (share <= 0L) return null;
             pending.remove(next);
+            GTRecipe paid = preparedBatches.getOrDefault(next, next);
             if (module.overdriver) {
-                long actual = next.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY);
-                next.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Math.min(actual, share));
+                long actual = paid.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY);
+                paid.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, Math.min(actual, share));
             }
             inputTransactions++;
             admittedShares.add(share);
             for (GTRecipe source : sourceRecipes == null ? List.of(next) : sourceRecipes) {
                 onThreadRecipeInputHandled(source);
             }
-            return next;
+            return paid;
         }
 
         @Override protected void setupThreadRecipe(GTRecipe recipe) {

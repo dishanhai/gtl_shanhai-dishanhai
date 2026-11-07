@@ -39,10 +39,11 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
                 || !(holder.getMetaMachine() instanceof IRecipeLogicMachine machine)
                 || !(machine.getRecipeLogic() instanceof IRecipeThreadDisplay logic)
                 || !logic.isRecipeThreadDisplayAvailable()) return;
-        int count = logic.getActiveRecipeThreadCount();
-        int pages = Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
+        int count = logic.getRecipeExecutionBatchCount();
+        int pageSize = logic.hasMergedRecipeBatches() ? 1 : PAGE_SIZE;
+        int pages = Math.max(1, Math.ceilDiv(count, pageSize));
         int page = (int) Math.floorMod(machine.self().getOffsetTimer() / 100L, (long) pages);
-        CompoundTag view = logic.getRecipeThreadDisplay(page * PAGE_SIZE, PAGE_SIZE);
+        CompoundTag view = logic.getRecipeThreadDisplay(page * pageSize, pageSize);
         view.putInt("page", page + 1);
         view.putInt("pages", pages);
         data.put(DATA, view);
@@ -59,6 +60,11 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
         addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.activity",
                 data.getInt("running"), data.getInt("waiting"))
                 .withStyle(ChatFormatting.GRAY));
+        if (data.contains("executionBatches")) {
+            addThreadText(tooltip, Component.translatable("gt_shanhai.primordial.threads.execution_batches",
+                    data.getInt("executionBatches"), data.getInt("active"))
+                    .withStyle(ChatFormatting.GRAY));
+        }
         Component parallel = data.getBoolean("independentRecipePools")
                 ? Component.translatable("gt_shanhai.primordial.threads.parallel_independent")
                 : Component.translatable("gt_shanhai.primordial.threads.parallel",
@@ -100,38 +106,53 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
                     helper.progressStyle().color(working ? 0xFF3D9B8F : 0xFF99764C).textColor(0xFFFFFFFF),
                     BoxStyle.DEFAULT, true).tag(THREAD_ELEMENT_UID);
             tooltip.add(progressBar);
+            boolean merged = row.getInt("mergedBatches") > 1;
+            if (merged) {
+                String key = row.getList("recipes", 10).size() + row.getInt("moreRecipes") > 1
+                        ? "gt_shanhai.primordial.threads.merged_cross_recipe" : "gt_shanhai.primordial.threads.merged_batches";
+                addThreadDetail(tooltip, row, Component.translatable(key,
+                        row.getInt("mergedBatches")));
+            }
             appendThreadOutputs(tooltip, row);
             float fraction = duration <= 0 ? 0 : Math.max(0, Math.min(1F, (float) progress / duration));
             addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.timing",
                     String.format(java.util.Locale.ROOT, "%.1f", fraction * 100), progress, duration,
                     String.format(java.util.Locale.ROOT, "%.1f", row.getInt("remainingTicks") / 20.0)));
-            var recipes = row.getList("recipes", 10);
-            if (recipes.isEmpty()) {
-                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.unknown_recipe"));
-            }
-            for (var source : recipes) {
-                CompoundTag identity = (CompoundTag) source;
-                String typeId = identity.getString("recipeType");
-                ResourceLocation recipeType = typeId.isBlank() ? null : ResourceLocation.tryParse(typeId);
-                if (recipeType != null) addThreadDetail(tooltip, row,
-                        Component.translatable("gt_shanhai.primordial.threads.recipe",
-                                Component.translatable(recipeType.toLanguageKey())));
-                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.recipe_id",
-                        identity.getString("recipeId")));
-            }
-            if (row.getInt("moreRecipes") > 0) {
-                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.more_recipes",
-                        row.getInt("moreRecipes")));
-            }
-            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.batch",
-                    NumberUtils.formatLong(row.getLong("reserved"))));
-            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.batch_energy",
-                    row.getString("consumption"), row.getString("production")));
+            if (!merged) appendBatchDetails(tooltip, row, data.getBoolean("independentRecipePools"));
             if (row.contains("reason")) {
                 Component reason = Component.Serializer.fromJson(row.getString("reason"));
                 if (reason != null) addThreadText(tooltip, reason.copy().withStyle(ChatFormatting.YELLOW));
             }
         }
+    }
+
+    private static void appendBatchDetails(ITooltip tooltip, CompoundTag row, boolean independentPools) {
+        var recipes = row.getList("recipes", 10);
+        if (recipes.isEmpty()) {
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.unknown_recipe"));
+        }
+        for (var source : recipes) {
+            CompoundTag identity = (CompoundTag) source;
+            String typeId = identity.getString("recipeType");
+            ResourceLocation recipeType = typeId.isBlank() ? null : ResourceLocation.tryParse(typeId);
+            if (recipeType != null) addThreadDetail(tooltip, row,
+                    Component.translatable("gt_shanhai.primordial.threads.recipe",
+                            Component.translatable(recipeType.toLanguageKey())));
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.recipe_id",
+                    identity.getString("recipeId")));
+            if (independentPools && identity.contains("reserved")) {
+                addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.recipe_reserved",
+                        NumberUtils.formatLong(identity.getLong("reserved"))));
+            }
+        }
+        if (row.getInt("moreRecipes") > 0) {
+            addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.more_recipes",
+                    row.getInt("moreRecipes")));
+        }
+        addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.batch",
+                NumberUtils.formatLong(row.getLong("reserved"))));
+        addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.batch_energy",
+                row.getString("consumption"), row.getString("production")));
     }
 
     private static void appendThreadOutputs(ITooltip tooltip, CompoundTag row) {
@@ -148,12 +169,15 @@ public enum PrimordialRecipeThreadsProvider implements IBlockComponentProvider, 
                 FluidStack stack = FluidStack.loadFromTag(output.getCompound("fluid"));
                 name = stack.getDisplayName();
             }
+            String amount = output.contains("amountExact")
+                    ? NumberUtils.formatDouble(Double.parseDouble(output.getString("amountExact")))
+                    : NumberUtils.formatLong(output.getLong("amount"));
             Component line = threadColor(row, Component.translatable(output.contains("item")
                             ? "gt_shanhai.primordial.threads.item_output" : "gt_shanhai.primordial.threads.fluid_output",
-                    NumberUtils.formatLong(output.getLong("amount")), name));
+                    amount, name));
             tooltip.add(new PrimordialRecipeThreadText(line, helper.text(line), icon).tag(THREAD_ELEMENT_UID));
         }
-        if (row.getInt("moreOutputs") > 0) {
+        if (row.getInt("mergedBatches") <= 1 && row.getInt("moreOutputs") > 0) {
             addThreadDetail(tooltip, row, Component.translatable("gt_shanhai.primordial.threads.more_outputs",
                     row.getInt("moreOutputs")));
         }

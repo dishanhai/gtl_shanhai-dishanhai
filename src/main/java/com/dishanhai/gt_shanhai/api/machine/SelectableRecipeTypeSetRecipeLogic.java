@@ -25,6 +25,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -32,6 +33,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
@@ -86,6 +88,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     private final Map<GTRecipeType, TypeCacheEntry> perTypeLookupCache = new HashMap<>();
+    private TypeSearchRound typeSearchRound;
     private long cachedMarkedRecipeTick = Long.MIN_VALUE;
     private Set<GTRecipe> cachedMarkedRecipes = Collections.emptySet();
     // merged 缓存按 (base 实例, marked 实例) 身份对命中，而非 tick 键：
@@ -141,6 +144,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         cachedLookupTick = Long.MIN_VALUE;
         cachedLookupRecipes = null;
         perTypeLookupCache.clear();
+        typeSearchRound = null;
         cachedMarkedRecipeTick = Long.MIN_VALUE;
         cachedMarkedRecipes = Collections.emptySet();
         cachedMergedLookupMarked = null;
@@ -180,7 +184,8 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
 
     /**
      * 選擇器（電路、1 格輸入的物品種類、選中配方類型）變了：立刻清候選。
-     * 只是數量波動：新鮮非空候選在 {@link #CONTENT_NOISE_HOLD_TICKS} 內留著；
+     * 只是數量波動：保留新鮮候選。加工中收到連續通知時，由查詢窗口控制候選過期；
+     * 安靜後的新通知和空轉時的通知仍可在 {@link #CONTENT_NOISE_HOLD_TICKS} 後刷新舊候選。
      * 空結果退避只在「安靜超過 1 tick 後的第一次通知」解除，連續 AE 通知不會把空轉機器叫醒到每 5 tick 重搜。
      */
     private void noteNoisyHandlerContentsChanged() {
@@ -203,7 +208,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
                 && tick - cachedLookupTick < CONTENT_NOISE_HOLD_TICKS;
         boolean risingEdge = lastContentNotifyTick == Long.MIN_VALUE || tick - lastContentNotifyTick > 1L;
         lastContentNotifyTick = tick;
-        if (freshNonEmpty) {
+        if (freshNonEmpty || !risingEdge && isWorking()) {
             return;
         }
         if (risingEdge) {
@@ -304,6 +309,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             return Collections.emptySet();
         }
         if (isLock()) {
+            typeSearchRound = null;
             return lookupLockedRecipe();
         }
         long tick = machine.getOffsetTimer();
@@ -319,6 +325,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             return mergeMarkedPatternRecipesCached(machine, cachedLookupRecipes);
         }
         Set<GTRecipe> recipes = searchRecipeTypes(machine, lookupTypes);
+        if (recipes == null) {
+            onRecipeTypeSearchYield();
+            return Collections.emptySet();
+        }
         Set<GTRecipe> merged = mergeMarkedPatternRecipesCached(machine, recipes);
         if (merged.isEmpty()) {
             // 空结果不写缓存：机器空转/缺料时永远实时搜索，料一到立刻开工，杜绝"缓存空集守死不启动"。
@@ -395,8 +405,24 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         return machine.getRecipeTypes();
     }
 
+    protected int recipeTypeSearchLimitPerTick() { return Integer.MAX_VALUE; }
+
+    protected void onRecipeTypeSearchYield() {}
+
+    @Nullable
     private Set<GTRecipe> searchRecipeTypes(SelectableRecipeTypeSetMachine machine, GTRecipeType[] types) {
         long tick = machine.getOffsetTimer();
+        int limit = recipeTypeSearchLimitPerTick();
+        if (types.length > limit) {
+            if (typeSearchRound == null || !Arrays.equals(typeSearchRound.types, types)) {
+                typeSearchRound = new TypeSearchRound(types);
+            }
+            Set<GTRecipe> result = typeSearchRound.advance(tick, limit, type ->
+                    type == null ? Collections.emptySet() : searchOneRecipeTypeCached(type, machine, tick));
+            if (result != null) typeSearchRound = null;
+            return result;
+        }
+        typeSearchRound = null;
         Set<GTRecipe> recipes = new ObjectOpenHashSet<>();
         for (GTRecipeType type : types) {
             if (type == null) {
@@ -405,6 +431,29 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             recipes.addAll(searchOneRecipeTypeCached(type, machine, tick));
         }
         return recipes;
+    }
+
+    /** 保留整輪候選，讓優先順序能比較所有配方類型。 */
+    static final class TypeSearchRound {
+        private final GTRecipeType[] types;
+        private final Set<GTRecipe> recipes = new ObjectOpenHashSet<>();
+        private int nextType;
+        private long lastTick = Long.MIN_VALUE;
+
+        TypeSearchRound(GTRecipeType[] types) {
+            this.types = types.clone();
+        }
+
+        @Nullable
+        Set<GTRecipe> advance(long tick, int limit, Function<GTRecipeType, Set<GTRecipe>> search) {
+            if (tick == lastTick) return null;
+            lastTick = tick;
+            int end = nextType + Math.min(limit, types.length - nextType);
+            while (nextType < end) {
+                recipes.addAll(search.apply(types[nextType++]));
+            }
+            return nextType == types.length ? recipes : null;
+        }
     }
 
     /**

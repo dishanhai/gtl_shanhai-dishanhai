@@ -115,6 +115,18 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     }
 
     @Override
+    protected int recipeTypeSearchLimitPerTick() {
+        MetaMachine machine = getMachine();
+        // 連續樣板派單會刷新候選；保留整輪搜尋，避免每 tick 從頭開始。
+        if (usesIndependentRecipePools()
+                && machine instanceof org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine capabilityMachine
+                && capabilityMachine.getMEPatternRecipeHandleParts().isEmpty()) {
+            return 8;
+        }
+        return super.recipeTypeSearchLimitPerTick();
+    }
+
+    @Override
     protected long getLookupCacheTicks() {
         return ACTIVE_LOOKUP_CACHE_TICKS;
     }
@@ -234,7 +246,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                 && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : 0L;
         boolean independentPools = usesIndependentRecipePools();
         boolean crossType = crossTypeThreads > 0L && !independentPools;
-        Set<GTRecipe> recipes = crossType ? lookupRecipeIterator() : priorityCandidates(this::lookupRecipeIterator);
+        Set<GTRecipe> recipes = crossType ? threadCandidates(this::lookupRecipeIterator) : priorityCandidates(this::lookupRecipeIterator);
         if (recipes.isEmpty()) {
             // 与父类 calculateParallels 同款语义：是否清缓存必须先问 shouldInvalidateLookupCacheWhenNoRunnableRecipe()。
             // 此前三处无条件 invalidate 把模块的 200-tick 稳态缓存和该开关整体架空——空闲模块每 5 tick
@@ -577,68 +589,51 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     }
 
     /**
-     * hintParallel 是同一配方上次的可匹配并行。输出受限的稳态下每轮结果几乎不变，
-     * 先测提示值再向两侧倍增划出区间，探测约 2–4 次；提示无效（≤1 或 ≥ 上界）时退化为原二分。
+     * hintParallel 是同一配方上次的可匹配并行。稳态只探测提示值和相邻的更高并行，
+     * 数量变化时复用已经确定的边界，再用倍增和二分定位。
      * 与二分一样依赖「可匹配性随并行单调」；最后一次通过的探测恒为最终结果，调用方的缓存命中依赖这一点。
      */
     static long findHighestMatchableParallel(long requestedParallel, long hintParallel, LongPredicate canMatch) {
         if (requestedParallel <= 0L || canMatch == null) {
             return 0L;
         }
-        if (canMatch.test(requestedParallel)) {
-            return requestedParallel;
-        }
-        if (requestedParallel == 1L) {
-            return 0L;
-        }
-
-        long oneLess = requestedParallel - 1L;
-        if (canMatch.test(oneLess)) {
-            return oneLess;
-        }
-        if (oneLess == 1L) {
-            return 0L;
-        }
-
-        // 并行 1 都过不了（输出倉滿、输入被别的配方吃光）= 整段单调区间全部失败，直接返回，
-        // 不必再二分。这是「堵塞状态每 5 tick 重试一轮」的主要开销：超限器下 log2(上限) 可达 60 轮，
-        // 每轮都复制一份缩放配方并做输入、输出两次 handler 匹配。
-        if (!canMatch.test(1L)) {
-            return 0L;
-        }
-
-        // lo 已知可过，hi 已知不可过。
         long lo = 1L;
-        long hi = oneLess;
+        long hi = requestedParallel - 1L;
         if (hintParallel > lo && hintParallel < hi) {
-            long step = 1L;
             if (canMatch.test(hintParallel)) {
-                lo = hintParallel;
-                while (true) {
+                lo = hintParallel + 1L;
+                if (!canMatch.test(lo)) return hintParallel;
+                if (canMatch.test(requestedParallel)) return requestedParallel;
+                if (lo == hi || canMatch.test(hi)) return hi;
+                for (long step = 2L; step < hi - lo; step <<= 1) {
                     long probe = lo + step;
-                    if (probe >= hi || probe < 0L) break;
-                    if (canMatch.test(probe)) {
-                        lo = probe;
-                        step <<= 1;
-                    } else {
+                    if (!canMatch.test(probe)) {
                         hi = probe;
                         break;
                     }
+                    lo = probe;
                 }
             } else {
                 hi = hintParallel;
-                while (true) {
+                if (!canMatch.test(lo)) return 0L;
+                for (long step = 1L; step < hi - lo; step <<= 1) {
                     long probe = hi - step;
-                    if (probe <= lo) break;
                     if (canMatch.test(probe)) {
                         lo = probe;
                         break;
                     }
                     hi = probe;
-                    step <<= 1;
                 }
             }
+        } else {
+            if (canMatch.test(requestedParallel)) return requestedParallel;
+            if (requestedParallel == 1L) return 0L;
+            if (canMatch.test(hi)) return hi;
+            // 无提示时先测上限，再用并行 1 快速排除整段都被阻塞的情况。
+            if (hi == lo || !canMatch.test(lo)) return 0L;
         }
+
+        // lo 已知可过，hi 已知不可过。
         while (hi - lo > 1L) {
             long middle = lo + ((hi - lo) >>> 1);
             if (canMatch.test(middle)) {

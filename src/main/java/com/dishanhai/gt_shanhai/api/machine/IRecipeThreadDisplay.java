@@ -9,6 +9,8 @@ public interface IRecipeThreadDisplay {
     CompoundTag getRecipeThreadDisplay(int first, int maximum);
     void onThreadInputsChanged();
     int getActiveRecipeThreadCount();
+    default int getRecipeExecutionBatchCount() { return getActiveRecipeThreadCount(); }
+    default boolean hasMergedRecipeBatches() { return false; }
     boolean isRecipeThreadDisplayAvailable();
     /** No recipe lookup, frame switching or inventory transaction is allowed in this observation. */
     default RecipeThreadSnapshot getRecipeThreadSnapshot() { return null; }

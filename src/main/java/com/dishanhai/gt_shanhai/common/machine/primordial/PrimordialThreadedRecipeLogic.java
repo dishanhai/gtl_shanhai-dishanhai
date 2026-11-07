@@ -31,6 +31,7 @@ import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 
 import java.math.BigInteger;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashSet;
@@ -43,6 +44,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private static final String SAVE_KEY = "sh_primordial_recipe_threads";
     private static final ManagedFieldHolder THREAD_FIELDS =
             new ManagedFieldHolder(PrimordialThreadedRecipeLogic.class, MANAGED_FIELD_HOLDER);
+    private static final Frame EMPTY_FRAME = new Frame();
     private PrimordialThreadScheduler<Frame> threads = new PrimordialThreadScheduler<>();
     private boolean initialized;
     private boolean tickingThreads;
@@ -56,6 +58,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private boolean priorityInputHandled;
     private LinkedHashSet<PrimordialThreadRecipeIdentity.Identity> matchingRecipeSources;
     private Map<Identity, Long> recipePoolReservations;
+    private Map<GTRecipe, Identity> recipePoolIdentities;
+    private Set<GTRecipe> admissionCandidates;
     @DescSynced private int activeRecipeThreads;
     @DescSynced private long reservedThreadParallel;
 
@@ -72,11 +76,18 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     public final Set<GTRecipe> priorityCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup) {
         if (priority == null) return lookup.get();
-        return new LinkedHashSet<>(priority.select(() -> {
-            Set<GTRecipe> candidates = lookup.get();
-            return recipePoolReservations == null ? candidates
-                    : candidates.stream().filter(recipe -> getThreadRecipePoolRemaining(recipe) > 0L).toList();
-        }));
+        do {
+            List<GTRecipe> selected = priority.select(lookup);
+            if (selected.isEmpty() || recipePoolReservations == null
+                    || getThreadRecipePoolRemaining(selected.getFirst()) > 0L) return new LinkedHashSet<>(selected);
+        } while (priority.retry());
+        return Set.of();
+    }
+
+    protected final Set<GTRecipe> threadCandidates(java.util.function.Supplier<Set<GTRecipe>> lookup) {
+        if (!admission) return lookup.get();
+        if (admissionCandidates == null) admissionCandidates = new LinkedHashSet<>(lookup.get());
+        return admissionCandidates;
     }
 
     protected long estimateThreadRecipeTicks(GTRecipe recipe) {
@@ -99,7 +110,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     private long recipePoolReserved(GTRecipe recipe) {
         if (recipePoolReservations == null) return 0L;
-        Identity source = PrimordialThreadRecipeIdentity.fromRecipe(recipe);
+        if (recipePoolIdentities == null) recipePoolIdentities = new java.util.IdentityHashMap<>();
+        Identity source = recipePoolIdentities.computeIfAbsent(recipe, PrimordialThreadRecipeIdentity::fromRecipe);
         if (source == null) return Long.MAX_VALUE;
         long unknown = recipePoolReservations.getOrDefault(null, 0L);
         long known = recipePoolReservations.getOrDefault(source, 0L);
@@ -109,18 +121,26 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     private Map<Identity, Long> collectRecipePoolReservations() {
         Map<Identity, Long> reserved = new HashMap<>();
         for (var lane : threads.lanes()) {
-            Frame frame = lane.task();
-            var sources = PrimordialThreadRecipeIdentity.sourcesOf(frame.recipe);
-            if (sources.isEmpty()) {
-                // 舊版沒有保存來源時，保守占用每個池，直到該批結算。
-                sources = java.util.Collections.singletonList(PrimordialThreadRecipeIdentity.fromRecipe(frame.origin));
-            }
-            // 舊跨配方批次沒有逐配方數量，先用原批次預留保護各來源。
-            for (Identity source : sources) {
-                reserved.merge(source, lane.reserved(), (a, b) -> a + Math.min(b, Long.MAX_VALUE - a));
-            }
+            reserveRecipePool(reserved, lane.task(), lane.reserved());
         }
         return reserved;
+    }
+
+    private void reserveRecipePool(Map<Identity, Long> reserved, Frame frame, long amount) {
+        if (frame.sourceReservations != null) {
+            frame.sourceReservations.forEach((source, parallel) ->
+                    reserved.merge(source, parallel, (a, b) -> a + Math.min(b, Long.MAX_VALUE - a)));
+            return;
+        }
+        var sources = PrimordialThreadRecipeIdentity.sourcesOf(frame.recipe);
+        if (sources.isEmpty()) {
+            // 舊版沒有保存來源時，保守占用每個池，直到該批結算。
+            sources = java.util.Collections.singletonList(PrimordialThreadRecipeIdentity.fromRecipe(frame.origin));
+        }
+        // 舊跨配方批次沒有逐配方數量，先用原批次預留保護各來源。
+        for (Identity source : sources) {
+            reserved.merge(source, amount, (a, b) -> a + Math.min(b, Long.MAX_VALUE - a));
+        }
     }
 
     protected final long getBaseParallelCapacity() { return super.getTotalParallelLimit(); }
@@ -150,6 +170,10 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     protected final boolean isThreadRecipeLookupAllowed() { return !tickingThreads || admission; }
     public final int getActiveRecipeThreadCount() { return activeRecipeThreads; }
+    @Override public final int getRecipeExecutionBatchCount() { return displayLanes().size(); }
+    @Override public final boolean hasMergedRecipeBatches() {
+        return displayLanes().stream().anyMatch(lane -> lane.threadCount() > 1);
+    }
     public final boolean isRecipeThreadDisplayAvailable() { return true; }
     public final long getReservedThreadParallel() { return reservedThreadParallel; }
 
@@ -162,12 +186,13 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         for (var lane : lanes) {
             Frame frame = lane.task();
             if (available && frame.status == Status.WORKING && !frame.pendingSetup
-                    && frame.progress < frame.duration && frame.recipe != null) running++;
+                    && frame.progress < frame.duration && frame.recipe != null) running += frame.batchCount;
         }
         long capacity = getUnreservedTotalParallelLimit();
         long configuredThreads = getConfiguredRecipeThreadCapacity();
         boolean independentPools = usesIndependentRecipePools();
-        return new RecipeThreadSnapshot(Math.min(Math.max(0L, capacity), configuredThreads), lanes.size(), running,
+        return new RecipeThreadSnapshot(Math.min(Math.max(0L, capacity), configuredThreads),
+                threads.activeThreads(), running,
                 enabled, nativeDrainRequested(), independentPools ? 0L : capacity, displayReserved(),
                 continuousTicks, completedThreadBatches,
                 threads.admissionShare(capacity, configuredThreads, tracksActualParallel(), independentPools) <= 0L);
@@ -184,7 +209,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                 && (!(getMachine() instanceof IMultiController controller) || controller.isFormed())
                 && (!(getMachine() instanceof PrimordialOmegaEngineModuleBase module) || module.canModuleWork());
         data.putBoolean("enabled", enabled);
-        data.putInt("active", lanes.size());
+        data.putInt("active", threads.activeThreads());
+        data.putInt("executionBatches", lanes.size());
         data.putLong("capacity", getRecipeThreadCapacity());
         data.putLong("reserved", displayReserved());
         data.putLong("parallelCapacity", getUnreservedTotalParallelLimit());
@@ -196,9 +222,9 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         int running = 0;
         for (var lane : lanes) {
             Frame frame = lane.task();
-            if (enabled && (!available || frame.status == Status.WAITING || frame.pendingSetup)) waiting++;
+            if (enabled && (!available || frame.status == Status.WAITING || frame.pendingSetup)) waiting += frame.batchCount;
             if (available && frame.status == Status.WORKING && !frame.pendingSetup
-                    && frame.progress < frame.duration && frame.recipe != null) running++;
+                    && frame.progress < frame.duration && frame.recipe != null) running += frame.batchCount;
             if (!available || frame.status != Status.WORKING || frame.pendingSetup
                     || frame.progress >= frame.duration || frame.recipe == null) continue;
             if (frame.recipe instanceof IWirelessGTRecipe wireless) {
@@ -221,6 +247,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             Frame frame = lane.task();
             CompoundTag row = new CompoundTag();
             row.putLong("index", lane.index());
+            row.putInt("mergedBatches", frame.batchCount);
             row.putLong("reserved", lane.reserved());
             row.putInt("progress", frame.progress);
             row.putInt("duration", frame.duration);
@@ -228,6 +255,14 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             row.putString("status", available ? frame.status.name() : enabled ? "WAITING" : "SUSPEND");
             if (frame.recipe != null) {
                 PrimordialThreadRecipeIdentity.appendDisplay(row, frame.recipe);
+                if (frame.sourceReservations != null) {
+                    for (Tag element : row.getList("recipes", Tag.TAG_COMPOUND)) {
+                        CompoundTag source = (CompoundTag) element;
+                        Long reserved = frame.sourceReservations.get(new Identity(
+                                source.getString("recipeType"), source.getString("recipeId")));
+                        if (reserved != null) source.putLong("reserved", reserved);
+                    }
+                }
                 BigInteger batchConsumption = BigInteger.ZERO;
                 BigInteger batchProduction = BigInteger.ZERO;
                 if (available && frame.status == Status.WORKING && !frame.pendingSetup
@@ -269,13 +304,14 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     public static void appendThreadOutputs(CompoundTag row, GTRecipe recipe) {
         if (recipe == null || recipe.outputs.isEmpty()) return;
+        boolean merged = row.getInt("mergedBatches") > 1;
         ListTag outputs = new ListTag();
         int total = 0;
         for (var ingredient : RecipeHelper.getOutputContents(recipe, ItemRecipeCapability.CAP)) {
             var stacks = ingredient.getItems();
             if (stacks.length == 0 || stacks[0].isEmpty()) continue;
             total++;
-            if (outputs.size() >= 4) continue;
+            if (!merged && outputs.size() >= 4) continue;
             CompoundTag output = new CompoundTag();
             output.put("item", stacks[0].copyWithCount(1).save(new CompoundTag()));
             output.putLong("amount", ingredient instanceof LongIngredient large
@@ -285,14 +321,32 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         for (var fluid : RecipeHelper.getOutputFluids(recipe)) {
             if (fluid.isEmpty()) continue;
             total++;
-            if (outputs.size() >= 4) continue;
+            if (!merged && outputs.size() >= 4) continue;
             CompoundTag output = new CompoundTag();
-            output.put("fluid", fluid.saveToTag(new CompoundTag()));
+            output.put("fluid", (merged ? fluid.copy(1L) : fluid).saveToTag(new CompoundTag()));
             output.putLong("amount", fluid.getAmount());
             outputs.add(output);
         }
-        row.put("outputs", outputs);
-        row.putInt("moreOutputs", total - outputs.size());
+        row.put("outputs", merged ? groupThreadOutputs(outputs) : outputs);
+        if (!merged) row.putInt("moreOutputs", total - outputs.size());
+    }
+
+    static ListTag groupThreadOutputs(ListTag outputs) {
+        Map<CompoundTag, BigInteger> totals = new LinkedHashMap<>();
+        for (Tag element : outputs) {
+            CompoundTag identity = ((CompoundTag) element).copy();
+            long amount = identity.getLong("amount");
+            identity.remove("amount");
+            totals.merge(identity, BigInteger.valueOf(amount), BigInteger::add);
+        }
+        ListTag grouped = new ListTag();
+        totals.forEach((identity, amount) -> {
+            CompoundTag output = identity.copy();
+            if (amount.bitLength() <= 63) output.putLong("amount", amount.longValue());
+            else output.putString("amountExact", amount.toString());
+            grouped.add(output);
+        });
+        return grouped;
     }
 
     public final long getRecipeThreadCapacity() {
@@ -337,6 +391,11 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
     public final void onThreadInputsChanged() {
         invalidateLookupSetCache();
         if (threads != null) threads.requestSearch();
+    }
+
+    @Override
+    protected final void onRecipeTypeSearchYield() {
+        threads.requestSearch();
     }
 
     @Override public void onRecipeTypeSelectionChanged() {
@@ -403,7 +462,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         }
         int before = progress;
         if (progress < duration) handleRecipeWorking();
-        if (progress > before) continuousTicks++;
+        if (progress > before) continuousTicks += frame.batchCount;
         if (fuelTime > 0) fuelTime--;
         if (progress >= duration) {
             if (!canFinishThreadBatch(lastRecipe)) {
@@ -412,7 +471,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                 setNativeDrain(false);
                 try { onRecipeFinish(); }
                 finally { setNativeDrain(drainRequested); }
-                completedThreadBatches++;
+                completedThreadBatches += frame.batchCount;
                 lastRecipe = null;
                 duration = progress = 0;
             }
@@ -452,12 +511,15 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         if (getMachine() instanceof IMultiController controller && !controller.isFormed()) return;
         if (getMachine() instanceof PrimordialOmegaEngineModuleBase module && !module.canModuleWork()) return;
 
-        Status previousStatus = getStatus();
+        long now = getMachine().getOffsetTimer();
         drainRequested = nativeDrainRequested();
+        Status previousStatus = getStatus();
+        if (threads.activeThreads() == 0 && previousStatus == Status.IDLE
+                && !drainRequested && !threads.isSearchDue(now)) return;
         boolean independentPools = usesIndependentRecipePools();
         tickingThreads = true;
         try {
-            threads.tick(getMachine().getOffsetTimer(), getUnreservedTotalParallelLimit(),
+            threads.tick(now, getUnreservedTotalParallelLimit(),
                     getConfiguredRecipeThreadCapacity(),
                     tracksActualParallel(), independentPools,
                     new PrimordialThreadScheduler.Runner<>() {
@@ -467,17 +529,43 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
                         @Override public long reservation(Frame frame, long share) {
                             long actual = frame.recipe.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY);
-                            return actual > 0L ? actual : share;
+                            long reserved = actual > 0L ? Math.min(actual, share) : share;
+                            Map<Identity, Long> sources = new HashMap<>();
+                            reserveRecipePool(sources, frame, reserved);
+                            frame.sourceReservations = sources;
+                            if (recipePoolReservations != null) reserveRecipePool(recipePoolReservations, frame, reserved);
+                            return reserved;
+                        }
+
+                        @Override public int admissionLimit() { return tracksActualParallel() ? 96 : 1; }
+
+                        @Override public boolean merge(Frame existing, Frame incoming) {
+                            if (existing.batchCount >= 4 || existing.progress != 0 || incoming.progress != 0
+                                    || existing.duration != incoming.duration || existing.pendingSetup || incoming.pendingSetup
+                                    || existing.status != Status.WORKING || incoming.status != Status.WORKING
+                                    || existing.fuel != 0 || incoming.fuel != 0
+                                    || !existing.chances.isEmpty() || !incoming.chances.isEmpty()) return false;
+                            GTRecipe combined = PrimordialThreadBatchMerge.merge(existing.recipe, incoming.recipe);
+                            if (combined == null || !canFinishThreadBatch(combined)) return false;
+                            Map<Identity, Long> sources = new HashMap<>();
+                            reserveRecipePool(sources, existing,
+                                    existing.recipe.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY));
+                            reserveRecipePool(sources, incoming,
+                                    incoming.recipe.data.getLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY));
+                            existing.recipe = combined;
+                            existing.sourceReservations = sources;
+                            existing.batchCount += incoming.batchCount;
+                            return true;
                         }
 
                         public Frame start(long share) {
                             if (drainRequested) return null;
-                            apply(new Frame());
+                            apply(EMPTY_FRAME);
                             allowance = share;
                             admission = true;
                             priorityInputHandled = false;
-                            if (independentPools) recipePoolReservations = collectRecipePoolReservations();
-                            priority = Math.min(getUnreservedTotalParallelLimit(), getRecipeThreadCapacity()) > 1L
+                            if (independentPools && recipePoolReservations == null) recipePoolReservations = collectRecipePoolReservations();
+                            if (priority == null) priority = getRecipeThreadCapacity() > 1L
                                     ? new RecipeThreadPriority<>(PrimordialThreadedRecipeLogic.this::estimateThreadRecipeTicks,
                                             recipe -> recipe.duration, PrimordialThreadedRecipeLogic.this::recipePoolReserved) : null;
                             try {
@@ -485,10 +573,10 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                                     findAndHandleRecipe();
                                     if (lastRecipe != null || priorityInputHandled) break;
                                 } while (priority != null && priority.retry());
-                                return lastRecipe != null && duration > 0 ? capture() : null;
+                                Frame frame = lastRecipe != null && duration > 0 ? capture() : null;
+                                if (frame != null && priority != null) priority.nextBatch();
+                                return frame;
                             } finally {
-                                priority = null;
-                                recipePoolReservations = null;
                                 priorityInputHandled = false;
                                 admission = false;
                                 allowance = 0L;
@@ -497,21 +585,27 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                     });
         } finally {
             admission = false;
+            priority = null;
+            admissionCandidates = null;
             recipePoolReservations = null;
+            recipePoolIdentities = null;
             tickingThreads = false;
             project(previousStatus);
         }
     }
 
     private void project(Status previousStatus) {
-        activeRecipeThreads = threads.lanes().size();
+        activeRecipeThreads = threads.activeThreads();
         reservedThreadParallel = threads.reserved();
-        Frame display = threads.lanes().stream().map(PrimordialThreadScheduler.Lane::task)
-                .filter(frame -> frame.status == Status.WORKING).findFirst()
-                .orElse(threads.lanes().isEmpty() ? new Frame() : threads.lanes().getFirst().task());
+        var lanes = threads.lanes();
+        Frame display = lanes.isEmpty() ? EMPTY_FRAME : lanes.getFirst().task();
+        for (int i = 1; display.status != Status.WORKING && i < lanes.size(); i++) {
+            Frame frame = lanes.get(i).task();
+            if (frame.status == Status.WORKING) display = frame;
+        }
         apply(display);
         totalContinuousRunningTime = continuousTicks;
-        Status aggregate = !threads.isEnabled() || drainRequested && threads.lanes().isEmpty()
+        Status aggregate = !threads.isEnabled() || drainRequested && lanes.isEmpty()
                 ? Status.SUSPEND : display.status;
         if (aggregate == Status.SUSPEND) {
             drainRequested = false;
@@ -563,7 +657,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         importLegacyBatch();
         ListTag list = new ListTag();
         for (var lane : threads.lanes()) {
-            CompoundTag data = lane.task().save();
+            CompoundTag data = lane.task().save(threadRecipePayload());
             data.putLong("index", lane.index());
             data.putLong("reserved", lane.reserved());
             list.add(data);
@@ -579,7 +673,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         var restored = new PrimordialThreadScheduler<Frame>();
         for (Tag element : tag.getList(SAVE_KEY, Tag.TAG_COMPOUND)) {
             CompoundTag data = (CompoundTag) element;
-            restored.restore(data.getLong("index"), data.getLong("reserved"), Frame.load(data));
+            Frame frame = Frame.load(data, threadRecipePayload());
+            restored.restore(data.getLong("index"), data.getLong("reserved"), frame, frame.batchCount);
         }
         threads = restored;
         initialized = true; // 空清單也具權威，不能把 native 顯示投影重複當成一批。
@@ -596,6 +691,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         captureInto(frame);
         return frame;
     }
+
+    protected GTRecipePayload threadRecipePayload() { return new GTRecipePayload(); }
 
     private void captureInto(Frame frame) {
         frame.recipe = lastRecipe;
@@ -627,6 +724,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
 
     private static final class Frame {
         GTRecipe recipe, origin;
+        int batchCount = 1;
+        Map<Identity, Long> sourceReservations;
         int progress, duration, fuel, maxFuel;
         long continuous;
         Status status = Status.IDLE;
@@ -635,9 +734,8 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         RecipeResult recipeStatus, workingStatus;
         final Map<RecipeCapability<?>, Object2IntMap<?>> chances = new HashMap<>();
 
-        CompoundTag save() {
+        CompoundTag save(GTRecipePayload payload) {
             CompoundTag data = new CompoundTag();
-            GTRecipePayload payload = new GTRecipePayload();
             payload.setPayload(recipe);
             data.put("recipe", java.util.Objects.requireNonNull(payload.serializeNBT()));
             if (recipe.data.contains(PrimordialThreadRecipeIdentity.KEY)) {
@@ -648,6 +746,16 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                 data.put("origin", java.util.Objects.requireNonNull(payload.serializeNBT()));
             }
             data.putBoolean("dirty", dirty);
+            data.putInt("mergedBatches", batchCount);
+            if (sourceReservations != null && !sourceReservations.containsKey(null)) {
+                ListTag sources = new ListTag();
+                sourceReservations.forEach((identity, parallel) -> {
+                    CompoundTag source = identity.save();
+                    source.putLong("reserved", parallel);
+                    sources.add(source);
+                });
+                data.put("sourceReservations", sources);
+            }
             data.putBoolean("pendingSetup", pendingSetup);
             data.putBoolean("wireless", recipe instanceof IWirelessGTRecipe);
             if (recipe instanceof IWirelessGTRecipe wireless && wireless.getWirelessEuTickInputs() != null) {
@@ -661,9 +769,17 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
             return data;
         }
 
-        static Frame load(CompoundTag data) {
+        static Frame load(CompoundTag data, GTRecipePayload payload) {
             Frame frame = new Frame();
-            GTRecipePayload payload = new GTRecipePayload();
+            frame.batchCount = Math.clamp(data.getInt("mergedBatches"), 1, 4);
+            if (data.contains("sourceReservations", Tag.TAG_LIST)) {
+                frame.sourceReservations = new HashMap<>();
+                for (Tag element : data.getList("sourceReservations", Tag.TAG_COMPOUND)) {
+                    CompoundTag source = (CompoundTag) element;
+                    frame.sourceReservations.put(new Identity(source.getString("recipeType"), source.getString("recipeId")),
+                            Math.max(0L, source.getLong("reserved")));
+                }
+            }
             payload.deserializeNBT(data.get("recipe"));
             frame.recipe = java.util.Objects.requireNonNull(payload.getPayload(), "Missing paid recipe thread snapshot");
             if (data.contains(PrimordialThreadRecipeIdentity.KEY)) {

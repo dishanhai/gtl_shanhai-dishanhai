@@ -27,13 +27,16 @@ class PrimordialRecipeThreadsProviderTest {
     @Test void preservesMachineTooltipAndTagsThreadRowsForTheSidePanel() {
         CompoundTag data = new CompoundTag();
         CompoundTag view = new CompoundTag();
-        view.putInt("active", 2);
+        view.putInt("active", 4);
+        view.putInt("executionBatches", 2);
+        view.putBoolean("independentRecipePools", true);
         view.putLong("capacity", 17);
         view.putString("consumption", "123");
         view.putString("production", "45");
         view.putBoolean("enabled", true);
         ListTag rows = new ListTag();
         rows.add(row(0, 30, 100, "WORKING"));
+        rows.getCompound(0).putInt("mergedBatches", 2);
         rows.getCompound(0).putInt("moreOutputs", 2);
         ListTag recipes = new ListTag();
         CompoundTag source = new CompoundTag();
@@ -42,6 +45,13 @@ class PrimordialRecipeThreadsProviderTest {
         recipes.add(source);
         rows.getCompound(0).put("recipes", recipes);
         rows.add(row(1, 2, 10, "WAITING"));
+        rows.getCompound(1).putInt("mergedBatches", 2);
+        ListTag mergedSources = recipes.copy();
+        CompoundTag other = source.copy();
+        other.putString("recipeId", "gt_shanhai:other");
+        other.putLong("reserved", Long.MAX_VALUE);
+        mergedSources.add(other);
+        rows.getCompound(1).put("recipes", mergedSources);
         view.put("threads", rows);
         data.put("sh_primordial_threads_display", view);
         List<ResourceLocation> removed = new ArrayList<>();
@@ -92,16 +102,21 @@ class PrimordialRecipeThreadsProviderTest {
         assertTrue(tagged.contains(PrimordialRecipeThreadsProvider.INSTANCE.getThreadElementUid()));
         assertEquals(List.of(0.3F, 0.2F), progress);
         assertTrue(text.stream().allMatch(component -> component.getContents() instanceof TranslatableContents));
-        assertTrue(sequence.indexOf("progress") < sequence.indexOf("gt_shanhai.primordial.threads.more_outputs"));
-        assertTrue(sequence.indexOf("gt_shanhai.primordial.threads.more_outputs")
-                < sequence.indexOf("gt_shanhai.primordial.threads.timing"));
+        assertFalse(sequence.contains("gt_shanhai.primordial.threads.more_outputs"));
+        assertTrue(sequence.indexOf("progress") < sequence.indexOf("gt_shanhai.primordial.threads.timing"));
         assertEquals(1, sequence.stream().filter("separator"::equals).count());
         assertTrue(colorKeys.contains("gt_shanhai.primordial.threads.thread_color.0"));
         assertTrue(colorKeys.contains("gt_shanhai.primordial.threads.thread_color.1"));
-        var idLine = text.stream().filter(component -> ((TranslatableContents) component.getContents()).getKey()
-                .equals("gt_shanhai.primordial.threads.recipe_id")).findFirst().orElseThrow();
-        assertEquals("gt_shanhai:photon_matrix_etch/wafer/ulpic_wafer_6",
-                ((TranslatableContents) idLine.getContents()).getArgs()[0]);
+        assertTrue(text.stream().anyMatch(component -> component.getContents() instanceof TranslatableContents contents
+                && contents.getKey().equals("gt_shanhai.primordial.threads.execution_batches")));
+        assertTrue(text.stream().anyMatch(component -> component.getContents() instanceof TranslatableContents contents
+                && contents.getKey().equals("gt_shanhai.primordial.threads.merged_batches")));
+        assertTrue(text.stream().anyMatch(component -> component.getContents() instanceof TranslatableContents contents
+                && contents.getKey().equals("gt_shanhai.primordial.threads.merged_cross_recipe")));
+        assertFalse(sequence.contains("gt_shanhai.primordial.threads.recipe_reserved"));
+        assertFalse(sequence.contains("gt_shanhai.primordial.threads.recipe_id"));
+        assertFalse(sequence.contains("gt_shanhai.primordial.threads.recipe"));
+        assertFalse(sequence.contains("gt_shanhai.primordial.threads.batch_energy"));
     }
 
     @Test void sidePanelExtractionLeavesMachineTooltipElementsUntouched() {

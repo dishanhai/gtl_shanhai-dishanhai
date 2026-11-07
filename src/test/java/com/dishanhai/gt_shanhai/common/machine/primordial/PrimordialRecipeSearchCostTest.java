@@ -93,14 +93,29 @@ class PrimordialRecipeSearchCostTest {
                 });
 
         assertEquals(123_456L, found);
-        assertTrue(calls.get() <= 7, "提示命中时探测次数应远小于二分，实际 " + calls.get());
+        assertEquals(2, calls.get(), "稳态只探测上次并行和相邻的更高并行");
+    }
+
+    @Test
+    void staleHighHintSkipsLargerProbesWhenMachineBecomesBlocked() {
+        AtomicInteger calls = new AtomicInteger();
+        long found = PrimordialModuleRecipeLogic.findHighestMatchableParallel(
+                Long.MAX_VALUE, 123_456L,
+                parallel -> {
+                    calls.incrementAndGet();
+                    return false;
+                });
+
+        assertEquals(0L, found);
+        assertEquals(2, calls.get(), "提示值已失败且并行 1 也失败时直接结束");
     }
 
     @Test
     void hintedSearchHandlesHugeRangeWithoutOverflow() {
-        long found = PrimordialModuleRecipeLogic.findHighestMatchableParallel(
-                Long.MAX_VALUE, Long.MAX_VALUE - 5L, parallel -> parallel <= Long.MAX_VALUE - 3L);
-        assertEquals(Long.MAX_VALUE - 3L, found);
+        assertEquals(Long.MAX_VALUE - 3L, PrimordialModuleRecipeLogic.findHighestMatchableParallel(
+                Long.MAX_VALUE, 2L, parallel -> parallel <= Long.MAX_VALUE - 3L));
+        assertEquals(2L, PrimordialModuleRecipeLogic.findHighestMatchableParallel(
+                Long.MAX_VALUE, Long.MAX_VALUE - 2L, parallel -> parallel <= 2L));
     }
 
     @Test

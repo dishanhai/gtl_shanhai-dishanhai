@@ -23,6 +23,7 @@ public final class RecipeThreadPriority<T> {
     private final ToLongFunction<T> reservation;
     private List<Candidate<T>> ordered;
     private int index;
+    private boolean nextBatch;
 
     public RecipeThreadPriority(ToLongFunction<T> estimate, ToIntFunction<T> originalDuration) {
         this(estimate, originalDuration, ignored -> 0L);
@@ -51,7 +52,29 @@ public final class RecipeThreadPriority<T> {
                     .thenComparing(Comparator.comparingLong(Candidate<T>::ticks).reversed())
                     .thenComparing(Comparator.comparingInt(Candidate<T>::originalTicks).reversed()));
         }
+        if (nextBatch && index < ordered.size()) {
+            // 同 tick 已扣料後，各池占用只會增加。重選剩餘候選，復用耗時估算。
+            int best = index;
+            long bestUsed = reservation.applyAsLong(ordered.get(best).recipe);
+            for (int i = index + 1; i < ordered.size(); i++) {
+                Candidate<T> candidate = ordered.get(i), current = ordered.get(best);
+                long used = reservation.applyAsLong(candidate.recipe);
+                if (used < bestUsed || used == bestUsed && (candidate.ticks > current.ticks
+                        || candidate.ticks == current.ticks && candidate.originalTicks > current.originalTicks)) {
+                    best = i;
+                    bestUsed = used;
+                }
+            }
+            java.util.Collections.swap(ordered, index, best);
+            nextBatch = false;
+        }
         return index < ordered.size() ? List.of(ordered.get(index).recipe) : List.of();
+    }
+
+    /** 成功候選移到隊尾；再次使用前仍由原生路徑重新核對庫存與池餘額。 */
+    public void nextBatch() {
+        if (ordered != null && index < ordered.size()) ordered.add(ordered.remove(index));
+        nextBatch = true;
     }
 
     public boolean retry() { return ordered != null && ++index < ordered.size(); }

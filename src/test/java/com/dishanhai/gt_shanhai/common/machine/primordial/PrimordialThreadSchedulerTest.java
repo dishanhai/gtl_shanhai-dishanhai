@@ -136,6 +136,21 @@ class PrimordialThreadSchedulerTest {
         assertEquals(2L, scheduler.reserved());
     }
 
+    @Test void reservationsRecoverFromSaturationAsIndependentBatchesFinish() {
+        scheduler.restore(0, 7, new Task("survivor", 3));
+        scheduler.restore(1, Long.MAX_VALUE, new Task("huge", 2));
+        scheduler.restore(2, 1, new Task("small", 1));
+
+        assertEquals(Long.MAX_VALUE, scheduler.reserved());
+        tick(0, 0, 4);
+        assertEquals(Long.MAX_VALUE, scheduler.reserved());
+        tick(1, 0, 4);
+        assertEquals(7L, scheduler.reserved());
+        assertEquals(3L, scheduler.admissionShare(10, 2, true));
+        tick(2, 0, 4);
+        assertEquals(0L, scheduler.reserved());
+    }
+
     @Test void zeroCapacityDoesNotSearchOrAllocate() {
         inputs.add(new Task("A", 100));
         tick(0, 0, 4);
