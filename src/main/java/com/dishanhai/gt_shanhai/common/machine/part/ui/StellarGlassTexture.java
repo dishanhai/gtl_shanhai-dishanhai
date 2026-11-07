@@ -19,6 +19,7 @@ import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -28,18 +29,17 @@ import java.util.function.Consumer;
 public final class StellarGlassTexture {
     private StellarGlassTexture() {}
 
-    private static final IGuiTexture ROOT_GLASS = GlassPanelTexture.smokePanel();
-    private static final IGuiTexture ROOT = themed(ROOT_GLASS,
-            (g, mx, my, x, y, w, h) -> RecipeThreadPanelWidget.drawGlass(g, (int) x, (int) y, w, h));
-    private static final IGuiTexture PANEL = themed(
-            plate(), GlassPanelTexture.page());
-    private static final IGuiTexture FLOATING_PANEL = themed(ROOT_GLASS, GlassPanelTexture.page());
-    private static final IGuiTexture DISPLAY = themed(
-            plate(), GlassPanelTexture.display());
-    private static final IGuiTexture SLOT = themed(
-            plate(), GlassPanelTexture.display());
-    private static final IGuiTexture PAGE = themed(
-            plate(), GlassPanelTexture.page());
+    /** 專用伺服器也會建構 UI，但繪圖 lambda 只能在實體客戶端連結。 */
+    private static final class ClientTextures {
+        private static final IGuiTexture ROOT_GLASS = GlassPanelTexture.smokePanel();
+        private static final IGuiTexture ROOT = themed(ROOT_GLASS,
+                (g, mx, my, x, y, w, h) -> RecipeThreadPanelWidget.drawGlass(g, (int) x, (int) y, w, h));
+        private static final IGuiTexture PANEL = themed(plate(), GlassPanelTexture.page());
+        private static final IGuiTexture FLOATING_PANEL = themed(ROOT_GLASS, GlassPanelTexture.page());
+        private static final IGuiTexture DISPLAY = themed(plate(), GlassPanelTexture.display());
+        private static final IGuiTexture SLOT = themed(plate(), GlassPanelTexture.display());
+        private static final IGuiTexture PAGE = themed(plate(), GlassPanelTexture.page());
+    }
 
     public static boolean neutral() { return ShanhaiUiClientConfig.stellarGlass(); }
 
@@ -47,9 +47,9 @@ public final class StellarGlassTexture {
 
     /** 原生 ConfiguratorPanel 負責 24×24 尺寸、左下排列與點擊區域。 */
     public static IFancyConfiguratorButton appearanceConfigurator() {
-        IGuiTexture icon = adapt(new TextTexture(() -> Component.translatable(neutral()
+        IGuiTexture icon = FMLEnvironment.dist.isClient() ? adapt(new TextTexture(() -> Component.translatable(neutral()
                 ? "gui.gt_shanhai.stellar.ui_mode.neutral"
-                : "gui.gt_shanhai.stellar.ui_mode.blue").getString()));
+                : "gui.gt_shanhai.stellar.ui_mode.blue").getString())) : IGuiTexture.EMPTY;
         return new IFancyConfiguratorButton() {
             @Override public IGuiTexture getIcon() { return icon; }
             @Override public List<Component> getTooltips() {
@@ -63,24 +63,27 @@ public final class StellarGlassTexture {
 
     private static GlassColors colors() { return neutral() ? GlassColors.SMOKE : GlassColors.DARK; }
 
-    public static IGuiTexture root() { return ROOT; }
+    public static IGuiTexture root() { return FMLEnvironment.dist.isClient() ? ClientTextures.ROOT : IGuiTexture.EMPTY; }
 
-    public static IGuiTexture panel() { return PANEL; }
+    public static IGuiTexture panel() { return FMLEnvironment.dist.isClient() ? ClientTextures.PANEL : IGuiTexture.EMPTY; }
 
     /** 主底板外的浮動面板需要自己的煙灰遮罩與模糊，不能只疊內層薄灰。 */
-    public static IGuiTexture floatingPanel() { return FLOATING_PANEL; }
+    public static IGuiTexture floatingPanel() {
+        return FMLEnvironment.dist.isClient() ? ClientTextures.FLOATING_PANEL : IGuiTexture.EMPTY;
+    }
 
-    public static IGuiTexture display() { return DISPLAY; }
+    public static IGuiTexture display() { return FMLEnvironment.dist.isClient() ? ClientTextures.DISPLAY : IGuiTexture.EMPTY; }
 
-    public static IGuiTexture slot() { return SLOT; }
+    public static IGuiTexture slot() { return FMLEnvironment.dist.isClient() ? ClientTextures.SLOT : IGuiTexture.EMPTY; }
 
-    public static IGuiTexture page() { return PAGE; }
+    public static IGuiTexture page() { return FMLEnvironment.dist.isClient() ? ClientTextures.PAGE : IGuiTexture.EMPTY; }
 
     public static int textColor() { return colors().TEXT; }
 
     public static int accentColor() { return colors().ACCENT; }
 
     public static IGuiTexture accentIcon(IGuiTexture icon) {
+        if (!FMLEnvironment.dist.isClient()) return icon;
         return (g, mx, my, x, y, w, h) -> icon.setColor(accentColor()).draw(g, mx, my, x, y, w, h);
     }
 
@@ -98,11 +101,13 @@ public final class StellarGlassTexture {
 
     /** 根板已取樣背景；內層控件復用庫內 hover 彈簧，避免逐格重複模糊。 */
     public static IGuiTexture button() {
+        if (!FMLEnvironment.dist.isClient()) return IGuiTexture.EMPTY;
         return themed(GlassPanelTexture.smokeButtonOverlay(), GlassPanelTexture.button());
     }
 
     /** 遞迴替換原生底圖，保留 REFUND_OVERLAY 等前景與文字的更新。 */
     public static IGuiTexture adapt(IGuiTexture texture) {
+        if (!FMLEnvironment.dist.isClient()) return texture;
         if (texture == GuiTextures.BUTTON || texture == GuiTextures.VANILLA_BUTTON) {
             return button();
         }
@@ -148,6 +153,7 @@ public final class StellarGlassTexture {
 
     /** SwitchWidget 自繪 base/pressed，不能只替換 Widget.backgroundTexture。 */
     public static void styleSwitch(SwitchWidget widget) {
+        if (!FMLEnvironment.dist.isClient()) return;
         var textures = (StellarSwitchWidgetAccessor) widget;
         widget.setTexture(switchFace(textures.gtShanhai$getBaseTexture(), false),
                 switchFace(textures.gtShanhai$getPressedTexture(), true));
