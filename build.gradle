@@ -36,6 +36,9 @@ sourceSets.main.resources { setSrcDirs(['src/main/resources', 'src/generated/res
 
 repositories {
     mavenCentral()
+    mavenLocal {
+        content { includeModule 'com.dishanhai', 'sh-common-lib-forge-1.20.1' }
+    }
     // 山海：讓 ForgeGradle 對本機可選 API／測試依賴執行 SRG → 開發映射。
     flatDir { dirs 'libs' }
 }
@@ -45,6 +48,7 @@ def shBetterUiJar = file(findProperty('shBetterUiJar') ?: "../SH-Better-UI/build
 
 dependencies {
     implementation files(shBetterUiJar)
+    implementation fg.deobf("com.dishanhai:sh-common-lib-forge-1.20.1:${sh_common_lib_version}")
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // 核心 Kotlin：只认这颗 jar（stdlib 2.2.21）。不要再依赖插件自带的 kotlin-stdlib。
@@ -119,6 +123,7 @@ processResources {
             mod_authors: mod_authors, mod_description: mod_description,
             minecraft_version: minecraft_version, forge_version: forge_version,
             sh_better_ui_version: sh_better_ui_version,
+            sh_common_lib_version: sh_common_lib_version,
     ]
     inputs.properties replaceProperties
     filesMatching(['META-INF/mods.toml']) {
@@ -303,6 +308,20 @@ tasks.register('verifyShBetterUiDependency') {
     doLast {
         if (!shBetterUiJar.isFile()) {
             throw new GradleException('Build SH-Better-UI devJar first or pass -PshBetterUiJar=<dev-jar>.')
+        }
+        new java.util.zip.ZipFile(shBetterUiJar).withCloseable { jar ->
+            def uiPackage = 'com/dishanhai/sh_better_ui/client'
+            def required = ['gui/scaled/ThemeEffects', 'gui/scaled/ShapeWaves', 'gui/scaled/VisualReveal', 'gui/display/ElectricLogo',
+                            'gui/scaled/UiButton', 'gui/scaled/UiScreenReturn', 'gui/scaled/UiBottomSheet',
+                            'gui/search/SearchIndex', 'glass/GlassTheme',
+                            'api/BackgroundRegistry', 'api/BackgroundSpec', 'api/BackgroundLayer', 'api/MaterialsApi$ThemeChoice']
+            if (required.any { jar.getEntry("${uiPackage}/${it}.class") == null }) {
+                throw new GradleException("The shop requires SH-Better-UI ${sh_better_ui_version} with the shared appearance APIs.")
+            }
+            def kernelPackage = 'com/dishanhai/sh_better_ui/kernel/api'
+            if (['UIApis', 'UIModule', 'ScreenService', 'AppearanceService'].any { jar.getEntry("${kernelPackage}/${it}.class") == null }) {
+                throw new GradleException("The shop requires the Forge SH-Better-UI ${sh_better_ui_version} dev JAR with Unified UI Kernel.")
+            }
         }
     }
 }

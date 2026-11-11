@@ -102,3 +102,10 @@ config="gt_shanhai.enhancedcore.mixin.json"
     versionRange="[${sh_better_ui_version},2.0.0)"
     ordering="AFTER"
     side="BOTH"
+
+[[dependencies.gt_shanhai]]
+    modId="sh_common_lib"
+    mandatory=true
+    versionRange="[${sh_common_lib_version},0.3.0)"
+    ordering="AFTER"
+    side="BOTH"
