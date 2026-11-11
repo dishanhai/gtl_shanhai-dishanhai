@@ -45,7 +45,7 @@ public class AEProcessingPatternVirtualProviderMixin {
         if (planningInputs == null) return;
         // 副产物下单的不消耗输入只在场检查一份。推送不能再按批次数量向机器要实料。
         VirtualPatternEncodingHelper.pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink,
-                VirtualPatternEncodingHelper.presenceKeys(planningInputs));
+                planningInputs);
         ci.cancel();
     }
 

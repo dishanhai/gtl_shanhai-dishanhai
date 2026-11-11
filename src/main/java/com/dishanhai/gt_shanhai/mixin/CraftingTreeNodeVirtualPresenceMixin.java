@@ -11,6 +11,7 @@ import appeng.crafting.inv.CraftingSimulationState;
 
 import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPresenceState;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
+import com.dishanhai.gt_shanhai.common.item.VirtualProviderSoftLocks;
 
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingCalculation;
 
@@ -79,11 +80,15 @@ public abstract class CraftingTreeNodeVirtualPresenceMixin {
             return false;
         }
         for (GenericStack possibleInput : possibleInputs) {
-            if (possibleInput != null && VirtualCraftingPresenceState.hasPresence(
-                    inventory, possibleInput.what(), needed)) {
-                inventory.addStackBytes(this.what, this.amount, needed);
-                return true;
+            if (possibleInput == null) continue;
+            if (!VirtualCraftingPresenceState.hasPresence(inventory, possibleInput.what(), needed)) {
+                if (((VirtualProviderSoftLocks.CalculationAccess) this.job)
+                        .gtShanhai$getSupplyPresence(possibleInput.what()) < needed) continue;
+                ((VirtualProviderSoftLocks.RequirementsAccess) inventory)
+                        .gtShanhai$requireSupply(possibleInput.what(), needed);
             }
+            inventory.addStackBytes(this.what, this.amount, needed);
+            return true;
         }
         return false;
     }

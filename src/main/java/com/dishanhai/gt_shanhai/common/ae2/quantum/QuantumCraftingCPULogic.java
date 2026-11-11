@@ -27,6 +27,7 @@ import appeng.crafting.inv.ListCraftingInventory;
 import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.hooks.ticking.TickHandler;
 import appeng.me.service.CraftingService;
+import com.dishanhai.gt_shanhai.common.ae2.GtlCoreCraftingPlans;
 import com.google.common.base.Preconditions;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisCraftCancel;
@@ -37,6 +38,8 @@ import org.gtlcore.gtlcore.api.machine.trait.AECraft.IMECraftIOPart;
 import org.gtlcore.gtlcore.api.machine.trait.MEPart.IMEPatternPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
 import org.gtlcore.gtlcore.integration.ae2.crafting.CraftingPatternPower;
+import org.gtlcore.gtlcore.integration.ae2.graph.GraphCpuController;
+import org.gtlcore.gtlcore.integration.ae2.graph.GraphJobCodec;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
@@ -59,6 +62,7 @@ public class QuantumCraftingCPULogic {
 
     final QuantumCraftingCPU cpu;
     private QuantumExecutingCraftingJob job;
+    private GraphCpuController graph;
     private final ListCraftingInventory inventory = new ListCraftingInventory(this::postChange);
     private final int[] usedOps = new int[3];
     private final Set<Consumer<AEKey>> listeners = new HashSet<>();
@@ -72,9 +76,13 @@ public class QuantumCraftingCPULogic {
 
     public ICraftingSubmitResult trySubmitJob(IGrid grid, ICraftingPlan plan, IActionSource src,
             @Nullable ICraftingRequester requester) {
-        if (job != null) return CraftingSubmitResult.CPU_BUSY;
+        if (hasJob()) return CraftingSubmitResult.CPU_BUSY;
         if (!cpu.isActive()) return CraftingSubmitResult.CPU_OFFLINE;
         if (cpu.getAvailableStorage() < plan.bytes()) return CraftingSubmitResult.CPU_TOO_SMALL;
+        if (GtlCoreCraftingPlans.isGraphPlan(plan)) {
+            graph = createGraphController();
+            return graph.submit(grid, plan, src, requester);
+        }
         if (!inventory.list.isEmpty()) {
             AELog.warn("Quantum crafting CPU inventory is not empty yet a job was submitted.");
         }
@@ -108,8 +116,20 @@ public class QuantumCraftingCPULogic {
         return CraftingSubmitResult.successful((ICraftingLink) null);
     }
 
+    private GraphCpuController createGraphController() {
+        return new QuantumGraphCpuHost(cpu, inventory, this::postChange).createController();
+    }
+
+    private boolean hasGraphJob() {
+        return graph != null && graph.ownsTask();
+    }
+
     public void tickCraftingLogic(IEnergyService energyService, CraftingService craftingService) {
         if (!cpu.isActive()) return;
+        if (hasGraphJob()) {
+            graph.tick(energyService, craftingService);
+            return;
+        }
         cantStoreItems = false;
         if (job == null) {
             storeItems();
@@ -595,7 +615,9 @@ public class QuantumCraftingCPULogic {
     }
 
     public long insert(AEKey what, long amount, Actionable type) {
-        if (what == null || job == null) return 0;
+        if (what == null || amount <= 0) return 0;
+        if (hasGraphJob()) return graph.insert(what, amount, type);
+        if (job == null) return 0;
         long waitingFor = job.waitingFor.extract(what, amount, Actionable.SIMULATE);
         if (waitingFor <= 0) {
             QuantumDiagnostics.hit("logic.insert.miss",
@@ -642,9 +664,17 @@ public class QuantumCraftingCPULogic {
     }
 
     public void cancel() {
+        if (hasGraphJob()) {
+            graph.cancel();
+            return;
+        }
         if (job == null) return;
         cpu.updateOutput(null);
         finishJob(false);
+    }
+
+    void handoffCancelledInventory() {
+        if (hasGraphJob()) graph.handoffCancelledInventory();
     }
 
     public void storeItems() {
@@ -663,26 +693,43 @@ public class QuantumCraftingCPULogic {
     }
 
     public long getLastModifiedOnTick() {
-        return lastModifiedOnTick;
+        return graph == null ? lastModifiedOnTick : Math.max(lastModifiedOnTick, graph.modifiedTick());
     }
 
     public boolean hasJob() {
-        return job != null;
+        return job != null || hasGraphJob();
     }
 
     @Nullable
     public GenericStack getFinalJobOutput() {
+        if (hasGraphJob()) return graph.finalOutput();
         return job == null || job.finalOutput == null ? null : new GenericStack(job.finalOutput.what(), job.remainingAmount);
     }
 
-    public QuantumElapsedTimeTracker getElapsedTimeTracker() {
-        return job == null ? new QuantumElapsedTimeTracker() : job.timeTracker;
+    public long getElapsedTime() {
+        if (hasGraphJob()) return graph.tracker().getElapsedTime();
+        return job == null ? 0L : job.timeTracker.getElapsedTime();
+    }
+
+    public long getStartItemCount() {
+        if (hasGraphJob()) return graph.tracker().getStartItemCount();
+        return job == null ? 0L : job.timeTracker.getStartItemCount();
+    }
+
+    public long getRemainingItemCount() {
+        if (hasGraphJob()) return graph.tracker().getRemainingItemCount();
+        return job == null ? 0L : job.timeTracker.getRemainingItemCount();
     }
 
     public void readFromNBT(CompoundTag data) {
         inventory.readFromNBT(data.getList("inventory", 10));
         VirtualCraftingPresenceState.readFromNBT(inventory, data);
-        if (data.contains("job")) {
+        if (data.contains(GraphJobCodec.NBT_KEY, 10)) {
+            job = null;
+            graph = createGraphController();
+            graph.read(data);
+            cpu.updateOutput(graph.finalOutput());
+        } else if (data.contains("job")) {
             job = new QuantumExecutingCraftingJob(data.getCompound("job"), this::postChange, this);
             if (job.finalOutput == null) {
                 finishJob(false);
@@ -697,13 +744,16 @@ public class QuantumCraftingCPULogic {
     public void writeToNBT(CompoundTag data) {
         data.put("inventory", inventory.writeToNBT());
         VirtualCraftingPresenceState.writeToNBT(inventory, data);
-        if (job != null) {
+        if (hasGraphJob()) {
+            graph.write(data);
+        } else if (job != null) {
             data.put("job", job.writeToNBT());
         }
     }
 
     @Nullable
     public ICraftingLink getLastLink() {
+        if (hasGraphJob()) return graph.link();
         return job == null ? null : job.link;
     }
 
@@ -720,14 +770,20 @@ public class QuantumCraftingCPULogic {
     }
 
     public long getStored(AEKey template) {
+        if (hasGraphJob()) return graph.stored(template);
         return inventory.extract(template, Long.MAX_VALUE, Actionable.SIMULATE);
     }
 
     public long getWaitingFor(AEKey template) {
+        if (hasGraphJob()) return graph.waiting(template);
         return job == null ? 0 : job.waitingFor.extract(template, Long.MAX_VALUE, Actionable.SIMULATE);
     }
 
     public void getAllWaitingFor(Set<AEKey> waitingFor) {
+        if (hasGraphJob()) {
+            graph.waitingKeys(waitingFor);
+            return;
+        }
         if (job == null) return;
         for (Object2LongMap.Entry<AEKey> entry : job.waitingFor.list) {
             waitingFor.add(entry.getKey());
@@ -735,6 +791,7 @@ public class QuantumCraftingCPULogic {
     }
 
     public long getPendingOutputs(AEKey template) {
+        if (hasGraphJob()) return graph.pending(template);
         long count = 0;
         if (job == null) return 0;
         for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> task : job.tasks.entrySet()) {
@@ -809,6 +866,7 @@ public class QuantumCraftingCPULogic {
     }
 
     public RedispatchResult retryRemainingDispatch() {
+        if (hasGraphJob()) return new RedispatchResult(RedispatchState.GRAPH_MANAGED, 0, 0);
         if (job == null) return new RedispatchResult(RedispatchState.NO_JOB, 0, 0);
         IGrid grid = cpu.getGrid();
         if (grid == null) return new RedispatchResult(RedispatchState.GRID_OFFLINE, 0, 0);
@@ -870,6 +928,7 @@ public class QuantumCraftingCPULogic {
     }
 
     public enum RedispatchState {
+        GRAPH_MANAGED,
         NO_JOB,
         GRID_OFFLINE,
         REFILLED,
@@ -894,6 +953,10 @@ public class QuantumCraftingCPULogic {
     }
 
     public void getAllItems(KeyCounter out) {
+        if (hasGraphJob()) {
+            graph.allItems(out);
+            return;
+        }
         out.addAll(inventory.list);
         if (job == null) return;
         out.addAll(job.waitingFor.list);
@@ -905,6 +968,7 @@ public class QuantumCraftingCPULogic {
     }
 
     public boolean isCantStoreItems() {
+        if (hasGraphJob()) return graph.cantStore();
         return cantStoreItems;
     }
 

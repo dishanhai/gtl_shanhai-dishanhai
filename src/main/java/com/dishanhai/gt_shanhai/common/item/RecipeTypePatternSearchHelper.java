@@ -636,17 +636,27 @@ public final class RecipeTypePatternSearchHelper {
         if (inputs == null || inputs.length == 0) return;
 
         GenericStack[] presenceTargets = new GenericStack[inputs.length];
+        IPatternDetails.IInput[] planningInputs = details.getInputs();
+        boolean hasPresence = VirtualPatternEncodingHelper.containsPresenceInput(planningInputs);
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0) continue;
             GenericStack presenceTarget = VirtualPatternEncodingHelper.resolveVirtualTargetForPatternInput(in, recipe);
-            if (presenceTarget == null && recipe != null && isNotConsumableInput(recipe, in.what())) {
+            if (presenceTarget == null && recipe != null && isPureCatalyst(recipe, in.what())) {
                 presenceTarget = new GenericStack(in.what(), Math.max(1L, in.amount()));
             }
             presenceTargets[i] = presenceTarget;
-            if (presenceTarget != null && buffer instanceof VirtualPatternBufferMachineAccess access) {
+            if (presenceTarget != null && (!hasPresence || recipe != null && isPureCatalyst(recipe, in.what()))
+                    && buffer instanceof VirtualPatternBufferMachineAccess access) {
                 access.gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what(),
                         Math.max(1L, presenceTarget.amount()));
+            }
+        }
+        if (hasPresence && buffer instanceof VirtualPatternBufferMachineAccess access) {
+            for (IPatternDetails.IInput input : planningInputs) {
+                if (!VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+                GenericStack template = input.getPossibleInputs()[0];
+                access.gtShanhai$addVirtualTargetToSlot(slot, template.what(), input.getMultiplier());
             }
         }
         if (consumableStockPresent) {
@@ -659,7 +669,9 @@ public final class RecipeTypePatternSearchHelper {
         Object actionSourceObj = readField(buffer, "actionSource");
         if (!(actionSourceObj instanceof IActionSource actionSource)) return;
         MEStorage storage = grid.getStorageService().getInventory();
-        Object2LongMap<AEKey> consumableInputs = mergeConsumableInputs(inputs, presenceTargets);
+        Object2LongMap<AEKey> consumableInputs = hasPresence
+                ? collectPhysicalPlanningInputs(planningInputs, recipe)
+                : mergeConsumableInputs(inputs, presenceTargets);
         long achievable = resolveVirtualSupplyParallel(consumableInputs,
                 Math.min(remainingBudget, hostParallelLimit),
                 key -> storage.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, actionSource));
@@ -694,6 +706,21 @@ public final class RecipeTypePatternSearchHelper {
             merged.put(input.what(), previous + input.amount());
         }
         return merged;
+    }
+
+    private static Object2LongMap<AEKey> collectPhysicalPlanningInputs(IPatternDetails.IInput[] inputs, GTRecipe recipe) {
+        Object2LongMap<AEKey> result = new Object2LongOpenHashMap<>();
+        for (IPatternDetails.IInput input : inputs) {
+            if (VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+            GenericStack template = input.getPossibleInputs()[0];
+            AEKey key = template.what();
+            if (recipe != null && isPureCatalyst(recipe, key)) continue;
+            long previous = result.getLong(key);
+            long amount = input.getMultiplier();
+            if (previous > Long.MAX_VALUE - amount) return null;
+            result.put(key, previous + amount);
+        }
+        return result;
     }
 
     /** 模擬與實際抽取共用合併需求，避免重複輸入各自占用同一份網路庫存。 */
@@ -793,10 +820,7 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     /**
-     * 该 InternalSlot 里是否还有"消耗性"输入库存（排除被扣料层保护而常驻的 NotConsumable 催化剂）。
-     * 直接读 InternalSlot 的 {@code getItemInventory()}/{@code getFluidInventory()}（AEKey→amount，
-     * key 有可靠 equals/hashCode），对每个量 &gt;0 的 key 用 {@link #isNotConsumableInput} 判断，
-     * 只要有一个非催化剂的输入还有量就返回 true。
+     * 检查槽内是否还有真实耗材。允许同一 AEKey 同时匹配催化剂和耗材。
      */
     private static boolean hasConsumableStock(Object internalSlot, GTRecipe recipe) {
         if (inventoryHasConsumable(invokeNoArg(internalSlot, "getItemInventory"), recipe)) return true;
@@ -806,8 +830,9 @@ public final class RecipeTypePatternSearchHelper {
     private static boolean inventoryHasConsumable(Object inventoryObj, GTRecipe recipe) {
         if (!(inventoryObj instanceof it.unimi.dsi.fastutil.objects.Object2LongMap<?> map)) return false;
         for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<?> entry : map.object2LongEntrySet()) {
-            if (entry.getKey() instanceof AEKey key && entry.getLongValue() > 0
-                    && !(recipe != null && isNotConsumableInput(recipe, key))) {
+            if (entry.getKey() instanceof AEKey key
+                    && entry.getLongValue() > virtualAmount(map, key)
+                    && !(recipe != null && isPureCatalyst(recipe, key))) {
                 return true;
             }
         }
@@ -818,31 +843,37 @@ public final class RecipeTypePatternSearchHelper {
      * 判断某个 AE 样板输入在已匹配的 {@code recipe} 里是否对应 {@code Content.chance==0}（GTCEu
      * "不消耗"标记）的输入——这类输入只要求"在场"，不该被当作消耗性物料参与批量估算。
      */
-    private static boolean isNotConsumableInput(GTRecipe recipe, AEKey key) {
+    @SuppressWarnings("unchecked")
+    private static long virtualAmount(Object2LongMap<?> map, AEKey key) {
+        if (map instanceof Object2LongOpenHashMap<?> inventory) {
+            return VirtualPatternBufferSlotState.getVirtualTargets((Object2LongOpenHashMap<AEKey>) inventory)
+                    .getLong(key);
+        }
+        return 0L;
+    }
+
+    private static boolean isPureCatalyst(GTRecipe recipe, AEKey key) {
+        boolean catalyst = false;
         if (key instanceof appeng.api.stacks.AEItemKey itemKey) {
-            ItemStack stack = itemKey.toStack();
             for (Content content : recipe.getInputContents(
                     com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability.CAP)) {
-                if (content.chance != 0) continue;
                 if (content.content instanceof net.minecraft.world.item.crafting.Ingredient ingredient
-                        && ingredient.test(stack)) {
-                    return true;
+                        && itemKey.matches(ingredient)) {
+                    if (content.chance > 0) return false;
+                    catalyst = true;
                 }
             }
         } else if (key instanceof appeng.api.stacks.AEFluidKey fluidKey) {
-            net.minecraft.world.level.material.Fluid fluid = fluidKey.getFluid();
             for (Content content : recipe.getInputContents(
                     com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability.CAP)) {
-                if (content.chance != 0) continue;
-                if (content.content instanceof com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient fi
-                        && fi.values != null) {
-                    for (com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient.Value value : fi.values) {
-                        if (value.getFluids().contains(fluid)) return true;
-                    }
+                if (content.content instanceof com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient ingredient
+                        && org.gtlcore.gtlcore.integration.ae2.AEUtils.testFluidIngredient(ingredient, fluidKey)) {
+                    if (content.chance > 0) return false;
+                    catalyst = true;
                 }
             }
         }
-        return false;
+        return catalyst;
     }
 
     private static long getRemainingBudget(MEPatternBufferPartMachineBase buffer, int slot) {

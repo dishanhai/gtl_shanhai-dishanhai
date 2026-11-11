@@ -12,16 +12,20 @@ import appeng.api.networking.energy.IEnergyService;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
 import appeng.crafting.CraftingLink;
+import appeng.crafting.execution.CraftingSubmitResult;
 import appeng.me.cluster.implementations.CraftingCPUCluster;
 import appeng.me.service.CraftingService;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingBlockEntity;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPU;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPUCluster;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.google.common.collect.ImmutableSet;
 
 import net.minecraft.nbt.CompoundTag;
 
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
@@ -29,6 +33,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -49,7 +54,13 @@ public abstract class QuantumCraftingServiceMixin {
     private Set<QuantumCraftingCPUCluster> gtShanhai$quantumClusters;
 
     @Unique
-    private boolean gtShanhai$quantumClustersDirty = true;
+    private boolean gtShanhai$quantumClustersDirty;
+
+    @Unique
+    private Set<AEKey> gtShanhai$quantumWaiting;
+
+    @Unique
+    private Set<AEKey> gtShanhai$lastNotifiedWaiting;
 
     @Shadow @Final private Set<CraftingCPUCluster> craftingCPUClusters;
     @Shadow @Final private IGrid grid;
@@ -59,6 +70,13 @@ public abstract class QuantumCraftingServiceMixin {
     @Shadow @Final private Set<AEKey> currentlyCrafting;
 
     @Shadow public abstract void addLink(CraftingLink link);
+
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void gtShanhai$initializeQuantumState(CallbackInfo ci) {
+        gtShanhai$quantumClustersDirty = true;
+        gtShanhai$quantumWaiting = Set.of();
+        gtShanhai$lastNotifiedWaiting = Set.of();
+    }
 
     @Inject(method = "addNode", at = @At("TAIL"))
     private void gtShanhai$onAddNode(IGridNode gridNode, CompoundTag savedData, CallbackInfo ci) {
@@ -93,11 +111,14 @@ public abstract class QuantumCraftingServiceMixin {
         int clusters = 0;
         int active = 0;
         Set<QuantumCraftingCPUCluster> cachedClusters = gtShanhai$getQuantumClusters();
+        if (cachedClusters.removeIf(cluster -> !cluster.belongsToGrid(grid))) {
+            lastProcessedCraftingLogicChangeTick = -1L;
+        }
         Set<QuantumCraftingCPUCluster> refreshedClusters = new HashSet<>();
         for (QuantumCraftingBlockEntity blockEntity : grid.getMachines(QuantumCraftingBlockEntity.class)) {
             machines++;
             QuantumCraftingCPUCluster cluster = blockEntity.getCluster();
-            if (cluster == null) continue;
+            if (cluster == null || !cluster.belongsToGrid(grid)) continue;
             if (!refreshedClusters.add(cluster)) continue;
             clusters++;
             for (QuantumCraftingCPU cpu : cluster.getActiveCPUSnapshot()) {
@@ -133,29 +154,50 @@ public abstract class QuantumCraftingServiceMixin {
         }
     }
 
-    @Inject(method = "onServerEndTick", at = @At("TAIL"))
+    @Inject(method = "onServerEndTick", at = @At(value = "FIELD",
+            target = "Lappeng/me/service/CraftingService;lastProcessedCraftingLogicChangeTick:J",
+            opcode = Opcodes.GETFIELD, ordinal = 0))
     private void gtShanhai$tickQuantumCpus(CallbackInfo ci) {
         long start = QuantumDiagnostics.start();
         gtShanhai$refreshQuantumClusters("onServerEndTick");
-        long latestChange = 0;
+        Set<AEKey> waiting = null;
         int clusters = 0;
         int active = 0;
         for (QuantumCraftingCPUCluster cluster : gtShanhai$getQuantumClusters()) {
+            if (!cluster.belongsToGrid(grid)) continue;
             clusters++;
             cluster.cleanupInactiveCpus();
             for (QuantumCraftingCPU cpu : cluster.getActiveCPUSnapshot()) {
                 active++;
                 cpu.craftingLogic.tickCraftingLogic(energyGrid, (CraftingService) (Object) this);
-                latestChange = Math.max(latestChange, cpu.craftingLogic.getLastModifiedOnTick());
-                cpu.craftingLogic.getAllWaitingFor(currentlyCrafting);
+                if (waiting == null) waiting = new HashSet<>();
+                cpu.craftingLogic.getAllWaitingFor(waiting);
             }
         }
-        if (latestChange > lastProcessedCraftingLogicChangeTick) {
+        Set<AEKey> nextWaiting = waiting == null ? Set.of() : waiting;
+        if (!gtShanhai$quantumWaiting.equals(nextWaiting)) {
+            gtShanhai$quantumWaiting = nextWaiting;
             lastProcessedCraftingLogicChangeTick = -1L;
         }
         if (QuantumDiagnostics.ENABLED) {
             QuantumDiagnostics.slow("service.onServerEndTick.quantum", start,
-                    "clusters=" + clusters + " active=" + active + " latestChange=" + latestChange);
+                    "clusters=" + clusters + " active=" + active);
+        }
+    }
+
+    @ModifyVariable(method = "onServerEndTick", at = @At("STORE"), name = "previouslyCrafting")
+    private Set<AEKey> gtShanhai$useLastNotifiedWaiting(Set<AEKey> liveSnapshot) {
+        // GRAPH publishes immediate output requests before AE2 compares its watcher snapshots.
+        return gtShanhai$lastNotifiedWaiting;
+    }
+
+    @Inject(method = "onServerEndTick", at = @At(value = "FIELD",
+            target = "Lappeng/me/service/CraftingService;interests:Lcom/google/common/collect/Multimap;",
+            opcode = Opcodes.GETFIELD, ordinal = 0, shift = At.Shift.AFTER))
+    private void gtShanhai$collectQuantumWaitingItems(CallbackInfo ci) {
+        currentlyCrafting.addAll(gtShanhai$quantumWaiting);
+        if (!gtShanhai$lastNotifiedWaiting.equals(currentlyCrafting)) {
+            gtShanhai$lastNotifiedWaiting = Set.copyOf(currentlyCrafting);
         }
     }
 
@@ -164,29 +206,20 @@ public abstract class QuantumCraftingServiceMixin {
             boolean prioritizePower, IActionSource src, CallbackInfoReturnable<ICraftingSubmitResult> cir) {
         if (job.simulation()) return;
         gtShanhai$refreshQuantumClusters("submitJob");
-        if (target instanceof QuantumCraftingCPU) {
-            QuantumCraftingCPU cpu = (QuantumCraftingCPU) target;
-            gtShanhai$setQuantumSubmitResult(cir, cpu.getCluster().submitJob(grid, job, src, requestingMachine));
-            return;
-        }
-        if (target instanceof QuantumCraftingCPUCluster) {
-            gtShanhai$setQuantumSubmitResult(cir, ((QuantumCraftingCPUCluster) target).submitJob(grid, job, src, requestingMachine));
+        if (target instanceof QuantumCraftingCPU cpu) {
+            cir.setReturnValue(cpu.isCapacityView()
+                    ? cpu.getCluster().submitJob(grid, job, src, requestingMachine)
+                    : CraftingSubmitResult.CPU_BUSY);
             return;
         }
         if (target == null) {
             QuantumCraftingCPUCluster cluster = gtShanhai$findSuitableQuantumCpu(job, src);
             if (cluster != null) {
                 updateList = true;
-                gtShanhai$setQuantumSubmitResult(cir, cluster.submitJob(grid, job, src, requestingMachine));
+                cir.setReturnValue(cluster.submitJob(grid, job, src, requestingMachine));
                 gtShanhai$markQuantumClustersDirty();
             }
         }
-    }
-
-    @Unique
-    private void gtShanhai$setQuantumSubmitResult(CallbackInfoReturnable<ICraftingSubmitResult> cir,
-            ICraftingSubmitResult result) {
-        cir.setReturnValue(result);
     }
 
     @Overwrite
@@ -199,6 +232,7 @@ public abstract class QuantumCraftingServiceMixin {
         gtShanhai$refreshQuantumClusters("insertIntoCpus");
         Set<QuantumCraftingCPUCluster> quantumClusters = gtShanhai$getQuantumClusters();
         for (QuantumCraftingCPUCluster cluster : quantumClusters) {
+            if (!cluster.belongsToGrid(grid)) continue;
             for (QuantumCraftingCPU cpu : cluster.getActiveCPUSnapshot()) {
                 inserted += cpu.craftingLogic.insert(what, amount - inserted, type);
             }
@@ -210,38 +244,45 @@ public abstract class QuantumCraftingServiceMixin {
         return inserted;
     }
 
-    @Inject(method = "getCpus", at = @At("RETURN"), cancellable = true)
-    private void gtShanhai$getQuantumCpus(CallbackInfoReturnable<ImmutableSet<ICraftingCPU>> cir) {
+    @WrapMethod(method = "getCpus")
+    private ImmutableSet<ICraftingCPU> gtShanhai$getQuantumCpus(Operation<ImmutableSet<ICraftingCPU>> original) {
         gtShanhai$refreshQuantumClusters("getCpus");
         ImmutableSet.Builder<ICraftingCPU> builder = ImmutableSet.builder();
-        builder.addAll(cir.getReturnValue());
+        builder.addAll(original.call());
         for (QuantumCraftingCPUCluster cluster : gtShanhai$getQuantumClusters()) {
+            if (!cluster.belongsToGrid(grid)) continue;
             for (QuantumCraftingCPU cpu : cluster.getActiveCPUSnapshot()) {
-                builder.add(cpu);
+                if (cpu.isBusy()) builder.add(cpu);
             }
-            if (cluster.isActive() && !cluster.isDestroyed()) {
+            if (cluster.isActive()) {
                 builder.add(cluster.getRemainingCapacityCPU());
             }
         }
-        cir.setReturnValue(builder.build());
+        return builder.build();
     }
 
-    @Inject(method = "getRequestedAmount", at = @At("RETURN"), cancellable = true)
-    private void gtShanhai$getQuantumRequestedAmount(AEKey what, CallbackInfoReturnable<Long> cir) {
+    @WrapMethod(method = "getRequestedAmount")
+    private long gtShanhai$getQuantumRequestedAmount(AEKey what, Operation<Long> original) {
         gtShanhai$refreshQuantumClusters("getRequestedAmount");
-        long requested = cir.getReturnValue();
+        long requested = original.call(what);
         for (QuantumCraftingCPUCluster cluster : gtShanhai$getQuantumClusters()) {
+            if (!cluster.belongsToGrid(grid)) continue;
             for (QuantumCraftingCPU cpu : cluster.getActiveCPUSnapshot()) {
-                requested += cpu.craftingLogic.getWaitingFor(what);
+                long waiting = cpu.craftingLogic.getWaitingFor(what);
+                if (requested > Long.MAX_VALUE - waiting) {
+                    return Long.MAX_VALUE;
+                }
+                requested += waiting;
             }
         }
-        cir.setReturnValue(requested);
+        return requested;
     }
 
     @Inject(method = "hasCpu", at = @At("HEAD"), cancellable = true)
     private void gtShanhai$hasQuantumCpu(ICraftingCPU cpu, CallbackInfoReturnable<Boolean> cir) {
         gtShanhai$refreshQuantumClusters("hasCpu");
         for (QuantumCraftingCPUCluster cluster : gtShanhai$getQuantumClusters()) {
+            if (!cluster.belongsToGrid(grid)) continue;
             if (cpu == cluster.getRemainingCapacityCPU()) {
                 cir.setReturnValue(true);
                 return;
@@ -272,8 +313,9 @@ public abstract class QuantumCraftingServiceMixin {
     private QuantumCraftingCPUCluster gtShanhai$findSuitableQuantumCpu(ICraftingPlan job, IActionSource src) {
         ArrayList<QuantumCraftingCPUCluster> valid = new ArrayList<>();
         for (QuantumCraftingCPUCluster cluster : gtShanhai$getQuantumClusters()) {
+            if (!cluster.belongsToGrid(grid)) continue;
             if (!cluster.isActive()) continue;
-            if (cluster.getAvailableStorage() < job.bytes()) continue;
+            if (!cluster.canFitPlan(job)) continue;
             if (!cluster.canBeAutoSelectedFor(src)) continue;
             valid.add(cluster);
         }

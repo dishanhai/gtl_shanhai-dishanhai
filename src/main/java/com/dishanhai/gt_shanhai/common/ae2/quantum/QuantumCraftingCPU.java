@@ -40,14 +40,18 @@ public class QuantumCraftingCPU implements ICraftingCPU {
         return craftingLogic.hasJob();
     }
 
+    public boolean isCapacityView() {
+        return id == null;
+    }
+
     @Override
     @Nullable
     public CraftingJobStatus getJobStatus() {
         GenericStack output = craftingLogic.getFinalJobOutput();
         if (output == null) return null;
-        QuantumElapsedTimeTracker tracker = craftingLogic.getElapsedTimeTracker();
-        long progress = Math.max(0, tracker.getStartItemCount() - tracker.getRemainingItemCount());
-        return new CraftingJobStatus(output, tracker.getStartItemCount(), progress, tracker.getElapsedTime());
+        long start = craftingLogic.getStartItemCount();
+        long progress = Math.max(0, start - craftingLogic.getRemainingItemCount());
+        return new CraftingJobStatus(output, start, progress, craftingLogic.getElapsedTime());
     }
 
     @Override

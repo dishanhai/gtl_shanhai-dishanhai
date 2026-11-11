@@ -17,13 +17,45 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.ToLongFunction;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 /**
  * Presence checks for virtual providers that should not consume their real target items.
  */
 public final class VirtualProviderSoftLocks {
+
+    public interface CalculationAccess {
+        long gtShanhai$getSupplyPresence(AEKey key);
+    }
+
+    public interface RequirementsAccess {
+        void gtShanhai$requireSupply(AEKey key, long amount);
+        Object2LongMap<AEKey> gtShanhai$getSupplyRequirements();
+    }
+
+    /** Copy supply slots on the server thread before the tree worker reads them. */
+    public static ToLongFunction<AEKey> snapshotSupplyPresence(IGrid grid) {
+        if (grid == null || !usesSupplyMachineMode()) return key -> 0L;
+        Object2LongOpenHashMap<AEKey> targets = new Object2LongOpenHashMap<>();
+        for (VirtualItemSupplyMachine machine : grid.getMachines(VirtualItemSupplyMachine.class)) {
+            if (machine.getMainNode().getGrid() == grid) machine.collectProvidedTargets(targets);
+        }
+        return key -> key instanceof AEItemKey item
+                ? targets.getLong(AEItemKey.of(VirtualItemProviderHelper.normalizeTarget(item.toStack()))) : 0L;
+    }
+
+    static GenericStack missingSupplyRequirement(Object2LongMap<AEKey> requirements,
+            ToLongFunction<AEKey> available) {
+        if (requirements == null) return null;
+        for (Object2LongMap.Entry<AEKey> entry : requirements.object2LongEntrySet()) {
+            long missing = entry.getLongValue() - available.applyAsLong(entry.getKey());
+            if (missing > 0L) return new GenericStack(entry.getKey(), missing);
+        }
+        return null;
+    }
 
     public static synchronized Reservation tryReserve(Object owner, IGrid grid, List<GenericStack> targets,
             IActionSource source) {
@@ -73,18 +105,9 @@ public final class VirtualProviderSoftLocks {
     }
 
     private static Reservation tryReserveFromSupplyMachines(IGrid grid, Map<AEKey, Long> required) {
+        ToLongFunction<AEKey> available = snapshotSupplyPresence(grid);
         for (Map.Entry<AEKey, Long> entry : required.entrySet()) {
-            long available = 0;
-            for (VirtualItemSupplyMachine machine : grid.getMachines(VirtualItemSupplyMachine.class)) {
-                if (machine == null) continue;
-                // 只是直接读槽位数据做在场校验，不走 AE 通道传输物品，不该要求 isOnline()（有 channel）——
-                // 供应机没分到 channel 时 isOnline() 会是 false，导致明明放了实物也判定为缺失。
-                available += machine.countProvidedTarget(entry.getKey());
-                if (available >= entry.getValue()) {
-                    break;
-                }
-            }
-            if (available < entry.getValue()) {
+            if (available.applyAsLong(entry.getKey()) < entry.getValue()) {
                 return Reservation.missing(new GenericStack(entry.getKey(), entry.getValue()));
             }
         }

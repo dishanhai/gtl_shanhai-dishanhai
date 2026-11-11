@@ -3,9 +3,9 @@ package com.dishanhai.gt_shanhai.common.item;
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
-
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 /**
  * Carries the current GRAPH pattern's presence keys across GTLCore's
@@ -36,6 +36,12 @@ public final class GraphPresenceDispatchBridge {
 
     public static void clear() {
         PRESENCE_KEYS.remove();
+    }
+
+    /** GRAPH models its reusable slot separately from the pattern's physical remainder. */
+    public static AEKey physicalRemainder(IPatternDetails.IInput input, AEKey key,
+            BiFunction<IPatternDetails.IInput, AEKey, AEKey> remainder) {
+        return VirtualPatternEncodingHelper.isPresenceInput(input) ? null : remainder.apply(input, key);
     }
 
     private GraphPresenceDispatchBridge() {

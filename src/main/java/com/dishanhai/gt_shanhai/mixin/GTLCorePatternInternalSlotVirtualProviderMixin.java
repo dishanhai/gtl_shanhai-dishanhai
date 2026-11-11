@@ -31,14 +31,10 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Mixin(targets = "org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase$InternalSlot", remap = false)
 public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPatternBufferSlotAccess {
@@ -189,34 +185,12 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
         int config = VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory);
         if (config < 0
                 && !gtShanhai$hasVirtualCircuitTarget()) return;
-        if (config >= 0) {
-            gtShanhai$removeVirtualCircuitPresence(config);
-        }
         SlotCacheManager cacheManager = getCacheManager();
         if (cacheManager instanceof SlotCacheManagerAccessor accessor) {
             accessor.gtShanhai$setCircuitCacheRaw(-1);
             accessor.gtShanhai$setCircuitStackRaw(ItemStack.EMPTY);
         }
         VirtualPatternBufferSlotState.clearVirtualCircuit(itemInventory);
-    }
-
-    @Unique
-    private void gtShanhai$removeVirtualCircuitPresence(int config) {
-        if (config < 0 || config > IntCircuitBehaviour.CIRCUIT_MAX) return;
-        AEItemKey circuitKey = AEItemKey.of(IntCircuitBehaviour.stack(config));
-        gtShanhai$subtractAmount(itemInventory, circuitKey, 1L);
-        gtShanhai$subtractAmount(gtShanhai$getItemCatalystInventory(), circuitKey, 1L);
-    }
-
-    @Unique
-    private static <T> void gtShanhai$subtractAmount(Object2LongMap<T> inventory, T key, long amount) {
-        if (inventory == null || key == null || amount <= 0L) return;
-        long remaining = inventory.getLong(key) - amount;
-        if (remaining > 0L) {
-            inventory.put(key, remaining);
-        } else {
-            inventory.removeLong(key);
-        }
     }
 
     @Unique
@@ -278,20 +252,6 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
         }
     }
 
-    @ModifyVariable(method = "handleItemInternal", at = @At("HEAD"), argsOnly = true, remap = false)
-    private Object2LongMap<Ingredient> gtShanhai$exemptPresenceItems(Object2LongMap<Ingredient> left) {
-        if (!gtShanhai$isStellarSlot()) return left;
-        gtShanhai$removePresenceItems(left);
-        return left;
-    }
-
-    @ModifyVariable(method = "handleFluidInternal", at = @At("HEAD"), argsOnly = true, remap = false)
-    private Object2LongMap<FluidIngredient> gtShanhai$exemptPresenceFluids(Object2LongMap<FluidIngredient> left) {
-        if (!gtShanhai$isStellarSlot()) return left;
-        gtShanhai$removePresenceFluids(left);
-        return left;
-    }
-
     @Unique
     private boolean gtShanhai$consumedItemsArePresence(GTRecipe recipe) {
         if (recipe == null) return false;
@@ -339,64 +299,6 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     private boolean gtShanhai$suppliesFluid(AEFluidKey key) {
         return virtualFluidSupply != null && virtualFluidSupply.contains(key)
                 || configuredVirtualFluids != null && configuredVirtualFluids.contains(key);
-    }
-
-    @Unique
-    private void gtShanhai$removePresenceItems(Object2LongMap<Ingredient> left) {
-        if (left == null || left.isEmpty()) return;
-        Object2LongMap<AEItemKey> targets = VirtualPatternBufferSlotState.getVirtualTargets(itemInventory);
-        if (targets.isEmpty()) return;
-        List<Ingredient> covered = null;
-        for (Object2LongMap.Entry<Ingredient> entry : left.object2LongEntrySet()) {
-            Ingredient ingredient = entry.getKey();
-            if (gtShanhai$ingredientIsPresence(ingredient, targets)) {
-                if (covered == null) covered = new ArrayList<>();
-                covered.add(ingredient);
-            }
-        }
-        if (covered == null) return;
-        for (int i = 0; i < covered.size(); i++) {
-            left.removeLong(covered.get(i));
-        }
-    }
-
-    @Unique
-    private void gtShanhai$removePresenceFluids(Object2LongMap<FluidIngredient> left) {
-        if (left == null || left.isEmpty()) return;
-        Object2LongMap<AEFluidKey> targets = VirtualPatternBufferSlotState.getVirtualTargets(fluidInventory);
-        if (targets.isEmpty()) return;
-        List<FluidIngredient> covered = null;
-        for (Object2LongMap.Entry<FluidIngredient> entry : left.object2LongEntrySet()) {
-            FluidIngredient ingredient = entry.getKey();
-            if (gtShanhai$fluidIsPresence(ingredient, targets)) {
-                if (covered == null) covered = new ArrayList<>();
-                covered.add(ingredient);
-            }
-        }
-        if (covered == null) return;
-        for (int i = 0; i < covered.size(); i++) {
-            left.removeLong(covered.get(i));
-        }
-    }
-
-    @Unique
-    private static boolean gtShanhai$ingredientIsPresence(Ingredient ingredient, Object2LongMap<AEItemKey> targets) {
-        if (ingredient == null) return false;
-        for (AEItemKey target : targets.keySet()) {
-            if (target != null && target.matches(ingredient)) return true;
-        }
-        return false;
-    }
-
-    @Unique
-    private static boolean gtShanhai$fluidIsPresence(FluidIngredient ingredient, Object2LongMap<AEFluidKey> targets) {
-        if (ingredient == null) return false;
-        for (FluidStack stack : ingredient.getStacks()) {
-            if (stack == null || stack.isEmpty()) continue;
-            AEFluidKey key = AEFluidKey.of(stack.getFluid());
-            if (key != null && targets.containsKey(key)) return true;
-        }
-        return false;
     }
 
     @Shadow

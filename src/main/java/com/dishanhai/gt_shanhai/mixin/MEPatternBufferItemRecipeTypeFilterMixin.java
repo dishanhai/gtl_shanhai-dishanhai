@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import com.dishanhai.gt_shanhai.common.item.PatternNotConsumableFilter;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSlotAccess;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 
@@ -33,11 +32,6 @@ public abstract class MEPatternBufferItemRecipeTypeFilterMixin implements IMERec
         if (!access.gtShanhai$slotAllowsRecipe(trySlot, recipe)) {
             cir.setReturnValue(false);
             return;
-        }
-        // 真扣料阶段（非 simulate）把配方里"不消耗"（chance==0）的物品输入从待扣列表剔除，
-        // 使 InternalSlot.handleItemInternal 不再吞掉催化剂；simulate 阶段保留以维持在场校验。
-        if (!simulate) {
-            PatternNotConsumableFilter.stripNotConsumableItems(recipe, left);
         }
     }
 }

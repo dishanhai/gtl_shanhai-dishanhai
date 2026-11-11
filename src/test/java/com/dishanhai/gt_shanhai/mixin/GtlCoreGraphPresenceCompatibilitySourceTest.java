@@ -20,14 +20,37 @@ class GtlCoreGraphPresenceCompatibilitySourceTest {
             "gt_shanhai", "mixin", "GtlCoreGraphPresenceExecutionAdapterMixin.java");
     private static final Path BRIDGE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "item", "GraphPresenceDispatchBridge.java");
+    private static final Path MIXINS = ADAPTER_MIXIN.getParent();
 
     @Test
     void buildUsesTheGraphCompatibleGtlCoreDependency() throws Exception {
         String build = Files.readString(BUILD_GRADLE);
-        assertTrue(build.contains("gtlcore-1.2.3.2-fix3.jar"),
-                "GRAPH 修复必须以 fix3 API 为编译基线");
+        assertTrue(build.contains("implementation files('libs/gtlcore-1.2.3.2-fix4.jar')"),
+                "GRAPH 回归使用仓库固定的 fix4 JAR");
         assertTrue(!build.contains("implementation files('libs/gtlcore-1.2.3.2-fix2.jar')"),
                 "不能继续以 fix2 编译并误判独立 GRAPH 路径");
+    }
+
+    @Test
+    void graphBindingComparesPhysicalOutputsWithoutSyntheticPresenceReturns() throws Exception {
+        String adapter = Files.readString(ADAPTER_MIXIN);
+        String config = MixinConfigs.readAll();
+        String fingerprint = Files.readString(MIXINS.resolve("GtlCoreGraphPresenceFingerprintMixin.java"));
+        String stateReturns = Files.readString(MIXINS.resolve("GtlCoreGraphPresenceStateReturnsMixin.java"));
+        assertTrue(config.contains("\"GtlCoreGraphPresenceFingerprintMixin\""));
+        assertTrue(config.contains("\"GtlCoreGraphPresenceFingerprintMixin$Binding\""));
+        assertTrue(config.contains("\"GtlCoreGraphPresenceStateReturnsMixin\""));
+        assertTrue(fingerprint.contains("GraphPresenceDispatchBridge.physicalRemainder"));
+        assertTrue(fingerprint.contains("of(Lappeng/api/crafting/IPatternDetails;)Ljava/lang/String;"));
+        assertTrue(adapter.contains("GraphPresenceDispatchBridge.physicalRemainder"));
+        assertTrue(stateReturns.contains("VirtualPatternEncodingHelper.isPresenceInput"));
+    }
+
+    @Test
+    void graphSummaryMixinsAreRegisteredForBothSupportedSummaryPaths() throws Exception {
+        String config = MixinConfigs.readAll();
+        assertTrue(config.contains("\"GtlCoreGraphPresenceSummaryMixin\""));
+        assertTrue(config.contains("\"GtlCoreGraphPresenceSummaryMixin$Legacy\""));
     }
 
     @Test

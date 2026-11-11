@@ -16,6 +16,7 @@ import appeng.me.cluster.IAECluster;
 import appeng.me.cluster.MBCalculator;
 import appeng.me.helpers.MachineSource;
 import appeng.util.ConfigManager;
+import com.dishanhai.gt_shanhai.common.ae2.GtlCoreCraftingPlans;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -160,41 +161,65 @@ public class QuantumCraftingCPUCluster implements IAECluster {
         QuantumDiagnostics.hit("cluster.cancelJobs", "active=" + activeCpus.size());
         ArrayList<UUID> ids = new ArrayList<>(activeCpus.keySet());
         for (UUID id : ids) {
-            killCpu(id, false);
+            killCpu(id, false, true);
         }
         updateGridForChangedCpu(this);
     }
 
     public void cancelJob(UUID id) {
         if (activeCpus.containsKey(id)) {
-            killCpu(id, true);
+            killCpu(id, true, false);
         }
+    }
+
+    public boolean canFitPlan(ICraftingPlan plan) {
+        return GtlCoreCraftingPlans.isGraphPlan(plan)
+                ? QuantumGraphCpuHost.fitsStorage(plan, getAvailableStorage())
+                : plan.bytes() <= getAvailableStorage();
     }
 
     public ICraftingSubmitResult submitJob(IGrid grid, ICraftingPlan plan, IActionSource src,
             ICraftingRequester requestingMachine) {
+        if (!belongsToGrid(grid) || !isActive()) {
+            return CraftingSubmitResult.CPU_OFFLINE;
+        }
+        if (!canFitPlan(plan)) {
+            return CraftingSubmitResult.CPU_TOO_SMALL;
+        }
         QuantumDiagnostics.hit("cluster.submitJob.start",
                 "bytes=" + plan.bytes() + " available=" + getAvailableStorage()
                         + " active=" + activeCpus.size() + " final=" + plan.finalOutput());
-        if (!isActive()) {
-            return CraftingSubmitResult.CPU_OFFLINE;
-        }
-        if (getAvailableStorage() < plan.bytes()) {
-            return CraftingSubmitResult.CPU_TOO_SMALL;
-        }
         UUID id = UUID.randomUUID();
         QuantumCraftingCPU cpu = new QuantumCraftingCPU(this, id, plan.bytes());
-        ICraftingSubmitResult result = cpu.craftingLogic.trySubmitJob(grid, plan, src, requestingMachine);
-        if (result.successful()) {
-            activeCpus.put(id, cpu);
-            recalculateRemainingStorage();
-            markDirty();
-            updateGridForChangedCpu(this);
+        ICraftingSubmitResult result;
+        try {
+            result = cpu.craftingLogic.trySubmitJob(grid, plan, src, requestingMachine);
+        } catch (RuntimeException failure) {
+            try {
+                cpu.craftingLogic.cancel();
+            } catch (RuntimeException cancellationFailure) {
+                failure.addSuppressed(cancellationFailure);
+            }
+            throw failure;
+        } finally {
+            // A failed GRAPH extraction can leave real materials awaiting refund.
+            retainJobOrRefund(id, cpu);
         }
         QuantumDiagnostics.hit("cluster.submitJob.result",
                 "success=" + result.successful() + " id=" + id + " active=" + activeCpus.size()
                         + " cpuHasJob=" + cpu.craftingLogic.hasJob());
         return result;
+    }
+
+    private void retainJobOrRefund(UUID id, QuantumCraftingCPU cpu) {
+        if (!cpu.craftingLogic.hasJob()) {
+            if (!cpu.craftingLogic.hasStoredItems()) return;
+            cpu.craftingLogic.markForDeletion();
+        }
+        activeCpus.put(id, cpu);
+        recalculateRemainingStorage();
+        markDirty();
+        updateGridForChangedCpu(this);
     }
 
     public List<QuantumCraftingCPU> getActiveCPUs() {
@@ -254,6 +279,7 @@ public class QuantumCraftingCPUCluster implements IAECluster {
             activeCpus.remove(id);
         }
         recalculateRemainingStorage();
+        markDirty();
         updateGridForChangedCpu(this);
         if (QuantumDiagnostics.ENABLED) {
             QuantumDiagnostics.slow("cluster.cleanupInactiveCpus", start,
@@ -302,6 +328,10 @@ public class QuantumCraftingCPUCluster implements IAECluster {
     public IGrid getGrid() {
         IGridNode node = getNode();
         return node == null ? null : node.getGrid();
+    }
+
+    public boolean belongsToGrid(@Nullable IGrid grid) {
+        return grid != null && !isDestroyed() && getGrid() == grid;
     }
 
     public boolean isActive() {
@@ -448,17 +478,22 @@ public class QuantumCraftingCPUCluster implements IAECluster {
         updateGridForChangedCpu(this);
     }
 
-    private void killCpu(UUID id, boolean updateGrid) {
+    private void killCpu(UUID id, boolean updateGrid, boolean breakingCluster) {
         QuantumCraftingCPU cpu = activeCpus.get(id);
         if (cpu == null) return;
         QuantumDiagnostics.hit("cluster.killCpu",
                 "id=" + id + " updateGrid=" + updateGrid + " hasJob=" + cpu.craftingLogic.hasJob()
                         + " hasStored=" + cpu.craftingLogic.hasStoredItems());
         cpu.craftingLogic.cancel();
-        if (cpu.craftingLogic.hasStoredItems()) {
-            cpu.craftingLogic.markForDeletion();
-        } else {
-            activeCpus.remove(id);
+        if (breakingCluster) {
+            cpu.craftingLogic.handoffCancelledInventory();
+        }
+        if (!cpu.craftingLogic.hasJob()) {
+            if (cpu.craftingLogic.hasStoredItems()) {
+                cpu.craftingLogic.markForDeletion();
+            } else {
+                activeCpus.remove(id);
+            }
         }
         recalculateRemainingStorage();
         markDirty();

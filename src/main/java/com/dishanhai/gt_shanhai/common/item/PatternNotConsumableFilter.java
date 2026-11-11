@@ -12,31 +12,12 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 
-import it.unimi.dsi.fastutil.objects.Object2LongMap;
-import it.unimi.dsi.fastutil.objects.Object2LongMaps;
-import it.unimi.dsi.fastutil.objects.ObjectIterator;
-
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.List;
 
-/**
- * 把 GTCEu 配方里"不消耗"（NotConsumable，{@code Content.chance==0}）的输入从"样板总成扣料层
- * 要扣减的 left"里剔除，使 {@code InternalSlot.handleItemInternal}/{@code handleFluidInternal}
- * 不再吞掉催化剂。
- *
- * <p>GTLCore 的样板扣料（{@code MEPatternBufferPartMachineBase$InternalSlot}）只按 needAmount
- * 做差值扣减，完全不识别 GTCEu 的 NotConsumable 语义；真实 GTCEu 机器的
- * {@code ItemRecipeCapability.getMaxParallelRatio} 会把 chance==0 的输入只做"存在性"校验、不随
- * 并行扣减，但那套逻辑在 AE 样板缓冲这一层用不上。此工具补上"扣料层识别 NotConsumable"这一环：
- * 只在真扣料（非 simulate）阶段调用，把 chance==0 的输入从 left 剔除，催化剂就永远保持在场、
- * 不被消耗。匹配（simulate）阶段绝不能调用本类——那会让"催化剂不在场也能匹配"，破坏在场校验。
- *
- * <p>匹配判定：先按引用相等快判（left 的 Ingredient 往往就是配方 Content 里同一个对象），再退回
- * 物品/流体匹配（NotConsumable 输入能 {@code test} 到 left 输入的代表物）。同一配方内一个物品几乎
- * 不会既是消耗输入又是不消耗输入，故此判定足够安全。
- */
+/** Tracks which virtual catalysts to keep after the active recipe consumes its physical inputs. */
 public final class PatternNotConsumableFilter {
 
     private PatternNotConsumableFilter() {
@@ -78,34 +59,6 @@ public final class PatternNotConsumableFilter {
         return false;
     }
 
-    /** 从 left 中移除配方里 chance==0 的物品输入（仅在非 simulate 扣料阶段调用）。 */
-    public static void stripNotConsumableItems(GTRecipe recipe, Object2LongMap<Ingredient> left) {
-        if (recipe == null || left == null || left.isEmpty()) return;
-        List<Content> contents = recipe.getInputContents(ItemRecipeCapability.CAP);
-        if (contents == null || contents.isEmpty()) return;
-        ObjectIterator<Object2LongMap.Entry<Ingredient>> it = Object2LongMaps.fastIterator(left);
-        while (it.hasNext()) {
-            Object2LongMap.Entry<Ingredient> entry = it.next();
-            if (isNotConsumableItemIngredient(contents, entry.getKey())) {
-                it.remove();
-            }
-        }
-    }
-
-    /** 从 left 中移除配方里 chance==0 的流体输入（仅在非 simulate 扣料阶段调用）。 */
-    public static void stripNotConsumableFluids(GTRecipe recipe, Object2LongMap<FluidIngredient> left) {
-        if (recipe == null || left == null || left.isEmpty()) return;
-        List<Content> contents = recipe.getInputContents(FluidRecipeCapability.CAP);
-        if (contents == null || contents.isEmpty()) return;
-        ObjectIterator<Object2LongMap.Entry<FluidIngredient>> it = Object2LongMaps.fastIterator(left);
-        while (it.hasNext()) {
-            Object2LongMap.Entry<FluidIngredient> entry = it.next();
-            if (isNotConsumableFluidIngredient(contents, entry.getKey())) {
-                it.remove();
-            }
-        }
-    }
-
     /** 某个物品栈是否对应配方里的 chance==0 输入（供料层"补料判断排除 NotConsumable"用）。 */
     public static boolean isItemNotConsumable(GTRecipe recipe, ItemStack stack) {
         if (recipe == null || stack == null || stack.isEmpty()) return false;
@@ -134,27 +87,4 @@ public final class PatternNotConsumableFilter {
         return false;
     }
 
-    private static boolean isNotConsumableItemIngredient(List<Content> contents, Ingredient key) {
-        if (key == null) return false;
-        ItemStack[] items = key.getItems();
-        for (Content content : contents) {
-            if (content.chance != 0) continue;
-            if (!(content.content instanceof Ingredient ncIngredient)) continue;
-            if (ncIngredient == key) return true;
-            if (items.length > 0 && ncIngredient.test(items[0])) return true;
-        }
-        return false;
-    }
-
-    private static boolean isNotConsumableFluidIngredient(List<Content> contents, FluidIngredient key) {
-        if (key == null) return false;
-        FluidStack[] stacks = key.getStacks();
-        for (Content content : contents) {
-            if (content.chance != 0) continue;
-            if (!(content.content instanceof FluidIngredient ncIngredient)) continue;
-            if (ncIngredient == key) return true;
-            if (stacks.length > 0 && ncIngredient.test(stacks[0])) return true;
-        }
-        return false;
-    }
 }

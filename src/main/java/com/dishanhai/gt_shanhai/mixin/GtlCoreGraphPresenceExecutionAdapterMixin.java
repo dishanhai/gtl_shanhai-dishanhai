@@ -1,8 +1,12 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import appeng.api.crafting.IPatternDetails;
+import appeng.api.stacks.AEKey;
+import com.dishanhai.gt_shanhai.common.item.GraphPresenceDispatchBridge;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
@@ -31,5 +35,15 @@ public abstract class GtlCoreGraphPresenceExecutionAdapterMixin {
     private boolean gtShanhai$presenceIsReusable(boolean original,
             @Local IPatternDetails.IInput input) {
         return original || VirtualPatternEncodingHelper.isPresenceInput(input);
+    }
+
+    @WrapOperation(
+            method = "matches",
+            at = @At(value = "INVOKE",
+                    target = "Lappeng/api/crafting/IPatternDetails$IInput;getRemainingKey(Lappeng/api/stacks/AEKey;)Lappeng/api/stacks/AEKey;"),
+            require = 0, remap = false)
+    private AEKey gtShanhai$matchPhysicalRemainder(IPatternDetails.IInput input, AEKey key,
+            Operation<AEKey> original) {
+        return GraphPresenceDispatchBridge.physicalRemainder(input, key, original::call);
     }
 }

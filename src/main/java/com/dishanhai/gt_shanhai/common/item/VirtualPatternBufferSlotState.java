@@ -5,6 +5,7 @@ import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMaps;
@@ -15,6 +16,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 import net.minecraft.nbt.CompoundTag;
@@ -54,13 +56,65 @@ public final class VirtualPatternBufferSlotState {
         Object2LongOpenHashMap<T> targets = getOrCreateTargets(inventory);
         long registered = Math.min(present, amount);
         long previous = targets.getLong(key);
-        if (previous > registered && inventory.getLong(key) > registered) {
-            inventory.put(key, registered);
-        }
-        if (fallbackPresence != null && fallbackPresence.getLong(key) > registered) {
-            fallbackPresence.put(key, registered);
+        if (previous > registered) {
+            reduceVirtualPortion(inventory, key, previous, registered);
+            if (fallbackPresence != null) {
+                reduceVirtualPortion(fallbackPresence, key, previous, registered);
+            }
         }
         targets.put(key, registered);
+    }
+
+    private static <T> void reduceVirtualPortion(Object2LongMap<T> inventory, T key, long previous, long amount) {
+        long current = inventory.getLong(key);
+        long tracked = Math.min(current, previous);
+        if (tracked > amount) inventory.put(key, current - tracked + amount);
+    }
+
+    @FunctionalInterface
+    public interface PhysicalStockMatcher<K, D> {
+        K match(Object2LongMap<K> remaining, D demand, long amount);
+    }
+
+    /** Keeps one budget per actual stock key, including when several ingredients can match it. */
+    public static <K extends AEKey, D> boolean canAllocatePhysicalStock(Object2LongOpenHashMap<K> inventory,
+            Object2LongMap<D> demands, PhysicalStockMatcher<K, D> matcher) {
+        Object2LongOpenHashMap<K> remaining = new Object2LongOpenHashMap<>(inventory);
+        for (Object2LongMap.Entry<K> virtual : getVirtualTargets(inventory).object2LongEntrySet()) {
+            K key = virtual.getKey();
+            remaining.put(key, Math.max(0L, remaining.getLong(key) - virtual.getLongValue()));
+        }
+        for (Object2LongMap.Entry<D> demand : demands.object2LongEntrySet()) {
+            long amount = demand.getLongValue();
+            if (amount <= 0L) continue;
+            K key = matcher.match(remaining, demand.getKey(), amount);
+            if (key == null) return false;
+            // Configured ME stock is added by the matcher. A negative balance reserves that stock.
+            remaining.addTo(key, -amount);
+        }
+        return true;
+    }
+
+    /** Temporarily exposes only physical stock to the native consumable deduction. */
+    public static <T extends AEKey> boolean withPhysicalStock(Object2LongOpenHashMap<T> inventory,
+            BooleanSupplier operation) {
+        if (!hasVirtualTargets(inventory)) return operation.getAsBoolean();
+        Object2LongOpenHashMap<T> detached = snapshotVirtualTargets(inventory);
+        for (Object2LongMap.Entry<T> entry : detached.object2LongEntrySet()) {
+            T key = entry.getKey();
+            long current = inventory.getLong(key);
+            long amount = Math.min(current, entry.getLongValue());
+            entry.setValue(amount);
+            if (current > amount) inventory.put(key, current - amount);
+            else inventory.removeLong(key);
+        }
+        try {
+            return operation.getAsBoolean();
+        } finally {
+            for (Object2LongMap.Entry<T> entry : detached.object2LongEntrySet()) {
+                if (entry.getLongValue() > 0L) inventory.addTo(entry.getKey(), entry.getLongValue());
+            }
+        }
     }
 
     public static synchronized void writeVirtualTargets(Object2LongOpenHashMap<AEItemKey> itemInventory,
@@ -103,7 +157,15 @@ public final class VirtualPatternBufferSlotState {
             registerVirtualTarget(fluidInventory, entry.getKey(), entry.getLongValue(), fluidFallbackPresence);
         }
         if (tag.contains(TAG_VIRTUAL_CIRCUIT, Tag.TAG_INT)) {
-            setVirtualCircuit(itemInventory, tag.getInt(TAG_VIRTUAL_CIRCUIT));
+            int config = tag.getInt(TAG_VIRTUAL_CIRCUIT);
+            if (config >= 0 && config <= IntCircuitBehaviour.CIRCUIT_MAX) {
+                AEItemKey key = AEItemKey.of(IntCircuitBehaviour.stack(config));
+                // Older saves can have a circuit marker without a per-key virtual quantity.
+                if (!getVirtualTargets(itemInventory).containsKey(key)) {
+                    registerVirtualTarget(itemInventory, key, 1L, itemFallbackPresence);
+                }
+                setVirtualCircuit(itemInventory, config);
+            }
         }
     }
 

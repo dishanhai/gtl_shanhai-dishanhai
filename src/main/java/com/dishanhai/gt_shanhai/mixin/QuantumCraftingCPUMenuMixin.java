@@ -1,11 +1,11 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import appeng.api.config.CpuSelectionMode;
+import appeng.api.networking.IGrid;
 import appeng.api.networking.crafting.ICraftingCPU;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
 import appeng.core.sync.packets.CraftingStatusPacket;
-import appeng.me.cluster.implementations.CraftingCPUCluster;
 import appeng.menu.AEBaseMenu;
 import appeng.menu.me.common.IncrementalUpdateHelper;
 import appeng.menu.me.crafting.CraftingCPUMenu;
@@ -18,6 +18,8 @@ import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPULogic;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingRedispatchMenu;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
 import com.google.common.collect.ImmutableList;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 
 import net.minecraft.world.entity.player.Inventory;
@@ -42,7 +44,7 @@ import java.util.function.Consumer;
 public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements QuantumCraftingRedispatchMenu {
 
     @Shadow @Final private IncrementalUpdateHelper incrementalUpdateHelper;
-    @Shadow private CraftingCPUCluster cpu;
+    @Shadow @Final private IGrid grid;
     @Shadow @Final private Consumer<AEKey> cpuChangeListener;
     @Shadow public CpuSelectionMode schedulingMode;
     @Shadow public boolean cantStoreItems;
@@ -66,6 +68,9 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void gtShanhai$initQuantumCpu(MenuType<?> menuType, int id, Inventory inventory, Object host, CallbackInfo ci) {
         registerClientAction("gtShanhaiRedispatch", this::gtShanhai$redispatch);
+        if ((Object) this instanceof CraftingStatusMenuAccessor) {
+            registerClientAction("gtShanhaiCancelSelectedCpu", Integer.class, this::gtShanhai$cancelSelectedCpu);
+        }
         if (host instanceof QuantumCraftingBlockEntity) {
             QuantumCraftingCPUCluster cluster = ((QuantumCraftingBlockEntity) host).getCluster();
             if (cluster == null) return;
@@ -93,6 +98,7 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
         }
         QuantumCraftingCPULogic.RedispatchResult result = quantumCpu.craftingLogic.retryRemainingDispatch();
         Component message = switch (result.state()) {
+            case GRAPH_MANAGED -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.graph_managed");
             case NO_JOB -> Component.literal("§e[量子 CPU] 当前没有待重发配任务");
             case GRID_OFFLINE -> Component.literal("§c[量子 CPU] AE 网络离线，无法补取原料");
             case MATERIAL_UNAVAILABLE -> Component.literal(
@@ -106,78 +112,81 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
 
     @Unique
     private QuantumCraftingCPU gtShanhai$resolveExplicitSelectedQuantumCpu() {
-        if ((Object) this instanceof CraftingStatusMenuAccessor accessor) {
-            ICraftingCPU selected = accessor.gtShanhai$getSelectedCpuRaw();
-            if (selected instanceof QuantumCraftingCPU quantumCpu && quantumCpu.isBusy()) {
-                gtShanhai$quantumCpu = quantumCpu;
-                return quantumCpu;
-            }
+        QuantumCraftingCPU quantumCpu = gtShanhai$quantumCpu;
+        if (quantumCpu == null || !quantumCpu.isBusy() || !quantumCpu.getCluster().belongsToGrid(grid)) {
             return null;
         }
-        return gtShanhai$quantumCpu != null && gtShanhai$quantumCpu.isBusy() ? gtShanhai$quantumCpu : null;
+        if ((Object) this instanceof CraftingStatusMenuAccessor accessor
+                && accessor.gtShanhai$getSelectedCpuRaw() != quantumCpu) {
+            return null;
+        }
+        return quantumCpu;
     }
 
-    @Inject(method = "setCPU", at = @At("HEAD"), cancellable = true)
-    private void gtShanhai$setQuantumCpu(ICraftingCPU selectedCpu, CallbackInfo ci) {
-        if (selectedCpu == null && gtShanhai$tryKeepBusyQuantumCpu()) {
-            ci.cancel();
-            return;
-        }
-        if (gtShanhai$quantumCpu != null) {
+    @WrapMethod(method = "setCPU")
+    private void gtShanhai$setQuantumCpu(ICraftingCPU selectedCpu, Operation<Void> original) {
+        boolean hadQuantum = gtShanhai$quantumCpu != null;
+        if (hadQuantum) {
             gtShanhai$quantumCpu.craftingLogic.removeListener(cpuChangeListener);
-        }
-        if (selectedCpu instanceof QuantumCraftingCPU) {
-            QuantumCraftingCPU quantumCpu = (QuantumCraftingCPU) selectedCpu;
-            if (!quantumCpu.isBusy() && gtShanhai$tryKeepBusyQuantumCpu()) {
-                ci.cancel();
-                return;
-            }
-            if (!quantumCpu.isBusy()) {
-                gtShanhai$quantumCpu = null;
-                return;
-            }
-            if (cpu != null) {
-                cpu.craftingLogic.removeListener(cpuChangeListener);
-            }
+            gtShanhai$quantumCpu = null;
+            gtShanhai$lastQuantumProgressSyncTick = Long.MIN_VALUE;
             incrementalUpdateHelper.reset();
-            gtShanhai$quantumCpu = quantumCpu;
-            gtShanhai$resetQuantumProgressSyncState();
-            gtShanhai$syncStatusMenuSelectedCpu(selectedCpu);
-            KeyCounter allItems = new KeyCounter();
-            gtShanhai$quantumCpu.craftingLogic.getAllItems(allItems);
-            int itemKinds = 0;
-            for (Object2LongMap.Entry<AEKey> entry : allItems) {
-                itemKinds++;
-                incrementalUpdateHelper.addChange(entry.getKey());
+        }
+        if (!(selectedCpu instanceof QuantumCraftingCPU quantumCpu)) {
+            original.call(selectedCpu);
+            if (hadQuantum && selectedCpu == null && isServerSide()) {
+                sendPacketToClient(new CraftingStatusPacket(containerId, CraftingStatus.EMPTY));
             }
-            gtShanhai$quantumCpu.craftingLogic.addListener(cpuChangeListener);
-            QuantumDiagnostics.hit("menu.setQuantumCpu",
-                    "busy=" + gtShanhai$quantumCpu.isBusy() + " items=" + itemKinds
-                            + " storage=" + gtShanhai$quantumCpu.getAvailableStorage());
-            gtShanhai$sendQuantumStatus("setCPU");
-            ci.cancel();
             return;
         }
-        gtShanhai$quantumCpu = null;
+
+        // AE2 and GTLCore each own a CPU reference and listener in the wrapped method.
+        original.call((ICraftingCPU) null);
+        if (!quantumCpu.isBusy() || !quantumCpu.getCluster().belongsToGrid(grid)) {
+            if (isServerSide()) {
+                sendPacketToClient(new CraftingStatusPacket(containerId, CraftingStatus.EMPTY));
+            }
+            return;
+        }
+        incrementalUpdateHelper.reset();
+        gtShanhai$quantumCpu = quantumCpu;
+        gtShanhai$markAllQuantumItemsChanged();
+        quantumCpu.craftingLogic.addListener(cpuChangeListener);
+        gtShanhai$sendQuantumStatus("setCPU", true);
     }
 
-    @Inject(method = "cancelCrafting", at = @At("TAIL"))
-    private void gtShanhai$cancelQuantumCrafting(CallbackInfo ci) {
-        if (isClientSide()) {
+    @WrapMethod(method = "cancelCrafting")
+    private void gtShanhai$cancelQuantumCrafting(Operation<Void> original) {
+        if ((Object) this instanceof CraftingStatusMenuAccessor accessor) {
+            if (isClientSide()) {
+                sendClientAction("gtShanhaiCancelSelectedCpu", accessor.gtShanhai$getSelectedCpuSerialRaw());
+            }
             return;
         }
-        QuantumCraftingCPU target = gtShanhai$resolveSelectedQuantumCpu();
-        if (target == null) {
-            QuantumDiagnostics.hit("menu.cancelQuantum", "target=null cached=" + (gtShanhai$quantumCpu != null));
+        if (isServerSide() && gtShanhai$quantumCpu != null) {
+            QuantumCraftingCPU target = gtShanhai$resolveExplicitSelectedQuantumCpu();
+            if (target != null) {
+                target.cancelJob();
+            }
             return;
         }
-        QuantumDiagnostics.hit("menu.cancelQuantum",
-                "busy=" + target.isBusy() + " storage=" + target.getAvailableStorage());
-        target.cancelJob();
+        original.call();
     }
 
-    // selectCpu(int) 只在 CraftingStatusMenu 上存在，CraftingCPUMenu 没有该方法；
-    // 量子 CPU 的选择记录已由 QuantumCraftingStatusMenuMixin / 本类 setCPU 注入覆盖。
+    @Unique
+    private void gtShanhai$cancelSelectedCpu(int serial) {
+        if (isClientSide() || serial < 0 || grid == null) {
+            return;
+        }
+        CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
+        if (serial != accessor.gtShanhai$getSelectedCpuSerialRaw()) {
+            return;
+        }
+        ICraftingCPU selected = accessor.gtShanhai$getSelectedCpuRaw();
+        if (selected != null && selected.isBusy() && grid.getCraftingService().getCpus().contains(selected)) {
+            selected.cancelJob();
+        }
+    }
 
     // removed(Player) = AbstractContainerMenu.m_6877_
     @Inject(method = "m_6877_", at = @At("TAIL"), remap = false, require = 0)
@@ -191,15 +200,11 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
     // broadcastChanges = AbstractContainerMenu.m_38946_
     @Inject(method = "m_38946_", at = @At("HEAD"), remap = false, require = 0)
     private void gtShanhai$broadcastQuantumChanges(CallbackInfo ci) {
-        gtShanhai$selectBusyQuantumCpuForStatusMenu();
-        if (isServerSide() && gtShanhai$clearFinishedSelectedQuantumCpu()) {
-            return;
-        }
-        if (isServerSide() && gtShanhai$quantumCpu != null && !gtShanhai$quantumCpu.isBusy()) {
-            gtShanhai$clearFinishedQuantumCpu(gtShanhai$quantumCpu);
-            return;
-        }
         if (isServerSide() && gtShanhai$quantumCpu != null) {
+            if (gtShanhai$resolveExplicitSelectedQuantumCpu() == null) {
+                setCPU(null);
+                return;
+            }
             schedulingMode = gtShanhai$quantumCpu.getSelectionMode();
             cantStoreItems = gtShanhai$quantumCpu.craftingLogic.isCantStoreItems();
             if (incrementalUpdateHelper.hasChanges()) {
@@ -212,11 +217,6 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
     }
 
     @Unique
-    private void gtShanhai$sendQuantumStatus(String reason) {
-        gtShanhai$sendQuantumStatus(reason, false);
-    }
-
-    @Unique
     private void gtShanhai$sendQuantumStatus(String reason, boolean forceProgressOnly) {
         boolean hasChanges = incrementalUpdateHelper.hasChanges();
         if (!isServerSide() || gtShanhai$quantumCpu == null || (!hasChanges && !forceProgressOnly)) {
@@ -226,7 +226,7 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
         if (hasChanges) {
             incrementalUpdateHelper.commitChanges();
         }
-        gtShanhai$rememberQuantumProgressStatus(status);
+        gtShanhai$rememberQuantumProgressStatus();
         QuantumDiagnostics.hit("menu.sendQuantumStatus",
                 "reason=" + reason
                         + " entries=" + status.getEntries().size()
@@ -246,14 +246,12 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
             return false;
         }
         long tick = level.getGameTime();
-        if (tick - gtShanhai$lastQuantumProgressSyncTick < gtShanhai$QUANTUM_PROGRESS_SYNC_INTERVAL) {
-            return false;
-        }
-        return true;
+        return gtShanhai$lastQuantumProgressSyncTick == Long.MIN_VALUE
+                || tick - gtShanhai$lastQuantumProgressSyncTick >= gtShanhai$QUANTUM_PROGRESS_SYNC_INTERVAL;
     }
 
     @Unique
-    private void gtShanhai$rememberQuantumProgressStatus(CraftingStatus status) {
+    private void gtShanhai$rememberQuantumProgressStatus() {
         Level level = gtShanhai$quantumCpu.getLevel();
         gtShanhai$lastQuantumProgressSyncTick = level == null ? gtShanhai$lastQuantumProgressSyncTick : level.getGameTime();
     }
@@ -268,11 +266,6 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
         for (Object2LongMap.Entry<AEKey> entry : allItems) {
             incrementalUpdateHelper.addChange(entry.getKey());
         }
-    }
-
-    @Unique
-    private void gtShanhai$resetQuantumProgressSyncState() {
-        gtShanhai$lastQuantumProgressSyncTick = Long.MIN_VALUE;
     }
 
     @Unique
@@ -296,168 +289,8 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
                 changes.removeSerial(what);
             }
         }
-        return new CraftingStatus(full, logic.getElapsedTimeTracker().getElapsedTime(),
-                logic.getElapsedTimeTracker().getRemainingItemCount(),
-                logic.getElapsedTimeTracker().getStartItemCount(), entries.build());
+        return new CraftingStatus(full, logic.getElapsedTime(), logic.getRemainingItemCount(),
+                logic.getStartItemCount(), entries.build());
     }
 
-    @Unique
-    private boolean gtShanhai$tryKeepBusyQuantumCpu() {
-        if (!((Object) this instanceof CraftingStatusMenuAccessor)) {
-            return false;
-        }
-        CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-        QuantumCraftingCPU busyCpu = gtShanhai$findBusyQuantumCpu(accessor);
-        if (busyCpu == null) {
-            return false;
-        }
-        setCPU(busyCpu);
-        QuantumDiagnostics.hit("menu.keepBusyQuantum",
-                "serial=" + accessor.gtShanhai$getSelectedCpuSerialRaw());
-        return true;
-    }
-
-    @Unique
-    private QuantumCraftingCPU gtShanhai$resolveSelectedQuantumCpu() {
-        if ((Object) this instanceof CraftingStatusMenuAccessor) {
-            CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-            QuantumCraftingCPU selectedCpu = gtShanhai$resolveStatusMenuQuantumCpu(accessor);
-            if (selectedCpu != null) {
-                return selectedCpu;
-            }
-            QuantumCraftingCPU fallback = gtShanhai$findBusyQuantumCpu(accessor);
-            if (fallback != null) {
-                return fallback;
-            }
-        }
-        if (gtShanhai$quantumCpu != null && gtShanhai$quantumCpu.isBusy()) {
-            return gtShanhai$quantumCpu;
-        }
-        return null;
-    }
-
-    @Unique
-    private void gtShanhai$selectBusyQuantumCpuForStatusMenu() {
-        if (isClientSide() || !((Object) this instanceof CraftingStatusMenuAccessor)) {
-            return;
-        }
-        CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-        ICraftingCPU selectedCpu = accessor.gtShanhai$getSelectedCpuRaw();
-        if (selectedCpu instanceof QuantumCraftingCPU && ((QuantumCraftingCPU) selectedCpu).isBusy()) {
-            return;
-        }
-        QuantumCraftingCPU busyCpu = gtShanhai$findBusyQuantumCpu(accessor);
-        if (busyCpu != null && busyCpu != selectedCpu) {
-            setCPU(busyCpu);
-            QuantumDiagnostics.hit("menu.autoSelectBusyQuantum",
-                    "serial=" + accessor.gtShanhai$getSelectedCpuSerialRaw());
-        }
-    }
-
-    @Unique
-    private QuantumCraftingCPU gtShanhai$resolveStatusMenuQuantumCpu(CraftingStatusMenuAccessor accessor) {
-        int selectedSerial = accessor.gtShanhai$getSelectedCpuSerialRaw();
-        for (ICraftingCPU cpu : accessor.gtShanhai$getLastCpuSetRaw()) {
-            Integer serial = accessor.gtShanhai$getCpuSerialMapRaw().get(cpu);
-            if (serial != null && serial.intValue() == selectedSerial && cpu instanceof QuantumCraftingCPU) {
-                QuantumCraftingCPU quantumCpu = (QuantumCraftingCPU) cpu;
-                gtShanhai$quantumCpu = quantumCpu;
-                return quantumCpu.isBusy() ? quantumCpu : null;
-            }
-        }
-        return null;
-    }
-
-    @Unique
-    private QuantumCraftingCPU gtShanhai$findBusyQuantumCpu(CraftingStatusMenuAccessor accessor) {
-        for (ICraftingCPU cpu : accessor.gtShanhai$getLastCpuSetRaw()) {
-            if (cpu instanceof QuantumCraftingCPU) {
-                QuantumCraftingCPU quantumCpu = (QuantumCraftingCPU) cpu;
-                if (quantumCpu.isBusy()) {
-                    gtShanhai$quantumCpu = quantumCpu;
-                    accessor.gtShanhai$setSelectedCpuRaw(cpu);
-                    accessor.gtShanhai$setSelectedCpuSerialRaw(accessor.gtShanhai$callGetOrAssignCpuSerial(cpu));
-                    QuantumDiagnostics.hit("menu.resolveFallbackQuantum",
-                            "serial=" + accessor.gtShanhai$getSelectedCpuSerialRaw());
-                    return quantumCpu;
-                }
-            }
-        }
-        return null;
-    }
-
-    @Unique
-    private boolean gtShanhai$clearFinishedSelectedQuantumCpu() {
-        if (!((Object) this instanceof CraftingStatusMenuAccessor)) {
-            return false;
-        }
-        CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-        ICraftingCPU selectedCpu = accessor.gtShanhai$getSelectedCpuRaw();
-        if (!(selectedCpu instanceof QuantumCraftingCPU)) {
-            return false;
-        }
-        QuantumCraftingCPU quantumCpu = (QuantumCraftingCPU) selectedCpu;
-        if (quantumCpu.isBusy()) {
-            return false;
-        }
-        QuantumCraftingCPU replacement = gtShanhai$findBusyQuantumCpuExcept(accessor, quantumCpu);
-        if (replacement != null) {
-            gtShanhai$clearFinishedQuantumCpu(quantumCpu);
-            setCPU(replacement);
-            return true;
-        }
-        gtShanhai$clearFinishedQuantumCpu(quantumCpu);
-        return true;
-    }
-
-    @Unique
-    private boolean gtShanhai$hasBusyQuantumCpu(CraftingStatusMenuAccessor accessor) {
-        for (ICraftingCPU cpu : accessor.gtShanhai$getLastCpuSetRaw()) {
-            if (cpu instanceof QuantumCraftingCPU && cpu.isBusy()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    @Unique
-    private QuantumCraftingCPU gtShanhai$findBusyQuantumCpuExcept(CraftingStatusMenuAccessor accessor, QuantumCraftingCPU excluded) {
-        for (ICraftingCPU cpu : accessor.gtShanhai$getLastCpuSetRaw()) {
-            if (cpu instanceof QuantumCraftingCPU && cpu != excluded && cpu.isBusy()) {
-                return (QuantumCraftingCPU) cpu;
-            }
-        }
-        return null;
-    }
-
-    @Unique
-    private void gtShanhai$clearFinishedQuantumCpu(QuantumCraftingCPU oldCpu) {
-        if (oldCpu == null) {
-            return;
-        }
-        oldCpu.craftingLogic.removeListener(cpuChangeListener);
-        if (gtShanhai$quantumCpu == oldCpu) {
-            gtShanhai$quantumCpu = null;
-        }
-        gtShanhai$resetQuantumProgressSyncState();
-        incrementalUpdateHelper.reset();
-        if ((Object) this instanceof CraftingStatusMenuAccessor) {
-            CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-            accessor.gtShanhai$setSelectedCpuRaw(null);
-            accessor.gtShanhai$setSelectedCpuSerialRaw(-1);
-        }
-        sendPacketToClient(new CraftingStatusPacket(containerId, CraftingStatus.EMPTY));
-        QuantumDiagnostics.hit("menu.clearFinishedQuantum",
-                "storage=" + oldCpu.getAvailableStorage());
-    }
-
-    @Unique
-    private void gtShanhai$syncStatusMenuSelectedCpu(ICraftingCPU selectedCpu) {
-        if (!((Object) this instanceof CraftingStatusMenuAccessor)) {
-            return;
-        }
-        CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-        accessor.gtShanhai$setSelectedCpuRaw(selectedCpu);
-        accessor.gtShanhai$setSelectedCpuSerialRaw(accessor.gtShanhai$callGetOrAssignCpuSerial(selectedCpu));
-    }
 }

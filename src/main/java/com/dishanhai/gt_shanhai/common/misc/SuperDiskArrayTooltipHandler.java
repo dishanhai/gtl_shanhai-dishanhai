@@ -4,13 +4,15 @@ import com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory;
 import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
+import com.dishanhai.sh_common_lib.api.client.ItemContentPreview;
+import com.dishanhai.sh_common_lib.api.client.ItemContentPreview.Entry;
 
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -20,9 +22,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.entity.player.ItemTooltipEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.math.BigInteger;
@@ -38,33 +37,17 @@ public class SuperDiskArrayTooltipHandler {
     public static void init() {
         if (initialized) return;
         initialized = true;
-        MinecraftForge.EVENT_BUS.register(new SuperDiskArrayTooltipHandler());
+        ItemContentPreview.register(stack -> stack.getItem() instanceof SuperDiskArrayItem,
+                SuperDiskArrayTooltipHandler::preview);
     }
 
-    @SubscribeEvent
-    public void onTooltip(ItemTooltipEvent event) {
-        ItemStack stack = event.getItemStack();
-        if (stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) return;
-        boolean shift = Screen.hasShiftDown();
-        List<Entry> entries = readCellEntries(stack, shift ? Integer.MAX_VALUE : 5);
-        if (entries.isEmpty()) return;
-
-        int max = shift ? entries.size() : Math.min(5, entries.size());
-        List<Component> tooltip = event.getToolTip();
-        addDynamicLore(stack, tooltip);
-        tooltip.add(Component.literal(""));
-        tooltip.add(Component.literal(shift ? "§6=== 超级磁盘阵列内容 ===" : "§d超级磁盘阵列内容预览"));
-        tooltip.add(Component.literal("§7包含物品 (" + (shift ? "完整" : "前" + max + "项") + "):"));
-        for (int i = 0; i < max; i++) {
-            Entry entry = entries.get(i);
-            tooltip.add(Component.literal(" §8• §7" + formatAmount(entry.amount) + "x " + entry.name + (entry.infinity ? " §d[无限元件]" : "")));
-        }
-        if (!shift && entries.size() > max) {
-            tooltip.add(Component.literal(" §7... 还有 §e" + (entries.size() - max) + "§7 项"));
-        }
-        tooltip.add(ShanhaiTextAPI.inline("{body_silver}总计: {/}{golden}" + formatAmount(sumAmounts(entries)) + "{/}{body_silver} 个内容，{/}{golden}" + entries.size() + "{/}{body_silver} 种类型{/}"));
-        tooltip.add(ShanhaiTextAPI.inline(shift ? "{body_silver}松开{/}{golden}Shift{/}{body_silver}显示简洁视图{/}" : "{body_silver}按住{/}{golden} Shift {/}{body_silver}查看完整列表{/}"));
-        tooltip.add(ShanhaiTextAPI.inline("{body_slate}由{/}{sunset}SDA实时解析器{/}{body_slate}生成{/}"));
+    private static ItemContentPreview.Preview preview(ItemStack stack, int resolveNameLimit) {
+        List<Entry> entries = readCellEntries(stack, resolveNameLimit);
+        List<Component> lore = new ArrayList<>();
+        if (!entries.isEmpty()) addDynamicLore(stack, lore);
+        return new ItemContentPreview.Preview(
+                Component.translatable("gt_shanhai.sda.preview.title").withStyle(ChatFormatting.LIGHT_PURPLE),
+                lore, entries);
     }
 
     private static List<Entry> readCellEntries(ItemStack stack, int resolveNameLimit) {
@@ -110,7 +93,7 @@ public class SuperDiskArrayTooltipHandler {
             long amount = i < amounts.length ? amounts[i] : 1L;
             Entry entry = i < resolveNameLimit
                     ? resolveEntry(key, BigInteger.valueOf(amount))
-                    : new Entry(BigInteger.valueOf(amount), "", false);
+                    : new Entry(Component.empty(), BigInteger.valueOf(amount));
             if (entry != null) result.add(entry);
         }
     }
@@ -122,7 +105,7 @@ public class SuperDiskArrayTooltipHandler {
             if (amount == null || amount.signum() <= 0) continue;
             result.add(index < resolveNameLimit
                     ? resolveEntry(entry.getKey(), amount)
-                    : new Entry(amount, "", false));
+                    : new Entry(Component.empty(), amount));
             index++;
         }
     }
@@ -143,7 +126,7 @@ public class SuperDiskArrayTooltipHandler {
                 BigInteger bigAmount = BigInteger.valueOf(amount);
                 result.add(index < resolveNameLimit
                         ? resolveEntry(entry.getKey(), bigAmount)
-                        : new Entry(bigAmount, "", false));
+                        : new Entry(Component.empty(), bigAmount));
                 index++;
             }
         }
@@ -174,11 +157,10 @@ public class SuperDiskArrayTooltipHandler {
                 CompoundTag record = tag.getCompound("record");
                 String targetType = record.getString("#c");
                 String targetId = record.getString("id");
-                String name = "ae2:f".equals(targetType) ? resolveFluidName(targetId) : resolveItemName(targetId);
-                return new Entry(amount, name, true);
+                return infinityEntry(targetType, targetId, amount);
             }
         }
-        return new Entry(amount, resolveItemName(id), false);
+        return new Entry(resolveItemName(id), amount);
     }
 
     private static Entry resolveEntry(AEKey key, BigInteger amount) {
@@ -190,46 +172,36 @@ public class SuperDiskArrayTooltipHandler {
                 CompoundTag record = tag.getCompound("record");
                 String targetType = record.getString("#c");
                 String targetId = record.getString("id");
-                String name = "ae2:f".equals(targetType) ? resolveFluidName(targetId) : resolveItemName(targetId);
-                return new Entry(amount, name, true);
+                return infinityEntry(targetType, targetId, amount);
             }
-            return new Entry(amount, stack.getHoverName().getString(), false);
+            return new Entry(stack.getHoverName(), amount);
         }
         if (key instanceof AEFluidKey fluidKey) {
             ResourceLocation id = ForgeRegistries.FLUIDS.getKey(fluidKey.getFluid());
-            return new Entry(amount, id != null ? resolveFluidName(id.toString()) : key.getDisplayName().getString(), false);
+            return new Entry(id != null ? resolveFluidName(id.toString()) : key.getDisplayName(), amount);
         }
-        return new Entry(amount, key.getDisplayName().getString(), false);
+        return new Entry(key.getDisplayName(), amount);
     }
 
-    private static String resolveItemName(String id) {
+    private static Entry infinityEntry(String targetType, String targetId, BigInteger amount) {
+        Component name = "ae2:f".equals(targetType) ? resolveFluidName(targetId) : resolveItemName(targetId);
+        return new Entry(name.copy().append(Component.translatable("gt_shanhai.sda.preview.infinity")
+                .withStyle(ChatFormatting.LIGHT_PURPLE)), amount);
+    }
+
+    private static Component resolveItemName(String id) {
         ResourceLocation rl = ResourceLocation.tryParse(id);
-        if (rl == null) return id;
+        if (rl == null) return Component.literal(id);
         Item item = ForgeRegistries.ITEMS.getValue(rl);
-        if (item == null) return id;
-        return new ItemStack(item).getHoverName().getString();
+        if (item == null) return Component.literal(id);
+        return new ItemStack(item).getHoverName();
     }
 
-    private static String resolveFluidName(String id) {
+    private static Component resolveFluidName(String id) {
         ResourceLocation rl = ResourceLocation.tryParse(id);
-        if (rl == null) return id;
+        if (rl == null) return Component.literal(id);
         Fluid fluid = ForgeRegistries.FLUIDS.getValue(rl);
-        if (fluid == null) return id;
-        return fluid.getFluidType().getDescription().getString();
+        if (fluid == null) return Component.literal(id);
+        return fluid.getFluidType().getDescription();
     }
-
-    private static BigInteger sumAmounts(List<Entry> entries) {
-        BigInteger sum = BigInteger.ZERO;
-        for (Entry entry : entries) sum = sum.add(entry.amount);
-        return sum;
-    }
-
-    private static String formatAmount(BigInteger amount) {
-        if (amount == null) return "0";
-        String text = amount.toString();
-        if (text.length() <= 18) return text;
-        return text.substring(0, 6) + "..." + text.substring(text.length() - 6);
-    }
-
-    private record Entry(BigInteger amount, String name, boolean infinity) {}
 }

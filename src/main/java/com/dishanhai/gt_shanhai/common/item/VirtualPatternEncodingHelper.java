@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import appeng.api.config.FuzzyMode;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
@@ -37,6 +38,7 @@ import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 import org.gtlcore.gtlcore.utils.NumberUtils;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -229,19 +231,6 @@ public final class VirtualPatternEncodingHelper {
         return false;
     }
 
-    /** 在场输入的目标键。推送和发配用它跳过按批次放大的实料抽取。 */
-    public static Set<AEKey> presenceKeys(IPatternDetails.IInput[] inputs) {
-        Set<AEKey> keys = new HashSet<>();
-        if (inputs == null) return keys;
-        for (int i = 0; i < inputs.length; i++) {
-            if (!isPresenceInput(inputs[i])) continue;
-            GenericStack[] possible = inputs[i].getPossibleInputs();
-            if (possible == null || possible.length == 0 || possible[0] == null || possible[0].what() == null) continue;
-            keys.add(possible[0].what());
-        }
-        return keys;
-    }
-
     public static boolean containsPresenceInputs(ICraftingPlan plan) {
         if (plan == null || plan.patternTimes() == null) return false;
         for (IPatternDetails details : plan.patternTimes().keySet()) {
@@ -279,9 +268,15 @@ public final class VirtualPatternEncodingHelper {
      * of subtracting the presence amount from the already-merged value.
      */
     public static Object2LongMap<AEKey> collectConsumableRequirements(ICraftingPlan plan) {
+        return collectConsumableRequirements(plan, null, null);
+    }
+
+    static Object2LongMap<AEKey> collectConsumableRequirements(ICraftingPlan plan,
+            @Nullable KeyCounter presenceKeys, @Nullable Level level) {
         Object2LongOpenHashMap<AEKey> requirements = new Object2LongOpenHashMap<>();
         requirements.defaultReturnValue(0L);
         if (plan == null || plan.patternTimes() == null) return requirements;
+        Object2LongOpenHashMap<AEKey> alternatives = new Object2LongOpenHashMap<>();
         for (Map.Entry<IPatternDetails, Long> task : plan.patternTimes().entrySet()) {
             IPatternDetails details = task.getKey();
             long times = task.getValue() == null ? 0L : Math.max(0L, task.getValue());
@@ -289,12 +284,27 @@ public final class VirtualPatternEncodingHelper {
             for (IPatternDetails.IInput input : details.getInputs()) {
                 if (isPresenceInput(input)) continue;
                 GenericStack[] possibleInputs = input.getPossibleInputs();
-                if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) continue;
-                long perPattern = Math.max(0L, input.getMultiplier());
-                long total = NumberUtils.saturatedMultiply(perPattern, times);
-                if (total <= 0L) continue;
-                AEKey key = possibleInputs[0].what();
-                requirements.put(key, NumberUtils.saturatedAdd(requirements.getLong(key), total));
+                if (possibleInputs == null || input.getMultiplier() <= 0L) continue;
+                for (GenericStack candidate : possibleInputs) {
+                    if (candidate == null || candidate.amount() <= 0L) continue;
+                    long perPattern = NumberUtils.saturatedMultiply(candidate.amount(), input.getMultiplier());
+                    if (presenceKeys == null) {
+                        alternatives.mergeLong(candidate.what(), perPattern, Math::max);
+                        continue;
+                    }
+                    for (Object2LongMap.Entry<AEKey> observed : presenceKeys.findFuzzy(candidate.what(), FuzzyMode.IGNORE_ALL)) {
+                        AEKey key = observed.getKey();
+                        if (input.isValid(key, level)) {
+                            alternatives.mergeLong(key, perPattern, Math::max);
+                        }
+                    }
+                }
+                for (Object2LongMap.Entry<AEKey> alternative : alternatives.object2LongEntrySet()) {
+                    AEKey key = alternative.getKey();
+                    long total = NumberUtils.saturatedMultiply(alternative.getLongValue(), times);
+                    requirements.put(key, NumberUtils.saturatedAdd(requirements.getLong(key), total));
+                }
+                alternatives.clear();
             }
         }
         return requirements;
@@ -429,7 +439,7 @@ public final class VirtualPatternEncodingHelper {
             }
             long consumed = input.getMultiplier() - presence;
             if (consumed > 0L) {
-                rebuilt.add(new PlanningInput(key, consumed));
+                rebuilt.add(nativeProcessingInput(key, consumed));
             }
             rebuilt.add(new PresenceInput(key, presence));
         }
@@ -457,7 +467,7 @@ public final class VirtualPatternEncodingHelper {
         IPatternDetails.IInput[] result = new IPatternDetails.IInput[condensed.size() + presenceTargets.size()];
         int index = 0;
         for (Map.Entry<AEKey, Long> entry : condensed.entrySet()) {
-            result[index++] = new PlanningInput(entry.getKey(), entry.getValue());
+            result[index++] = nativeProcessingInput(entry.getKey(), entry.getValue());
         }
         for (Map.Entry<AEKey, Long> entry : presenceTargets.entrySet()) {
             result[index++] = new PresenceInput(entry.getKey(), entry.getValue());
@@ -467,99 +477,81 @@ public final class VirtualPatternEncodingHelper {
 
     public static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, KeyCounter[] inputHolder,
             IPatternDetails.PatternInputSink inputSink) {
-        pushSparseInputsIncludingVirtual(sparseInputs, null, inputHolder, inputSink, null, null);
+        pushSparseInputsIncludingVirtual(sparseInputs, null, inputHolder, inputSink);
     }
 
     public static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs,
             KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink) {
-        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, null, null);
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink,
+                createPlanningInputs(sparseInputs, sparseOutputs));
     }
 
     public static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs,
-            KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink, Set<AEKey> presenceKeys) {
-        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, null, presenceKeys);
+            KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink, IPatternDetails.IInput[] planningInputs) {
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, planningInputs, null);
     }
 
-    private static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs, KeyCounter[] inputHolder,
-            IPatternDetails.PatternInputSink inputSink, BiConsumer<AEKey, Long> virtualTargetSink) {
-        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, virtualTargetSink, null);
-    }
-
-    private static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs, KeyCounter[] inputHolder,
-            IPatternDetails.PatternInputSink inputSink, BiConsumer<AEKey, Long> virtualTargetSink,
-            Set<AEKey> presenceKeys) {
-        KeyCounter allInputs = new KeyCounter();
-        if (inputHolder != null) {
-            for (KeyCounter counter : inputHolder) {
-                if (counter != null) {
-                    allInputs.addAll(counter);
-                }
-            }
-        }
-
+    private static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs,
+            KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink,
+            IPatternDetails.IInput[] planningInputs, BiConsumer<AEKey, Long> virtualTargetSink) {
         if (sparseInputs == null) return;
-        PatternAnalysis analysis = getPatternAnalysis(sparseInputs, sparseOutputs);
-        long patternMultiplier = countPatternMultiplier(allInputs, sparseInputs, analysis, presenceKeys);
-        for (GenericStack input : sparseInputs) {
-            if (input == null || input.what() == null || input.amount() <= 0) continue;
-            AEKey key = input.what();
-            long amount = input.amount();
-            GenericStack virtualTarget = analysis.targetFor(input);
-            if (virtualTarget != null || (presenceKeys != null && presenceKeys.contains(key))) {
-                if (virtualTargetSink != null) {
-                    AEKey target = virtualTarget == null ? key : virtualTarget.what();
-                    long once = virtualTarget == null ? Math.max(1L, amount) : Math.max(1L, virtualTarget.amount());
-                    virtualTargetSink.accept(target, once);
-                }
+        if (inputHolder == null || inputHolder.length != planningInputs.length) {
+            throw new IllegalArgumentException("Pattern input holder does not match planning slots");
+        }
+        Map<AEKey, BatchInput> realInputs = new HashMap<>();
+        Map<AEKey, Long> virtualInputs = new LinkedHashMap<>();
+        for (int slot = 0; slot < planningInputs.length; slot++) {
+            IPatternDetails.IInput input = planningInputs[slot];
+            GenericStack template = input.getPossibleInputs()[0];
+            AEKey key = template.what();
+            long perRun = Math.multiplyExact(template.amount(), input.getMultiplier());
+            if (isPresenceInput(input)) {
+                virtualInputs.merge(key, perRun, Math::max);
                 continue;
             }
-
-            long available = allInputs.get(key);
-            long scaledAmount = multiplyAmount(amount, patternMultiplier);
-            if (available < scaledAmount) {
-                throw new RuntimeException(String.format(
-                        "Expected at least %d of %s when pushing pattern, but only %d available",
-                        scaledAmount, key, available));
+            KeyCounter holder = inputHolder[slot];
+            long available = holder == null ? 0 : holder.get(key);
+            if (perRun <= 0 || available < perRun || available % perRun != 0) {
+                throw new IllegalArgumentException("Incomplete batch for pattern input " + key);
             }
-            inputSink.pushInput(key, scaledAmount);
-            consumeInputHolder(inputHolder, key, scaledAmount);
-            allInputs.remove(key, scaledAmount);
+            realInputs.put(key, new BatchInput(holder, available / perRun, perRun));
         }
-    }
 
-    private static long multiplyAmount(long amount, long multiplier) {
-        if (amount <= 0 || multiplier <= 0) return 0L;
-        if (amount > Long.MAX_VALUE / multiplier) return Long.MAX_VALUE;
-        return amount * multiplier;
-    }
-
-    private static long countPatternMultiplier(KeyCounter inputs, GenericStack[] sparseInputs, PatternAnalysis analysis,
-            Set<AEKey> presenceKeys) {
-        if (inputs == null || sparseInputs == null) return 1L;
-        long multiplier = Long.MAX_VALUE;
+        // 规划已合并重复实料格。按原格顺序拆回实际数量，虚拟槽不能参与实料计算。
+        PatternAnalysis analysis = getPatternAnalysis(sparseInputs, sparseOutputs);
+        List<GenericStack> transfers = new ArrayList<>();
         for (GenericStack input : sparseInputs) {
-            if (input == null || input.what() == null || input.amount() <= 0 || analysis.targetFor(input) != null) continue;
-            if (presenceKeys != null && presenceKeys.contains(input.what())) continue;
-            long available = inputs.get(input.what());
-            multiplier = Math.min(multiplier, available / input.amount());
+            if (input == null || input.amount() <= 0 || analysis.targetFor(input) != null) continue;
+            BatchInput batch = realInputs.get(input.what());
+            if (batch == null || batch.remainingPerRun == 0) continue;
+            long amount = Math.min(batch.remainingPerRun, input.amount());
+            batch.remainingPerRun -= amount;
+            transfers.add(new GenericStack(input.what(), amount * batch.runs));
         }
-        if (multiplier == Long.MAX_VALUE || multiplier <= 0) return 1L;
-        return multiplier;
+        for (BatchInput batch : realInputs.values()) {
+            if (batch.remainingPerRun != 0) {
+                throw new IllegalArgumentException("Pattern inputs changed since planning");
+            }
+        }
+
+        for (GenericStack transfer : transfers) {
+            inputSink.pushInput(transfer.what(), transfer.amount());
+            realInputs.get(transfer.what()).holder.remove(transfer.what(), transfer.amount());
+        }
+        if (virtualTargetSink != null) {
+            virtualInputs.forEach(virtualTargetSink);
+        }
     }
 
-    private static void consumeInputHolder(KeyCounter[] inputHolder, AEKey key, long amount) {
-        if (inputHolder == null || key == null || amount <= 0) return;
-        long remaining = amount;
-        for (KeyCounter counter : inputHolder) {
-            if (counter == null) continue;
-            long available = counter.get(key);
-            long extracted = Math.min(available, remaining);
-            if (extracted <= 0) continue;
-            counter.remove(key, extracted);
-            remaining -= extracted;
-            if (remaining <= 0) {
-                return;
-            }
+    private static final class BatchInput {
+        private final KeyCounter holder;
+        private final long runs;
+        private long remainingPerRun;
+
+        private BatchInput(KeyCounter holder, long runs, long perRun) {
+            this.holder = holder;
+            this.runs = runs;
+            this.remainingPerRun = perRun;
         }
     }
 
@@ -572,11 +564,12 @@ public final class VirtualPatternEncodingHelper {
             IPatternDetails.PatternInputSink inputSink, BiConsumer<AEKey, Long> virtualTargetSink) {
         GenericStack[] sparseInputs = getSparseInputs(details);
         GenericStack[] sparseOutputs = getSparseOutputs(details);
-        Set<AEKey> presence = presenceKeys(details.getInputs());
-        if (presence.isEmpty() && !containsVirtualInput(sparseInputs, sparseOutputs)) {
-            return false;
+        IPatternDetails.IInput[] planningInputs = details.getInputs();
+        if (!containsPresenceInput(planningInputs)) {
+            if (!containsVirtualInput(sparseInputs, sparseOutputs)) return false;
+            planningInputs = createPlanningInputs(sparseInputs, sparseOutputs);
         }
-        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, virtualTargetSink, presence);
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, planningInputs, virtualTargetSink);
         return true;
     }
 
@@ -2311,11 +2304,39 @@ public final class VirtualPatternEncodingHelper {
         }
     }
 
-    private static class PlanningInput implements IPatternDetails.IInput {
-        protected final GenericStack[] template;
+    /**
+     * GTLCore distinguishes exact processing inputs from crafting inputs by their native class.
+     * Keep that identity when a processing pattern also contains a custom Presence slot.
+     */
+    public static IPatternDetails.IInput nativeProcessingInput(AEKey key, long amount) {
+        try {
+            return NativeProcessingInput.CONSTRUCTOR.newInstance(new GenericStack(key, amount));
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Cannot construct an AE2 processing pattern input", exception);
+        }
+    }
+
+    private static final class NativeProcessingInput {
+        private static final java.lang.reflect.Constructor<? extends IPatternDetails.IInput> CONSTRUCTOR = find();
+
+        private static java.lang.reflect.Constructor<? extends IPatternDetails.IInput> find() {
+            try {
+                var type = Class.forName(AEProcessingPattern.class.getName() + "$Input")
+                        .asSubclass(IPatternDetails.IInput.class);
+                var constructor = type.getDeclaredConstructor(GenericStack.class);
+                constructor.setAccessible(true);
+                return constructor;
+            } catch (ReflectiveOperationException exception) {
+                throw new IllegalStateException("Cannot find the AE2 processing pattern input constructor", exception);
+            }
+        }
+    }
+
+    private static final class PresenceInput implements IPatternDetails.IInput {
+        private final GenericStack[] template;
         private final long multiplier;
 
-        private PlanningInput(AEKey key, long multiplier) {
+        private PresenceInput(AEKey key, long multiplier) {
             this.template = new GenericStack[] { new GenericStack(key, 1) };
             this.multiplier = multiplier;
         }
@@ -2333,18 +2354,6 @@ public final class VirtualPatternEncodingHelper {
         @Override
         public boolean isValid(AEKey input, net.minecraft.world.level.Level level) {
             return input != null && input.matches(template[0]);
-        }
-
-        @Override
-        public AEKey getRemainingKey(AEKey template) {
-            return null;
-        }
-    }
-
-    private static final class PresenceInput extends PlanningInput {
-
-        private PresenceInput(AEKey key, long multiplier) {
-            super(key, multiplier);
         }
 
         @Override

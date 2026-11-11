@@ -70,6 +70,9 @@ import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
+import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
+import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
+import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
@@ -454,6 +457,63 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         @Override
         public boolean isFluidActive(boolean simulate) {
             return hasPatternInSlot(getSlotIndex());
+        }
+
+        @Override
+        public boolean testVirtualItemInternal(GTRecipe recipe) {
+            if (!super.testVirtualItemInternal(recipe)) return false;
+            var targets = VirtualPatternBufferSlotState.getVirtualTargets(getItemInventory());
+            if (targets.isEmpty()) return true;
+            List<Ingredient> physical = new ArrayList<>();
+            boolean overlap = false;
+            for (Content content : recipe.getInputContents(ItemRecipeCapability.CAP)) {
+                if (content.chance > 0 && content.content instanceof Ingredient ingredient) {
+                    physical.add(ingredient);
+                    if (!overlap) overlap = targets.keySet().stream().anyMatch(key -> key.matches(ingredient));
+                }
+            }
+            if (!overlap) return true;
+            // GTLCore checks one ME slot per recipe; mirrored keys may be stripped from the simulated list.
+            return VirtualPatternBufferSlotState.canAllocatePhysicalStock(getItemInventory(),
+                    AEUtils.ingredientsMap(physical), (remaining, ingredient, amount) -> stockItemHandler.hasConfig()
+                            ? findStockItemKey(ingredient, remaining, Object2LongMaps.emptyMap(), amount, false)
+                            : getCacheManager().getBestItemMatch(ingredient, remaining, amount));
+        }
+
+        @Override
+        public boolean testVirtualFluidInternal(GTRecipe recipe) {
+            if (!super.testVirtualFluidInternal(recipe)) return false;
+            var targets = VirtualPatternBufferSlotState.getVirtualTargets(getFluidInventory());
+            if (targets.isEmpty()) return true;
+            List<FluidIngredient> physical = new ArrayList<>();
+            boolean overlap = false;
+            for (Content content : recipe.getInputContents(FluidRecipeCapability.CAP)) {
+                if (content.chance > 0 && content.content instanceof FluidIngredient ingredient) {
+                    physical.add(ingredient);
+                    if (!overlap) {
+                        overlap = targets.keySet().stream().anyMatch(key -> AEUtils.testFluidIngredient(ingredient, key));
+                    }
+                }
+            }
+            if (!overlap) return true;
+            return VirtualPatternBufferSlotState.canAllocatePhysicalStock(getFluidInventory(),
+                    AEUtils.fluidIngredientsMap(physical), (remaining, ingredient, amount) -> stockFluidHandler.hasConfig()
+                            ? findStockFluidKey(ingredient, remaining, Object2LongMaps.emptyMap(), amount, false)
+                            : getCacheManager().getBestFluidMatch(ingredient, remaining, amount));
+        }
+
+        @Override
+        public boolean handleItemInternal(Object2LongMap<Ingredient> left, int circuit, boolean simulate) {
+            if (simulate) return super.handleItemInternal(left, circuit, true);
+            return VirtualPatternBufferSlotState.withPhysicalStock(getItemInventory(),
+                    () -> super.handleItemInternal(left, circuit, false));
+        }
+
+        @Override
+        public boolean handleFluidInternal(Object2LongMap<FluidIngredient> left, boolean simulate) {
+            if (simulate) return super.handleFluidInternal(left, true);
+            return VirtualPatternBufferSlotState.withPhysicalStock(getFluidInventory(),
+                    () -> super.handleFluidInternal(left, false));
         }
     }
 

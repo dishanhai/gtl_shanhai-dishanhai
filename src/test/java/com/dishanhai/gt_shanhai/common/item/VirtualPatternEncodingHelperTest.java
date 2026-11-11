@@ -156,31 +156,6 @@ public class VirtualPatternEncodingHelperTest {
     }
 
     @Test
-    void bulkDispatchDoesNotMultiplyReusableVirtualTargets() throws IOException {
-        String source = Files.readString(Path.of(
-                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"))
-                .replace("\r\n", "\n");
-
-        int presenceStart = source.indexOf("if (virtualTarget != null || (presenceKeys != null && presenceKeys.contains(key)))");
-        int consumableStart = source.indexOf("long available = allInputs.get(key);", presenceStart);
-        assertTrue(presenceStart >= 0 && consumableStart > presenceStart);
-        String presenceBranch = source.substring(presenceStart, consumableStart);
-        assertTrue(presenceBranch.contains("AEKey target = virtualTarget == null ? key : virtualTarget.what();"));
-        assertTrue(presenceBranch.contains("long once = virtualTarget == null ? Math.max(1L, amount) : Math.max(1L, virtualTarget.amount());"),
-                "虛擬目標與普通 presence 都只取一份在場量");
-        int dispatch = presenceBranch.indexOf("virtualTargetSink.accept(target, once);");
-        assertTrue(dispatch >= 0 && presenceBranch.indexOf("continue;", dispatch) > dispatch,
-                "在場輸入送往虛擬 sink 後必須跳過後續消耗輸入扣減");
-        assertFalse(presenceBranch.contains("patternMultiplier"),
-                "不消耗目標不能乘整批下單次數");
-        assertTrue(source.indexOf("long scaledAmount = multiplyAmount(amount, patternMultiplier);", consumableStart)
-                        > consumableStart,
-                "消耗輸入仍必須依批次放大");
-        assertFalse(source.contains("virtualTarget.amount()), patternMultiplier"),
-                "批量次数不得放大虚拟库存并持久化到样板总成");
-    }
-
-    @Test
     void virtualProviderTargetIsDeserializedOnlyOncePerAnalysis() throws IOException {
         String source = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));

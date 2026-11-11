@@ -44,6 +44,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.EnumSet;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER;
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
@@ -218,6 +219,15 @@ public class VirtualItemSupplyMachine extends MetaMachine
             }
         }
         return count;
+    }
+
+    public void collectProvidedTargets(Object2LongOpenHashMap<AEKey> targets) {
+        for (int slot = 0; slot < providerSlots.getSlots(); slot++) {
+            ItemStack stack = providerSlots.getStackInSlot(slot);
+            if (stack.isEmpty()) continue;
+            ItemStack resolved = VirtualItemProviderHelper.resolveForRecipe(stack);
+            if (!resolved.isEmpty()) targets.addTo(AEItemKey.of(resolved), stack.getCount());
+        }
     }
 
     private void logSlotChange(String action, int slot, ItemStack stack) {
