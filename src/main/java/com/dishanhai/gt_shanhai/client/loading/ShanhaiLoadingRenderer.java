@@ -18,6 +18,7 @@ import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 import java.util.ArrayList;
 import java.util.List;
+import static com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingText.text;
 
 /** 山海：商店透明玻璃主題；全程使用原生 GUI 座標，文字不跟隨整頁縮放。 */
 public final class ShanhaiLoadingRenderer {
@@ -79,25 +80,25 @@ public final class ShanhaiLoadingRenderer {
             RenderSystem.setShaderColor(1, 1, 1, 1);
             ShanhaiLoadingFont atlas = startup ? ShanhaiLoadingFont.get() : null;
             List<TextRun> text = new ArrayList<>();
-            add(text, "山海 · 載入", panel.x() + panel.padding(), panel.y() + 8, 18, GlassPalette.TEXT);
-            add(text, "GT SHANHAI  /  " + (startup ? "INITIALIZATION" : "WORLD LOADING"),
+            add(text, text("title"), panel.x() + panel.padding(), panel.y() + 8, 18, GlassPalette.TEXT);
+            add(text, text(startup ? "startup.subtitle" : "world.subtitle"),
                     panel.x() + panel.padding(), panel.y() + 31, 9, GlassPalette.TEXT_MUTED);
-            String badge = startup ? "01 / 啟動初始化" : "02 / 進入世界";
+            String badge = text(startup ? "startup.badge" : "world.badge");
             add(text, badge, panel.x() + panel.width() - panel.padding() - width(badge, 9, atlas),
                     panel.y() + 15, 9, GlassPalette.ACCENT);
             if (panel.railWidth() > 0) {
                 int railX = panel.x() + panel.padding() + 10;
-                add(text, "01  啟動初始化", railX, panel.contentTop() + 5, 9, GlassPalette.TEXT);
-                add(text, startup ? "正在載入" : "已完成", railX, panel.contentTop() + 23, 9,
+                add(text, text("startup.rail"), railX, panel.contentTop() + 5, 9, GlassPalette.TEXT);
+                add(text, text(startup ? "working" : "done"), railX, panel.contentTop() + 23, 9,
                         startup ? GlassPalette.ACCENT : GlassPalette.OK);
-                add(text, "02  進入世界", railX, panel.contentTop() + 63, 9, GlassPalette.TEXT);
-                add(text, startup ? "等待選擇存檔" : "正在載入", railX, panel.contentTop() + 81, 9,
+                add(text, text("world.rail"), railX, panel.contentTop() + 63, 9, GlassPalette.TEXT);
+                add(text, text(startup ? "world.waiting" : "working"), railX, panel.contentTop() + 81, 9,
                         startup ? GlassPalette.TEXT_MUTED : GlassPalette.ACCENT);
             }
             List<DetailLine> details = detailLines(frame.tasks(), panel.contentWidth() - 16, atlas);
             int pages = Math.max(1, (details.size() + panel.rowCapacity() - 1) / panel.rowCapacity());
             int page = Math.floorMod(pageOffset + (int) (frame.elapsedMs() / 6000), pages);
-            add(text, startup ? "初始化工作" : "世界載入詳情", panel.contentX() + 4, panel.contentTop() + 2, 9, GlassPalette.TEXT_HEAD);
+            add(text, text(startup ? "startup.tasks" : "world.tasks"), panel.contentX() + 4, panel.contentTop() + 2, 9, GlassPalette.TEXT_HEAD);
             String pageLabel = (page + 1) + " / " + pages;
             add(text, pageLabel, panel.contentX() + panel.contentWidth() - width(pageLabel, 9, atlas) - 4,
                     panel.contentTop() + 2, 9, GlassPalette.TEXT_MUTED);
@@ -120,7 +121,7 @@ public final class ShanhaiLoadingRenderer {
                 graphics.fill(barLeft + start, barY, barLeft + start + span, barY + 2, alpha(GlassPalette.ACCENT, opacity));
             }
             add(text, String.format(java.util.Locale.ROOT, "%.1f s", frame.elapsedMs() / 1000d), barLeft, panel.footerY(), 9, GlassPalette.TEXT_HEAD);
-            String footer = pages > 1 ? "自動分頁 · 滾輪查看" : "山海恒長在";
+            String footer = text(pages > 1 ? "pages.hint" : "footer");
             add(text, footer, barRight - width(footer, 9, atlas), panel.footerY(), 9, GlassPalette.TEXT_MUTED);
             graphics.flush();
             drawText(graphics, text, atlas, opacity);
@@ -200,12 +201,12 @@ public final class ShanhaiLoadingRenderer {
     private static List<DetailLine> detailLines(List<ShanhaiLoadingState.Task> tasks, int maxWidth, ShanhaiLoadingFont atlas) {
         List<DetailLine> result = new ArrayList<>();
         for (var task : tasks) {
-            String counts = task.done() ? "  完成" + (task.total() >= 0 ? " " + task.current() : "") : task.total() > 0
+            String counts = task.done() ? "  " + text("done") + (task.total() >= 0 ? " " + task.current() : "") : task.total() > 0
                     ? "  " + task.current() + " / " + task.total() + "  " + (int) (task.fraction() * 100) + "%" : "  ...";
             appendLines(result, task.label() + counts, maxWidth, true, atlas);
             if (!task.detail().isBlank()) appendLines(result, task.detail(), maxWidth, false, atlas);
         }
-        if (result.isEmpty()) result.add(new DetailLine("正在準備 ...", true));
+        if (result.isEmpty()) result.add(new DetailLine(text("preparing"), true));
         return result;
     }
 

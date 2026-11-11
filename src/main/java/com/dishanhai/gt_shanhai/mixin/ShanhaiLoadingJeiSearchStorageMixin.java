@@ -11,6 +11,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class ShanhaiLoadingJeiSearchStorageMixin {
     @Inject(method = "put(Ljava/lang/String;Ljava/lang/Object;)V", at = @At("HEAD"), remap = false)
     private void shanhai$storageCheckpoint(CallbackInfo ci) {
-        ShanhaiLoadingClient.checkpoint("JEI 搜尋結構索引 ...");
+        ShanhaiLoadingClient.checkpoint(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingText.text("jei.search.structure"));
     }
 }

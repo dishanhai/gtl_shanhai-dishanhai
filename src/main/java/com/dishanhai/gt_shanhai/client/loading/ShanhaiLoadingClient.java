@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import com.google.gson.JsonElement;
 import net.minecraft.world.item.crafting.Recipe;
+import static com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingText.text;
 
 /** 山海：資料適配與客戶端生命週期。所有 GL 工作限定在渲染執行緒。 */
 @Mod.EventBusSubscriber(modid = "gt_shanhai", value = Dist.CLIENT)
@@ -51,7 +52,7 @@ public final class ShanhaiLoadingClient {
     @SubscribeEvent
     public static void onTitleInit(ScreenEvent.Init.Post event) {
         if (event.getScreen() instanceof TitleScreen title) {
-            event.addListener(Button.builder(Component.literal("載入分析"), button ->
+            event.addListener(Button.builder(Component.translatable("gui.gt_shanhai.loading.report.open"), button ->
                     Minecraft.getInstance().setScreen(new ShanhaiLoadingReportScreen(title, true)))
                     .bounds(title.width - 100, 6, 94, 20).build());
         }
@@ -78,11 +79,11 @@ public final class ShanhaiLoadingClient {
                     Math.max(0, meter.current()), meter.steps(), false));
         }
         // 資源 reload 的實際進度，並非整體啟動百分比。
-        tasks.add(new ShanhaiLoadingState.Task("資源重載", "Minecraft resources / textures / models",
+        tasks.add(new ShanhaiLoadingState.Task(text("resources"), text("resources.detail"),
                 Math.max(0, Math.min(100, (int) (progress * 100))), 100, false));
         var messages = StartupNotificationManager.getMessages();
         if (!messages.isEmpty()) {
-            tasks.add(0, new ShanhaiLoadingState.Task("初始化細節", messages.get(0).message().getText(), 0, -1, false));
+            tasks.add(0, new ShanhaiLoadingState.Task(text("startup.detail"), messages.get(0).message().getText(), 0, -1, false));
         }
         render(graphics, true, new ShanhaiLoadingState.Frame(true, now - startupStarted, opacity, tasks), opacity, redrawMenu);
     }
@@ -90,12 +91,12 @@ public final class ShanhaiLoadingClient {
     public static void beginWorld() {
         ShanhaiLoadingProfiler.beginWorld();
         startSession();
-        WORLD.update("data", "資料包與登錄表", "正在準備世界 ...", 0, -1);
+        WORLD.update("data", text("data"), text("data.preparing"), 0, -1);
     }
 
     public static void loadingWorldData() {
         // 僅接續已由玩家選擇的世界；建立世界設定頁的預讀不啟動第二段動畫。
-        if (WORLD.active()) WORLD.update("data", "資料包與登錄表", "正在準備世界 ...", 0, -1);
+        if (WORLD.active()) WORLD.update("data", text("data"), text("data.preparing"), 0, -1);
     }
 
     public static boolean asyncWorldData() { return WORLD.active() && ShanhaiLoadingPreferences.asyncWorldData(); }
@@ -106,7 +107,7 @@ public final class ShanhaiLoadingClient {
         Minecraft mc = Minecraft.getInstance();
         if (!mc.isSameThread() || !WORLD.active() || mc.screen == null || !isLoadingScreen(mc.screen)) return task.get();
         return ShanhaiLoadingAsync.await(task, () -> {
-            checkpoint("JEI 背景索引 ...");
+            checkpoint(text("jei.background"));
             mc.pollTask();
         });
     }
@@ -117,7 +118,7 @@ public final class ShanhaiLoadingClient {
         if (!WORLD.active() || !mc.isSameThread() || mc.screen == null || !isLoadingScreen(mc.screen)) return;
         long now = Util.getMillis();
         if (now - lastWaitingFrame < 50) return;
-        WORLD.update("client", "客戶端索引與預覽", detail, 0, -1);
+        WORLD.update("client", text("client"), detail, 0, -1);
         renderWhileWaiting(mc);
     }
 
@@ -131,17 +132,17 @@ public final class ShanhaiLoadingClient {
     public static void beginPreparedWorld(int recipes) {
         ShanhaiLoadingProfiler.beginWorld();
         startSession();
-        WORLD.complete(WORLD.session(), "data", "資料包與登錄表", "沿用已準備的世界資料", -1);
-        WORLD.complete(WORLD.session(), "recipes", "世界配方", "已準備的配方", recipes);
+        WORLD.complete(WORLD.session(), "data", text("data"), text("data.reused"), -1);
+        WORLD.complete(WORLD.session(), "recipes", text("recipes.world"), text("recipes.prepared"), recipes);
     }
 
     public static void dataReady() {
-        WORLD.complete(WORLD.session(), "data", "資料包與登錄表", "資料包讀取完成", -1);
+        WORLD.complete(WORLD.session(), "data", text("data"), text("data.ready"), -1);
     }
 
     public static void connectionStatus(ConnectScreen owner, Component status) {
         if (WORLD.active() && Minecraft.getInstance().screen == owner) {
-            WORLD.update("connect", "伺服器連線", status.getString(), 0, -1);
+            WORLD.update("connect", text("connect"), status.getString(), 0, -1);
         }
     }
 
@@ -186,12 +187,12 @@ public final class ShanhaiLoadingClient {
         Screen next = event.getNewScreen();
         if (next instanceof ConnectScreen) {
             if (!WORLD.active()) { ShanhaiLoadingProfiler.beginWorld(); startSession(); }
-            WORLD.update("connect", "伺服器連線", "等待伺服器回應 ...", 0, -1);
+            WORLD.update("connect", text("connect"), text("connect.waiting"), 0, -1);
         } else if (next instanceof LevelLoadingScreen || next instanceof ReceivingLevelScreen) {
             if (WORLD.active()) sawTerrain = true;
             if (WORLD.active() && next instanceof ReceivingLevelScreen) {
                 WORLD.completeExisting(WORLD.session(), "terrain");
-                WORLD.complete(WORLD.session(), "connect", "伺服器連線", "連線已建立", -1);
+                WORLD.complete(WORLD.session(), "connect", text("connect"), text("connect.ready"), -1);
             }
         } else if (next != null && !isLoadingScreen(next)) {
             // 錯誤畫面、取消返回、重新選服：立即放行原畫面，清除舊會話。

@@ -11,6 +11,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class ShanhaiLoadingJeiRecipesMixin {
     @Inject(method = "addRecipe", at = @At("HEAD"), remap = false)
     private void shanhai$betweenRecipes(CallbackInfoReturnable<Boolean> cir) {
-        ShanhaiLoadingClient.checkpoint("JEI 配方與多方塊預覽 ...");
+        ShanhaiLoadingClient.checkpoint(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingText.text("jei.recipes"));
     }
 }

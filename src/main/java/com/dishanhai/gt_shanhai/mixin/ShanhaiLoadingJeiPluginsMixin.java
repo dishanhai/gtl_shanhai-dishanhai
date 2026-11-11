@@ -14,8 +14,8 @@ public abstract class ShanhaiLoadingJeiPluginsMixin {
     @WrapOperation(method = "callOnPlugins", at = @At(value = "INVOKE",
             target = "Ljava/util/function/Consumer;accept(Ljava/lang/Object;)V"), remap = false)
     private static void shanhai$pluginCheckpoint(Consumer<IModPlugin> action, Object plugin, Operation<Void> original) {
-        ShanhaiLoadingClient.checkpoint("JEI 插件：" + plugin.getClass().getName());
+        ShanhaiLoadingClient.checkpoint(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingText.text("jei.plugin", plugin.getClass().getName()));
         try { original.call(action, plugin); }
-        finally { ShanhaiLoadingClient.checkpoint("JEI 插件註冊 ..."); }
+        finally { ShanhaiLoadingClient.checkpoint(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingText.text("jei.plugins")); }
     }
 }

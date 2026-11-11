@@ -25,23 +25,23 @@ public final class ShanhaiLoadingReportScreen extends Screen {
     private ShanhaiLoadingProfiler.ProfileReport report;
 
     public ShanhaiLoadingReportScreen(Screen parent, boolean startup) {
-        super(Component.literal("山海載入效能分析")); this.parent = parent; this.startup = startup;
+        super(Component.translatable("gui.gt_shanhai.loading.report.title")); this.parent = parent; this.startup = startup;
     }
 
     @Override protected void init() {
         int half = Math.max(50, (width - 44) / 2);
-        glassButton("啟動初始化", button -> select(true), 20, 27, half, 20, () -> startup);
-        glassButton("進入世界", button -> select(false), width / 2 + 2, 27, half, 20, () -> !startup);
-        String[] modes = {"耗時", "CPU", "配置", "慢配方", "熱點", "配置估計"};
+        glassButton(tr("report.startup"), button -> select(true), 20, 27, half, 20, () -> startup);
+        glassButton(tr("report.world"), button -> select(false), width / 2 + 2, 27, half, 20, () -> !startup);
+        String[] modes = {tr("report.elapsed"), tr("report.cpu"), tr("report.allocation"), tr("report.recipes"), tr("report.hotspots"), tr("report.estimates")};
         int itemWidth = Math.max(30, (width - 60) / 6);
         for (int i = 0; i < modes.length; i++) {
             final int selected = i;
             glassButton(modes[i], button -> { mode = selected; scroll = 0; rebuild(); },
                     20 + i * (itemWidth + 4), 51, itemWidth, 20, () -> mode == selected);
         }
-        glassButton("返回", button -> onClose(), width / 2 + 49, height - 27, 90, 20, () -> false);
-        glassButton("重新整理", button -> rebuild(), width / 2 - 45, height - 27, 90, 20, () -> false);
-        var folder = glassButton("開啟報告目錄", button -> Util.getPlatform().openFile(ShanhaiLoadingProfiler.directory().toFile()),
+        glassButton(tr("report.back"), button -> onClose(), width / 2 + 49, height - 27, 90, 20, () -> false);
+        glassButton(tr("report.refresh"), button -> rebuild(), width / 2 - 45, height - 27, 90, 20, () -> false);
+        var folder = glassButton(tr("report.folder"), button -> Util.getPlatform().openFile(ShanhaiLoadingProfiler.directory().toFile()),
                 width / 2 - 139, height - 27, 90, 20, () -> false);
         folder.active = Files.isDirectory(ShanhaiLoadingProfiler.directory());
         rebuild();
@@ -57,33 +57,33 @@ public final class ShanhaiLoadingReportScreen extends Screen {
         report = ShanhaiLoadingProfiler.report(startup);
         lines.clear();
         if (report == null) {
-            append(startup ? "尚無啟動分析。分析器啟用後，完成下一次遊戲初始化便會產生報告。"
-                    : "尚無世界分析。請自行選擇存檔或伺服器，完成載入後再查看。", 0xffb3c4d0);
+            append(startup ? tr("report.no_startup")
+                    : tr("report.no_world"), 0xffb3c4d0);
         } else {
             var metrics = report.metrics();
-            append("擷取：" + report.capturedAt() + "；狀態：" + metrics.outcome(), 0xff829aaa);
-            append("程序 CPU " + (report.processCpuNanos() < 0 ? "N/A" : ms(report.processCpuNanos()) + " ms")
-                    + "；平均使用核心數 " + (report.processCpuNanos() < 0 || metrics.elapsedNanos() <= 0 ? "N/A"
-                    : String.format(Locale.ROOT, "%.2f / %d", (double) report.processCpuNanos() / metrics.elapsedNanos(), report.processors())), 0xffb3c4d0);
-            append("堆淨變化 " + mib(metrics.heapDeltaBytes()) + "；已觀察堆峰值 " + mib(metrics.peakObservedHeapBytes())
-                    + "；GC " + (report.gcCollections() < 0 ? "N/A" : report.gcCollections() + " 次 / " + report.gcMillis() + " ms"), 0xffb3c4d0);
-            append("並行與巢狀工作不可相加當作總耗時。含等待／Forge 觀測項不是 CPU 執行時間；堆數值含其他執行緒與 GC。", 0xff829aaa);
+            append(tr("report.capture_summary", report.capturedAt(), outcome(metrics.outcome())), 0xff829aaa);
+            append(tr("report.cpu_summary", (report.processCpuNanos() < 0 ? "N/A" : ms(report.processCpuNanos()) + " ms"),
+                    (report.processCpuNanos() < 0 || metrics.elapsedNanos() <= 0 ? "N/A"
+                    : String.format(Locale.ROOT, "%.2f / %d", (double) report.processCpuNanos() / metrics.elapsedNanos(), report.processors()))), 0xffb3c4d0);
+            append(tr("report.heap_summary", mib(metrics.heapDeltaBytes()), mib(metrics.peakObservedHeapBytes()),
+                    report.gcCollections() < 0 ? "N/A" : tr("report.gc_summary", report.gcCollections(), report.gcMillis())), 0xffb3c4d0);
+            append(tr("report.caveat"), 0xff829aaa);
             if (mode >= 4) appendHotspots();
             var entries = new ArrayList<>(mode >= 4 ? List.<ShanhaiLoadingMetrics.Entry>of() : mode == 3 ? metrics.slowRecipes() : metrics.entries());
             Comparator<ShanhaiLoadingMetrics.Entry> order = mode == 1 ? Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::cpuNanos)
                     : mode == 2 ? Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::allocatedBytes)
                     : Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::elapsedNanos);
             entries = new ArrayList<>(ShanhaiLoadingMetrics.executionFirst(entries, order));
-            if (mode == 0) append("直接執行工作優先；含等待及觀測項列於後方。", 0xff80dfda);
+            if (mode == 0) append(tr("report.execution_first"), 0xff80dfda);
             int rank = 0;
             for (var entry : entries) {
                 append("", 0);
                 append(++rank + ". " + entry.name(), entry.elapsedNanos() >= 1_000_000_000L ? 0xffe4bd78 : 0xff80dfda);
-                append("[" + kind(entry.kind()) + "] " + ms(entry.elapsedNanos()) + " ms；" + entry.calls() + " 次；失敗 " + entry.failures(), 0xffdbe8ed);
-                append("CPU " + (entry.cpuSamples() == 0 ? "N/A" : ms(entry.cpuNanos()) + " ms（" + entry.cpuSamples() + " 筆）")
-                        + "；配置量 " + (entry.allocationSamples() == 0 ? "N/A" : mib(entry.allocatedBytes()) + "（" + entry.allocationSamples() + " 筆）"), 0xffa6b9c6);
+                append(tr("report.entry_summary", kind(entry.kind()), ms(entry.elapsedNanos()), entry.calls(), entry.failures()), 0xffdbe8ed);
+                append(tr("report.resources_summary", entry.cpuSamples() == 0 ? "N/A" : tr("report.sample_value", ms(entry.cpuNanos()) + " ms", entry.cpuSamples()),
+                        entry.allocationSamples() == 0 ? "N/A" : tr("report.sample_value", mib(entry.allocatedBytes()), entry.allocationSamples())), 0xffa6b9c6);
             }
-            if (entries.isEmpty() && mode < 4) append("此分類沒有可用樣本。逐筆配方僅量耗時，CPU／配置量記在外層載入工作。", 0xff829aaa);
+            if (entries.isEmpty() && mode < 4) append(tr("report.no_entries"), 0xff829aaa);
         }
         contentHeight = lines.size() * 12;
         scroll = Math.max(0, Math.min(scroll, Math.max(0, contentHeight - Math.max(1, height - 142))));
@@ -91,18 +91,18 @@ public final class ShanhaiLoadingReportScreen extends Screen {
 
     private void appendHotspots() {
         var sampling = report.sampling();
-        if (sampling == null) { append("此報告沒有抽樣資料。", 0xff829aaa); return; }
-        append("JFR：" + sampling.status(), 0xffb3c4d0);
-        append(mode == 4 ? "CPU 熱點依抽樣次數排序，不是精確 CPU 時間。" : "配置量為 JFR 抽樣估計，不是精確配置總量。", 0xff829aaa);
+        if (sampling == null) { append(tr("report.no_sampling"), 0xff829aaa); return; }
+        append(tr("report.jfr") + sampling.status(), 0xffb3c4d0);
+        append(mode == 4 ? tr("report.cpu_note") : tr("report.allocation_note"), 0xff829aaa);
         var hotspots = mode == 4 ? sampling.cpuHotspots() : sampling.allocationHotspots();
         int rank = 0;
         for (var entry : hotspots) {
             append("", 0);
             append(++rank + ". " + entry.method(), 0xff80dfda);
-            append(mode == 4 ? entry.cpuSamples() + " 個 CPU 樣本"
-                    : "估計配置 " + mib(entry.sampledAllocationBytes()) + "；" + entry.allocationSamples() + " 個樣本", 0xffdbe8ed);
+            append(mode == 4 ? tr("report.cpu_sample_count", entry.cpuSamples())
+                    : tr("report.allocation_sample_count", mib(entry.sampledAllocationBytes()), entry.allocationSamples()), 0xffdbe8ed);
         }
-        if (hotspots.isEmpty()) append("此分類尚無樣本；載入很快、抽樣停用或 JVM 不支援時可能為空。", 0xff829aaa);
+        if (hotspots.isEmpty()) append(tr("report.empty_hotspots"), 0xff829aaa);
     }
 
     private void append(String text, int color) {
@@ -121,7 +121,7 @@ public final class ShanhaiLoadingReportScreen extends Screen {
             ShanhaiLoadingBackdrop.capture(width, height, this);
         }
         graphics.drawCenteredString(font, title, width / 2, 9, 0xff80dfda);
-        String summary = startup ? "啟動初始化" : "進入世界";
+        String summary = startup ? tr("report.startup") : tr("report.world");
         if (report != null) {
             var metrics = report.metrics();
             summary += "：" + ms(metrics.elapsedNanos()) + " ms";
@@ -149,13 +149,20 @@ public final class ShanhaiLoadingReportScreen extends Screen {
     }
     @Override public void onClose() { minecraft.setScreen(parent); }
     @Override public void removed() { ShanhaiLoadingRenderer.releaseBackdrop(); super.removed(); }
+    private static String tr(String key, Object... args) { return Component.translatable("gui.gt_shanhai.loading." + key, args).getString(); }
+    private static String outcome(String value) {
+        return switch (value) {
+            case "ready", "cancelled", "replaced", "running" -> tr("outcome." + value);
+            default -> value;
+        };
+    }
     private static String ms(long nanos) { return String.format(Locale.ROOT, "%.2f", nanos / 1_000_000d); }
     private static String mib(long bytes) { return String.format(Locale.ROOT, "%.2f MiB", bytes / 1048576d); }
     private static String kind(String value) {
         return switch (value) {
-            case "prepare" -> "準備執行"; case "apply" -> "套用執行"; case "Forge observed" -> "Forge 觀測耗時";
-            case "listener elapsed (includes waits)" -> "載入器耗時（含等待）";
-            case "recipe namespace" -> "配方命名空間"; case "recipe" -> "單筆配方"; default -> value;
+            case "prepare" -> tr("kind.prepare"); case "apply" -> tr("kind.apply"); case "Forge observed" -> tr("kind.forge");
+            case "listener elapsed (includes waits)" -> tr("kind.listener");
+            case "recipe namespace" -> tr("kind.namespace"); case "recipe" -> tr("kind.recipe"); default -> value;
         };
     }
     private record Line(String text, int color) {}
@@ -176,8 +183,7 @@ public final class ShanhaiLoadingReportScreen extends Screen {
             int edge = on ? GlassPalette.ACCENT : GuiMotion.lerpColor(ShopTheme.GLASS.frameDark, GlassPalette.ACCENT, hover.value());
             int fill = on ? ShopTheme.GLASS.selectBg : GuiMotion.lerpColor(ShopTheme.GLASS.buttonBg, ShopTheme.GLASS.buttonHover, hover.value());
             ShopTheme.GLASS.box(graphics, getX(), getY(), getWidth(), getHeight(), edge, fill);
-            graphics.drawString(font, getMessage(), getX() + (getWidth() - font.width(getMessage())) / 2,
-                    getY() + (getHeight() - font.lineHeight) / 2, active ? GlassPalette.TEXT : GlassPalette.TEXT_OFF, false);
+            renderScrollingString(graphics, font, 2, active ? GlassPalette.TEXT : GlassPalette.TEXT_OFF);
         }
     }
 }
