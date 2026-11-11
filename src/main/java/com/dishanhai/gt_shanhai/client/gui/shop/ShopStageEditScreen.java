@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -18,7 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** 分类页签阶段提交限制编辑器（山海署名）；格子自动换行，超出视口时按像素纵向滚动。 */
-public final class ShopStageEditScreen extends ScaledScreen {
+public final class ShopStageEditScreen extends ShopScaledScreen {
     private static final int W = 360, H = 210, SLOT = 20;
     private static final int SLOT_ROW_H = SLOT + 10;
     private final ShopScreen parent;

@@ -7,6 +7,65 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** 山海：搜索索引的分区、缓存与目录更新行为。 */
 class ShopCatalogSearchIndexTest {
+    @Test
+    void emptyNameIdFallbackDoesNotOutrankRealNamesOrNeedLoadedChunks() {
+        var unloaded = new ShopCatalogManifest.Stub(91, "unloaded", "", "", "", false,
+                Integer.MAX_VALUE, "", "", List.of("demo:iron"), "unloaded-91", "");
+        var index = new ShopCatalogSearchIndex(List.of(unloaded,
+                stub(92, false, "demo:iron", "other:iron")));
+        assertEquals(List.of(91L, 92L), index.search("demo:iron", "unloaded", null));
+        var suggestions = index.suggest("demo:iron", List.of(91L, 92L), 5);
+        assertEquals(List.of(92L, 91L), suggestions.stream()
+                .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+        assertEquals("demo:iron", suggestions.getLast().displayName());
+        assertEquals("demo:iron", suggestions.getLast().completion());
+    }
+
+    @Test
+    void localizedNamesMatchPinyinWithoutOptionalSearchMods() {
+        var index = new ShopCatalogSearchIndex(List.of(stub(1, false, "铁锭", "mod:iron"),
+                stub(2, false, "铜锭", "mod:copper"), stub(3, true, "铁锭块", "mod:iron_block")));
+        for (String query : List.of("tieding", "铁 ding", "tieding mod:iron")) {
+            assertEquals(List.of(1L), index.search(query, "all", null), query);
+            assertEquals(List.of(1L), index.suggest(query, null, 20).stream()
+                    .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList(), query);
+        }
+        assertEquals(List.of(1L, 2L), index.search("td", "all", null));
+        assertEquals(List.of(2L), index.search("td", "copper", List.of(2L)));
+        assertEquals(List.of(2L, 1L), index.search("td", "reverse", List.of(2L, 3L, 1L)));
+        assertEquals(List.of(2L, 1L), index.suggest("td", List.of(2L, 3L, 1L), 20).stream()
+                .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+    }
+
+    @Test
+    void catalogKeepsLiteralPrefixWordsPunctuationAndEmptyNames() {
+        var index = new ShopCatalogSearchIndex(List.of(stub(1, false, "Block #1", "mod:block"),
+                stub(2, false, "Block @home", "mod:home"), stub(3, false, "", "mod:unnamed"),
+                stub(4, false, "Named", "mod:unnamed_plate"),
+                stub(5, false, "Iron, Ingot", "mod:ingot")));
+        assertEquals(List.of(1L), index.search("#1", "all", null));
+        assertEquals(List.of(2L), index.search("@home", "all", null));
+        assertEquals(List.of(1L), index.suggest("#1", null, 20).stream()
+                .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+        assertEquals("Block #1", index.suggest("#1", null, 20).getFirst().completion());
+        assertEquals(List.of(3L, 4L), index.suggest("mod:unnamed", List.of(4L, 3L), 20).stream()
+                .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+        assertEquals("mod:unnamed", index.suggest("mod:unnamed", null, 20).getFirst().completion());
+        assertEquals("mod:unnamed", index.suggest("mod:unnamed", null, 20).getFirst().displayName());
+        assertEquals("Iron, Ingot", index.suggest("iron ingot", null, 20).getFirst().completion());
+    }
+
+    @Test
+    void externallyMatchedSuggestionsKeepForeignMatchesAndHostOrder() {
+        var index = new ShopCatalogSearchIndex(List.of(stub(1, false, "Copper", "mod:copper"),
+                stub(2, false, "Iron", "mod:iron"), stub(3, false, "Iron Plate", "mod:plate")));
+        var matches = List.of(1L, 3L, 999L, 2L);
+        assertEquals(List.of(2L, 3L, 1L), index.suggestMatches("iron", matches, 20).stream()
+                .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+        assertEquals(List.of(3L, 1L), index.suggestMatches("conductors", List.of(3L, 1L), 20).stream()
+                .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList());
+    }
+
     private ShopCatalogManifest.Stub stub(long key, boolean hidden, String name, String id) {
         return new ShopCatalogManifest.Stub(key, "materials", "", "", "", hidden, 0,
                 "", name, List.of(id), "stable-" + key, "");

@@ -38,8 +38,12 @@ class ShopUsesIsolationSourceTest {
     @Test
     void hidingAnEntryCannotCopyConsumedSaveBalanceIntoServerConfig() throws Exception {
         String packet = source("network/ShopToggleHiddenPacket.java");
-        assertTrue(packet.contains("old.getServerUses(), old.getDisplayIcons()"));
-        assertTrue(packet.contains("updated.overrideRemainingUses(old.getRemainingUses())"));
+        String config = source("common/shop/ShopConfig.java");
+        assertTrue(packet.contains("ShopConfig.batchSetHidden(List.of(old.getStableId()), hidden)"));
+        assertTrue(config.contains("updated.set(i, copyEntry(old, old.getCategory(), hidden))"));
+        assertTrue(config.contains("old.getServerUses(), old.getDisplayIcons()"));
+        assertTrue(config.contains("old.getDiscountStartMs(), old.getDiscountEndMs(), old.getSubmissionItems()"));
+        assertTrue(config.contains("copy.overrideRemainingUses(old.getRemainingUses())"));
     }
 
     @Test

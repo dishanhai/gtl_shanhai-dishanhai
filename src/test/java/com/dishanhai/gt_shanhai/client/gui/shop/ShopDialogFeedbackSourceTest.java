@@ -27,7 +27,10 @@ class ShopDialogFeedbackSourceTest {
         assertTrue(ui.contains("ShopUiSounds.click()") && ui.contains("ShopUiSounds.limit()"),
                 "可用按钮出点击声，不可用的轻抖低响");
         assertTrue(ui.contains("GuiRenderUtil.withButtonMotion(") && ui.contains("ButtonFeedback.shade("));
-        assertTrue(ui.contains("ClientShopUiSettings.reduceMotion()"), "跟随减少动效开关");
+        assertTrue(ui.contains("UiPreferences.configured()") && ui.contains("preferences.reducedMotion()"),
+                "跟随统一的全局和商店减少动效快照");
+        assertTrue(ui.contains("preferences.feedback().hoverAnimation()")
+                && ui.contains("preferences.feedback().pressAnimation()"), "弹窗沿用共享反馈设置");
         assertTrue(ui.contains("mouseHandler.isLeftPressed()"), "松开落在别处时每帧兜底");
     }
 
@@ -87,5 +90,27 @@ class ShopDialogFeedbackSourceTest {
         assertTrue(s.contains("new ShopAutoCraftConfirmPacket(planId, false)"));
         String keys = extractBlock(s, "public boolean keyPressed(int keyCode, int scanCode, int modifiers)");
         assertTrue(keys.contains("GLFW_KEY_PAGE_DOWN") && keys.contains("GLFW_KEY_END"), "长清单可用键盘翻页");
+    }
+
+    @Test
+    void confirmationScreensBridgeNativeFocusWithoutReplacingTheScrollableBody() throws Exception {
+        for (String name : new String[]{"ShopAutoCraftConfirmScreen.java", "ShopSingleUseWarnScreen.java"}) {
+            String s = src(name);
+            assertTrue(s.contains("extends ShopScaledScreen"), name + " 共用主题与显示偏好作用域");
+            assertTrue(s.contains("confirmButton = addWidget(new UiButton(")
+                    && s.contains("cancelButton = addWidget(new UiButton("), name + " 注册原生焦点及旁白入口");
+            assertTrue(s.contains("ShopTheme.current().focus("), name + " 自绘按钮仍提供可见焦点");
+            assertTrue(s.contains("getNarrationMessage()") && s.contains("CommonComponents.joinLines(details)"),
+                    name + " 旁白能读取完整清单，而不只读取当前可见行");
+            assertTrue(s.contains("ui.syncEnterHeld()") && s.contains("ui.takeEnter()")
+                    && s.contains("ui.enterReleased(keyCode)"), name + " 保留继承 Enter 与系统重复保护");
+            assertTrue(s.contains("getFocused() == cancelButton ? cancelButton : confirmButton"),
+                    name + " Enter 跟随当前操作焦点");
+            assertTrue(s.contains("spaceHeld = InputConstants.isKeyDown(") && s.contains("if (!spaceHeld)")
+                    && s.contains("if (keyCode == GLFW.GLFW_KEY_SPACE) spaceHeld = false"),
+                    name + " Space 不得把父页继承的系统重复当成确认");
+            assertTrue(s.contains("actions.abandon()") && s.contains("returnToParent.close()"),
+                    name + " 移除结束一次性选择并释放交接快照");
+        }
     }
 }

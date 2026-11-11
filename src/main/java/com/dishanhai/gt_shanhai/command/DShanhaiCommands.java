@@ -739,6 +739,7 @@ public class DShanhaiCommands {
                                             net.minecraft.commands.arguments.EntityArgument.getPlayer(ctx, "玩家");
                                     var perm = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.get(ctx.getSource().getServer());
                                     boolean ok = perm.grant(target.getUUID());
+                                    if (ok) com.dishanhai.gt_shanhai.network.ShopOpenPacket.syncEditAccess(target);
                                     ctx.getSource().sendSuccess(msg(ok
                                             ? "§b[山海商店] §a已授予 §f" + target.getName().getString() + " §a编辑权限"
                                             : "§7[山海商店] " + target.getName().getString() + " 已有编辑权限"), false);
@@ -751,6 +752,7 @@ public class DShanhaiCommands {
                                             net.minecraft.commands.arguments.EntityArgument.getPlayer(ctx, "玩家");
                                     var perm = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.get(ctx.getSource().getServer());
                                     boolean ok = perm.revoke(target.getUUID());
+                                    if (ok) com.dishanhai.gt_shanhai.network.ShopOpenPacket.syncEditAccess(target);
                                     ctx.getSource().sendSuccess(msg(ok
                                             ? "§b[山海商店] §e已撤销 §f" + target.getName().getString() + " §e的编辑权限"
                                             : "§7[山海商店] " + target.getName().getString() + " 本就无编辑权限"), false);
@@ -794,9 +796,9 @@ public class DShanhaiCommands {
                                 return 0;
                             }
                             boolean on = com.dishanhai.gt_shanhai.common.shop.ShopEditMode.toggle(p.getUUID());
-                            ctx.getSource().sendSuccess(msg(on
-                                    ? "§b[山海商店] §a已开启编辑模式 §7（可新增/删除商品；重启后自动关闭）"
-                                    : "§b[山海商店] §e已关闭编辑模式 §7（新增/删除商品按钮将隐藏）"), false);
+                            com.dishanhai.gt_shanhai.network.ShopOpenPacket.syncEditAccess(p);
+                            ctx.getSource().sendSuccess(() -> Component.translatable(on
+                                    ? "gt_shanhai.shop.hidden.edit_on" : "gt_shanhai.shop.hidden.edit_off"), false);
                             return 1;
                         }));
     }

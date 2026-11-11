@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.network.ExchangeEditPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
@@ -29,7 +28,7 @@ import java.util.List;
  * 右键槽位删除；点「+」开同一选择器加入新项。
  * 确认打成 {@link ExchangeEditPacket} 发服务端持久化，关闭返回 {@link ExchangeScreen}。</p>
  */
-public class ExchangeEditScreen extends ScaledScreen {
+public class ExchangeEditScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;

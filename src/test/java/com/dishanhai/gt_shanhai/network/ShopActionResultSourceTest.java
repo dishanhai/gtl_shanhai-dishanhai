@@ -38,7 +38,7 @@ class ShopActionResultSourceTest {
     @Test
     void resultPacketIsClientBoundAndBumpsTheProtocol() throws Exception {
         String net = source("network/ShanhaiNetwork.java");
-        assertTrue(net.contains("PROTOCOL_VERSION = \"17\""));
+        assertTrue(net.contains("PROTOCOL_VERSION = \"18\""));
         int cart = net.indexOf("ShopCartPurchaseResultPacket.class");
         int result = net.indexOf("ShopActionResultPacket.class");
         assertTrue(cart >= 0 && result > cart, "新包追加在后面，不打乱既有包号");

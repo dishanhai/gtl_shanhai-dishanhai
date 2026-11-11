@@ -125,7 +125,6 @@ public final class ClientShopCatalog {
     private static final State STATE = new State();
     private static ShopCatalogManifest manifest = ShopCatalogManifest.empty();
     private static final Map<Long, ShopCatalogManifest.Stub> stubsByKey = new LinkedHashMap<>();
-    private static final Map<String, List<Long>> groupKeys = new LinkedHashMap<>();
     private static final Map<String, Long> linkKeys = new LinkedHashMap<>();
     private static final Map<String, Long> stableIdToKey = new LinkedHashMap<>();
     // 商品物品 ID 反向索引：JEI 悬停快捷键只查全量轻量 stub，不触发商品 chunk 加载。
@@ -135,10 +134,8 @@ public final class ClientShopCatalog {
     // 前置任务反向索引：FTBQ 任务 ID（十六进制）→ 以它为前置的商品 entryKey 列表（保持 manifest 顺序）。
     // 供任务书那侧的「前往商店」按钮反查（见 FtbViewQuestPanelShopButtonMixin）；隐藏条目不入索引。
     private static final Map<String, List<Long>> prereqQuestKeys = new LinkedHashMap<>();
-    private static final List<String> topCategories = new ArrayList<>();
-    private static final Map<String, List<String>> subCategories = new LinkedHashMap<>();   // key=top          -> 二级选项
-    private static final Map<String, List<String>> subCategories2 = new LinkedHashMap<>();  // key=top\0sub      -> 三级选项
-    private static final Map<String, List<String>> subCategories3 = new LinkedHashMap<>();  // key=top\0sub\0sub2-> 四级选项
+    private static ShopCatalogView browseView = new ShopCatalogView(manifest, false);
+    private static ShopCatalogView editView;
     private static final Map<Long, ShopEntry> entriesByKey = new LinkedHashMap<>();
     private static final IdentityHashMap<ShopEntry, Long> keysByEntry = new IdentityHashMap<>();
     private static final ArrayDeque<PendingChunk> pendingChunks = new ArrayDeque<>();
@@ -184,41 +181,10 @@ public final class ClientShopCatalog {
 
     public static long revision() { return STATE.revision(); }
     public static boolean ready() { return STATE.ready(); }
-    public static List<String> topCategories() { return List.copyOf(topCategories); }
-
-    public static List<String> subCategories(String top) {
-        return subCategories.getOrDefault(top == null ? "" : top, List.of());
-    }
-
-    public static List<String> subCategories2(String top, String sub) {
-        return subCategories2.getOrDefault(pathKey(top, sub), List.of());
-    }
-
-    public static List<String> subCategories3(String top, String sub, String sub2) {
-        return subCategories3.getOrDefault(pathKey(top, sub, sub2), List.of());
-    }
-
-    private static final ShopCatalogSearchIndex searchIndex = new ShopCatalogSearchIndex(List.of());
-
-    public static List<Long> keysOfGroup(String top, String sub, String sub2, String sub3) {
-        return groupKeys.getOrDefault(groupKey(top, sub, sub2, sub3), List.of());
-    }
-
-    public static List<Long> searchKeys(String query) {
-        return searchIndex.search(query, "", null);
-    }
-
-    public static List<Long> searchKeys(String query, String top, String sub, String sub2, String sub3) {
-        return searchIndex.search(query, groupKey(top, sub, sub2, sub3), keysOfGroup(top, sub, sub2, sub3));
-    }
-
-    public static List<ShopCatalogSearchIndex.Suggestion> searchSuggestions(String query, List<Long> candidates, int limit) {
-        return searchIndex.suggest(query, candidates, limit);
-    }
-
-    public static List<Long> resourceKeys(List<com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter.Resource> resources,
-                                          boolean costs) {
-        return com.dishanhai.gt_shanhai.common.shop.ShopResourceFilter.keys(manifest.stubs(), resources, costs);
+    public static ShopCatalogView view(boolean editMode) {
+        if (!editMode) return browseView;
+        if (editView == null) editView = new ShopCatalogView(manifest, true);
+        return editView;
     }
 
     public static ShopEntry get(long entryKey) { return entriesByKey.get(entryKey); }
@@ -409,20 +375,13 @@ public final class ClientShopCatalog {
 
     private static void rebuildManifestIndexes() {
         stubsByKey.clear();
-        groupKeys.clear();
         linkKeys.clear();
         stableIdToKey.clear();
         goodsIdKeys.clear();
         goodsIdentityKeys.clear();
         prereqQuestKeys.clear();
-        topCategories.clear();
-        subCategories.clear();
-        subCategories2.clear();
-        subCategories3.clear();
-        LinkedHashSet<String> tops = new LinkedHashSet<>();
-        Map<String, LinkedHashSet<String>> subs = new LinkedHashMap<>();
-        Map<String, LinkedHashSet<String>> subs2 = new LinkedHashMap<>();
-        Map<String, LinkedHashSet<String>> subs3 = new LinkedHashMap<>();
+        browseView = new ShopCatalogView(manifest, false);
+        editView = null;
         for (ShopCatalogManifest.Stub stub : manifest.stubs()) {
             stubsByKey.put(stub.entryKey(), stub);
             if (!stub.linkKey().isEmpty()) linkKeys.putIfAbsent(stub.linkKey(), stub.entryKey());
@@ -446,74 +405,16 @@ public final class ClientShopCatalog {
                 prereqQuestKeys.computeIfAbsent(stub.prereqQuestId(), ignored -> new ArrayList<>())
                         .add(stub.entryKey());
             }
-            String top = stub.top(), sub = stub.sub(), sub2 = stub.sub2(), sub3 = stub.sub3();
-            tops.add(top);
-            subs.computeIfAbsent(top, ignored -> new LinkedHashSet<>());
-            if (!sub.isEmpty()) subs.get(top).add(sub);
-            subs2.computeIfAbsent(pathKey(top, sub), ignored -> new LinkedHashSet<>());
-            if (!sub.isEmpty() && !sub2.isEmpty()) subs2.get(pathKey(top, sub)).add(sub2);
-            subs3.computeIfAbsent(pathKey(top, sub, sub2), ignored -> new LinkedHashSet<>());
-            if (!sub.isEmpty() && !sub2.isEmpty() && !sub3.isEmpty()) subs3.get(pathKey(top, sub, sub2)).add(sub3);
-            addGroupKey(top, "", "", "", stub.entryKey());
-            addGroupKey("", "", "", "", stub.entryKey());
-            if (!sub.isEmpty()) addGroupKey(top, sub, "", "", stub.entryKey());
-            if (!sub.isEmpty() && !sub2.isEmpty()) addGroupKey(top, sub, sub2, "", stub.entryKey());
-            if (!sub.isEmpty() && !sub2.isEmpty() && !sub3.isEmpty()) addGroupKey(top, sub, sub2, sub3, stub.entryKey());
-        }
-        // 应用服务端下发的显式排序（拖拽页签后落地，见 ShopConfig#moveCategoryTo）；order-key 跟
-        // pathKey/顶级空串完全对齐，未出现在排序表里的分类按发现顺序追加在末尾，见 applyOrder。
-        searchIndex.rebuild(manifest.stubs());
-        topCategories.addAll(applyOrder("", new ArrayList<>(tops)));
-        for (Map.Entry<String, LinkedHashSet<String>> entry : subs.entrySet()) {
-            subCategories.put(entry.getKey(), applyOrder(entry.getKey(), new ArrayList<>(entry.getValue())));
-        }
-        for (Map.Entry<String, LinkedHashSet<String>> entry : subs2.entrySet()) {
-            subCategories2.put(entry.getKey(), applyOrder(entry.getKey(), new ArrayList<>(entry.getValue())));
-        }
-        for (Map.Entry<String, LinkedHashSet<String>> entry : subs3.entrySet()) {
-            subCategories3.put(entry.getKey(), applyOrder(entry.getKey(), new ArrayList<>(entry.getValue())));
-        }
-        for (Map.Entry<String, List<Long>> entry : new ArrayList<>(groupKeys.entrySet())) {
-            groupKeys.put(entry.getKey(), List.copyOf(entry.getValue()));
         }
         for (Map.Entry<String, List<Long>> entry : new ArrayList<>(prereqQuestKeys.entrySet())) {
             prereqQuestKeys.put(entry.getKey(), List.copyOf(entry.getValue()));
         }
     }
 
-    private static void addGroupKey(String top, String sub, String sub2, String sub3, long key) {
-        groupKeys.computeIfAbsent(groupKey(top, sub, sub2, sub3), ignored -> new ArrayList<>()).add(key);
-    }
-
     private static void applyRemainingUses(ShopEntry entry, long target) {
         if (entry == null || target < 0L) return;
         long current = entry.getRemainingUses();
         if (current < 0L || target < current) entry.overrideRemainingUses(target);
-    }
-
-    private static String groupKey(String top, String sub, String sub2, String sub3) {
-        return (top == null ? "" : top) + '\u0000' + (sub == null ? "" : sub)
-                + '\u0000' + (sub2 == null ? "" : sub2) + '\u0000' + (sub3 == null ? "" : sub3);
-    }
-
-    // pathKey 用 "/" 拼接（不是 NUL）：必须跟 ShopConfig#discoveredCategoriesAt 对 parentPath 的
-    // "/" 切分格式完全一致，manifest.categoryOrder() 下发的 key 才能在这里直接命中，见 applyOrder。
-    private static String pathKey(String top, String sub) {
-        return (top == null ? "" : top) + '/' + (sub == null ? "" : sub);
-    }
-
-    private static String pathKey(String top, String sub, String sub2) {
-        return pathKey(top, sub) + '/' + (sub2 == null ? "" : sub2);
-    }
-
-    /** 按 manifest 下发的显式排序重排 discovered：排序表里没有的分类按原发现顺序追加在末尾。 */
-    private static List<String> applyOrder(String orderKey, List<String> discovered) {
-        List<String> order = manifest.categoryOrder().getOrDefault(orderKey, List.of());
-        if (order.isEmpty()) return List.copyOf(discovered);
-        List<String> result = new ArrayList<>(discovered.size());
-        for (String c : order) if (discovered.contains(c)) result.add(c);
-        for (String c : discovered) if (!result.contains(c)) result.add(c);
-        return List.copyOf(result);
     }
 
     /** 把商店正在看的 chunk 换到队首。正在解析的那一块如果已经是钉住的，就不动。 */

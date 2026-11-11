@@ -45,4 +45,15 @@ class ShopTooltipMotionTest {
         motion.endFrame();
         assertEquals(0f, motion.show("item", 900L, false));
     }
+
+    @Test
+    void customDelayUsesTheSameTargetInReducedMotion() {
+        ShopTooltipMotion motion = new ShopTooltipMotion();
+        assertEquals(-1f, motion.show("item", 1000L, true, 200));
+        motion.endFrame();
+        assertEquals(-1f, motion.show("item", 1199L, true, 200));
+        motion.endFrame();
+        assertEquals(1f, motion.show("item", 1200L, true, 200));
+        assertEquals(-1f, motion.show("other", 1201L, true, 200));
+    }
 }

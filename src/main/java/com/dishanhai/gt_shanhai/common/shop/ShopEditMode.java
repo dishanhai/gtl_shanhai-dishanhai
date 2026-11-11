@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 与 {@link ShopCheatMode} 同一套结构。有编辑权（{@link ShopEditPermission#canEdit}）的玩家
  * 还须额外开启此开关，才能新增/编辑/删除商品条目（见 {@link ShopEditPermission#canEditCatalog}，
  * 服务端校验见 {@link com.dishanhai.gt_shanhai.network.ShopEditPacket} 的 ADD/EDIT 与
- * {@link com.dishanhai.gt_shanhai.network.ShopActionPacket} 的 DELETE）；商店设置、隐藏切换
- * （见 {@link com.dishanhai.gt_shanhai.network.ShopToggleHiddenPacket}）、排序等非破坏性操作
+ * {@link com.dishanhai.gt_shanhai.network.ShopActionPacket} 的 DELETE），以及修改公共隐藏状态；
+ * 商店设置、排序等非破坏性操作
  * 不受此开关限制，仍只看 canEdit。</p>
  */
 public final class ShopEditMode {

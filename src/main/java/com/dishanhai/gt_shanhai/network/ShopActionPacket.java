@@ -160,7 +160,8 @@ public class ShopActionPacket {
         }
 
         ShopEntry entry = resolve(pkt);
-        if (entry == null) {
+        if (entry == null || (pkt.fromCart && entry.isHidden()
+                && !com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player))) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 商品不存在"));
             sendResult(player, pkt, 0L, "商品不存在");
             return;

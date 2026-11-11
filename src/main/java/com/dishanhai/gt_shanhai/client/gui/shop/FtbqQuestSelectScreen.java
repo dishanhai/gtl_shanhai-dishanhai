@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 
 import dev.ftb.mods.ftbquests.client.ClientQuestFile;
 import dev.ftb.mods.ftbquests.quest.Chapter;
@@ -25,7 +24,7 @@ import java.util.function.Consumer;
  * 服务端购买校验直接读同一个任务的实时完成状态，本屏只负责「挑一个」，不做任何本地复制。
  * 整体结构照抄 {@link FtbqTableSelectScreen}，数据源换成全部任务。
  */
-public class FtbqQuestSelectScreen extends ScaledScreen {
+public class FtbqQuestSelectScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;

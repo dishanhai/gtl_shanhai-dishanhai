@@ -234,7 +234,8 @@ class ShopPickerFeedbackSourceTest {
     void shopTabStripsPlayThePressFeedbackBeforeSwitching() throws Exception {
         String s = read("ShopScreen.java");
         String strip = extractBlock(s, "private void drawTabStrip(");
-        assertTrue(strip.contains("buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame)"), "页签按几何 key 取压下态");
+        assertTrue(strip.contains("buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame || !visualFeedback.pressAnimation())"),
+                "页签按几何 key 取压下态，尊重主题的按压动画开关");
         assertTrue(strip.contains("tabPressScale("), "页签按下用放大的压下幅度，14px 高的页签 0.95 看不出");
         assertTrue(strip.contains("fb[i].flashMix()"), "按下与闪色都把格子亮成金色");
         assertTrue(extractBlock(s, "private boolean tabRowClicked(").contains("pressTab("),

@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeConfig;
@@ -29,7 +28,7 @@ import java.util.List;
  * <p>左侧列 {@link ExchangeConfig} 兑换条目，右侧显示选中条目的「付出 → 得到」两侧（星火 + 多物品/流体），
  * 正向/反向按钮各发一个 {@link ExchangePacket}。编辑权玩家可新增/编辑/删除。星火余额读客户端账户缓存。</p>
  */
-public class ExchangeScreen extends ScaledScreen {
+public class ExchangeScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GREEN = -11141291;

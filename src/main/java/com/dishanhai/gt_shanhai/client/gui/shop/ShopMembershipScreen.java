@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopBank;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
@@ -24,7 +23,7 @@ import java.math.BigInteger;
  * <p>页签「会员」：青铜/白银/黄金永久买断，付目标档全价。</p>
  * <p>页签「银行」：定期存款与贷款。数字、利率、可借额度来自服务器快照。</p>
  */
-public class ShopMembershipScreen extends ScaledScreen {
+public class ShopMembershipScreen extends ShopScaledScreen {
 
     private static final int PAGE_MEMBER = 0;
     private static final int PAGE_BANK = 1;

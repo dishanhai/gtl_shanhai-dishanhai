@@ -45,7 +45,7 @@ public class ShopEntry {
      *  CHOICE=购买前从表内物品类奖励中选 1 项；RANDOM=复用 FTBQ 自身加权随机抽取（原有行为）；
      *  ALL=一次性交付表内每一项物品类奖励。与本地奖励池的三种子模式语义对齐，只是奖励来源换成 FTBQ 表。 */
     private final RewardMode ftbqSubMode;
-    /** 隐藏商品：不出现在分类网格/枚举里，只能被另一条目的 {@link #linkTo} 直接跳转带达（仿 FTBQ 隐藏任务）。 */
+    /** 公共隐藏商品：普通目录不枚举，保留另一条目的 {@link #linkTo} 直达；编辑模式可见。 */
     private final boolean hidden;
     /** 本条目的跳转目标别名（供其他条目的 {@link #linkTo} 引用），可空。仅需给「会被跳转到」的隐藏商品设置。 */
     private final String linkKey;
@@ -741,7 +741,7 @@ public class ShopEntry {
         return ftbqSubMode;
     }
 
-    /** 是否为隐藏商品（不出现在分类网格/枚举里，只能被跳转直达）。 */
+    /** 是否在公共目录中隐藏；个人隐藏不写入该字段。 */
     public boolean isHidden() {
         return hidden;
     }

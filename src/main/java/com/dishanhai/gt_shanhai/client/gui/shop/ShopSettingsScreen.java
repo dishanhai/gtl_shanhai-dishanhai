@@ -1,8 +1,10 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
+import com.dishanhai.gt_shanhai.client.shop.ShopAppearance;
+import com.dishanhai.sh_better_ui.client.gui.display.GraphicIcon;
+import com.dishanhai.sh_better_ui.client.gui.scaled.UiButton;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopSettingsPacket;
@@ -28,7 +30,7 @@ import net.minecraft.util.FormattedCharSequence;
  * <p>标题和底栏按钮固定。中间选项区超出视口时可滚轮或拖右侧滚动条，输入框跟着内容走，
  * 滚出视口的输入框隐藏，避免点到底栏时还命中它们。</p>
  */
-public class ShopSettingsScreen extends ScaledScreen {
+public class ShopSettingsScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
@@ -87,6 +89,10 @@ public class ShopSettingsScreen extends ScaledScreen {
     private boolean reduceMotion;
     private boolean uiSounds;
     private String shopTheme;
+    private ShopAppearance appearance;
+    private UiButton appearanceButton;
+    private boolean restoreAppearanceFocus;
+    private Component saveError;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private EditBox cardWidthBox;
@@ -119,9 +125,15 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.sdaDirectDiskHatchInject = DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get();
         this.previewBar = ClientShopUiSettings.rewardPreviewBar();
         this.rememberShopView = ClientShopUiSettings.rememberShopView();
-        this.reduceMotion = ClientShopUiSettings.reduceMotion();
+        this.reduceMotion = ClientShopUiSettings.localReduceMotion();
         this.uiSounds = ClientShopUiSettings.uiSounds();
         this.shopTheme = ClientShopUiSettings.shopTheme();
+        this.appearance = ClientShopUiSettings.shopAppearance();
+    }
+
+    @Override
+    public void render(GuiGraphics g, int mx, int my, float pt) {
+        ShopVisuals.scoped(appearance, reduceMotion, () -> super.render(g, mx, my, pt));
     }
 
     @Override
@@ -131,7 +143,20 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     /** 本页按尚未保存的选择即时预览主题。 */
     private ShopTheme theme() {
-        return ShopTheme.of(shopTheme);
+        return ShopTheme.of(shopTheme, appearance.materialId());
+    }
+
+    @Override
+    protected ShopAppearance screenAppearance() { return appearance; }
+
+    @Override
+    protected boolean screenReducedMotion() { return reduceMotion; }
+
+    @Override
+    protected ShopTheme screenTheme() { return theme(); }
+
+    void setThemeDraft(ShopAppearance appearance) {
+        this.appearance = appearance;
     }
 
     @Override
@@ -141,6 +166,17 @@ public class ShopSettingsScreen extends ScaledScreen {
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
         settingsScroll = clampScroll(settingsScroll);
+        appearanceButton = addWidget(new UiButton(left + panelWidth - 116, top + 2, 110, 14,
+                Component.translatable("gt_shanhai.shop.appearance.title"), button -> {
+                    restoreAppearanceFocus = true;
+                    Minecraft.getInstance().setScreen(new ShopThemeEditorScreen(this, shopTheme, appearance, reduceMotion));
+                }));
+        appearanceButton.setLeadingIcon(GraphicIcon.CUSTOM_THEME);
+        appearanceButton.setSampleBackground(false);
+        if (restoreAppearanceFocus) {
+            setInitialFocus(appearanceButton);
+            restoreAppearanceFocus = false;
+        }
 
         int fieldW = fieldWidth();
         if (serverRows) {
@@ -205,18 +241,20 @@ public class ShopSettingsScreen extends ScaledScreen {
         // 玻璃主题：选项滚动区单独一层区域毛玻璃，和标题/底栏分开（经典主题原样没有这块）
         if (t.glass) t.region(g, left + 6, viewTop(), panelWidth - 12, viewH());
 
-        g.drawString(this.font, serverRows ? "§6商店设置 §7(含服务端设置)" : "§6商店设置 §7(本机显示偏好)",
-                left + 10, top + 5, GOLD, true);
+        String heading = saveError != null ? saveError.getString()
+                : serverRows ? "§6商店设置 §7(含服务端设置)" : "§6商店设置 §7(本机显示偏好)";
+        g.drawString(font, GuiRenderUtil.trimText(font, heading, panelWidth - 130), left + 10, top + 5,
+                saveError == null ? GOLD : 0xFFFF7777, true);
+        appearanceButton.render(g, mx, my, pt);
         drawBtn(g, left + 12, top + panelHeight - 22, 60, 14, "§c取消", mx, my);
         drawBtn(g, guideBtnX(), top + panelHeight - 22, GUIDE_BTN_W, 14, "§b新手引导", mx, my);
         drawBtn(g, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14, "§a确认保存", mx, my);
 
-        enableScaledScissor(g, left + 6, viewTop(), left + panelWidth - 6, viewBottom());
     }
 
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
-        // 输入框渲染会自己开关 scissor，背景里开的裁剪到这里已经失效，文字和按钮要重新裁。
+        // 输入框只在完整进入视口时显示，文字和按钮在这里独立裁切。
         enableScaledScissor(g, left + 6, viewTop(), left + panelWidth - 6, viewBottom());
         int x = left + 12;
         int textW = fieldWidth();
@@ -275,9 +313,9 @@ public class ShopSettingsScreen extends ScaledScreen {
         drawWrappedContentLines(g, SOUND_HINT, x, row(rowSoundHint()), textW);
         int themeY = visualY(row(rowTheme()));
         if (rowVisible(themeY, 16)) {
+            Component themeName = ShopTheme.name(ShopTheme.visibleId(shopTheme, appearance.materialId()));
             drawBtn(g, x, themeY, fieldWidth(), 16,
-                    Component.translatable("gt_shanhai.shop.theme.setting",
-                            Component.translatable("gt_shanhai.shop.theme." + shopTheme)).getString(), mx, my);
+                    Component.translatable("gt_shanhai.shop.theme.setting", themeName).getString(), mx, my);
         }
         drawWrappedContentLines(g, themeHint(), x, row(rowThemeHint()), textW);
 
@@ -330,7 +368,8 @@ public class ShopSettingsScreen extends ScaledScreen {
                 return true;
             }
             if (hitContent(mx, contentMy, x, row(rowTheme()), w, 16)) {
-                shopTheme = ShopTheme.next(shopTheme);
+                shopTheme = ShopTheme.next(ShopTheme.visibleId(shopTheme, appearance.materialId()));
+                appearance = appearance.withMaterial(ShopAppearance.Material.PRESET);
                 return true;
             }
         }
@@ -381,11 +420,14 @@ public class ShopSettingsScreen extends ScaledScreen {
         long aeMin;
         try { aeMin = aeInjectMin == null || aeInjectMin.isEmpty() ? 64L : Long.parseLong(aeInjectMin); }
         catch (NumberFormatException e) { aeMin = 64L; }
+        if (!ClientShopUiSettings.setShopAppearance(shopTheme, appearance)) {
+            saveError = Component.translatable("gt_shanhai.shop.appearance.save_error");
+            return;
+        }
         ClientShopUiSettings.setCardSize(width, height);
         ClientShopUiSettings.setRewardPreviewBar(previewBar);
         ClientShopUiSettings.setRememberShopView(rememberShopView);
         ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds);
-        ClientShopUiSettings.setShopTheme(shopTheme);
         parent.onRememberShopViewSaved(rememberShopView);
         if (serverRows) {
             ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
@@ -537,6 +579,11 @@ public class ShopSettingsScreen extends ScaledScreen {
         }
         t.drawCentered(g, this.font, GuiRenderUtil.trimText(this.font, t.label(label), w - 6), x + w / 2, y + (h - 8) / 2,
                 t.ink(label, WHITE));
+    }
+
+    @Override
+    public void onClose() {
+        Minecraft.getInstance().setScreen(parent);
     }
 
     @Override

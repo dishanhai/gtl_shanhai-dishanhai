@@ -56,7 +56,7 @@ class ShopDetailFeedbackSourceTest {
         assertTrue(tip.contains("g.renderTooltip(this.font, detailHoverStack, mx, my)"),
                 "保留原版真實物品 tooltip 與擴充內容");
         String animate = extractBlock(shop, "private void animateTooltip(");
-        assertTrue(animate.contains("ClientShopUiSettings.reduceMotion()"));
+        assertTrue(animate.contains("reduceMotionFrame") && animate.contains("visualFeedback.tooltipDelayMs()"));
         assertTrue(animate.contains("GuiRenderUtil.withPanelMotion("));
     }
 

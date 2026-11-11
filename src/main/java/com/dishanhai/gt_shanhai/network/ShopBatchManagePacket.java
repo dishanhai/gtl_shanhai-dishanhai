@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopEditPermission;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
+import com.dishanhai.gt_shanhai.common.shop.ShopPersonalHidden;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -23,9 +24,9 @@ import java.util.function.Supplier;
  */
 public final class ShopBatchManagePacket {
 
-    public enum Action { HIDE, UNHIDE, UP, DOWN, TOP, REGROUP, SET_TRADE_MODE, DELETE }
+    public enum Action { HIDE, UNHIDE, UP, DOWN, TOP, REGROUP, SET_TRADE_MODE, DELETE, PERSONAL_HIDE, PERSONAL_UNHIDE }
 
-    private static final int MAX_IDS = 256;
+    public static final int MAX_IDS = 256;
     private final Action action;
     private final long catalogRevision;
     private final List<String> stableIds;
@@ -84,8 +85,16 @@ public final class ShopBatchManagePacket {
 
     private static void apply(ShopBatchManagePacket pkt, ServerPlayer player) {
         if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
+        if (pkt.action == Action.PERSONAL_HIDE || pkt.action == Action.PERSONAL_UNHIDE) {
+            applyPersonal(pkt, player);
+            return;
+        }
         if (!ShopEditPermission.canEdit(player)) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
+            return;
+        }
+        if ((pkt.action == Action.HIDE || pkt.action == Action.UNHIDE) && !ShopEditPermission.canEditCatalog(player)) {
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.hidden.edit_required"));
             return;
         }
         ShopCatalogSnapshot current = ShopConfig.snapshot();
@@ -135,5 +144,24 @@ public final class ShopBatchManagePacket {
         player.sendSystemMessage(changed > 0
                 ? Component.literal("§b[山海商店] §a" + verb + " §f" + changed + " §a项")
                 : Component.literal("§e[山海商店] " + verb + "没有可变更的项目"));
+    }
+
+    private static void applyPersonal(ShopBatchManagePacket pkt, ServerPlayer player) {
+        boolean hide = pkt.action == Action.PERSONAL_HIDE;
+        ShopCatalogSnapshot snapshot = ShopConfig.snapshot();
+        if (hide && snapshot.revision() != pkt.catalogRevision) {
+            ShopCatalogManifestPacket.sendLatestIfAllowed(player, snapshot.manifest(), pkt.catalogRevision);
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.hidden.retry"));
+            return;
+        }
+        var ids = hide ? pkt.stableIds.stream().filter(id -> {
+            ShopEntry entry = snapshot.resolveByStableId(id);
+            return entry != null && !entry.isHidden() && entry.isStructurallyValid();
+        }).toList() : pkt.stableIds;
+        var current = ShopPersonalHidden.set(player, ids, hide);
+        if (hide && !current.containsAll(ids)) {
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.hidden.personal_limit"));
+        }
+        ShopPersonalHiddenSyncPacket.sendTo(player, current);
     }
 }

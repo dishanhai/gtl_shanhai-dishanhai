@@ -1,13 +1,18 @@
 package com.dishanhai.gt_shanhai.client.shop;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.sh_better_ui.client.api.ShBetterUiApi;
+import com.dishanhai.sh_better_ui.theme.ThemeId;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Objects;
 
 /** Client-only personal display preferences for the wallet shop UI. */
 public final class ClientShopUiSettings {
@@ -49,6 +54,7 @@ public final class ClientShopUiSettings {
     private static String pickerSort = "default";
     private static boolean pickerGroupByMod = false;
     private static String shopTheme = THEME_CLASSIC;
+    private static ShopAppearance shopAppearance = ShopAppearance.DEFAULT;
     /** 初始化向导（ShopWelcomeScreen）是否已走完或跳过。新客户端没有配置文件 = 未完成；旧配置文件没这个键 = 老玩家，视为已完成。 */
     private static boolean setupDone;
     /** 山海商店个人禁用，仅保存在本机 config，不影响其他客户端。 */
@@ -148,6 +154,12 @@ public final class ClientShopUiSettings {
 
     public static boolean reduceMotion() {
         ensureLoaded();
+        return reduceMotion || com.dishanhai.sh_better_ui.client.gui.scaled.UiPreferences.configured().reducedMotion();
+    }
+
+    /** 编辑本机偏好时读取原值，不能把全局覆盖写成本机持久化设置。 */
+    public static boolean localReduceMotion() {
+        ensureLoaded();
         return reduceMotion;
     }
 
@@ -176,12 +188,40 @@ public final class ClientShopUiSettings {
 
     public static synchronized void setShopTheme(String theme) {
         ensureLoaded();
+        setShopAppearance(theme, shopAppearance.withMaterial(ShopAppearance.Material.PRESET));
+    }
+
+    public static ShopAppearance shopAppearance() {
+        ensureLoaded();
+        return shopAppearance;
+    }
+
+    public static synchronized boolean setShopAppearance(String theme, ShopAppearance appearance) {
+        ensureLoaded();
+        Objects.requireNonNull(appearance);
+        String previousTheme = shopTheme;
+        ShopAppearance previousAppearance = shopAppearance;
         shopTheme = normalizeTheme(theme);
-        save();
+        shopAppearance = appearance;
+        if (save()) return true;
+        shopTheme = previousTheme;
+        shopAppearance = previousAppearance;
+        return false;
     }
 
     private static String normalizeTheme(String theme) {
-        return THEME_SMOKE.equals(theme) ? THEME_SMOKE : THEME_GLASS.equals(theme) ? THEME_GLASS : THEME_CLASSIC;
+        return validThemeId(theme) ? theme : THEME_CLASSIC;
+    }
+
+    static boolean validThemeId(String id) {
+        if (id == null) return false;
+        if (!id.contains(":")) return ShBetterUiApi.materials().findTheme(id).isPresent();
+        try {
+            ThemeId.require(id);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     public static String pickerSort() {
@@ -226,6 +266,7 @@ public final class ClientShopUiSettings {
         pickerSort = "default";
         pickerGroupByMod = false;
         shopTheme = THEME_CLASSIC;
+        shopAppearance = ShopAppearance.DEFAULT;
         setupDone = false;
         shopDisabled = false;
         if (!settingsFile().exists()) return;
@@ -259,6 +300,7 @@ public final class ClientShopUiSettings {
                     && root.getAsJsonPrimitive("shopTheme").isString()) {
                 shopTheme = normalizeTheme(root.get("shopTheme").getAsString());
             }
+            shopAppearance = ShopAppearance.fromJson(root.get("shopAppearance"));
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_client_ui.json 失败: {}", e.getMessage());
         }
@@ -277,7 +319,8 @@ public final class ClientShopUiSettings {
         };
     }
 
-    private static void save() {
+    private static boolean save() {
+        Path temporary = null;
         try {
             JsonObject root = new JsonObject();
             root.addProperty("cardWidth", cardWidth);
@@ -291,14 +334,28 @@ public final class ClientShopUiSettings {
             root.addProperty("pickerSort", pickerSort);
             root.addProperty("pickerGroupByMod", pickerGroupByMod);
             root.addProperty("shopTheme", shopTheme);
+            if (!ShopAppearance.DEFAULT.equals(shopAppearance)) root.add("shopAppearance", shopAppearance.toJson());
             root.addProperty("setupDone", setupDone);
             root.addProperty("shopDisabled", shopDisabled);
-            try (OutputStreamWriter writer = new OutputStreamWriter(
-                    new FileOutputStream(settingsFile()), StandardCharsets.UTF_8)) {
-                writer.write(GSON.toJson(root));
+            Path destination = settingsFile().toPath();
+            temporary = Files.createTempFile(destination.getParent(), "shop_client_ui-", ".tmp");
+            Files.writeString(temporary, GSON.toJson(root), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 保存 shop_client_ui.json 失败: {}", e.getMessage());
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (java.io.IOException ignored) {
+                    // 原有偏好文件仍可读取。
+                }
+            }
+            return false;
         }
     }
 }

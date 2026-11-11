@@ -7,6 +7,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** 山海：多选资源联想只能收窄当前来源和模组的匹配结果，不修改已选清单。 */
 class PickerSearchSuggestionsTest {
+    @Test
+    void pinyinSuggestionsPreserveCurrentSourceOrderAndCompleteLocalizedNames() {
+        var index = new PickerSearchSuggestions(List.of(entry(0, "铁锭", "mod:iron"),
+                entry(1, "铁锭块", "mod:iron_block"), entry(2, "Copper", "other:copper")));
+        for (String query : List.of("tieding", "td", "铁 ding")) {
+            var result = index.suggestAll(query, List.of(1, 0));
+            assertEquals(List.of(1L, 0L), result.stream()
+                    .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList(), query);
+            assertEquals("铁锭块", result.getFirst().completion(), query);
+        }
+        assertTrue(index.suggestAll("td", List.of(2)).isEmpty());
+    }
+
     private Object index(List<PickerSortEntry> entries) throws Exception {
         return Class.forName("com.dishanhai.gt_shanhai.client.gui.shop.PickerSearchSuggestions")
                 .getConstructor(List.class).newInstance(entries);
@@ -43,6 +56,21 @@ class PickerSearchSuggestionsTest {
         }
         assertEquals("*minecraft:water", suggest(index, "#water", List.of(1)).get(0).completion());
         assertTrue(suggest(index, " ", List.of(0)).isEmpty());
+    }
+
+    @Test
+    void externallyMatchedTooltipAndIdQueriesKeepUnrelatedNamesAndIds() {
+        var index = new PickerSearchSuggestions(List.of(entry(0, "Copper", "mod:copper"),
+                entry(1, "Tin", "mod:tin"), entry(2, "", "mod:unnamed")));
+        for (String query : List.of("$conductive", "*external-alias")) {
+            var result = index.suggestAll(query, List.of(1, 999, 0));
+            assertEquals(List.of(1L, 0L), result.stream()
+                    .map(ShopCatalogSearchIndex.Suggestion::entryKey).toList(), query);
+            assertEquals(List.of("*mod:tin", "*mod:copper"), result.stream()
+                    .map(ShopCatalogSearchIndex.Suggestion::completion).toList(), query);
+        }
+        assertEquals("mod:unnamed", index.suggestAll("unnamed", List.of(2)).getFirst().completion());
+        assertEquals("mod:unnamed", index.suggestAll("unnamed", List.of(2)).getFirst().displayName());
     }
 
     @Test

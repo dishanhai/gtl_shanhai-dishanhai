@@ -7,7 +7,6 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.RepeatCurve;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.sh_better_ui.client.glass.GlassGeometry;
 import com.dishanhai.sh_better_ui.client.glass.GuiRect;
@@ -53,7 +52,7 @@ import java.util.function.Consumer;
  * <p>由 {@link ShopEntryEditScreen} 的「物品排 +」「流体排 +」打开，取代原 FTBLib 单选。
  * 关屏后返回编辑器（其 init 重新按草稿布局，显示新加入项）。</p>
  */
-public class MultiPickerScreen extends ScaledScreen {
+public class MultiPickerScreen extends ShopScaledScreen {
 
     private enum Mode { ITEM, INVENTORY, BOOKMARK, FLUID, TEXTURE }
 
@@ -125,6 +124,8 @@ public class MultiPickerScreen extends ScaledScreen {
     }
 
     private final Screen parent;
+
+    boolean catalogEditorPage() { return ShopScreenOpener.isCatalogEditorPage(parent); }
     // 物品确认回调带精确 long 数量：ItemStack.setCount 物理上限是 int，光靠 stack 传数量会把
     // 100000000000 这类输入悄悄夹成 2147483647（消费方再 getCount() 反推 long 等于白存）。
     // stack 照旧带 int 夹值（角标/兼容用），需要真实数量的消费方（成本排 List<Long>）读第二参。

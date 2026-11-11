@@ -57,7 +57,7 @@ class PickerPreferencesSourceTest {
 
     @Test
     void savingPickerPreferencesKeepsAllExistingSettingKeys() throws Exception {
-        String save = block(Files.readString(SETTINGS), "private static void save()");
+        String save = block(Files.readString(SETTINGS), "private static boolean save()");
 
         for (String key : new String[]{"pickerSort", "pickerGroupByMod", "cardWidth", "cardHeight",
                 "rewardPreview", "rememberShopView", "shopSearch", "shopSelectedStableId", "reduceMotion", "uiSounds"}) {

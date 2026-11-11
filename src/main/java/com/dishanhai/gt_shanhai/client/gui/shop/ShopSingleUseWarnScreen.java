@@ -2,12 +2,15 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.sh_better_ui.client.gui.scaled.UiButton;
+import com.mojang.blaze3d.platform.InputConstants;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.FormattedCharSequence;
 
 import org.lwjgl.glfw.GLFW;
@@ -25,7 +28,7 @@ import java.util.List;
  * <p>长行换行不截断；行多时可滚轮、拖右侧滚动条或用 ↑↓/PageUp/PageDown/Home/End 翻；Enter 继续购买、Esc 取消。
  * 按钮反馈走 {@link ShopDialogUi}。</p>
  */
-public class ShopSingleUseWarnScreen extends ScaledScreen {
+public class ShopSingleUseWarnScreen extends ShopScaledScreen {
 
     private static final int RED = 0xFFFF5555;
     private static final int RED_DARK = 0xFFAA2222;
@@ -40,11 +43,13 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
     private static final int FOOTER_H = 36;
     private static final int WHEEL_ROWS = 3;
 
-    private final Screen parentScreen;
     private final List<String> lines;
-    private final Runnable onConfirm;
     private final ShopDialogUi ui = new ShopDialogUi(RED_DARK, RED, BTN_BG, BTN_HOVER);
-    private boolean finished;
+    private final ShopConfirmationReturn returnToParent;
+    private final ShopConfirmationActions actions;
+    private UiButton confirmButton;
+    private UiButton cancelButton;
+    private boolean spaceHeld;
 
     private int left, top, panelWidth, panelHeight;
     private int listX, listY, listW, listH;
@@ -53,10 +58,13 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
     private int[] heights = new int[0];
 
     private ShopSingleUseWarnScreen(Screen parentScreen, List<String> lines, Runnable onConfirm) {
-        super(Component.literal("重复购买提醒"));
-        this.parentScreen = parentScreen;
+        super(label("single_use.title"));
         this.lines = List.copyOf(lines);
-        this.onConfirm = onConfirm;
+        returnToParent = new ShopConfirmationReturn(this, parentScreen);
+        actions = new ShopConfirmationActions(() -> {
+            returnToParent.restore();
+            onConfirm.run();
+        }, returnToParent::restore, () -> {});
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false;
@@ -73,6 +81,7 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
     protected void initScaled() {
         ui.cancel();
         ui.syncEnterHeld();
+        spaceHeld = InputConstants.isKeyDown(Minecraft.getInstance().getWindow().getWindow(), GLFW.GLFW_KEY_SPACE);
         left = Math.max(6, (vWidth - TARGET_W) / 2);
         top = Math.max(8, (vHeight - TARGET_H) / 2);
         panelWidth = Math.min(TARGET_W, vWidth - 12);
@@ -92,6 +101,13 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
         heights = new int[rows.size()];
         Arrays.fill(heights, ROW_H);
         scroll = Math.min(scroll, maxScroll());
+        confirmButton = addWidget(new UiButton(left + 8, btnY(), confirmW(), 18,
+                label("single_use.confirm").withStyle(ChatFormatting.YELLOW), button -> confirm(),
+                ShopVisuals.preferences(), true));
+        cancelButton = addWidget(new UiButton(left + panelWidth - 8 - 52, btnY(), 52, 18,
+                CommonComponents.GUI_CANCEL.copy().withStyle(ChatFormatting.GREEN), button -> cancel(),
+                ShopVisuals.preferences(), false));
+        setInitialFocus(confirmButton);
     }
 
     private int visibleRows() {
@@ -121,6 +137,7 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
     @Override
     public void renderBackground(GuiGraphics g) {
         if (!ShopTheme.current().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
+        returnToParent.render(g);
     }
 
     @Override
@@ -130,8 +147,8 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
         ShopTheme.current().rootPanel(g, left, top, panelWidth, panelHeight,
                 left + 5, top + 18, panelWidth - 10, panelHeight - 23, RED_DARK, RED, RED);
 
-        g.drawString(this.font, "§c⚠ 重复购买提醒", left + 8, top + 5, RED, true);
-        g.drawString(this.font, "§7SDA / 无限盘一般只需买一次", left + 8, top + 14, GRAY, true);
+        g.drawString(this.font, label("single_use.heading"), left + 8, top + 5, RED, true);
+        g.drawString(this.font, label("single_use.details"), left + 8, top + 14, GRAY, true);
 
         int visible = visibleRows();
         for (int i = 0; i < visible; i++) {
@@ -142,28 +159,35 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
         int maxScroll = maxScroll();
         ui.drawScrollbar(g, barX(), listY, listH, rows.size(), visible, scroll, maxScroll, mx, my);
         if (maxScroll > 0) {
-            g.drawString(this.font, "§8" + (scroll + 1) + "-" + Math.min(scroll + visible, rows.size()) + "/" + rows.size()
-                    + " 滚轮或拖动右侧滚动条", listX, listY + listH + 2, GRAY, true);
+            g.drawString(this.font, Component.translatable("gt_shanhai.shop.confirmation.scroll",
+                    scroll + 1, Math.min(scroll + visible, rows.size()), rows.size()),
+                    listX, listY + listH + 2, GRAY, true);
         }
 
-        ui.draw(g, this.font, left + 8, btnY(), confirmW(), 18, "§e仍然购买", mx, my, true);
-        ui.draw(g, this.font, left + panelWidth - 8 - 52, btnY(), 52, 18, "§a取消", mx, my, true);
+        ui.draw(g, this.font, left + 8, btnY(), confirmW(), 18,
+                confirmButton.getMessage(), mx, my, true);
+        ui.draw(g, this.font, left + panelWidth - 8 - 52, btnY(), 52, 18,
+                cancelButton.getMessage(), mx, my, true);
+        if (confirmButton.isFocused()) ShopTheme.current().focus(g, left + 8, btnY(), confirmW(), 18);
+        if (cancelButton.isFocused()) ShopTheme.current().focus(g, left + panelWidth - 8 - 52, btnY(), 52, 18);
     }
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
-        if (btn != 0 || finished) return false;
+        if (btn != 0 || actions.finished()) return false;
         int first = ui.beginDrag(mx, my, barX(), listY, listH, rows.size(), visibleRows(), maxScroll());
         if (first >= 0) {
             scroll = first;
             return true;
         }
         if (ui.hit(mx, my, left + 8, btnY(), confirmW(), 18, true)) {
-            confirm();
+            setFocused(confirmButton);
+            confirmButton.onPress();
             return true;
         }
         if (ui.hit(mx, my, left + panelWidth - 8 - 52, btnY(), 52, 18, true)) {
-            cancel();
+            setFocused(cancelButton);
+            cancelButton.onPress();
             return true;
         }
         return super.universalMouseClicked(mx, my, btn);
@@ -196,13 +220,22 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (!finished) {
+        if (!actions.finished()) {
             int page = Math.max(1, visibleRows() - 1);
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 // 在商店里按 Enter 打开本框时，松开前的系统重复不算确认
                 if (ui.takeEnter()) {
-                    ui.press(left + 8, btnY(), confirmW(), 18, true);
-                    confirm();
+                    UiButton target = getFocused() == cancelButton ? cancelButton : confirmButton;
+                    ui.press(target.getX(), target.getY(), target.getWidth(), target.getHeight(), target.active);
+                    target.onPress();
+                }
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_SPACE && getFocused() instanceof UiButton target) {
+                if (!spaceHeld) {
+                    spaceHeld = true;
+                    ui.press(target.getX(), target.getY(), target.getWidth(), target.getHeight(), target.active);
+                    target.onPress();
                 }
                 return true;
             }
@@ -225,20 +258,16 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
     @Override
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
         ui.enterReleased(keyCode);
+        if (keyCode == GLFW.GLFW_KEY_SPACE) spaceHeld = false;
         return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     private void confirm() {
-        if (finished) return;
-        finished = true;
-        Minecraft.getInstance().setScreen(parentScreen);
-        onConfirm.run();
+        actions.confirm(true);
     }
 
     private void cancel() {
-        if (finished) return;
-        finished = true;
-        Minecraft.getInstance().setScreen(parentScreen);
+        actions.cancel();
     }
 
     @Override
@@ -249,9 +278,24 @@ public class ShopSingleUseWarnScreen extends ScaledScreen {
     @Override
     public void removed() {
         ui.cancel();
+        returnToParent.close();
+        actions.abandon();
         super.removed();
     }
 
     @Override
     public boolean isPauseScreen() { return false; }
+
+    @Override
+    public Component getNarrationMessage() {
+        List<Component> details = new ArrayList<>();
+        details.add(getTitle());
+        details.add(label("single_use.details"));
+        for (String line : lines) details.add(DShanhaiTextUtil.fromLegacy(line));
+        return CommonComponents.joinLines(details);
+    }
+
+    private static net.minecraft.network.chat.MutableComponent label(String key) {
+        return Component.translatable("gt_shanhai.shop.confirmation." + key);
+    }
 }

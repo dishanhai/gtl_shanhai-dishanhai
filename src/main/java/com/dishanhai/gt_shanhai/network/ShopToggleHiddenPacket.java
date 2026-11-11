@@ -9,16 +9,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * 商店条目「设为隐藏/取消隐藏」专用包（C→S，编辑权专属）。
- *
- * <p>单独拆出来（而不是走 {@link ShopEditPacket} 的 Action.EDIT），是因为「编辑条目」
- * 折进了编辑模式（{@link com.dishanhai.gt_shanhai.common.shop.ShopEditMode}，见反馈）后，
- * 服务端要能严格拦「编辑条目」而不连带误伤「设为隐藏」——两者若共用同一个网络包，
- * 服务端没法只区分出是从哪个入口发起的。这里只校验 {@link ShopEditPermission#canEdit}，
- * 不要求编辑模式，跟排序（{@link ShopReorderPacket}）同一档权限。</p>
+ * 公共目录隐藏开关（C→S）。只允许已开启目录编辑模式的编辑者修改。
  */
 public class ShopToggleHiddenPacket {
 
@@ -52,8 +47,8 @@ public class ShopToggleHiddenPacket {
 
     private static void apply(ShopToggleHiddenPacket pkt, ServerPlayer player) {
         if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
-        if (!ShopEditPermission.canEdit(player)) {
-            player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
+        if (!ShopEditPermission.canEditCatalog(player)) {
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.hidden.edit_required"));
             return;
         }
         ShopEntry old = ShopConfig.resolve(pkt.catalogRevision, pkt.entryKey);
@@ -61,15 +56,10 @@ public class ShopToggleHiddenPacket {
             player.sendSystemMessage(Component.literal("§c[山海商店] 商品目录已更新或商品不存在，请重新打开"));
             return;
         }
-        ShopEntry updated = new ShopEntry(old.getGoodsList(), old.getCategory(), old.getCost(), old.getDescription(),
-                old.getServerUses(), old.getDisplayIcons(), old.getRewardMode(), old.getRewardPool(),
-                !old.isHidden(), old.getLinkKey(), old.getLinkTo(), old.getDisplayName(), old.getFtbqTableId(),
-                old.getFtbqSubMode(), old.getTradeMode(), old.getPeriodTicks(), old.getPeriodLimit(),
-                old.getPrerequisiteQuestId(), old.getStableId()).withBranchSource(old.getBranchSource());
-        updated.overrideRemainingUses(old.getRemainingUses());
-        boolean ok = ShopConfig.replaceEntry(old, updated);
+        boolean hidden = !old.isHidden();
+        boolean ok = ShopConfig.batchSetHidden(List.of(old.getStableId()), hidden) > 0;
         player.sendSystemMessage(ok
-                ? Component.literal(updated.isHidden() ? "§b[山海商店] §a已设为隐藏" : "§b[山海商店] §a已取消隐藏")
+                ? Component.translatable(hidden ? "gt_shanhai.shop.hidden.global_hidden" : "gt_shanhai.shop.hidden.global_restored")
                 : Component.literal("§c[山海商店] 操作失败"));
     }
 }

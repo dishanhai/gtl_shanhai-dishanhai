@@ -144,7 +144,7 @@ class ShopBatchOperationsSourceTest {
                 "玻璃主题应沿用样板生成器的 GlassPalette 与受光亮边");
         assertTrue(screen.contains("applyTheme(ShopTheme.current())") && screen.contains("theme.backdrop(g, left, top, panelWidth, panelHeight)"),
                 "商店每帧按主题回填结构色，玻璃主题先实时糊掉面板后面的世界");
-        assertTrue(settings.contains("界面主题") && settings.contains("setShopTheme("),
+        assertTrue(settings.contains("界面主题") && settings.contains("setShopAppearance(shopTheme, appearance)"),
                 "商店设置应能切换并保存界面主题");
         assertTrue(prefs.contains("\"shopTheme\"") && prefs.contains("THEME_CLASSIC"),
                 "主题只存客户端，默认经典");

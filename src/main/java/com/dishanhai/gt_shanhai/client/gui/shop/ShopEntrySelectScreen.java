@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 
@@ -23,7 +22,7 @@ import java.util.function.Consumer;
  * <p>数据源是登录时就同步好的轻量 stub（{@link ClientShopCatalog#stubs()}），不需要商品实体
  * 到货，所以打开即全量可选、可搜。结构照抄 {@link FtbqQuestSelectScreen}，数据源换成商品。</p>
  */
-public class ShopEntrySelectScreen extends ScaledScreen {
+public class ShopEntrySelectScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
@@ -55,6 +54,8 @@ public class ShopEntrySelectScreen extends ScaledScreen {
     public ShopEntrySelectScreen(Screen parent, Consumer<String> onPicked) {
         this(parent, false, "", onPicked);
     }
+
+    boolean catalogEditorPage() { return ShopScreenOpener.isCatalogEditorPage(parent); }
 
     /** 山海编辑器可选隐藏商品并排除自己；任务绑定继续使用默认的可见商品入口。 */
     public ShopEntrySelectScreen(Screen parent, boolean includeHidden, String excludeStableId,

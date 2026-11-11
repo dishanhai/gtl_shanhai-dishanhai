@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.client.shop.ShopCatalogSearchIndex.Suggestion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
@@ -90,7 +89,7 @@ final class ShopSearchSuggestions {
     }
 
     private int listY() {
-        return y + height + 2 + (ClientShopUiSettings.reduceMotion() ? 0
+        return y + height + 2 + (com.dishanhai.sh_better_ui.client.gui.scaled.UiPreferences.configured().reducedMotion() ? 0
                 : Math.round(3f * (1f - GuiMotion.clamp01(motion.value()))));
     }
 

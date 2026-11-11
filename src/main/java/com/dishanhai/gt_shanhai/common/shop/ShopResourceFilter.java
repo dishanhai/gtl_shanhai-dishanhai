@@ -46,10 +46,15 @@ public final class ShopResourceFilter {
     }
 
     public static List<Long> keys(List<ShopCatalogManifest.Stub> stubs, List<Resource> selected, boolean costs) {
+        return keys(stubs, selected, costs, false);
+    }
+
+    public static List<Long> keys(List<ShopCatalogManifest.Stub> stubs, List<Resource> selected, boolean costs,
+                                  boolean includeHidden) {
         List<Long> result = new ArrayList<>();
         var matcher = compile(selected);
         for (var stub : stubs) {
-            if (!stub.hidden() && matcher.test(costs ? stub.costResources() : stub.goodsResources())) {
+            if ((includeHidden || !stub.hidden()) && matcher.test(costs ? stub.costResources() : stub.goodsResources())) {
                 result.add(stub.entryKey());
             }
         }

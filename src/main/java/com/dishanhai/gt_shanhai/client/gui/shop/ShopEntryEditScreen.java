@@ -5,7 +5,6 @@ import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopEntryEditLayout.Row;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopEntryEditLayout.Tab;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -43,7 +42,7 @@ import java.util.List;
  * <p>字段分在五个页签（商品/价格/限购/奖励/跳转，见 {@link ShopEntryEditLayout}），每页的行按实际高度
  * 往下堆，说明换行就长高；取消/保存在页脚右下。</p>
  */
-public class ShopEntryEditScreen extends ScaledScreen {
+public class ShopEntryEditScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;

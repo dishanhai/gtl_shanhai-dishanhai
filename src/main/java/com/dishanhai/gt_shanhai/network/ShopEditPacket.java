@@ -353,8 +353,7 @@ public class ShopEditPacket {
             player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
             return;
         }
-        // 新增/编辑（含「复制为新条目」）都折进了编辑模式；「设为隐藏」已拆到 ShopToggleHiddenPacket，
-        // 不走这里，不受此校验影响，见 ShopEditMode 类注释。
+        // 新增/编辑（含「复制为新条目」）都需要目录编辑模式。
         if (!com.dishanhai.gt_shanhai.common.shop.ShopEditMode.isEnabled(player.getUUID())) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 请先执行 /山海 商店 编辑 开启编辑模式"));
             return;

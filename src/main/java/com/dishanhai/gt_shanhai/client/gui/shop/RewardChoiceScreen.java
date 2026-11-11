@@ -3,7 +3,6 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.TextFormatParser;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 
@@ -26,7 +25,7 @@ import java.util.List;
  * <p>名字换行不截断（行随之长高）；↑↓ 选、Enter 确认、Esc 回商店；确认经 {@link ShopScreen#submitRewardChoice}
  * 带请求号发包，回到商店后确认按钮接着显示等待与成交结果。按钮与滚动条走 {@link ShopDialogUi}。</p>
  */
-public class RewardChoiceScreen extends ScaledScreen {
+public class RewardChoiceScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;

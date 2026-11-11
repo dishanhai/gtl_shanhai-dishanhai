@@ -22,9 +22,9 @@ class ShopSmokeGlassSourceTest {
         assertAll(
                 () -> assertTrue(settings.contains("THEME_SMOKE")),
                 () -> assertTrue(theme.contains("GlassTheme.SMOKE")),
-                () -> assertTrue(theme.contains("case ClientShopUiSettings.THEME_SMOKE")),
+                () -> assertTrue(theme.contains("ShBetterUiApi.materials().findTheme(id)")),
                 () -> assertTrue(screen.contains("ShopTheme.next(")),
-                () -> assertTrue(welcome.contains("ShopTheme.SMOKE")),
+                () -> assertTrue(welcome.contains("ShopTheme.choices()")),
                 () -> assertTrue(settings.contains("root.addProperty(\"shopTheme\", shopTheme)")));
     }
 

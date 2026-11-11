@@ -185,10 +185,12 @@ public final class ShopAutoCraft {
             return;
         }
         List<CartLine> lines = new ArrayList<>();
+        boolean catalogEditor = ShopEditPermission.canEditCatalog(player);
         for (Map.Entry<String, Long> candidate : ShopCartAPI.getAll(player.getServer(), player.getUUID()).entrySet()) {
             ShopEntry entry = ShopConfig.resolveByStableId(candidate.getKey());
             long times = candidate.getValue() == null ? 0L : candidate.getValue();
-            if (entry == null || times <= 0L || !entry.isValid() || !entry.allowsBuy() || entry.hasMissingItems()) continue;
+            if (entry == null || (!catalogEditor && entry.isHidden()) || times <= 0L
+                    || !entry.isValid() || !entry.allowsBuy() || entry.hasMissingItems()) continue;
             lines.add(new CartLine(entry, times));
         }
         if (lines.isEmpty()) {

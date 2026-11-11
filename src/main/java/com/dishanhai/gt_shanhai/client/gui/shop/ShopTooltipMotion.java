@@ -12,13 +12,22 @@ final class ShopTooltipMotion {
     private boolean shown;
 
     float show(Object key, long nowMs, boolean reduceMotion) {
+        return show(key, nowMs, reduceMotion, 0);
+    }
+
+    float show(Object key, long nowMs, boolean reduceMotion, int delayMs) {
         if (!Objects.equals(target, key)) {
             target = key;
             enteredAtMs = nowMs;
         }
         shown = true;
-        if (reduceMotion) enteredAtMs = nowMs - ENTER_MS;
-        float t = GuiMotion.clamp01((nowMs - enteredAtMs) / (float) ENTER_MS);
+        long elapsed = Math.max(0L, nowMs - enteredAtMs);
+        if (elapsed < delayMs) return -1f;
+        if (reduceMotion) {
+            enteredAtMs = nowMs - delayMs - ENTER_MS;
+            return 1f;
+        }
+        float t = GuiMotion.clamp01((elapsed - delayMs) / (float) ENTER_MS);
         return 1f - (1f - t) * (1f - t);
     }
 

@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 
 import dev.ftb.mods.ftbquests.client.ClientQuestFile;
 import dev.ftb.mods.ftbquests.quest.QuestObjectBase;
@@ -26,7 +25,7 @@ import java.util.function.Consumer;
  * （标题 + 首个物品类奖励的图标），供商店「FTBQ」奖励模式选表用。选中即回填 ID（十六进制字符串）
  * 并关闭；商店购买时服务端直接读同一张表的实时内容，本屏只负责「挑一个」，不做任何本地复制。
  */
-public class FtbqTableSelectScreen extends ScaledScreen {
+public class FtbqTableSelectScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;

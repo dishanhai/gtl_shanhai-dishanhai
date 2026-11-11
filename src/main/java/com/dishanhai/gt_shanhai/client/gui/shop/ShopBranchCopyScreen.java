@@ -2,8 +2,8 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
+import com.dishanhai.gt_shanhai.client.shop.ShopCatalogView;
 import com.dishanhai.gt_shanhai.common.shop.ShopBranch;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
@@ -24,7 +24,7 @@ import java.util.Set;
  * 多选后一次发给服务端。复制出的商品是副本，内容跟随主支同步；成本、限购等阶段自己的字段可在副本单独改。
  * 默认勾上与分支同级的兄弟阶段（同一个父节点的其他子分类）。路径放不下就换行，不截断。
  */
-public final class ShopBranchCopyScreen extends ScaledScreen {
+public final class ShopBranchCopyScreen extends ShopScaledScreen {
 
     private static final int W = 380, H = 300;
     private static final int PAD = 12;
@@ -58,17 +58,17 @@ public final class ShopBranchCopyScreen extends ScaledScreen {
     // ===== 候选节点 =====
 
     /** 客户端目录里所有分类节点的完整路径（最多四层），保持目录里的顺序。 */
-    static List<String> allPaths() {
+    static List<String> allPaths(ShopCatalogView catalog) {
         List<String> out = new ArrayList<>();
-        for (String top : ClientShopCatalog.topCategories()) {
+        for (String top : catalog.topCategories()) {
             out.add(top);
-            for (String sub : ClientShopCatalog.subCategories(top)) {
+            for (String sub : catalog.subCategories(top)) {
                 String p2 = top + "/" + sub;
                 out.add(p2);
-                for (String sub2 : ClientShopCatalog.subCategories2(top, sub)) {
+                for (String sub2 : catalog.subCategories2(top, sub)) {
                     String p3 = p2 + "/" + sub2;
                     out.add(p3);
-                    for (String sub3 : ClientShopCatalog.subCategories3(top, sub, sub2)) out.add(p3 + "/" + sub3);
+                    for (String sub3 : catalog.subCategories3(top, sub, sub2)) out.add(p3 + "/" + sub3);
                 }
             }
         }
@@ -95,7 +95,7 @@ public final class ShopBranchCopyScreen extends ScaledScreen {
 
     private void collectCandidates() {
         if (entryMode()) {
-            for (String path : allPaths()) {
+            for (String path : allPaths(shop.catalogView())) {
                 if (ShopBranch.depth(path) > ShopBranch.MAX_DEPTH) continue;
                 boolean allThere = true; // 所有商品都已经在这个分组里，就没必要再列
                 for (ShopEntry e : entries) if (!path.equals(e.getCategory())) { allThere = false; break; }
@@ -104,7 +104,7 @@ public final class ShopBranchCopyScreen extends ScaledScreen {
             return;
         }
         String parent = parentOf(sourcePath);
-        for (String path : allPaths()) {
+        for (String path : allPaths(shop.catalogView())) {
             if (ShopBranch.inBranch(path, sourcePath)) continue;     // 不能复制到自己里面
             if (ShopBranch.depth(path) + 1 > ShopBranch.MAX_DEPTH) continue; // 连分支根都放不下
             candidates.add(path);

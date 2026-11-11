@@ -157,6 +157,7 @@ public class ClientInit {
         com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientShopCart.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientShopPersonalHidden.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientShopBank.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance.clear();

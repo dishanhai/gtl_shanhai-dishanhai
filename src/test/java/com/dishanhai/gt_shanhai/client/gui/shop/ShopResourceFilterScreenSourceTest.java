@@ -25,7 +25,8 @@ class ShopResourceFilterScreenSourceTest {
     void searchResponderSelectsAllOnceWhileRecomputeUsesCurrentCategoryScope() throws Exception {
         String source = screen();
         assertTrue(source.contains("searchBox.setResponder(this::onShopSearchChanged)"));
-        assertTrue(source.contains("ClientShopCatalog.searchKeys(q, selectedTop, selectedSub, selectedSub2, selectedSub3)"));
+        assertTrue(source.contains("ShopCatalogView catalog = catalogView()"));
+        assertTrue(source.contains("catalog.searchKeys(q, selectedTop, selectedSub, selectedSub2, selectedSub3)"));
         assertTrue(source.contains("selectAllForSearch()"));
         assertTrue(source.contains("btn == 1 && hit(mx, my, searchBoxX(), searchBoxY(), SEARCH_W, 12)"));
         assertTrue(source.contains("searchBox.setValue(\"\")"));

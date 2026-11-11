@@ -1,9 +1,9 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.sh_better_ui.client.api.MaterialsApi.ThemeChoice;
 import com.dishanhai.sh_better_ui.client.glass.GlassPalette;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopAvailability;
@@ -15,6 +15,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -24,9 +25,9 @@ import java.util.function.Supplier;
  *
  * <p>偏好页只放最影响观感的几项：界面主题（点选即刻整页预览）、减少动效、商店音效、记住选取与搜索。
  * 「完成」把选择存进 {@link ClientShopUiSettings} 并记下已完成；「跳过」/ESC 只记已完成，不改任何设置。
- * 之后可在「商店设置」底栏的「新手引导」重看。所有文字按宽度换行，放不下就往下占行，不截断。</p>
+ * 之后可在「商店设置」底栏的「新手引导」重看。</p>
  */
-public class ShopWelcomeScreen extends ScaledScreen {
+public class ShopWelcomeScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GRAY = -5592406;
@@ -39,6 +40,8 @@ public class ShopWelcomeScreen extends ScaledScreen {
     private static final int PAD = 14;
     private static final int BTN_H = 16;
     private static final int CARD_H = 64;
+    private static final int THEMES_PER_PAGE = 3;
+    private static final int THEME_NAV_W = 28;
 
     private static final String[] PAGE_TITLES = {"欢迎来到山海商店", "钱包、货币与银行", "背包、AE 与设置"};
     private static final String[][][] PAGE_ITEMS = {
@@ -76,7 +79,9 @@ public class ShopWelcomeScreen extends ScaledScreen {
     private final Spring openMotion = Spring.opening(Spring.PANEL);
     private int page;
     private String shopTheme = ClientShopUiSettings.shopTheme();
-    private boolean reduceMotion = ClientShopUiSettings.reduceMotion();
+    private int themePage;
+    private boolean themeEdited;
+    private boolean reduceMotion = ClientShopUiSettings.localReduceMotion();
     private boolean uiSounds = ClientShopUiSettings.uiSounds();
     private boolean rememberView = ClientShopUiSettings.rememberShopView();
     private boolean personalDisabled = ClientShopUiSettings.shopDisabled();
@@ -129,8 +134,9 @@ public class ShopWelcomeScreen extends ScaledScreen {
         return screen;
     }
 
-    private ShopTheme theme() {
-        return ShopTheme.of(shopTheme);
+    @Override
+    protected ShopTheme screenTheme() {
+        return themeEdited ? ShopTheme.of(shopTheme) : super.screenTheme();
     }
 
     @Override
@@ -143,7 +149,7 @@ public class ShopWelcomeScreen extends ScaledScreen {
 
     @Override
     public void renderBackground(GuiGraphics g) {
-        if (!theme().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
+        if (!screenTheme().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
     }
 
     // ===== 几何 =====
@@ -155,15 +161,51 @@ public class ShopWelcomeScreen extends ScaledScreen {
     private int nextW() { return 70; }
     private int nextX() { return left + panelWidth - PAD - nextW(); }
     private int prevX() { return nextX() - 6 - 60; }
-    private int cardW() { return (contentW() - 16) / 3; }
+    private int cardW() { return (contentW() - 8 * (THEMES_PER_PAGE - 1)) / THEMES_PER_PAGE; }
     private int cardX(int i) { return contentX() + i * (cardW() + 8); }
     private int cardY() { return contentTop() + 12; }
+    private int themeNavY() { return cardY() + CARD_H + 4; }
+    private int themeNavRight() { return contentX() + contentW() - THEME_NAV_W; }
+
+    private String visibleThemeId() {
+        return themeEdited ? shopTheme : ShopTheme.visibleId(shopTheme, screenAppearance().materialId());
+    }
+
+    private static int themePageCount(List<ThemeChoice> choices) {
+        return Math.max(1, (choices.size() + THEMES_PER_PAGE - 1) / THEMES_PER_PAGE);
+    }
+
+    private List<ThemeChoice> visibleThemes(List<ThemeChoice> choices) {
+        themePage = Math.min(themePage, themePageCount(choices) - 1);
+        return themesOnPage(choices, themePage);
+    }
+
+    static List<ThemeChoice> themesOnPage(List<ThemeChoice> choices, int page) {
+        int start = page * THEMES_PER_PAGE;
+        return choices.subList(start, Math.min(choices.size(), start + THEMES_PER_PAGE));
+    }
+
+    private void showTheme(String id) {
+        var choices = ShopTheme.choices();
+        for (int i = 0; i < choices.size(); i++) {
+            if (choices.get(i).id().equals(id)) {
+                themePage = i / THEMES_PER_PAGE;
+                return;
+            }
+        }
+        themePage = 0;
+    }
+
+    private void selectTheme(String id) {
+        shopTheme = id;
+        themeEdited = true;
+    }
 
     private int wrappedLines(String text) {
         return Math.max(1, this.font.split(Component.literal(text), contentW()).size());
     }
 
-    private int toggleRowsTop() { return cardY() + CARD_H + 14; }
+    private int toggleRowsTop() { return themeNavY() + BTN_H + 6; }
 
     /** 第 i 个开关按钮的 Y：每行 = 按钮 + 换行后的说明 + 间距。 */
     private int toggleY(int i) {
@@ -190,7 +232,7 @@ public class ShopWelcomeScreen extends ScaledScreen {
     }
 
     private void drawPanel(GuiGraphics g, int mx, int my) {
-        ShopTheme t = theme();
+        ShopTheme t = screenTheme();
         t.rootPanel(g, left, top, panelWidth, panelHeight,
                 left + 5, top + HEADER_H, panelWidth - 10, panelHeight - HEADER_H - 5);
         int head = t.glass ? GlassPalette.TEXT_HEAD : GOLD;
@@ -223,9 +265,21 @@ public class ShopWelcomeScreen extends ScaledScreen {
         int accent = t.glass ? GlassPalette.ACCENT : GOLD;
         g.drawString(this.font, "先选几个偏好（之后都能在「商店设置」里改，只存在这台客户端）",
                 contentX(), contentTop(), accent, !t.glass);
-        drawThemeCard(g, 0, ShopTheme.CLASSIC, ClientShopUiSettings.THEME_CLASSIC, mx, my);
-        drawThemeCard(g, 1, ShopTheme.GLASS, ClientShopUiSettings.THEME_GLASS, mx, my);
-        drawThemeCard(g, 2, ShopTheme.SMOKE, ClientShopUiSettings.THEME_SMOKE, mx, my);
+        var choices = ShopTheme.choices();
+        var visible = visibleThemes(choices);
+        String selected = visibleThemeId();
+        for (int i = 0; i < visible.size(); i++) {
+            var choice = visible.get(i);
+            drawThemeCard(g, i, choice, choice.id().equals(selected), mx, my);
+        }
+        int pages = themePageCount(choices);
+        if (pages > 1) {
+            int y = themeNavY();
+            if (themePage > 0) drawBtn(g, t, contentX(), y, THEME_NAV_W, BTN_H, "‹", mx, my);
+            if (themePage < pages - 1) drawBtn(g, t, themeNavRight(), y, THEME_NAV_W, BTN_H, "›", mx, my);
+            Component pageLabel = Component.translatable("gt_shanhai.shop.theme.pages", themePage + 1, pages);
+            g.drawCenteredString(this.font, pageLabel, left + panelWidth / 2, y + 4, accent);
+        }
 
         String[] labels = {
                 reduceMotion ? "§a减少动效: 开" : "§8减少动效: 关",
@@ -267,8 +321,8 @@ public class ShopWelcomeScreen extends ScaledScreen {
     }
 
     /** 主题点选卡：用它自己代表的主题画一块小底板，选中的边框亮起并标「已选」。 */
-    private void drawThemeCard(GuiGraphics g, int i, ShopTheme preview, String id, int mx, int my) {
-        boolean selected = id.equals(shopTheme);
+    private void drawThemeCard(GuiGraphics g, int i, ThemeChoice choice, boolean selected, int mx, int my) {
+        ShopTheme preview = ShopTheme.of(choice.id());
         int x = cardX(i);
         int y = cardY();
         int w = cardW();
@@ -276,10 +330,19 @@ public class ShopWelcomeScreen extends ScaledScreen {
         int border = selected || hover ? preview.frame : preview.frameDark;
         if (preview.glass) preview.backdrop(g, x, y, w, CARD_H);
         preview.box(g, x, y, w, CARD_H, border, selected ? preview.selectBg : preview.rowBg);
-        int textY = drawWrapped(g, Component.translatable("gt_shanhai.shop.theme." + id).getString(),
-                x + 8, y + 6, w - 16, preview.glass ? preview.colors.TEXT_HEAD : GOLD, !preview.glass);
-        drawWrapped(g, Component.translatable("gt_shanhai.shop.theme." + id + ".description").getString(),
-                x + 8, textY + 3, w - 16, preview.glass ? preview.colors.TEXT_MUTED : GRAY, !preview.glass);
+        Component name = ShopTheme.name(choice);
+        String legacyDescription = Component.translatableWithFallback(
+                "gt_shanhai.shop.theme." + choice.id() + ".description", "").getString();
+        Component description = Component.translatableWithFallback(choice.nameKey() + ".description", legacyDescription);
+        int textY = y + 6;
+        for (var line : this.font.split(name, w - 16).stream().limit(2).toList()) {
+            g.drawString(this.font, line, x + 8, textY, preview.glass ? preview.colors.TEXT_HEAD : GOLD, !preview.glass);
+            textY += 10;
+        }
+        for (var line : this.font.split(description, w - 16).stream().limit(2).toList()) {
+            g.drawString(this.font, line, x + 8, textY, preview.glass ? preview.colors.TEXT_MUTED : GRAY, !preview.glass);
+            textY += 10;
+        }
         if (selected) {
             String mark = Component.translatable("gt_shanhai.shop.theme.selected").getString();
             g.drawString(this.font, mark, x + w - 8 - this.font.width(mark), y + CARD_H - 12,
@@ -341,16 +404,21 @@ public class ShopWelcomeScreen extends ScaledScreen {
                 return true;
             }
         } else if (page == PAGE_SETUP) {
-            if (GuiRenderUtil.isHovering(mx, my, cardX(0), cardY(), cardW(), CARD_H)) {
-                shopTheme = ClientShopUiSettings.THEME_CLASSIC;
+            var choices = ShopTheme.choices();
+            var visible = visibleThemes(choices);
+            for (int i = 0; i < visible.size(); i++) {
+                if (GuiRenderUtil.isHovering(mx, my, cardX(i), cardY(), cardW(), CARD_H)) {
+                    selectTheme(visible.get(i).id());
+                    return true;
+                }
+            }
+            if (themePage > 0 && GuiRenderUtil.isHovering(mx, my, contentX(), themeNavY(), THEME_NAV_W, BTN_H)) {
+                themePage--;
                 return true;
             }
-            if (GuiRenderUtil.isHovering(mx, my, cardX(1), cardY(), cardW(), CARD_H)) {
-                shopTheme = ClientShopUiSettings.THEME_GLASS;
-                return true;
-            }
-            if (GuiRenderUtil.isHovering(mx, my, cardX(2), cardY(), cardW(), CARD_H)) {
-                shopTheme = ClientShopUiSettings.THEME_SMOKE;
+            if (themePage < themePageCount(choices) - 1
+                    && GuiRenderUtil.isHovering(mx, my, themeNavRight(), themeNavY(), THEME_NAV_W, BTN_H)) {
+                themePage++;
                 return true;
             }
             for (int i = 0; i < TOGGLE_HINTS.length; i++) {
@@ -370,6 +438,11 @@ public class ShopWelcomeScreen extends ScaledScreen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (awaitingGlobalSave) return true;
+        if (page == PAGE_SETUP && (keyCode == GLFW.GLFW_KEY_UP || keyCode == GLFW.GLFW_KEY_DOWN)) {
+            selectTheme(ShopTheme.adjacent(visibleThemeId(), keyCode == GLFW.GLFW_KEY_UP ? -1 : 1));
+            showTheme(shopTheme);
+            return true;
+        }
         // GLFW: 右 262 / 左 263 / 回车 257 / 小键盘回车 335
         if (keyCode == 262 || keyCode == 257 || keyCode == 335) {
             advance();
@@ -384,7 +457,7 @@ public class ShopWelcomeScreen extends ScaledScreen {
 
     private void advance() {
         if (availabilityOnly || page >= PAGE_COUNT - 1) finish(true);
-        else page++;
+        else if (++page == PAGE_SETUP) showTheme(visibleThemeId());
     }
 
     /** ESC 等同「跳过」：只记已完成，不改设置。 */
@@ -396,7 +469,7 @@ public class ShopWelcomeScreen extends ScaledScreen {
     private void finish(boolean save) {
         if (awaitingGlobalSave) return;
         if (save) {
-            ClientShopUiSettings.setShopTheme(shopTheme);
+            if (themeEdited) ClientShopUiSettings.setShopTheme(shopTheme);
             ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds);
             ClientShopUiSettings.setRememberShopView(rememberView);
             ClientShopUiSettings.setShopDisabled(personalDisabled);

@@ -24,6 +24,16 @@ class ShopCardAndOverlaySourceTest {
     }
 
     @Test
+    void loadingAndResolvedCardsShareThePriceColumn() throws Exception {
+        String cell = block("private void drawCell(");
+        String loading = block("private void drawLoadingCell(");
+        assertTrue(cell.contains("int numX = cx + layout.priceX()"));
+        assertTrue(loading.contains("renderNumberBar(g, cx + layout.priceX()"));
+        assertTrue(loading.contains("cx + layout.priceX() + 4"),
+                "占位文字需与正式卡片使用同一价格栏，避免加载完成时跳位");
+    }
+
+    @Test
     void cardsReuseResolvedIconsAndMetricsAndReloadInvalidatesTheirCache() throws Exception {
         String cell = block("private void drawCell(");
         assertFalse(cell.contains("entry.effectiveIcons()"), "无限盘 NBT 图标解析不应逐帧执行");

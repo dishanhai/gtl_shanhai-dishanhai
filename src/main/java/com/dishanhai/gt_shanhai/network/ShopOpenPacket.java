@@ -18,15 +18,27 @@ public class ShopOpenPacket {
     /** 所有开店入口统一先推服务端禁用状态与 OP 权限。 */
     public static void sendTo(net.minecraft.server.level.ServerPlayer player) {
         ShopAvailabilityPacket.sendTo(player);
+        ShopPersonalHiddenSyncPacket.sendTo(player);
         ShanhaiNetwork.CHANNEL.send(net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
                 new ShopOpenPacket(com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player),
                         com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player),
                         com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
     }
 
+    public static void syncEditAccess(net.minecraft.server.level.ServerPlayer player) {
+        ShanhaiNetwork.CHANNEL.send(net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
+                editAccess(com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player),
+                        com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player)));
+    }
+
+    static ShopOpenPacket editAccess(boolean canEdit, boolean catalogEditUnlocked) {
+        return new ShopOpenPacket(canEdit, catalogEditUnlocked, null, false);
+    }
+
     private final boolean canEdit;
     private final boolean catalogEditUnlocked;
     private final com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest;
+    private final boolean openScreen;
 
     public ShopOpenPacket() {
         this(false, false, com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.empty());
@@ -38,8 +50,14 @@ public class ShopOpenPacket {
 
     public ShopOpenPacket(boolean canEdit, boolean catalogEditUnlocked,
                            com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest) {
+        this(canEdit, catalogEditUnlocked, manifest, true);
+    }
+
+    private ShopOpenPacket(boolean canEdit, boolean catalogEditUnlocked,
+                           com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest, boolean openScreen) {
         this.canEdit = canEdit;
         this.catalogEditUnlocked = catalogEditUnlocked;
+        this.openScreen = openScreen;
         this.manifest = manifest == null
                 ? com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.empty() : manifest;
     }
@@ -47,27 +65,33 @@ public class ShopOpenPacket {
     public ShopOpenPacket(FriendlyByteBuf buf) {
         this.canEdit = buf.readBoolean();
         this.catalogEditUnlocked = buf.readBoolean();
-        this.manifest = ShopCatalogCodecs.readManifest(buf);
+        this.openScreen = buf.readBoolean();
+        this.manifest = openScreen ? ShopCatalogCodecs.readManifest(buf)
+                : com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.empty();
     }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(canEdit);
         buf.writeBoolean(catalogEditUnlocked);
-        ShopCatalogCodecs.writeManifest(buf, manifest);
+        buf.writeBoolean(openScreen);
+        if (openScreen) ShopCatalogCodecs.writeManifest(buf, manifest);
     }
 
     public static void handle(ShopOpenPacket pkt, Supplier<NetworkEvent.Context> ctx) {
         NetworkEvent.Context context = ctx.get();
         if (context.getDirection().getReceptionSide().isClient()) {
-            context.enqueueWork(() -> openClient(pkt.canEdit, pkt.catalogEditUnlocked, pkt.manifest));
+            context.enqueueWork(() -> applyClient(pkt));
         }
         context.setPacketHandled(true);
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static void openClient(boolean canEdit, boolean catalogEditUnlocked,
-                                   com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest) {
-        com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog.applyManifest(manifest);
-        com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener.open(canEdit, catalogEditUnlocked);
+    private static void applyClient(ShopOpenPacket packet) {
+        if (!packet.openScreen) {
+            com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener.updateEditAccess(packet.canEdit, packet.catalogEditUnlocked);
+            return;
+        }
+        com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog.applyManifest(packet.manifest);
+        com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener.open(packet.canEdit, packet.catalogEditUnlocked);
     }
 }

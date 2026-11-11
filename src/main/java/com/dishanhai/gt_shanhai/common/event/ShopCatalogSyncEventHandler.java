@@ -3,13 +3,19 @@ package com.dishanhai.gt_shanhai.common.event;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.network.ShopCatalogManifestPacket;
+import com.dishanhai.gt_shanhai.network.ShopOpenPacket;
 import com.dishanhai.gt_shanhai.network.ShopQuestLinkSyncPacket;
 import com.dishanhai.gt_shanhai.network.ShopSubmissionSyncPacket;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.player.PermissionsChangedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 玩家登录即下发一次商店目录清单（山海署名）。
@@ -27,6 +33,7 @@ public final class ShopCatalogSyncEventHandler {
     private ShopCatalogSyncEventHandler() {}
 
     private static volatile boolean resourceIndexRefreshPending;
+    private static final Set<UUID> EDIT_ACCESS_REFRESH = new HashSet<>();
 
     static {
         if (net.minecraftforge.fml.ModList.get().isLoaded("ftbquests")) FtbqRefreshListener.register();
@@ -48,9 +55,23 @@ public final class ShopCatalogSyncEventHandler {
 
     @SubscribeEvent
     public static void onServerTick(net.minecraftforge.event.TickEvent.ServerTickEvent event) {
-        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END || !resourceIndexRefreshPending) return;
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+        if (!EDIT_ACCESS_REFRESH.isEmpty()) {
+            for (UUID id : EDIT_ACCESS_REFRESH) {
+                ServerPlayer player = event.getServer().getPlayerList().getPlayer(id);
+                if (player != null) ShopOpenPacket.syncEditAccess(player);
+            }
+            EDIT_ACCESS_REFRESH.clear();
+        }
+        if (!resourceIndexRefreshPending) return;
         resourceIndexRefreshPending = false;
         ShopConfig.refreshResourceIndex();
+    }
+
+    @SubscribeEvent
+    public static void onOpPermissionChanged(PermissionsChangedEvent event) {
+        // Forge 先发可取消事件，再更新 OP 列表；tick 末读取真正生效的权限。
+        EDIT_ACCESS_REFRESH.add(event.getEntity().getUUID());
     }
 
     @SubscribeEvent
@@ -61,6 +82,7 @@ public final class ShopCatalogSyncEventHandler {
     @SubscribeEvent
     public static void onServerStopped(net.minecraftforge.event.server.ServerStoppedEvent event) {
         resourceIndexRefreshPending = false;
+        EDIT_ACCESS_REFRESH.clear();
         com.dishanhai.gt_shanhai.common.shop.ShopAvailability.clearPersonal();
     }
 

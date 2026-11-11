@@ -31,17 +31,25 @@ class ShopButtonFeedbackSourceTest {
 
     @Test
     void clickSoundPlaysEvenWhenMotionIsReduced() throws Exception {
-        String wave = extractBlock(Files.readString(Path.of(SHOP)), "private void armClickWave(");
+        String shop = Files.readString(Path.of(SHOP));
+        String wave = extractBlock(shop, "private void armClickWave(");
         int sound = wave.indexOf("ShopUiSounds.click()");
-        int reduce = wave.indexOf("ClientShopUiSettings.reduceMotion()");
-        int arm = wave.indexOf("clickWaveAtMs =");
-        assertTrue(sound >= 0 && sound < reduce && reduce < arm, "先出声，减少动效时再跳过波纹");
+        assertTrue(sound >= 0 && sound < wave.indexOf("armClickWaveVisual("), "先出声，再进入可关闭的视觉反馈");
+        String visual = extractBlock(shop, "private void armClickWaveVisual(");
+        int reduce = visual.indexOf("ClientShopUiSettings.reduceMotion()");
+        assertTrue(reduce >= 0 && reduce < visual.indexOf("clickWaveAtMs ="), "减少动效只跳过波纹");
+        assertFalse(visual.contains("ShopUiSounds.click()"), "原生按钮已经出声，视觉入口不能重复出声");
+        String nativeButton = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopNativeButton.java"));
+        String nativeSound = extractBlock(nativeButton, "public void playDownSound(");
+        assertTrue(nativeSound.contains("ShopUiSounds.click()") && !nativeSound.contains("reduceMotion"),
+                "原生键盘和鼠标入口继续遵守商店音效开关，且不受减少动效影响");
     }
 
     @Test
     void buttonsDrawThroughTheFeedbackVisual() throws Exception {
         String s = Files.readString(Path.of(SHOP));
-        String draw = extractBlock(s, "private void drawButton(");
+        String draw = extractBlock(s, "long actionKey, GraphicIcon icon)");
         assertTrue(draw.contains("hoverButtons.follow("), "hover 弹簧照旧");
         assertTrue(draw.contains("my - frameMy"), "滚动区按内容坐标画，要换回屏幕坐标对上按下 key");
         assertTrue(draw.contains("buttonFeedback.visual(") && draw.contains("GuiRenderUtil.withButtonMotion("));

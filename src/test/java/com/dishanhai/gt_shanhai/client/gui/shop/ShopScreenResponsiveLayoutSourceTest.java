@@ -40,10 +40,12 @@ class ShopScreenResponsiveLayoutSourceTest {
                 "顶部购买页签宽度不应随卡片布局缩放");
         assertTrue(source.contains("private int closeBtnW() { return CLOSE_W; }"),
                 "顶部关闭按钮宽度不应随卡片布局缩放");
-        assertTrue(source.contains("drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, \"§6货币中心\""),
-                "顶部选择控件不应切换成紧凑短标签");
-        assertTrue(source.contains("drawButton(g, backpackBtnX(), top + 6, backpackBtnW(), TOP_BAR_H,"),
-                "精妙背包按钮仍应使用原本固定控件");
+        assertTrue(source.contains("case CURRENCY -> currencyBtnW();")
+                        && source.contains("case BACKPACK -> backpackBtnW();"),
+                "原生适配仍使用货币中心和精妙背包的固定按钮尺寸");
+        assertTrue(source.contains("button.sync(x, top + 6, width, TOP_BAR_H,")
+                        && source.contains("button.getX(), button.getY(), button.getWidth(), button.getHeight()"),
+                "原生输入和自绘图标共用同一组固定坐标与尺寸");
 
         assertFalse(source.contains("private int detailW()"),
                 "购买/详情面板不应再有动态宽度");
@@ -59,5 +61,17 @@ class ShopScreenResponsiveLayoutSourceTest {
                 "顶部控件不应按分辨率切换短文本");
         assertFalse(source.contains("\"§aSDA开\"") || source.contains("\"§8SDA关\""),
                 "精妙背包控件不应被缩成 SDA 短标签");
+    }
+
+    @Test
+    void commerceControlsUseSharedIcons() throws Exception {
+        String source = Files.readString(SCREEN);
+        for (String icon : new String[]{"CURRENCY", "REDEEM", "MEMBERSHIP", "BUY", "SELL",
+                "SHOPPING_CART", "FAVORITE", "FILTER", "BALANCE"}) {
+            assertTrue(source.contains("GraphicIcon." + icon), "商店应使用共享图标 " + icon);
+        }
+        assertTrue(source.contains("balanceCellStart(barX, balanceLabel())"), "余额变化动画应锚定到新货币格");
+        assertTrue(source.contains("balanceCellStart(x, balanceLabel())"), "悬停应命中新货币格");
+        assertTrue(source.contains("balanceCellStart(x, label)"), "余额栏应在图标和标签之后绘制货币格");
     }
 }

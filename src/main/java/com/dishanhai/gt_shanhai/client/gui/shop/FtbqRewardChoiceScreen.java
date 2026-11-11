@@ -3,7 +3,6 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import com.dishanhai.gt_shanhai.api.TextFormatParser;
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 
@@ -25,7 +24,7 @@ import java.util.List;
  * 见 {@code ShopPurchase#resolveFtbqItemRewardByIndex}，不信任客户端物品数据）。与 {@link RewardChoiceScreen}
  * 是同一套交互，只是奖励来源从本地奖励池换成 FTBQ 表内容。
  */
-public class FtbqRewardChoiceScreen extends ScaledScreen {
+public class FtbqRewardChoiceScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;

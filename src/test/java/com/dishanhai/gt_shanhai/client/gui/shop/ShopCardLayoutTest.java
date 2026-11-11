@@ -18,20 +18,23 @@ class ShopCardLayoutTest {
     }
 
     @Test
-    void everySupportedSizeKeepsTheIconAboveThePriceAndAllPricePartsInside() throws Exception {
+    void everySupportedSizeKeepsFullIconAndAllPricePartsToItsRight() throws Exception {
         for (int w : new int[]{48, 60, 96, 164}) for (int h : new int[]{28, 32, 38, 48, 72})
             for (int amount : new int[]{6, 30, 120}) for (int extra : new int[]{0, 12, 60}) {
                 var l = layout(w, h, amount, extra, true);
-                assertTrue(3 + value(l, "slotSize") + 2 <= value(l, "priceY"));
+                assertEquals(20, value(l, "slotSize"), w + "x" + h);
+                assertTrue(value(l, "priceX") >= 3 + value(l, "slotSize") + 3);
+                assertEquals(value(l, "textX"), value(l, "priceX"));
+                assertTrue(4 + 9 + 2 <= value(l, "priceY"));
                 assertTrue(value(l, "numberWidth") >= 12);
-                assertTrue(2 + value(l, "numberWidth") <= w - 2);
+                assertTrue(value(l, "priceX") + value(l, "numberWidth") <= w - 3);
                 if (flag(l, "showCost")) {
-                    assertTrue(value(l, "costX") >= 2 + value(l, "numberWidth") + 2);
-                    assertTrue(value(l, "costX") + 10 <= w - 2);
+                    assertTrue(value(l, "costX") >= value(l, "priceX") + value(l, "numberWidth") + 2);
+                    assertTrue(value(l, "costX") + 10 <= w - 3);
                 }
                 if (flag(l, "showExtra")) {
                     assertTrue(value(l, "extraX") >= value(l, "costX") + 12);
-                    assertTrue(value(l, "extraX") + extra <= w - 2);
+                    assertTrue(value(l, "extraX") + extra <= w - 3);
                 }
                 if (flag(l, "showCategory")) assertTrue(14 + 9 + 2 <= value(l, "priceY"));
                 assertTrue(value(l, "textX") + value(l, "textWidth") <= w - 3);

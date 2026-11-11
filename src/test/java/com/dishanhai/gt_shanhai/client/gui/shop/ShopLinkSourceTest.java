@@ -28,9 +28,9 @@ class ShopLinkSourceTest {
     @Test
     void shopScreenResolvesJumpsByStableIdFirst() throws Exception {
         String shop = read("client/gui/shop/ShopScreen.java");
-        assertTrue(!shop.contains("linkedEntryKey("), "三处跳转解析都改走 resolveLink");
-        int n = shop.split("ClientShopCatalog\\.resolveLink\\(", -1).length - 1;
-        assertTrue(n == 3, "预载、详情跳转列、右键菜单各一处，实际 " + n);
+        assertTrue(!shop.contains("linkedEntryKey("), "商店跳转统一走 resolveLink");
+        assertTrue(shop.contains("ClientShopCatalog.resolveLink(selected.getLinkTo()) == linkTargetKey"),
+                "点击时核对当前商品的链接，避免上一帧的过期目标");
         String resolve = extractBlock(read("client/shop/ClientShopCatalog.java"), "public static long resolveLink(");
         assertTrue(resolve.indexOf("keyOfStableId(") < resolve.indexOf("linkedEntryKey("), "先按 stableId，再认旧称呼");
     }

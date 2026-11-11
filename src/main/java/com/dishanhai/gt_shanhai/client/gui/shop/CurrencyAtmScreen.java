@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
@@ -36,7 +35,7 @@ import java.util.Objects;
  * 币种兑换（按 {@link CurrencyRateConfig} 汇率）、AE 自动结算（AE 模式下网络余额可直接参与）。
  * 纯客户端界面，结算全发 {@link CurrencyActionPacket} 给服务端。
  */
-public class CurrencyAtmScreen extends ScaledScreen {
+public class CurrencyAtmScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GREEN = -11141291;

@@ -2,14 +2,17 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.sh_better_ui.client.gui.scaled.UiButton;
+import com.mojang.blaze3d.platform.InputConstants;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopAutoCraftConfirmPacket;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.FormattedCharSequence;
 
 import org.lwjgl.glfw.GLFW;
@@ -27,7 +30,7 @@ import java.util.UUID;
  * <p>长行换行不截断；清单很长时可滚轮、拖右侧滚动条或用 ↑↓/PageUp/PageDown/Home/End 翻；Enter 确认、Esc 取消。
  * 按钮反馈走 {@link ShopDialogUi}。</p>
  */
-public class ShopAutoCraftConfirmScreen extends ScaledScreen {
+public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
@@ -49,7 +52,11 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     private final List<String> useLines;
     private final List<String> noteLines;
     private final ShopDialogUi ui = new ShopDialogUi(GOLD_DARK, GOLD, BTN_BG, BTN_HOVER);
-    private boolean finished;
+    private final ShopConfirmationReturn returnToParent;
+    private final ShopConfirmationActions actions;
+    private UiButton confirmButton;
+    private UiButton cancelButton;
+    private boolean spaceHeld;
 
     private int left, top, panelWidth, panelHeight;
     private int listX, listY, listW, listH;
@@ -60,12 +67,24 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
 
     private ShopAutoCraftConfirmScreen(UUID planId, boolean anySubmittable,
             List<String> useLines, List<String> noteLines, Screen parentScreen) {
-        super(Component.literal("自动合成确认"));
+        super(label("auto_craft.title"));
         this.planId = planId;
         this.anySubmittable = anySubmittable;
         this.useLines = List.copyOf(useLines);
         this.noteLines = List.copyOf(noteLines);
         this.parentScreen = parentScreen;
+        returnToParent = new ShopConfirmationReturn(this, parentScreen);
+        actions = new ShopConfirmationActions(() -> {
+            ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, true));
+            returnToParent.restore();
+        }, () -> {
+            ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
+            returnToParent.restore();
+        }, () -> {
+            if (Minecraft.getInstance().getConnection() != null) {
+                ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
+            }
+        });
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false;
@@ -85,16 +104,16 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
                 planId, anySubmittableIn, useLinesIn, noteLinesIn, parent));
     }
 
-    private List<String> displayLines() {
-        List<String> lines = new ArrayList<>();
+    private List<Component> displayLines() {
+        List<Component> lines = new ArrayList<>();
         if (!noteLines.isEmpty()) {
-            lines.add("§c— 跳过/材料不足 —");
-            lines.addAll(noteLines);
+            lines.add(label("auto_craft.notes").withStyle(ChatFormatting.RED));
+            for (String line : noteLines) lines.add(DShanhaiTextUtil.fromLegacy(line));
         }
         if (!useLines.isEmpty()) {
-            lines.addAll(useLines);
+            for (String line : useLines) lines.add(DShanhaiTextUtil.fromLegacy(line));
         }
-        if (lines.isEmpty()) lines.add("§7（没有可提交的合成项）");
+        if (lines.isEmpty()) lines.add(label("auto_craft.empty").withStyle(ChatFormatting.GRAY));
         return lines;
     }
 
@@ -102,6 +121,7 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     protected void initScaled() {
         ui.cancel();
         ui.syncEnterHeld();
+        spaceHeld = InputConstants.isKeyDown(Minecraft.getInstance().getWindow().getWindow(), GLFW.GLFW_KEY_SPACE);
         left = Math.max(6, (vWidth - TARGET_W) / 2);
         top = Math.max(8, (vHeight - TARGET_H) / 2);
         panelWidth = Math.min(TARGET_W, vWidth - 12);
@@ -113,8 +133,8 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
         // 右缘留给滚动条
         int textW = Math.max(16, listW - ShopDialogUi.BAR_W - 3);
         List<FormattedCharSequence> wrapped = new ArrayList<>();
-        for (String line : displayLines()) {
-            List<FormattedCharSequence> parts = this.font.split(DShanhaiTextUtil.fromLegacy(line), textW);
+        for (Component line : displayLines()) {
+            List<FormattedCharSequence> parts = this.font.split(line, textW);
             if (parts.isEmpty()) wrapped.add(FormattedCharSequence.EMPTY);
             else wrapped.addAll(parts);
         }
@@ -122,6 +142,15 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
         heights = new int[rows.size()];
         Arrays.fill(heights, ROW_H);
         scroll = Math.min(scroll, maxScroll());
+        confirmButton = addWidget(new UiButton(left + 8, btnY(), confirmW(), 18,
+                label(anySubmittable ? "auto_craft.confirm" : "auto_craft.disabled")
+                        .withStyle(anySubmittable ? ChatFormatting.GREEN : ChatFormatting.DARK_GRAY),
+                button -> confirm(), ShopVisuals.preferences(), true));
+        confirmButton.active = anySubmittable;
+        cancelButton = addWidget(new UiButton(left + panelWidth - 8 - 52, btnY(), 52, 18,
+                CommonComponents.GUI_CANCEL.copy().withStyle(ChatFormatting.RED), button -> cancel(),
+                ShopVisuals.preferences(), false));
+        if (anySubmittable) setInitialFocus(confirmButton);
     }
 
     private int visibleRows() {
@@ -151,6 +180,7 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     @Override
     public void renderBackground(GuiGraphics g) {
         if (!ShopTheme.current().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
+        returnToParent.render(g);
     }
 
     @Override
@@ -159,8 +189,9 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
         ShopTheme.current().rootPanel(g, left, top, panelWidth, panelHeight,
                 left + 5, top + 18, panelWidth - 10, panelHeight - 23);
 
-        g.drawString(this.font, "§6自动合成确认", left + 8, top + 5, GOLD, true);
-        g.drawString(this.font, anySubmittable ? "§7确认后向 AE 网络提交合成任务" : "§c没有任何一项能提交",
+        g.drawString(this.font, getTitle(), left + 8, top + 5, GOLD, true);
+        g.drawString(this.font, label(anySubmittable ? "auto_craft.details" : "auto_craft.unavailable")
+                        .withStyle(anySubmittable ? ChatFormatting.GRAY : ChatFormatting.RED),
                 left + 8, top + 14, GRAY, true);
 
         int visible = visibleRows();
@@ -172,29 +203,37 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
         int maxScroll = maxScroll();
         ui.drawScrollbar(g, barX(), listY, listH, rows.size(), visible, scroll, maxScroll, mx, my);
         if (maxScroll > 0) {
-            g.drawString(this.font, "§8" + (scroll + 1) + "-" + Math.min(scroll + visible, rows.size()) + "/" + rows.size()
-                    + " 滚轮或拖动右侧滚动条", listX, listY + listH + 2, GRAY, true);
+            g.drawString(this.font, Component.translatable("gt_shanhai.shop.confirmation.scroll",
+                    scroll + 1, Math.min(scroll + visible, rows.size()), rows.size()),
+                    listX, listY + listH + 2, GRAY, true);
         }
 
         ui.draw(g, this.font, left + 8, btnY(), confirmW(), 18,
-                anySubmittable ? "§a确认合成" : "§8无可提交项", mx, my, anySubmittable);
-        ui.draw(g, this.font, left + panelWidth - 8 - 52, btnY(), 52, 18, "§c取消", mx, my, true);
+                confirmButton.getMessage(), mx, my, anySubmittable);
+        ui.draw(g, this.font, left + panelWidth - 8 - 52, btnY(), 52, 18,
+                cancelButton.getMessage(), mx, my, true);
+        if (confirmButton.isFocused()) ShopTheme.current().focus(g, left + 8, btnY(), confirmW(), 18);
+        if (cancelButton.isFocused()) ShopTheme.current().focus(g, left + panelWidth - 8 - 52, btnY(), 52, 18);
     }
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
-        if (btn != 0 || finished) return false;
+        if (btn != 0 || actions.finished()) return false;
         int first = ui.beginDrag(mx, my, barX(), listY, listH, rows.size(), visibleRows(), maxScroll());
         if (first >= 0) {
             scroll = first;
             return true;
         }
         if (ui.hit(mx, my, left + 8, btnY(), confirmW(), 18, anySubmittable)) {
-            if (anySubmittable) confirm();
+            if (anySubmittable) {
+                setFocused(confirmButton);
+                confirmButton.onPress();
+            }
             return true;
         }
         if (ui.hit(mx, my, left + panelWidth - 8 - 52, btnY(), 52, 18, true)) {
-            cancel();
+            setFocused(cancelButton);
+            cancelButton.onPress();
             return true;
         }
         return super.universalMouseClicked(mx, my, btn);
@@ -227,13 +266,22 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (!finished) {
+        if (!actions.finished()) {
             int page = Math.max(1, visibleRows() - 1);
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 // 按住 Enter 的系统重复只算一次；在商店里按 Enter 打开本框时，松开前也不算
                 if (ui.takeEnter()) {
-                    ui.press(left + 8, btnY(), confirmW(), 18, anySubmittable);
-                    if (anySubmittable) confirm();
+                    UiButton target = getFocused() == cancelButton ? cancelButton : confirmButton;
+                    ui.press(target.getX(), target.getY(), target.getWidth(), target.getHeight(), target.active);
+                    if (target.active) target.onPress();
+                }
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_SPACE && getFocused() instanceof UiButton target) {
+                if (!spaceHeld) {
+                    spaceHeld = true;
+                    ui.press(target.getX(), target.getY(), target.getWidth(), target.getHeight(), target.active);
+                    if (target.active) target.onPress();
                 }
                 return true;
             }
@@ -256,21 +304,16 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     @Override
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
         ui.enterReleased(keyCode);
+        if (keyCode == GLFW.GLFW_KEY_SPACE) spaceHeld = false;
         return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     private void confirm() {
-        if (finished) return;
-        finished = true;
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, true));
-        Minecraft.getInstance().setScreen(parentScreen);
+        actions.confirm(anySubmittable);
     }
 
     private void cancel() {
-        if (finished) return;
-        finished = true;
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
-        Minecraft.getInstance().setScreen(parentScreen);
+        actions.cancel();
     }
 
     @Override
@@ -281,13 +324,24 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     @Override
     public void removed() {
         ui.cancel();
-        if (!finished && Minecraft.getInstance().getConnection() != null) {
-            finished = true;
-            ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
-        }
+        returnToParent.close();
+        actions.abandon();
         super.removed();
     }
 
     @Override
     public boolean isPauseScreen() { return false; }
+
+    @Override
+    public Component getNarrationMessage() {
+        List<Component> details = new ArrayList<>();
+        details.add(getTitle());
+        details.add(label(anySubmittable ? "auto_craft.details" : "auto_craft.unavailable"));
+        details.addAll(displayLines());
+        return CommonComponents.joinLines(details);
+    }
+
+    private static net.minecraft.network.chat.MutableComponent label(String key) {
+        return Component.translatable("gt_shanhai.shop.confirmation." + key);
+    }
 }

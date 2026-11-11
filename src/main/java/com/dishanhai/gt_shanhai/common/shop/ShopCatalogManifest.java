@@ -54,7 +54,7 @@ public final class ShopCatalogManifest {
     private final List<Stub> stubs;
     /**
      * 分类页签显式排序：key=父路径（"/"拼接，""=顶级页签自身），value=该层已知分类的排序结果。
-     * 未出现在这里的分类按发现顺序追加在末尾（见 ClientShopCatalog#applyOrder）；由
+     * 未出现在这里的分类按发现顺序追加在末尾；由
      * {@link ShopConfig} 持久化到 shop_category_order.json，拖拽排序页签后写回并重新广播。
      */
     private final Map<String, List<String>> categoryOrder;

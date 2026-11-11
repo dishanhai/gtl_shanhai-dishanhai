@@ -5,7 +5,7 @@ import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
-import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
+import com.dishanhai.sh_better_ui.client.gui.scaled.UiPreferences;
 
 import com.mojang.blaze3d.platform.InputConstants;
 
@@ -37,6 +37,8 @@ final class ShopDialogUi {
     private final int fill;
     private final int fillHover;
     private boolean reduceMotion;
+    private boolean hoverAnimation = true;
+    private boolean pressAnimation = true;
     private boolean dragging;
     private boolean enterHeld;
 
@@ -58,7 +60,10 @@ final class ShopDialogUi {
     /** 每帧：松开落在别处（没收到 mouseReleased）时兜底松开，游标进出按住的按钮，推进闪色与轻抖。 */
     void frame(int mx, int my) {
         long now = System.currentTimeMillis();
-        reduceMotion = ClientShopUiSettings.reduceMotion();
+        UiPreferences preferences = UiPreferences.configured();
+        reduceMotion = preferences.reducedMotion();
+        hoverAnimation = preferences.feedback().hoverAnimation();
+        pressAnimation = preferences.feedback().pressAnimation();
         MouseHandler mouseHandler = Minecraft.getInstance().mouseHandler;
         if (!mouseHandler.isLeftPressed() && !mouseHandler.isRightPressed()) {
             if (feedback.holding()) feedback.release(now);
@@ -100,18 +105,20 @@ final class ShopDialogUi {
     }
 
     float rowHover(int index, boolean hovered) {
+        if (!hoverAnimation || reduceMotion) return hovered ? 1f : 0f;
         return feedback.hover(rowKey(index), hovered, System.currentTimeMillis());
     }
 
     /** 自己画的格子（如编辑器槽位）的 hover 渐变 0..1，和按钮同一张弹簧表。 */
     float hoverAt(int x, int y, int w, int h, boolean hovered) {
+        if (!hoverAnimation || reduceMotion) return hovered ? 1f : 0f;
         return feedback.hover(key(x, y, w, h), hovered, System.currentTimeMillis());
     }
 
     /** 自己画的格子按同一套压感与轻抖画：{@link #reject} 这个格子时它会轻抖。减少动效时原样画。 */
     void withMotion(GuiGraphics g, int x, int y, int w, int h, Runnable draw) {
         long k = key(x, y, w, h);
-        ButtonFeedback.Visual v = feedback.visual(k, k, true, System.currentTimeMillis(), reduceMotion);
+        ButtonFeedback.Visual v = feedback.visual(k, k, true, System.currentTimeMillis(), reduceMotion || !pressAnimation);
         GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), draw);
     }
 
@@ -157,8 +164,8 @@ final class ShopDialogUi {
     void draw(GuiGraphics g, Font font, int x, int y, int w, int h, String label, int mx, int my, boolean enabled) {
         long now = System.currentTimeMillis();
         long k = key(x, y, w, h);
-        float hv = feedback.hover(k, enabled && GuiRenderUtil.isHovering(mx, my, x, y, w, h), now);
-        ButtonFeedback.Visual v = feedback.visual(k, k, enabled, now, reduceMotion);
+        float hv = hoverAt(x, y, w, h, enabled && GuiRenderUtil.isHovering(mx, my, x, y, w, h));
+        ButtonFeedback.Visual v = feedback.visual(k, k, enabled, now, reduceMotion || !pressAnimation);
         // 玻璃主题：金框换成主题青框、底换成玻璃按钮底；警告弹窗的红框是语义色，原样保留
         ShopTheme t = ShopTheme.current();
         boolean themed = t.glass && border == ShopTheme.CLASSIC.frameDark;
@@ -170,6 +177,22 @@ final class ShopDialogUi {
     }
 
     // ============ 滚动条 ============
+
+    /** 本地化确认按钮保留原生 Component 的样式与参数。 */
+    void draw(GuiGraphics g, Font font, int x, int y, int w, int h, net.minecraft.network.chat.Component label,
+              int mx, int my, boolean enabled) {
+        long now = System.currentTimeMillis();
+        long k = key(x, y, w, h);
+        float hv = hoverAt(x, y, w, h, enabled && GuiRenderUtil.isHovering(mx, my, x, y, w, h));
+        ButtonFeedback.Visual v = feedback.visual(k, k, enabled, now, reduceMotion || !pressAnimation);
+        ShopTheme t = ShopTheme.current();
+        boolean themed = t.glass && border == ShopTheme.CLASSIC.frameDark;
+        int b = ButtonFeedback.tint(GuiMotion.lerpColor(themed ? t.frameDark : border, themed ? t.frame : borderHover, hv), v);
+        int f = ButtonFeedback.shade(t.glass ? GuiMotion.lerpColor(t.buttonBg, t.buttonHover, hv)
+                : GuiMotion.lerpColor(fill, fillHover, hv), v);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(),
+                () -> t.button(g, font, x, y, w, h, label, b, f, 0xFFFFFFFF));
+    }
 
     /** 列表右缘的滚动条（x 是轨道左缘）：没溢出不画；游标在上面或正在拖时把手变亮。 */
     void drawScrollbar(GuiGraphics g, int x, int y, int h, int total, int visible, int first, int maxFirst,

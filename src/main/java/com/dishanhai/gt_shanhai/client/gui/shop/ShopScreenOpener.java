@@ -7,6 +7,7 @@ import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.WalletOpenRequestPacket;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -35,6 +36,24 @@ public final class ShopScreenOpener {
     }
 
     public static void clear() { currentShop = null; }
+
+    public static void updateEditAccess(boolean canEdit, boolean catalogEditUnlocked) {
+        if (currentShop == null) return;
+        boolean accessLost = currentShop.isCatalogEditUnlocked() && !(canEdit && catalogEditUnlocked);
+        currentShop.updateEditAccess(canEdit, catalogEditUnlocked);
+        var mc = Minecraft.getInstance();
+        if (accessLost && isCatalogEditorPage(mc.screen)) {
+            mc.setScreen(currentShop);
+        }
+    }
+
+    static boolean isCatalogEditorPage(Screen screen) {
+        return screen instanceof ShopEntryEditScreen || screen instanceof ShopStageEditScreen
+                || screen instanceof ShopBranchCopyScreen || screen instanceof FtbqTableSelectScreen
+                || screen instanceof FtbqQuestSelectScreen || screen instanceof RewardOptionEditScreen
+                || screen instanceof ShopEntrySelectScreen productPicker && productPicker.catalogEditorPage()
+                || screen instanceof MultiPickerScreen resourcePicker && resourcePicker.catalogEditorPage();
+    }
 
     public static void requestOpenAt(long entryKey) {
         ShopCatalogManifest.Stub stub = ClientShopCatalog.stub(entryKey);

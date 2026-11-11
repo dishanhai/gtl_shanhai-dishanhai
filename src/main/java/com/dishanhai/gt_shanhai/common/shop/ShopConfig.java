@@ -710,13 +710,21 @@ public final class ShopConfig {
         }
     }
 
-    /** 某父路径下当前实际存在的分类（按发现顺序；隐藏商品不计入），parentPath="" = 顶级页签自身。 */
+    /** 编辑模式拖拽使用完整目录的分类下标，包括仅有隐藏商品的分类。 */
     private static List<String> discoveredCategoriesAt(String parentPath) {
-        if (parentPath == null || parentPath.isEmpty()) return snapshot().topCategories();
-        String[] parts = parentPath.split("/", 3);
-        if (parts.length == 1) return snapshot().subCategories(parts[0]);
-        if (parts.length == 2) return snapshot().subCategories2(parts[0], parts[1]);
-        return snapshot().subCategories3(parts[0], parts[1], parts[2]);
+        String[] parents = parentPath == null || parentPath.isEmpty() ? new String[0] : parentPath.split("/", 3);
+        Set<String> discovered = new LinkedHashSet<>();
+        for (var stub : snapshot().manifest().stubs()) {
+            String[] path = {stub.top(), stub.sub(), stub.sub2(), stub.sub3()};
+            boolean matches = true;
+            for (int i = 0; i < parents.length; i++) {
+                if (parents[i].equals(path[i])) continue;
+                matches = false;
+                break;
+            }
+            if (matches && !path[parents.length].isEmpty()) discovered.add(path[parents.length]);
+        }
+        return List.copyOf(discovered);
     }
 
     /**

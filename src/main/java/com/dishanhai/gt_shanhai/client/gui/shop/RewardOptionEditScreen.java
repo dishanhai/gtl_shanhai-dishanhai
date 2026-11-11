@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
-import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 
 import net.minecraft.client.Minecraft;
@@ -17,7 +16,7 @@ import java.util.function.Consumer;
  * （每次交付独立随机取整，min==max 即固定数量），对标 FTBQuests 战利品表的 weight/count 配置。
  * 从 {@link ShopEntryEditScreen} 悬停奖励池槽位点击进入，确认后回填对应下标。
  */
-public class RewardOptionEditScreen extends ScaledScreen {
+public class RewardOptionEditScreen extends ShopScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
