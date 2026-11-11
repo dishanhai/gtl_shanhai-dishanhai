@@ -5,16 +5,23 @@ import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.lookup.Branch;
+import com.gregtechceu.gtceu.api.recipe.lookup.GTRecipeLookup;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.mojang.datafixers.util.Either;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorValidation;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeFingerprint;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore;
+import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.event.OnDatapackSyncEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.server.ServerLifecycleHooks;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -30,6 +37,7 @@ import java.util.Set;
 /**
  * Single runtime entry for rebuilding a recipe type from immutable originals.
  */
+@Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID)
 public final class RecipeRebuildService {
 
     public enum RebuildReason {
@@ -49,6 +57,16 @@ public final class RecipeRebuildService {
             long revision) {}
 
     private RecipeRebuildService() {}
+
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public static void onDatapackReload(OnDatapackSyncEvent event) {
+        if (event.getPlayer() != null) return;
+        MinecraftServer server = event.getPlayerList().getServer();
+        RecipeOriginalSnapshotStore.activate(server.getRecipeManager());
+        if (rebuildAll(RebuildReason.RELOAD).isEmpty()) {
+            DShanhaiRecipeModifierAPI.invalidatePatternCaches("datapack-reload");
+        }
+    }
 
     public static RebuildReport rebuildType(String recipeTypeId, RebuildReason reason) {
         return rebuildType(recipeTypeId, reason, true);
@@ -104,13 +122,12 @@ public final class RecipeRebuildService {
                     try {
                         var lookup = type.getLookup();
                         lookup.removeAllRecipes();
-                        for (GTRecipe recipe : rebuilt) lookup.addRecipe(recipe);
+                        for (GTRecipe recipe : rebuilt) addLookupRecipe(lookup, recipe);
                         // 本次写回的副本才是 canonical：以本次集合整体替换，不再依赖历史残留
                         DShanhaiRecipeModifierAPI.replaceCanonicalLookupRecipes(recipeTypeId, rebuilt);
-                        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+                        var server = ServerLifecycleHooks.getCurrentServer();
                         if (server != null) {
-                            com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
-                                    .replaceType(server, recipeTypeId, rebuilt);
+                            ShanhaiVanillaRecipeTable.replaceType(server, recipeTypeId, rebuilt);
                         }
                         com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeReverseIndex.invalidate();
                         DShanhaiRecipeModifierAPI.invalidateRecipeCaches(
@@ -168,6 +185,7 @@ public final class RecipeRebuildService {
             return new RebuildReport(recipeTypeId, 0, 0, 0, 0,
                     DShanhaiRecipeModifierAPI.getPatternCacheRevision());
         }
+        ensureOriginals(recipeTypeId, type);
         Map<String, ShanhaiRecipeOverrideStore.Entry> overrides =
                 defaultOverrideStore().entriesForType(recipeTypeId);
         Set<String> disabled = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getDisabledRecipeIds());
@@ -189,12 +207,14 @@ public final class RecipeRebuildService {
                     DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(true);
                     try {
                         var lookup = type.getLookup();
+                        var server = ServerLifecycleHooks.getCurrentServer();
                         if (!unlinkRecipes(lookup.getLookup(), live.keySet(), removed)) {
                             lookup.removeAllRecipes();
                             List<GTRecipe> rebuilt =
                                     assemble(recipeTypeId, ensureOriginals(recipeTypeId, type), overrides);
-                            for (GTRecipe recipe : rebuilt) lookup.addRecipe(recipe);
+                            for (GTRecipe recipe : rebuilt) addLookupRecipe(lookup, recipe);
                             DShanhaiRecipeModifierAPI.replaceCanonicalLookupRecipes(recipeTypeId, rebuilt);
+                            if (server != null) ShanhaiVanillaRecipeTable.replaceType(server, recipeTypeId, rebuilt);
                         } else {
                             for (String recipeId : live.keySet()) {
                                 DShanhaiRecipeModifierAPI.unmarkCanonicalLookupRecipe(recipeTypeId, recipeId);
@@ -202,22 +222,9 @@ public final class RecipeRebuildService {
                             for (String recipeId : removed) {
                                 DShanhaiRecipeModifierAPI.unmarkCanonicalLookupRecipe(recipeTypeId, recipeId);
                             }
-                            for (GTRecipe recipe : live.values()) lookup.addRecipe(recipe);
+                            for (GTRecipe recipe : live.values()) addLookupRecipe(lookup, recipe);
                             DShanhaiRecipeModifierAPI.markCanonicalLookupRecipes(recipeTypeId, live.values());
-                        }
-                        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
-                        if (server != null) {
-                            Map<ResourceLocation, Recipe<?>> upserts = new LinkedHashMap<>();
-                            Set<ResourceLocation> removals = new LinkedHashSet<>();
-                            for (String recipeId : removed) {
-                                ResourceLocation id = ResourceLocation.tryParse(recipeId);
-                                if (id != null) removals.add(id);
-                            }
-                            for (GTRecipe recipe : live.values()) {
-                                if (recipe.getId() != null) upserts.put(recipe.getId(), recipe);
-                            }
-                            com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
-                                    .replaceEntries(server, recipeTypeId, upserts, removals);
+                            if (server != null) replaceEntries(server, recipeTypeId, live.values(), removed);
                         }
                         com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeReverseIndex.invalidate();
                         DShanhaiRecipeModifierAPI.invalidateRecipeCaches(
@@ -233,6 +240,20 @@ public final class RecipeRebuildService {
                 removed.size(),
                 live.size(),
                 DShanhaiRecipeModifierAPI.getPatternCacheRevision());
+    }
+
+    private static void replaceEntries(MinecraftServer server, String recipeTypeId,
+            Iterable<GTRecipe> live, Set<String> removed) {
+        Map<ResourceLocation, Recipe<?>> upserts = new LinkedHashMap<>();
+        Set<ResourceLocation> removals = new LinkedHashSet<>();
+        for (String recipeId : removed) {
+            ResourceLocation id = ResourceLocation.tryParse(recipeId);
+            if (id != null) removals.add(id);
+        }
+        for (GTRecipe recipe : live) {
+            if (recipe.getId() != null) upserts.put(recipe.getId(), recipe);
+        }
+        ShanhaiVanillaRecipeTable.replaceEntries(server, recipeTypeId, upserts, removals);
     }
 
     public static List<RebuildReport> rebuildAll(RebuildReason reason) {
@@ -271,6 +292,8 @@ public final class RecipeRebuildService {
     /** Snapshot recipe after overrides, or an added recipe that is not in the snapshot. */
     public static GTRecipe editableOf(String recipeTypeId, String recipeId) {
         if (recipeTypeId == null || recipeId == null || recipeId.isEmpty()) return null;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) RecipeOriginalSnapshotStore.activate(server.getRecipeManager());
         GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(recipeTypeId, recipeId);
         if (snapshot != null) return buildCanonical(recipeTypeId, snapshot);
         ShanhaiRecipeOverrideStore.Entry entry =
@@ -288,10 +311,10 @@ public final class RecipeRebuildService {
      */
     public static String captureLive(String recipeTypeId, String recipeId) {
         if (recipeId == null || recipeId.isEmpty()) return null;
-        String scanned = scanLookup(recipeTypeId, recipeId);
-        if (scanned != null) return scanned;
         String fromManager = captureFromManager(recipeId);
         if (fromManager != null) return fromManager;
+        String scanned = scanLookup(recipeTypeId, recipeId);
+        if (scanned != null) return scanned;
         if (recipeTypeId != null && !recipeTypeId.isEmpty()) {
             for (GTRecipeType type : GTRegistries.RECIPE_TYPES) {
                 if (type == null || type.registryName == null) continue;
@@ -326,8 +349,9 @@ public final class RecipeRebuildService {
 
     private static String captureFromManager(String recipeId) {
         ResourceLocation id = ResourceLocation.tryParse(recipeId);
-        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (id == null || server == null) return null;
+        RecipeOriginalSnapshotStore.activate(server.getRecipeManager());
         net.minecraft.world.item.crafting.Recipe<?> recipe =
                 server.getRecipeManager().byKey(id).orElse(null);
         if (!(recipe instanceof GTRecipe gt) || gt.getId() == null
@@ -336,8 +360,6 @@ public final class RecipeRebuildService {
         }
         String actualType = gt.recipeType.registryName.toString();
         if (!recipeId.equals(gt.getId().toString())) return null;
-        String scanned = scanLookup(actualType, recipeId);
-        if (scanned != null) return scanned;
         RecipeOriginalSnapshotStore.capture(actualType, gt);
         return editableOf(actualType, recipeId) == null ? null : actualType;
     }
@@ -397,7 +419,8 @@ public final class RecipeRebuildService {
             }
         }
         for (ShanhaiRecipeOverrideStore.Entry entry : safe.values()) {
-            if (entry == null || entry.recipeId().isEmpty() || ids.contains(entry.recipeId())) continue;
+            if (entry == null || entry.recipeId().isEmpty()
+                    || ids.contains(entry.recipeId()) || disabled.contains(entry.recipeId())) continue;
             GTRecipe added;
             if (entry.created()) {
                 added = materializeCreated(recipeTypeId, entry);
@@ -406,7 +429,8 @@ public final class RecipeRebuildService {
             } else {
                 added = materializeAddition(recipeTypeId, entry);
             }
-            if (added == null || added.getId() == null) continue;
+            if (added == null || added.getId() == null
+                    || DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(recipeTypeId, added)) continue;
             if (!ids.add(added.getId().toString())) continue;
             rebuilt.add(added);
         }
@@ -612,7 +636,8 @@ public final class RecipeRebuildService {
                 }
             }
         }
-        return editableOf(recipeTypeId, recipeId);
+        GTRecipe recipe = editableOf(recipeTypeId, recipeId);
+        return DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(recipeTypeId, recipe) ? null : recipe;
     }
 
     private static final Field BRANCH_NODES = branchField("nodes");
@@ -628,6 +653,15 @@ public final class RecipeRebuildService {
         }
     }
 
+    /** Writes a canonical recipe to the tree or retains it as a secondary lookup candidate. */
+    public static void addLookupRecipe(GTRecipeLookup lookup, GTRecipe recipe) {
+        if (lookup.addRecipe(recipe) || recipe.getId() == null) return;
+        Branch root = lookup.getLookup();
+        // addRecipe can have written some ingredient alternatives before finding a conflict.
+        unlinkRecipes(root, Set.of(recipeId(recipe)), Set.of());
+        RecipeLookupOverflow.add(root, recipe);
+    }
+
     /** @return false when the branch shape is not the one this patch knows */
     private static boolean unlinkRecipes(Branch root, Set<String> liveIds, Set<String> removedIds) {
         if (root == null || BRANCH_NODES == null || BRANCH_SPECIAL_NODES == null) return false;
@@ -637,6 +671,7 @@ public final class RecipeRebuildService {
         if (ids.isEmpty()) return true;
         try {
             unlinkBranch(root, ids);
+            RecipeLookupOverflow.remove(root, ids);
             return true;
         } catch (IllegalAccessException e) {
             GTDishanhaiMod.LOGGER.warn("[配方修改器] 无法增量更新配方层，改为整类重建", e);
@@ -674,16 +709,22 @@ public final class RecipeRebuildService {
     }
 
     private static List<GTRecipe> ensureOriginals(String recipeTypeId, GTRecipeType type) {
-        if (RecipeOriginalSnapshotStore.hasSnapshot(recipeTypeId)) {
-            return RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
-        }
-        captureManagerOriginals(recipeTypeId);
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) RecipeOriginalSnapshotStore.activate(server.getRecipeManager());
         if (!RecipeOriginalSnapshotStore.hasSnapshot(recipeTypeId)) {
-            captureLookupOriginals(recipeTypeId, type);
+            Map<String, GTRecipe> originals = new LinkedHashMap<>();
+            boolean managerAvailable = captureManagerOriginals(server, recipeTypeId, originals);
+            type.getProxyRecipes().values().forEach(recipes -> recipes.forEach(recipe ->
+                    addOriginal(originals, recipe)));
+            RecipeOriginalSnapshotStore.copiesOf(recipeTypeId).forEach(recipe -> addOriginal(originals, recipe));
+            captureLookupOriginals(type, originals);
+            if (managerAvailable) {
+                RecipeOriginalSnapshotStore.captureComplete(recipeTypeId, originals.values());
+            } else {
+                return List.copyOf(originals.values());
+            }
         }
-        return RecipeOriginalSnapshotStore.hasSnapshot(recipeTypeId)
-                ? RecipeOriginalSnapshotStore.copiesOf(recipeTypeId)
-                : List.of();
+        return RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
     }
 
     /**
@@ -692,27 +733,27 @@ public final class RecipeRebuildService {
      * deletes the datapack recipes that lost the conflict. The vanilla table
      * still has every loaded recipe, so the first snapshot starts there.
      */
-    private static void captureManagerOriginals(String recipeTypeId) {
-        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
-        if (server == null) return;
-        for (Recipe<?> recipe : com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
-                .read(server, recipeTypeId).values()) {
-            if (recipe instanceof GTRecipe gt) {
-                RecipeOriginalSnapshotStore.capture(recipeTypeId, gt);
-            }
+    private static boolean captureManagerOriginals(MinecraftServer server, String recipeTypeId, Map<String, GTRecipe> originals) {
+        if (server == null) return false;
+        for (Recipe<?> recipe : ShanhaiVanillaRecipeTable.read(server, recipeTypeId).values()) {
+            if (recipe instanceof GTRecipe gt) addOriginal(originals, gt);
+        }
+        return true;
+    }
+
+    private static void captureLookupOriginals(GTRecipeType type, Map<String, GTRecipe> originals) {
+        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return;
+        boolean previous = DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.get();
+        DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.set(true);
+        try {
+            type.getLookup().getLookup().getRecipes(true).forEach(recipe -> addOriginal(originals, recipe));
+        } finally {
+            DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.set(previous);
         }
     }
 
-    private static void captureLookupOriginals(String recipeTypeId, GTRecipeType type) {
-        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return;
-        DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.set(true);
-        try {
-            type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
-                if (recipe != null) RecipeOriginalSnapshotStore.capture(recipeTypeId, recipe);
-            });
-        } finally {
-            DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.set(false);
-        }
+    private static void addOriginal(Map<String, GTRecipe> originals, GTRecipe recipe) {
+        if (recipe != null && recipe.getId() != null) originals.putIfAbsent(recipeId(recipe), recipe);
     }
 
     public static List<GTRecipe> originalsOfType(String recipeTypeId) {

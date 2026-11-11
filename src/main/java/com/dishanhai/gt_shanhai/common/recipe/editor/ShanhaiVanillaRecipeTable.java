@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.common.misc.RecipeManagerReflectionUtil;
-import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.google.common.collect.ImmutableMap;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -9,6 +9,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -19,13 +20,10 @@ public final class ShanhaiVanillaRecipeTable {
 
     public static Map<ResourceLocation, Recipe<?>> read(MinecraftServer server, String typeId) {
         RecipeManagerReflectionUtil.RecipeManagerMaps maps = resolve(server);
-        if (maps == null) return Map.of();
-        for (Map.Entry<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> entry : maps.recipesMap().entrySet()) {
-            if (matchesType(entry.getKey(), typeId, entry.getValue())) {
-                return Map.copyOf(entry.getValue());
-            }
-        }
-        return Map.of();
+        RecipeType<?> targetType = resolveType(typeId);
+        if (maps == null || targetType == null) return Map.of();
+        return Collections.unmodifiableMap(new LinkedHashMap<>(
+                maps.recipesMap().getOrDefault(targetType, Map.of())));
     }
 
     public static void replaceType(
@@ -35,13 +33,7 @@ public final class ShanhaiVanillaRecipeTable {
         RecipeManagerReflectionUtil.RecipeManagerMaps maps = resolve(server);
         if (maps == null) return;
 
-        RecipeType<?> targetType = null;
-        for (Map.Entry<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> entry : maps.recipesMap().entrySet()) {
-            if (matchesType(entry.getKey(), typeId, entry.getValue())) {
-                targetType = entry.getKey();
-                break;
-            }
-        }
+        RecipeType<?> targetType = resolveType(typeId);
         if (targetType == null) return;
 
         Map<ResourceLocation, Recipe<?>> replacement = new LinkedHashMap<>();
@@ -55,10 +47,7 @@ public final class ShanhaiVanillaRecipeTable {
         Map<ResourceLocation, Recipe<?>> old = byType.put(targetType, replacement);
 
         Map<ResourceLocation, Recipe<?>> byName = new LinkedHashMap<>(maps.byNameMap());
-        if (old != null) {
-            for (ResourceLocation id : old.keySet()) byName.remove(id);
-        }
-        byName.putAll(replacement);
+        updateByName(byName, targetType, old == null ? Set.of() : old.keySet(), replacement);
         install(server, maps, byType, byName);
     }
 
@@ -74,16 +63,9 @@ public final class ShanhaiVanillaRecipeTable {
         RecipeManagerReflectionUtil.RecipeManagerMaps maps = resolve(server);
         if (maps == null) return;
 
-        RecipeType<?> targetType = null;
-        Map<ResourceLocation, Recipe<?>> existing = null;
-        for (Map.Entry<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> entry : maps.recipesMap().entrySet()) {
-            if (matchesType(entry.getKey(), typeId, entry.getValue())) {
-                targetType = entry.getKey();
-                existing = entry.getValue();
-                break;
-            }
-        }
-        if (targetType == null || existing == null) return;
+        RecipeType<?> targetType = resolveType(typeId);
+        if (targetType == null) return;
+        Map<ResourceLocation, Recipe<?>> existing = maps.recipesMap().getOrDefault(targetType, Map.of());
 
         Map<ResourceLocation, Recipe<?>> next = new LinkedHashMap<>(existing);
         if (removals != null) {
@@ -96,11 +78,26 @@ public final class ShanhaiVanillaRecipeTable {
         byType.put(targetType, next);
 
         Map<ResourceLocation, Recipe<?>> byName = new LinkedHashMap<>(maps.byNameMap());
-        if (removals != null) {
-            for (ResourceLocation id : removals) byName.remove(id);
-        }
-        if (upserts != null) byName.putAll(upserts);
+        updateByName(byName, targetType, removals, upserts);
         install(server, maps, byType, byName);
+    }
+
+    static void updateByName(
+            Map<ResourceLocation, Recipe<?>> byName,
+            RecipeType<?> targetType,
+            Set<ResourceLocation> removals,
+            Map<ResourceLocation, Recipe<?>> upserts) {
+        // GTCEu proxy recipes share their source recipe's ID. Keep the original
+        // type's globally indexed recipe while maintaining the GT copy by type.
+        if (removals != null) {
+            for (ResourceLocation id : removals) {
+                byName.computeIfPresent(id, (key, current) -> current.getType() == targetType ? null : current);
+            }
+        }
+        if (upserts != null) {
+            upserts.forEach((id, recipe) -> byName.compute(id, (key, current) ->
+                    current == null || current.getType() == targetType ? recipe : current));
+        }
     }
 
     private static void install(
@@ -122,19 +119,8 @@ public final class ShanhaiVanillaRecipeTable {
         return RecipeManagerReflectionUtil.resolve(server.getRecipeManager());
     }
 
-    private static boolean matchesType(
-            RecipeType<?> type,
-            String typeId,
-            Map<ResourceLocation, Recipe<?>> recipes) {
-        if (typeId == null) return false;
-        for (Recipe<?> recipe : recipes.values()) {
-            if (recipe instanceof GTRecipe gt
-                    && gt.recipeType != null
-                    && gt.recipeType.registryName != null
-                    && typeId.equals(gt.recipeType.registryName.toString())) {
-                return true;
-            }
-        }
-        return type.getClass().getName().equals(typeId);
+    private static RecipeType<?> resolveType(String typeId) {
+        ResourceLocation id = typeId == null ? null : ResourceLocation.tryParse(typeId);
+        return id == null ? null : GTRegistries.RECIPE_TYPES.get(id);
     }
 }

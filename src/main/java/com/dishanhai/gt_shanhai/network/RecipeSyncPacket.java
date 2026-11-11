@@ -268,12 +268,13 @@ public final class RecipeSyncPacket {
             for (String removedId : msg.removedRecipeIds) {
                 recipeTableChanged |= byId.remove(removedId) != null;
             }
-            if (recipeTableChanged) {
+            if (recipeTableChanged && !mc.hasSingleplayerServer()) {
                 boolean previous = DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.get();
                 DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(true);
                 try {
                     lookup.removeAllRecipes();
-                    byId.values().forEach(lookup::addRecipe);
+                    byId.values().forEach(recipe ->
+                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.addLookupRecipe(lookup, recipe));
                     withoutId.forEach(lookup::addRecipe);
                 } finally {
                     DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(previous);

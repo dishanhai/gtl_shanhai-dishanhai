@@ -26,7 +26,7 @@ class RecipeEditorPacketCodecTest {
         // 封包只允許伺服器 → 客戶端
         assertTrue(source.contains("NetworkDirection.PLAY_TO_CLIENT"));
         assertTrue(source.contains("lookup.removeAllRecipes()"));
-        assertTrue(source.contains("byId.values().forEach(lookup::addRecipe)"));
+        assertTrue(source.contains("RecipeRebuildService.addLookupRecipe(lookup, recipe)"));
         assertTrue(source.contains("withoutId.forEach(lookup::addRecipe)"));
         assertTrue(source.contains("SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(true)"));
         assertFalse(source.contains("lookup.getLookup().removeAllRecipes()"));

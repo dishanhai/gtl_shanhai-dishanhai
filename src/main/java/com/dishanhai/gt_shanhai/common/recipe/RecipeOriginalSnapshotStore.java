@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.common.recipe;
 
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import net.minecraft.world.item.crafting.RecipeManager;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -10,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.IdentityHashMap;
+import java.util.WeakHashMap;
 
 /**
  * Stores the first unmodified copy of each runtime recipe.
@@ -20,6 +23,10 @@ import java.util.IdentityHashMap;
 public final class RecipeOriginalSnapshotStore {
 
     private static final Map<String, LinkedHashMap<String, GTRecipe>> SNAPSHOTS = new LinkedHashMap<>();
+    private static final Set<String> COMPLETE_TYPES = new LinkedHashSet<>();
+    private static final ThreadLocal<Map<String, LinkedHashMap<String, GTRecipe>>> LOADING = new ThreadLocal<>();
+    private static final Map<RecipeManager, Map<String, LinkedHashMap<String, GTRecipe>>> LOADED = new WeakHashMap<>();
+    private static WeakReference<RecipeManager> activeManager = new WeakReference<>(null);
     private static final Map<GTRecipe, String> ANONYMOUS_KEYS = new IdentityHashMap<>();
     private static long anonymousSequence;
 
@@ -27,11 +34,37 @@ public final class RecipeOriginalSnapshotStore {
 
     public static synchronized void capture(String recipeTypeId, GTRecipe recipe) {
         if (recipeTypeId == null || recipeTypeId.isEmpty() || recipe == null) return;
-        LinkedHashMap<String, GTRecipe> byId =
-                SNAPSHOTS.computeIfAbsent(recipeTypeId, key -> new LinkedHashMap<>());
+        Map<String, LinkedHashMap<String, GTRecipe>> loading = LOADING.get();
+        LinkedHashMap<String, GTRecipe> byId = (loading != null ? loading : SNAPSHOTS)
+                .computeIfAbsent(recipeTypeId, key -> new LinkedHashMap<>());
         String id = stableKey(recipe);
         if (!id.startsWith("@anonymous:") && byId.containsKey(id)) return;
         byId.putIfAbsent(id, recipe.copy());
+    }
+
+    public static synchronized void captureComplete(String recipeTypeId, Iterable<? extends GTRecipe> originals) {
+        clear(recipeTypeId);
+        for (GTRecipe recipe : originals) capture(recipeTypeId, recipe);
+        COMPLETE_TYPES.add(recipeTypeId);
+    }
+
+    public static void beginLoading() {
+        LOADING.set(new LinkedHashMap<>());
+    }
+
+    public static synchronized void endLoading(RecipeManager manager, boolean loaded) {
+        if (loaded) LOADED.put(manager, LOADING.get());
+        LOADING.remove();
+    }
+
+    /** Adopt only a manager that has been installed on the server. */
+    public static synchronized void activate(RecipeManager manager) {
+        if (manager == null) return;
+        Map<String, LinkedHashMap<String, GTRecipe>> originals = LOADED.remove(manager);
+        if (originals == null && activeManager.get() == manager) return;
+        clearAll();
+        if (originals != null) SNAPSHOTS.putAll(originals);
+        activeManager = new WeakReference<>(manager);
     }
 
     public static synchronized GTRecipe copyOf(String recipeTypeId, String recipeId) {
@@ -63,8 +96,7 @@ public final class RecipeOriginalSnapshotStore {
     }
 
     public static synchronized boolean hasSnapshot(String recipeTypeId) {
-        Map<String, GTRecipe> byId = SNAPSHOTS.get(recipeTypeId);
-        return byId != null && !byId.isEmpty();
+        return COMPLETE_TYPES.contains(recipeTypeId);
     }
 
     public static synchronized Set<String> typeIds() {
@@ -73,18 +105,17 @@ public final class RecipeOriginalSnapshotStore {
 
     public static synchronized void clear(String recipeTypeId) {
         if (recipeTypeId != null) {
+            COMPLETE_TYPES.remove(recipeTypeId);
             Map<String, GTRecipe> removed = SNAPSHOTS.remove(recipeTypeId);
             if (removed != null) {
-                for (GTRecipe recipe : removed.values()) {
-                    ANONYMOUS_KEYS.values().removeIf(id -> id.startsWith("@anonymous:")
-                            && removed.containsKey(id));
-                }
+                ANONYMOUS_KEYS.values().removeIf(removed::containsKey);
             }
         }
     }
 
     public static synchronized void clearAll() {
         SNAPSHOTS.clear();
+        COMPLETE_TYPES.clear();
         ANONYMOUS_KEYS.clear();
         anonymousSequence = 0L;
     }

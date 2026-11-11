@@ -307,10 +307,10 @@ public final class ShanhaiRecipeEditorOps {
         }
         String rebuildType = resolvedType;
         try {
+            Set<String> changedIds = affectedIds(existing.get().sourceRecipeId(), recipeId, existing);
             RecipeRebuildService.RebuildReport report =
-                    RecipeRebuildService.rebuildType(
-                            rebuildType, RecipeRebuildService.RebuildReason.RULE_CHANGED);
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(rebuildType, recipeId);
+                    RecipeRebuildService.refreshLookupEntries(rebuildType, changedIds);
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipesToAll(rebuildType, changedIds);
             return new Result(Result.Status.SUCCESS, "override-removed-and-rebuilt", report.revision());
         } catch (Throwable t) {
             return new Result(Result.Status.REBUILD_FAILED, "override-removed-rebuild-failed",

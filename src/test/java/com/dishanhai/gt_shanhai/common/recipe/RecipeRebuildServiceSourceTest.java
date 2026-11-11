@@ -15,8 +15,9 @@ class RecipeRebuildServiceSourceTest {
                 "src/main/java/com/dishanhai/gt_shanhai/common/recipe/RecipeRebuildService.java"));
 
         assertTrue(source.contains("RecipeOriginalSnapshotStore.copiesOf"));
-        assertTrue(source.indexOf("applyStripByType") < source.indexOf("applyReplaceByType"));
-        assertTrue(source.indexOf("applyReplaceByType") < source.indexOf("isDeletedByRuntimeRule"));
+        String canonical = source.substring(source.indexOf("private static GTRecipe buildCanonical("));
+        assertTrue(canonical.indexOf("applyStripByType") < canonical.indexOf("applyReplaceByType"));
+        assertTrue(canonical.indexOf("applyReplaceByType") < canonical.indexOf("isDeletedByRuntimeRule"));
         assertTrue(source.contains("lookup.removeAllRecipes()"));
         assertTrue(source.contains("lookup.addRecipe"));
         assertTrue(source.contains("runPatternCacheInvalidationBatch"));

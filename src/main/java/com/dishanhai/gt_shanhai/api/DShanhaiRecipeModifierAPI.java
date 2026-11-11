@@ -12,6 +12,7 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.dishanhai.gt_shanhai.common.recipe.RecipeOriginalSnapshotStore;
+import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
 import com.dishanhai.gt_shanhai.mixin.SlotCacheManagerAccessor;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 
@@ -1130,7 +1131,7 @@ public class DShanhaiRecipeModifierAPI {
         SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(true);
         try {
             lookup.removeAllRecipes();
-            for (GTRecipe existing : unique.values()) lookup.addRecipe(existing);
+            for (GTRecipe existing : unique.values()) RecipeRebuildService.addLookupRecipe(lookup, existing);
         } finally {
             SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(false);
         }
@@ -1238,14 +1239,13 @@ public class DShanhaiRecipeModifierAPI {
             });
             SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(true);
             lookup.removeAllRecipes();
-            for (GTRecipe recipe : recipes) lookup.addRecipe(recipe);
+            for (GTRecipe recipe : recipes) RecipeRebuildService.addLookupRecipe(lookup, recipe);
         } finally {
             SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(false);
             SUPPRESS_GET_RECIPES_STRIP.set(false);
         }
         DShanhaiRecipeModifierAPI.unmarkCanonicalLookupRecipe(recipeTypeId, recipeId);
         markCanonicalLookupRecipe(recipeTypeId, replacement);
-        invalidatePatternCaches("modifyRecipeField:" + recipeTypeId);
         DShanhaiRecipeEngine.clearRecipeCache();
         DShanhaiGTRecipeQuery.resetCache();
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
@@ -1258,6 +1258,7 @@ public class DShanhaiRecipeModifierAPI {
                     .replaceEntries(server, recipeTypeId, upserts, Set.of());
         }
         com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeReverseIndex.invalidate();
+        invalidateRecipeCaches("modifyRecipeField:" + recipeTypeId, Set.of(recipeTypeId));
         com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(recipeTypeId, recipeId);
     }
 

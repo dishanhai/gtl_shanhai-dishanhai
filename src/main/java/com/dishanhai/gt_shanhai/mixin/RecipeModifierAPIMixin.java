@@ -2,15 +2,25 @@ package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.api.DShanhaiRuntimeRecipeCache;
+import com.dishanhai.gt_shanhai.common.recipe.RecipeLookupOverflow;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
+import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.lookup.AbstractMapIngredient;
 import com.gregtechceu.gtceu.api.recipe.lookup.Branch;
 import com.gregtechceu.gtceu.api.recipe.lookup.GTRecipeLookup;
+import com.gregtechceu.gtceu.api.recipe.lookup.RecipeIterator;
 
+import org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine;
+import org.gtlcore.gtlcore.api.machine.trait.MEPatternRecipeHandlePart;
+import org.gtlcore.gtlcore.api.recipe.IAdditionalRecipeIterator;
+import org.gtlcore.gtlcore.api.recipe.RecipeCacheStrategy;
+import org.gtlcore.gtlcore.api.recipe.RecipeRunner;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Shadow;
@@ -22,7 +32,9 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 
 @Mixin(value = GTRecipeLookup.class, remap = false)
@@ -39,6 +51,7 @@ public abstract class RecipeModifierAPIMixin {
     @Inject(method = "removeAllRecipes", at = @At("HEAD"))
     private void gtShanhai$clearRuntimeRecipeCacheOnLookupReset(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
         DShanhaiRuntimeRecipeCache.clear();
+        RecipeLookupOverflow.clear(this.lookup);
     }
 
     /**
@@ -50,6 +63,20 @@ public abstract class RecipeModifierAPIMixin {
         return DShanhaiRecipeModifierAPI.prepareLookupRecipe(recipe);
     }
 
+    @WrapOperation(method = "addRecipe", at = @At(value = "INVOKE",
+            target = "Lcom/gregtechceu/gtceu/api/recipe/lookup/GTRecipeLookup;"
+                    + "recurseIngredientTreeAdd(Lcom/gregtechceu/gtceu/api/recipe/GTRecipe;"
+                    + "Ljava/util/List;Lcom/gregtechceu/gtceu/api/recipe/lookup/Branch;II)Z"))
+    private boolean gtShanhai$rejectEmptyIngredientTreeEntry(GTRecipeLookup lookup, GTRecipe recipe,
+            List<List<AbstractMapIngredient>> ingredients, Branch root, int index, int count,
+            Operation<Boolean> original) {
+        // GTCEu reports success for an empty index even though no node can hold the recipe.
+        if (ingredients.isEmpty() && DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.get()) {
+            return false;
+        }
+        return original.call(lookup, recipe, ingredients, root, index, count);
+    }
+
     @Inject(method = "addRecipe", at = @At("HEAD"), remap = false)
     private void gtShanhai$removeDuplicateLookupRecipe(GTRecipe recipe,
                                                         org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
@@ -59,7 +86,7 @@ public abstract class RecipeModifierAPIMixin {
     @Inject(method = "findRecipe", at = @At("HEAD"), cancellable = true)
     private void gtShanhai$getCachedFindRecipe(IRecipeCapabilityHolder holder, CallbackInfoReturnable<GTRecipe> cir) {
         String typeId = gtShanhai$getRecipeTypeId();
-        if (!DShanhaiRecipeModifierAPI.canUseRuntimeRecipeCache(typeId)) return;
+        if (!gtShanhai$canCache(holder, typeId)) return;
 
         DShanhaiRuntimeRecipeCache.Key key = DShanhaiRuntimeRecipeCache.key(typeId, holder, "findRecipe");
         if (DShanhaiRuntimeRecipeCache.contains(key)) {
@@ -73,7 +100,7 @@ public abstract class RecipeModifierAPIMixin {
         GTRecipe current = cir.getReturnValue();
         if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(current)
                 && !DShanhaiRecipeModifierAPI.hasRuntimeJSModifiers(typeId)) return;
-        if (!DShanhaiRecipeModifierAPI.canUseRuntimeRecipeCache(typeId)) {
+        if (!gtShanhai$canCache(holder, typeId)) {
             applyStrip(holder, cir);
             return;
         }
@@ -91,12 +118,36 @@ public abstract class RecipeModifierAPIMixin {
 
     @Inject(method = "find", at = @At("RETURN"), cancellable = true)
     private void gtShanhai$stripOnFind(IRecipeCapabilityHolder holder, Predicate<GTRecipe> predicate, CallbackInfoReturnable<GTRecipe> cir) {
+        if (cir.getReturnValue() == null) {
+            GTRecipe overflow = gtShanhai$findOverflow(holder, predicate);
+            if (overflow == null) return;
+            cir.setReturnValue(gtShanhai$applyRuntimeModifiers(holder, overflow, gtShanhai$getRecipeTypeId()));
+            return;
+        }
         applyStrip(holder, cir);
     }
 
     @Inject(method = "find", at = @At("HEAD"), cancellable = true)
     private void gtShanhai$getCachedFindCandidates(IRecipeCapabilityHolder holder, Predicate<GTRecipe> predicate, CallbackInfoReturnable<GTRecipe> cir) {
         String typeId = gtShanhai$getRecipeTypeId();
+        List<MEPatternRecipeHandlePart> parts = gtShanhai$patternParts(holder);
+        if (!parts.isEmpty()) {
+            // Cached ME slots are intentionally absent from prepareRecipeFind.
+            for (MEPatternRecipeHandlePart part : parts) {
+                for (GTRecipe recipe : part.getCachedGTRecipe()) {
+                    if (recipe != null && recipe.recipeType == recipeType && predicate.test(recipe)) {
+                        cir.setReturnValue(gtShanhai$applyRuntimeModifiers(holder, recipe, typeId));
+                        return;
+                    }
+                }
+            }
+            List<List<AbstractMapIngredient>> ingredients = gtShanhai$prepareRecipeFind(holder);
+            GTRecipe recipe = ingredients == null ? null
+                    : gtShanhai$recurseIngredientTreeFindRecipe(ingredients, this.lookup, predicate);
+            if (recipe == null) recipe = gtShanhai$findOverflow(holder, predicate);
+            cir.setReturnValue(gtShanhai$applyRuntimeModifiers(holder, recipe, typeId));
+            return;
+        }
         if (!DShanhaiRecipeModifierAPI.canUseRuntimeRecipeCache(typeId)) return;
 
         DShanhaiRuntimeRecipeCache.Key key = DShanhaiRuntimeRecipeCache.key(typeId, holder, "findCandidates");
@@ -105,7 +156,54 @@ public abstract class RecipeModifierAPIMixin {
         }
 
         GTRecipe recipe = DShanhaiRuntimeRecipeCache.findFirstCandidate(key, predicate);
+        if (recipe == null) recipe = gtShanhai$findOverflow(holder, predicate);
         cir.setReturnValue(gtShanhai$applyRuntimeModifiers(holder, recipe, typeId));
+    }
+
+    @Inject(method = "getRecipeIterator", at = @At("RETURN"))
+    private void gtShanhai$appendOverflow(IRecipeCapabilityHolder holder, Predicate<GTRecipe> predicate,
+            CallbackInfoReturnable<RecipeIterator> cir) {
+        List<GTRecipe> overflow = RecipeLookupOverflow.recipes(this.lookup);
+        if (overflow.isEmpty() || !(cir.getReturnValue() instanceof IAdditionalRecipeIterator additional)) return;
+        LinkedHashSet<GTRecipe> merged = new LinkedHashSet<>();
+        List<GTRecipe> existing = additional.getAdditionalRecipes();
+        if (existing != null) merged.addAll(existing);
+        for (GTRecipe recipe : overflow) {
+            if (gtShanhai$matchesOverflowInput(holder, recipe)) merged.add(recipe);
+        }
+        additional.setAdditionalRecipes(new ArrayList<>(merged));
+    }
+
+    @Unique
+    private GTRecipe gtShanhai$findOverflow(IRecipeCapabilityHolder holder, Predicate<GTRecipe> predicate) {
+        for (GTRecipe recipe : RecipeLookupOverflow.recipes(this.lookup)) {
+            if (gtShanhai$matchesOverflowInput(holder, recipe) && predicate.test(recipe)) return recipe;
+        }
+        return null;
+    }
+
+    @Unique
+    private static boolean gtShanhai$matchesOverflowInput(IRecipeCapabilityHolder holder, GTRecipe recipe) {
+        if (recipe.inputs.isEmpty()) return true;
+        if (holder instanceof IRecipeCapabilityMachine) {
+            return RecipeRunner.handle(recipe, IO.IN, holder, recipe.inputs, Map.of(),
+                    true, RecipeCacheStrategy.NO_CACHE).isSuccess();
+        }
+        return recipe.matchRecipeContents(IO.IN, holder, recipe.inputs, false).isSuccess();
+    }
+
+    @Unique
+    private boolean gtShanhai$canCache(IRecipeCapabilityHolder holder, String typeId) {
+        return gtShanhai$patternParts(holder).isEmpty()
+                && !RecipeLookupOverflow.hasRecipes(this.lookup)
+                && DShanhaiRecipeModifierAPI.canUseRuntimeRecipeCache(typeId);
+    }
+
+    @Unique
+    private static List<MEPatternRecipeHandlePart> gtShanhai$patternParts(IRecipeCapabilityHolder holder) {
+        if (!(holder instanceof IRecipeCapabilityMachine machine)) return List.of();
+        List<MEPatternRecipeHandlePart> parts = machine.getMEPatternRecipeHandleParts();
+        return parts == null ? List.of() : parts;
     }
 
     private void applyStrip(IRecipeCapabilityHolder holder, CallbackInfoReturnable<GTRecipe> cir) {

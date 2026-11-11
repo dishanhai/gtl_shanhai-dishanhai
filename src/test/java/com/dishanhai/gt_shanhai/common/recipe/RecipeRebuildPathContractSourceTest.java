@@ -87,4 +87,15 @@ class RecipeRebuildPathContractSourceTest {
         assertTrue(sync.contains("syncOverridesTo"),
                 "登入補發入口必須存在");
     }
+
+    @Test
+    void emptyIngredientIndexUsesTheSameFallbackAsDuplicateInputs() throws Exception {
+        String lookup = read("src/main/java/com/dishanhai/gt_shanhai/mixin/RecipeModifierAPIMixin.java");
+        String rebuild = read("src/main/java/com/dishanhai/gt_shanhai/common/recipe/RecipeRebuildService.java");
+
+        assertTrue(lookup.contains("recurseIngredientTreeAdd(Lcom/gregtechceu/gtceu/api/recipe/GTRecipe;"));
+        assertTrue(lookup.contains("if (ingredients.isEmpty() && DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.get())"));
+        assertTrue(rebuild.contains("if (lookup.addRecipe(recipe) || recipe.getId() == null) return;"));
+        assertTrue(rebuild.contains("RecipeLookupOverflow.add(root, recipe);"));
+    }
 }

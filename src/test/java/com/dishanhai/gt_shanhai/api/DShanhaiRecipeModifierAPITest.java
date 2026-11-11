@@ -1,8 +1,11 @@
 package com.dishanhai.gt_shanhai.api;
 
+import net.minecraftforge.fml.loading.FMLPaths;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -11,6 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class DShanhaiRecipeModifierAPITest {
+
+    @BeforeAll
+    static void initializeForgePaths() {
+        FMLPaths.loadAbsolutePaths(Path.of("build", "test-game-dir"));
+    }
 
     @Test
     void batchPatternCacheInvalidationRefreshesOwnersOnlyOnce() {
