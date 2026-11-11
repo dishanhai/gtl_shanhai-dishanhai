@@ -148,18 +148,20 @@ class NativeRecipeThreadRuntimeTest {
         assertEquals(0, p.runtime.getRecipeThreadSnapshot().running());
     }
 
-    @Test void stellarSnapshotUsesTheSchedulersActualAdmissionGateAfterDowngrade() throws Exception {
+    @Test void stellarSnapshotReflectsRemainderAdmissionAfterCapacityDowngrade() throws Exception {
         Probe p = probe(); p.runtime.parallel = 100;
         p.queue("a", 100); p.runtime.tickAt(0);
         p.queue("b", 100); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(1);
         p.queue("c", 100); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(2);
         p.runtime.parallel = 90;
+        assertFalse(p.runtime.getRecipeThreadSnapshot().admissionBlocked());
         p.queue("waiting", 1); p.runtime.onThreadInputsChanged(); p.runtime.tickAt(3);
         var state = p.runtime.getRecipeThreadSnapshot();
-        assertEquals(4, state.capacity()); assertEquals(3, state.active());
-        assertEquals(75, state.reservedParallel()); assertEquals(90, state.parallelCapacity());
-        assertFalse(state.threadsFull()); assertFalse(state.parallelFull());
-        assertTrue(state.admissionBlocked()); assertEquals(3, p.inputs);
+        assertEquals(4, state.capacity()); assertEquals(4, state.active());
+        assertEquals(90, state.reservedParallel()); assertEquals(90, state.parallelCapacity());
+        assertTrue(state.threadsFull()); assertTrue(state.parallelFull());
+        assertTrue(state.admissionBlocked()); assertEquals(4, p.inputs);
+        assertEquals(List.of(25L, 25L, 25L, 15L), p.shares);
     }
 
     @Test void independentBatchesShareOneMachineWorkingCallbackAndCannotAdvanceTwiceInOneTick() throws Exception {

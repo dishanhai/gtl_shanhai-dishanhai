@@ -108,7 +108,8 @@ public final class PrimordialThreadScheduler<T> {
         long index = nextIndex();
         if (index >= count) return 0L;
         long share = capacity / count + (index < capacity % count ? 1L : 0L);
-        return share > remaining ? 0L : share;
+        // 山海：保留已扣料批次的預留，不足完整份額時仍讓空閒執行緒使用餘額。
+        return Math.min(share, remaining);
     }
 
     public void tick(long now, long capacity, long threads, Runner<T> runner) {

@@ -78,7 +78,7 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
         if (priority == null) return lookup.get();
         do {
             List<GTRecipe> selected = priority.select(lookup);
-            if (selected.isEmpty() || recipePoolReservations == null
+            if (selected.isEmpty() || !usesIndependentRecipePools()
                     || getThreadRecipePoolRemaining(selected.getFirst()) > 0L) return new LinkedHashSet<>(selected);
         } while (priority.retry());
         return Set.of();
@@ -564,10 +564,12 @@ public abstract class PrimordialThreadedRecipeLogic extends SelectableRecipeType
                             allowance = share;
                             admission = true;
                             priorityInputHandled = false;
-                            if (independentPools && recipePoolReservations == null) recipePoolReservations = collectRecipePoolReservations();
-                            if (priority == null) priority = getRecipeThreadCapacity() > 1L
-                                    ? new RecipeThreadPriority<>(PrimordialThreadedRecipeLogic.this::estimateThreadRecipeTicks,
-                                            recipe -> recipe.duration, PrimordialThreadedRecipeLogic.this::recipePoolReserved) : null;
+                            if (priority == null && getRecipeThreadCapacity() > 1L) {
+                                // 山海：共享池同樣按來源占用排序，避免最長配方重複占滿所有執行緒。
+                                recipePoolReservations = collectRecipePoolReservations();
+                                priority = new RecipeThreadPriority<>(PrimordialThreadedRecipeLogic.this::estimateThreadRecipeTicks,
+                                        recipe -> recipe.duration, PrimordialThreadedRecipeLogic.this::recipePoolReserved);
+                            }
                             try {
                                 do {
                                     findAndHandleRecipe();

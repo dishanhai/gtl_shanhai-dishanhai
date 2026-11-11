@@ -413,6 +413,27 @@ class PrimordialThreadedRecipeLogicTest {
         assertEquals(Long.MAX_VALUE - 64L, logic.admittedShares.getLast());
     }
 
+    @Test void capacityReductionAdmitsTheRemainingParallelWithoutActualParallelTracking() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = 128L;
+        logic.queue("paid", 100);
+        tick(logic, 0L);
+        assertEquals(32L, logic.getReservedThreadParallel());
+
+        logic.parallelCapacity = 40L;
+        logic.queue("remainder", 100);
+        logic.wake();
+        tick(logic, 1L);
+
+        assertEquals(List.of(32L, 8L), logic.admittedShares);
+        assertEquals(40L, logic.getReservedThreadParallel());
+        assertEquals(2, logic.inputTransactions);
+        assertEquals(2, logic.getActiveRecipeThreadCount());
+        assertEquals(List.of("paid", "remainder"), logic.running());
+        assertTrue(logic.finished.isEmpty());
+        assertTrue(logic.getRecipeThreadSnapshot().parallelFull());
+    }
+
     @Test void limitedThreadsRedistributeUnusedParallelToTheRemainingSlots() throws Exception {
         Probe logic = probe();
         logic.useActualParallel = true;
@@ -431,6 +452,93 @@ class PrimordialThreadedRecipeLogicTest {
         assertEquals(64L, logic.getReservedThreadParallel());
         assertEquals(4L, display(logic).getList("threads", 10).getCompound(0).getLong("reserved"));
         assertTrue(logic.getRecipeThreadSnapshot().threadsFull());
+    }
+
+    @Test void sharedPoolDistributesAdmissionsBetweenLongAndShortRecipesInTheSameTick() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = 1920L;
+        logic.module.configuredThreads = 262145L;
+        logic.useActualParallel = logic.usePriority = true;
+        for (String id : List.of("slow", "fast")) {
+            for (int i = 0; i < 96; i++) {
+                var batch = new WirelessGTRecipe(recipe(id, id.equals("slow") ? 1000 : 200), BigInteger.ZERO);
+                batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, 1L);
+                logic.pending.add(batch);
+            }
+        }
+
+        tick(logic, 0L);
+
+        assertEquals(48L, logic.pending.stream().filter(batch -> batch.id.getPath().equals("slow")).count());
+        assertEquals(48L, logic.pending.stream().filter(batch -> batch.id.getPath().equals("fast")).count());
+        assertEquals(96, logic.getActiveRecipeThreadCount());
+        assertEquals(96L, logic.getReservedThreadParallel());
+        assertEquals(96, logic.inputTransactions);
+        assertEquals(1, logic.candidateLookups);
+        assertTrue(logic.energyTicks.isEmpty());
+    }
+
+    @Test void sharedPoolKeepsSourceOccupancyWhenPrioritiesAreRebuiltOnTheNextTick() throws Exception {
+        Probe logic = probe();
+        logic.parallelCapacity = 1920L;
+        logic.module.configuredThreads = 262145L;
+        logic.useActualParallel = logic.usePriority = true;
+        for (int i = 0; i < 192; i++) {
+            var batch = new WirelessGTRecipe(recipe("slow", 1000), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, 1L);
+            logic.pending.add(batch);
+        }
+        tick(logic, 0L);
+        assertEquals(96, logic.getActiveRecipeThreadCount());
+        for (int i = 0; i < 96; i++) {
+            var batch = new WirelessGTRecipe(recipe("fast", 200), BigInteger.ZERO);
+            batch.data.putLong(PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY, 1L);
+            logic.pending.add(batch);
+        }
+
+        tick(logic, 1L);
+
+        assertEquals(96, logic.pending.size());
+        assertTrue(logic.pending.stream().allMatch(batch -> batch.id.getPath().equals("slow")));
+        assertEquals(192, logic.getActiveRecipeThreadCount());
+        assertEquals(192L, logic.getReservedThreadParallel());
+        assertEquals(192, logic.inputTransactions);
+        assertEquals(2, logic.candidateLookups);
+        assertTrue(logic.finished.isEmpty());
+    }
+
+    @Test void sharedPoolWithoutActualParallelTrackingPrefersAnUnusedRecipeOnTheNextTick() throws Exception {
+        Probe logic = probe();
+        logic.usePriority = true;
+        logic.queue("slow", 1000);
+        logic.queue("slow", 1000);
+        logic.queue("fast", 200);
+
+        tick(logic, 0L);
+        tick(logic, 1L);
+
+        assertEquals(List.of("slow", "fast"), logic.running());
+        assertEquals(List.of(16L, 16L), logic.admittedShares);
+        assertEquals(32L, logic.getReservedThreadParallel());
+        assertEquals(2, logic.inputTransactions);
+        assertEquals("slow", logic.pending.getFirst().id.getPath());
+    }
+
+    @Test void sharedPoolSourceRankingDoesNotRejectAnOtherwiseRunnableUnidentifiedRecipe() throws Exception {
+        Probe logic = probe();
+        logic.usePriority = true;
+        GTRecipe untagged = recipe("untagged", 20);
+        UNSAFE.putObject(untagged.recipeType, UNSAFE.objectFieldOffset(GTRecipeType.class.getField("registryName")),
+                new ResourceLocation("gtceu", "dummy"));
+        assertNull(PrimordialThreadRecipeIdentity.fromRecipe(untagged));
+        logic.pending.add(untagged);
+
+        tick(logic, 0L);
+
+        assertEquals(1, logic.inputTransactions);
+        assertEquals(1, logic.getActiveRecipeThreadCount());
+        assertEquals(List.of("untagged"), logic.running());
+        assertEquals(16L, logic.getReservedThreadParallel());
     }
 
     @Test void unlimitedThreadSourceCanUseTheRemainingFiniteMachineParallel() throws Exception {

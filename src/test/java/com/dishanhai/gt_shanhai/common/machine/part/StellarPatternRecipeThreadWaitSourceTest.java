@@ -29,7 +29,8 @@ class StellarPatternRecipeThreadWaitSourceTest {
                 "common/machine/primordial/PrimordialThreadedRecipeLogic.java"}) {
             String source = Files.readString(MAIN.resolve(file));
             assertTrue(source.contains("getRecipeThreadSnapshot()"), file);
-            assertTrue(source.contains("completedThreadBatches++"), file);
+            assertTrue(source.contains("completedThreadBatches++")
+                    || source.contains("completedThreadBatches += frame.batchCount;"), file);
         }
         String adapter = Files.readString(MAIN.resolve("mixin/RecipeThreadLogicMixin.java"));
         assertTrue(adapter.contains("shanhai$recipeThreads().getRecipeThreadSnapshot()"));

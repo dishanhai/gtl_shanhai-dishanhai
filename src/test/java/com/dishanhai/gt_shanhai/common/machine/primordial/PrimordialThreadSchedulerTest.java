@@ -11,7 +11,7 @@ class PrimordialThreadSchedulerTest {
     @Test void readonlyAdmissionShareIncludesDowngradedReservationsAndRoundRemainders() {
         var scheduler = new PrimordialThreadScheduler<String>();
         scheduler.restore(0, 25, "a"); scheduler.restore(1, 25, "b"); scheduler.restore(2, 25, "c");
-        assertEquals(0, scheduler.admissionShare(90, 4));
+        assertEquals(15, scheduler.admissionShare(90, 4));
         assertEquals(25, scheduler.admissionShare(100, 4));
         assertEquals(3, scheduler.lanes().size()); assertEquals(75, scheduler.reserved());
     }
@@ -56,6 +56,64 @@ class PrimordialThreadSchedulerTest {
         scheduler.requestSearch();
         tick(20, 65, 4);
         assertEquals(before, searches, "額度滿時不可查配方");
+    }
+
+    @Test void fullySuppliedThreadsShareTheAvailableParallelEqually() {
+        var actual = startAvailableParallels(64L, 4L, 64L, 64L, 64L, 64L);
+        assertEquals(List.of(16L, 16L, 16L, 16L),
+                actual.lanes().stream().map(PrimordialThreadScheduler.Lane::reserved).toList());
+        assertEquals(64L, actual.reserved());
+        assertEquals(4, actual.activeThreads());
+    }
+
+    @Test void undersuppliedThreadsReserveTheirAvailableParallelAndLeaveTheRestForOtherThreads() {
+        var actual = startAvailableParallels(64L, 4L, 3L, 5L, 64L, 64L);
+        assertEquals(List.of(3L, 5L, 28L, 28L),
+                actual.lanes().stream().map(PrimordialThreadScheduler.Lane::reserved).toList());
+        assertEquals(64L, actual.reserved());
+        assertEquals(4, actual.activeThreads());
+    }
+
+    @Test void parallelBelowTheThreadCountStartsOnlyThreadsWithAnAvailableParallel() {
+        var actual = startAvailableParallels(2L, 4L, 64L, 64L, 64L, 64L);
+        assertEquals(List.of(1L, 1L),
+                actual.lanes().stream().map(PrimordialThreadScheduler.Lane::reserved).toList());
+        assertEquals(2L, actual.reserved());
+        assertEquals(2, actual.activeThreads());
+    }
+
+    @Test void anUndersuppliedSingleThreadDoesNotCreateExtraThreadsFromUnusedParallel() {
+        var actual = startAvailableParallels(64L, 1L, 3L, 64L, 64L);
+        assertEquals(List.of(3L),
+                actual.lanes().stream().map(PrimordialThreadScheduler.Lane::reserved).toList());
+        assertEquals(3L, actual.reserved());
+        assertEquals(1, actual.activeThreads());
+    }
+
+    @Test void untrackedParallelShortageUsesTheRemainderWithoutChangingPaidReservations() {
+        scheduler.restore(0L, 32L, new Task("paid", 100));
+        inputs.add(new Task("remainder", 100));
+
+        tick(0L, 40L, 4L);
+
+        assertEquals(List.of(32L, 8L),
+                scheduler.lanes().stream().map(PrimordialThreadScheduler.Lane::reserved).toList());
+        assertEquals(40L, scheduler.reserved());
+        assertEquals(2, scheduler.activeThreads());
+        assertEquals(1, searches);
+        assertEquals(99, scheduler.lanes().getFirst().task().remaining);
+    }
+
+    @Test void aSinglePaidThreadCannotUseItsRemainderToCreateAnotherThread() {
+        scheduler.restore(0L, 3L, new Task("paid", 100));
+        inputs.add(new Task("extra", 100));
+
+        tick(0L, 64L, 1L);
+
+        assertEquals(1, scheduler.activeThreads());
+        assertEquals(3L, scheduler.reserved());
+        assertEquals(0, searches);
+        assertEquals(1, inputs.size());
     }
 
     @Test void emptyLanesShareOneLazySearchAndNoisyNotificationCannotBypassTheCadence() {
@@ -173,6 +231,22 @@ class PrimordialThreadSchedulerTest {
         tick(10, 64, 4);
         assertEquals(99, first.remaining);
         assertEquals(2, searches);
+    }
+
+    private static PrimordialThreadScheduler<Long> startAvailableParallels(
+            long capacity, long threads, long... available) {
+        var actual = new PrimordialThreadScheduler<Long>();
+        var pending = new ArrayDeque<Long>();
+        for (long parallel : available) pending.add(parallel);
+        actual.tick(0L, capacity, threads, true, new PrimordialThreadScheduler.Runner<>() {
+            @Override public boolean advance(Long parallel) { return false; }
+            @Override public Long start(long allowance) {
+                return pending.isEmpty() ? null : Math.min(pending.removeFirst(), allowance);
+            }
+            @Override public long reservation(Long parallel, long allowance) { return parallel; }
+            @Override public int admissionLimit() { return 96; }
+        });
+        return actual;
     }
 
     private void tick(long now, long capacity, long threads) {
