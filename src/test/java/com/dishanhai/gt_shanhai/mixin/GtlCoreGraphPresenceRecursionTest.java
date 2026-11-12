@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.common.ae2.GraphCraftingRedispatch;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.cgse.core.GraphCompiler;
 import org.cgse.core.GraphJobRuntime;
@@ -8,15 +9,19 @@ import org.cgse.core.GraphPlanner;
 import org.cgse.core.GraphRecipe;
 import org.cgse.core.PlanSummary;
 import org.cgse.core.PlanningBudget;
+import org.cgse.core.ReplanCoordinator;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GtlCoreGraphPresenceRecursionTest {
@@ -109,6 +114,50 @@ class GtlCoreGraphPresenceRecursionTest {
     void recursiveExecutionCannotBootstrapWithEitherStartupInputMissing() {
         assertFalse(plan(Map.of("virtual", 1L)).feasible());
         assertFalse(plan(Map.of("reagent", 1L)).feasible());
+    }
+
+    @Test
+    void redispatchReplansPendingWorkWithoutReplayingAnAcceptedBatch() {
+        GraphPlan<String> plan = plan(STARTUP);
+        GraphJobRuntime<String> runtime = new GraphJobRuntime<>(plan, plan.initial(), Map.of());
+        runtime.tick(new GraphJobRuntime.Adapter<>() {
+            @Override
+            public long capacity(GraphRecipe<String> recipe, long requested) {
+                return 1;
+            }
+
+            @Override
+            public GraphJobRuntime.Outcome push(GraphRecipe<String> recipe, long runs, Map<String, Long> inputs) {
+                return GraphJobRuntime.Outcome.ACCEPTED;
+            }
+
+            @Override
+            public long deliver(String key, long amount) {
+                return 0;
+            }
+
+            @Override
+            public long refund(String key, long amount) {
+                return 0;
+            }
+        }, 1, 1);
+        assertEquals(1L, runtime.dispatches());
+        assertEquals(1L, runtime.inFlight("intermediate"));
+
+        var replanning = new ReplanCoordinator<String, String>();
+        var checkpoint = new AtomicReference<GraphJobRuntime.ReplanCheckpoint<String>>();
+        Runnable startReplan = () -> checkpoint.set(runtime.beginReplan());
+        runtime.suspend(true);
+        GraphCraftingRedispatch.retryPending(runtime, replanning, startReplan);
+        assertNull(checkpoint.get());
+        runtime.suspend(false);
+
+        GraphCraftingRedispatch.retryPending(runtime, replanning, startReplan);
+        assertNotNull(checkpoint.get());
+        assertEquals(1L, runtime.dispatches());
+        assertEquals(1L, runtime.inFlight("intermediate"));
+        assertEquals(1L, runtime.held("virtual"));
+        assertEquals(1L, runtime.accept("intermediate", 1, false));
     }
 
     private static GraphPlan<String> plan(Map<String, Long> stock) {

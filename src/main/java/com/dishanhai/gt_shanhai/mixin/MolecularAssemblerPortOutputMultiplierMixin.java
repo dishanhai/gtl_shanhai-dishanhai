@@ -119,14 +119,24 @@ public abstract class MolecularAssemblerPortOutputMultiplierMixin {
         cir.setReturnValue(gtShanhai$effectivePatternCache);
     }
 
-    @ModifyVariable(method = "pushPattern", at = @At("HEAD"), argsOnly = true, ordinal = 0)
-    private IPatternDetails gtShanhai$restoreSourcePatternBeforePush(IPatternDetails patternDetails) {
+    // GRAPH 预检查原始槽位，容量按实际入队的原始产出计算。
+    @ModifyVariable(method = {"pushPattern", "gtlcore$canProduceGraphPattern", "gtlcore$graphCapacity"},
+            at = @At("HEAD"), argsOnly = true, ordinal = 0, require = 3)
+    private IPatternDetails gtShanhai$restoreSourcePatternForDispatch(IPatternDetails patternDetails) {
+        return gtShanhai$sourcePattern(patternDetails);
+    }
+
+    // GTLCore 1.2.3.2-fix4 的分子端口尚未覆盖这些诊断方法。
+    @ModifyVariable(method = {"gtlcore$graphSharedToolProblem", "gtlcore$graphBlockReason",
+            "gtlcore$graphBlockDetail", "gtlcore$graphBlockMessage"},
+            at = @At("HEAD"), argsOnly = true, ordinal = 0, require = 0)
+    private IPatternDetails gtShanhai$restoreSourcePatternForDiagnostics(IPatternDetails patternDetails) {
         return gtShanhai$sourcePattern(patternDetails);
     }
 
     @Unique
     private IPatternDetails gtShanhai$sourcePattern(IPatternDetails patternDetails) {
-        if (patternDetails == null) return null;
+        if (patternDetails == null || gtShanhai$effectiveToSource.isEmpty()) return patternDetails;
         IPatternDetails source = gtShanhai$effectiveToSource.get(patternDetails);
         if (source != null) return source;
         source = gtShanhai$effectiveDefinitionToSource.get(gtShanhai$definitionTag(patternDetails));

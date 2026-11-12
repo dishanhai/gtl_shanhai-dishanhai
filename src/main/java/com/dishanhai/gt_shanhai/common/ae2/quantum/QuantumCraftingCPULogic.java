@@ -27,6 +27,7 @@ import appeng.crafting.inv.ListCraftingInventory;
 import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.hooks.ticking.TickHandler;
 import appeng.me.service.CraftingService;
+import com.dishanhai.gt_shanhai.common.ae2.GraphCraftingRedispatch;
 import com.dishanhai.gt_shanhai.common.ae2.GtlCoreCraftingPlans;
 import com.google.common.base.Preconditions;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
@@ -866,10 +867,13 @@ public class QuantumCraftingCPULogic {
     }
 
     public RedispatchResult retryRemainingDispatch() {
-        if (hasGraphJob()) return new RedispatchResult(RedispatchState.GRAPH_MANAGED, 0, 0);
-        if (job == null) return new RedispatchResult(RedispatchState.NO_JOB, 0, 0);
         IGrid grid = cpu.getGrid();
         if (grid == null) return new RedispatchResult(RedispatchState.GRID_OFFLINE, 0, 0);
+        if (hasGraphJob()) {
+            return new RedispatchResult(GraphCraftingRedispatch.request(graph)
+                    ? RedispatchState.GRAPH_QUEUED : RedispatchState.GRAPH_UNAVAILABLE, 0, 0);
+        }
+        if (job == null) return new RedispatchResult(RedispatchState.NO_JOB, 0, 0);
 
         Object2LongOpenHashMap<AEKey> requiredInputs = new Object2LongOpenHashMap<>();
         requiredInputs.defaultReturnValue(0L);
@@ -928,7 +932,8 @@ public class QuantumCraftingCPULogic {
     }
 
     public enum RedispatchState {
-        GRAPH_MANAGED,
+        GRAPH_QUEUED,
+        GRAPH_UNAVAILABLE,
         NO_JOB,
         GRID_OFFLINE,
         REFILLED,

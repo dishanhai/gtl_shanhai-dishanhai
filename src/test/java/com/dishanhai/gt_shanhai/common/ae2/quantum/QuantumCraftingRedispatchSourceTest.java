@@ -49,21 +49,24 @@ class QuantumCraftingRedispatchSourceTest {
     void menuActionTargetsTheSelectedQuantumCpu() throws IOException {
         String menu = Files.readString(MENU);
 
-        assertTrue(menu.contains("registerClientAction(\"gtShanhaiRedispatch\""));
+        assertTrue(menu.contains("registerClientAction(\"gtShanhaiRedispatch\", Integer.class"));
+        assertTrue(menu.contains("serial != gtShanhai$currentRedispatchSerial()"),
+                "客户端切换 CPU 后，旧按钮请求不得作用于另一个 CPU");
         assertTrue(menu.contains("gtShanhai$resolveExplicitSelectedQuantumCpu()"),
                 "重发配只能操作用户当前明确选中的量子 CPU，不能 fallback 到其他忙碌 CPU");
         assertTrue(menu.contains("quantumCpu.craftingLogic.retryRemainingDispatch()"));
+        assertTrue(menu.contains("GraphCraftingRedispatch.forNativeCpu(cluster)"),
+                "原生 GRAPH CPU 也使用自己的图控制器");
     }
 
     @Test
-    void buttonOccupiesTheSlotImmediatelyLeftOfCancel() throws IOException {
+    void buttonUsesItsOwnRowBelowTheCpuPanel() throws IOException {
         assertTrue(Files.exists(SCREEN));
         String screen = Files.readString(SCREEN);
         String mixins = MixinConfigs.readAll();
 
-        assertTrue(screen.contains("Component.literal(\"重发配\")"));
-        assertTrue(screen.contains("this.leftPos + 108"));
-        assertTrue(screen.contains("this.topPos + this.imageHeight - 25"));
+        assertTrue(screen.contains("new UiButton("));
+        assertTrue(screen.contains("this.topPos + this.imageHeight + 2"));
         assertTrue(screen.contains("control.gtShanhai$redispatch()"));
         assertTrue(mixins.contains("\"CraftingCPUScreenRedispatchMixin\""));
     }

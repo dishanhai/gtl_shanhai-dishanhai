@@ -23,11 +23,45 @@ class MolecularAssemblerPortOutputMultiplierSourceTest {
         assertTrue(source.contains("VirtualPatternEncodingHelper.rewritePatternOutputMultiplier"));
         assertTrue(source.contains("gtShanhai$effectiveToSource"));
         assertTrue(source.contains("@ModifyVariable("));
-        assertTrue(source.contains("method = \"pushPattern\""));
+        assertTrue(source.contains("\"pushPattern\""));
         assertTrue(source.contains("gtShanhai$sourcePattern(patternDetails)"),
                 "端口接单前必须把 AE 可见倍增视图还原成源样板，避免实际倍率再次叠乘");
         assertFalse(source.contains("patternSlotMap.put("),
                 "端口不能改写 GTLCore 源样板映射");
+    }
+
+    @Test
+    void graphPreflightAndCapacityUseTheSameSourcePatternAsPush() throws Exception {
+        String source = Files.readString(MIXIN);
+        int preflight = source.indexOf("\"gtlcore$canProduceGraphPattern\"");
+        int capacity = source.indexOf("\"gtlcore$graphCapacity\"");
+        assertTrue(preflight >= 0 && capacity >= 0,
+                "GRAPH 必须在检查槽位和计算原始产出队列容量前还原源样板");
+
+        int start = source.lastIndexOf("@ModifyVariable(", Math.min(preflight, capacity));
+        int end = source.indexOf("\n    }", Math.max(preflight, capacity));
+        assertTrue(start >= 0 && end >= 0);
+        String hook = source.substring(start, end);
+        assertTrue(hook.contains("\"pushPattern\""));
+        assertTrue(hook.contains("at = @At(\"HEAD\")"));
+        assertTrue(hook.contains("argsOnly = true, ordinal = 0, require = 3"));
+        assertTrue(hook.contains("return gtShanhai$sourcePattern(patternDetails);"));
+    }
+
+    @Test
+    void newerGraphDiagnosticsUseSourceSlotsAndRemainOptional() throws Exception {
+        String source = Files.readString(MIXIN);
+        int target = source.indexOf("\"gtlcore$graphSharedToolProblem\"");
+        assertTrue(target >= 0);
+        int start = source.lastIndexOf("@ModifyVariable(", target);
+        int end = source.indexOf("\n    }", target);
+        assertTrue(start >= 0 && end >= 0);
+        String hook = source.substring(start, end);
+        assertTrue(hook.contains("\"gtlcore$graphBlockReason\""));
+        assertTrue(hook.contains("\"gtlcore$graphBlockDetail\""));
+        assertTrue(hook.contains("\"gtlcore$graphBlockMessage\""));
+        assertTrue(hook.contains("require = 0"));
+        assertTrue(hook.contains("return gtShanhai$sourcePattern(patternDetails);"));
     }
 
     @Test

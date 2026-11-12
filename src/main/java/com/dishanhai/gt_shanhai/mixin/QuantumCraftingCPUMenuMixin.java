@@ -6,11 +6,14 @@ import appeng.api.networking.crafting.ICraftingCPU;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
 import appeng.core.sync.packets.CraftingStatusPacket;
+import appeng.me.cluster.implementations.CraftingCPUCluster;
 import appeng.menu.AEBaseMenu;
+import appeng.menu.guisync.GuiSync;
 import appeng.menu.me.common.IncrementalUpdateHelper;
 import appeng.menu.me.crafting.CraftingCPUMenu;
 import appeng.menu.me.crafting.CraftingStatus;
 import appeng.menu.me.crafting.CraftingStatusEntry;
+import com.dishanhai.gt_shanhai.common.ae2.GraphCraftingRedispatch;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingBlockEntity;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPU;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPUCluster;
@@ -26,6 +29,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
 import net.minecraft.world.level.Level;
 
 import org.spongepowered.asm.mixin.Final;
@@ -46,11 +50,19 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
     @Shadow @Final private IncrementalUpdateHelper incrementalUpdateHelper;
     @Shadow @Final private IGrid grid;
     @Shadow @Final private Consumer<AEKey> cpuChangeListener;
+    @Shadow private CraftingCPUCluster cpu;
     @Shadow public CpuSelectionMode schedulingMode;
     @Shadow public boolean cantStoreItems;
 
     @Unique
     private QuantumCraftingCPU gtShanhai$quantumCpu;
+
+    @Unique
+    private static final int gtShanhai$NO_REDISPATCH_CPU = Integer.MIN_VALUE;
+
+    @Unique
+    @GuiSync(110)
+    private int gtShanhai$redispatchSerial = gtShanhai$NO_REDISPATCH_CPU;
 
     @Unique
     private static final long gtShanhai$QUANTUM_PROGRESS_SYNC_INTERVAL = 5L;
@@ -67,7 +79,7 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void gtShanhai$initQuantumCpu(MenuType<?> menuType, int id, Inventory inventory, Object host, CallbackInfo ci) {
-        registerClientAction("gtShanhaiRedispatch", this::gtShanhai$redispatch);
+        registerClientAction("gtShanhaiRedispatch", Integer.class, this::gtShanhai$handleRedispatch);
         if ((Object) this instanceof CraftingStatusMenuAccessor) {
             registerClientAction("gtShanhaiCancelSelectedCpu", Integer.class, this::gtShanhai$cancelSelectedCpu);
         }
@@ -85,29 +97,70 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
 
     @Override
     @Unique
+    public boolean gtShanhai$canRedispatch() {
+        return gtShanhai$redispatchSerial != gtShanhai$NO_REDISPATCH_CPU
+                && gtShanhai$redispatchSerial == gtShanhai$currentRedispatchSerial();
+    }
+
+    @Override
+    @Unique
     public void gtShanhai$redispatch() {
-        if (isClientSide()) {
-            sendClientAction("gtShanhaiRedispatch");
+        if (isClientSide() && gtShanhai$canRedispatch()) {
+            sendClientAction("gtShanhaiRedispatch", gtShanhai$redispatchSerial);
+        }
+    }
+
+    @Unique
+    private int gtShanhai$currentRedispatchSerial() {
+        return (Object) this instanceof CraftingStatusMenuAccessor accessor
+                ? accessor.gtShanhai$getSelectedCpuSerialRaw() : -1;
+    }
+
+    @Unique
+    private GraphCraftingRedispatch gtShanhai$resolveNativeGraphCpu() {
+        ICraftingCPU selected = (Object) this instanceof CraftingStatusMenuAccessor accessor
+                ? accessor.gtShanhai$getSelectedCpuRaw() : cpu;
+        if (!(selected instanceof CraftingCPUCluster cluster) || grid == null || cluster.getGrid() != grid
+                || cluster.isDestroyed() || !cluster.isActive() || !cluster.isBusy()) {
+            return null;
+        }
+        return GraphCraftingRedispatch.forNativeCpu(cluster);
+    }
+
+    @Unique
+    private void gtShanhai$handleRedispatch(int serial) {
+        if (isClientSide()) return;
+        QuantumCraftingCPU quantumCpu = gtShanhai$resolveExplicitSelectedQuantumCpu();
+        GraphCraftingRedispatch graph = gtShanhai$resolveNativeGraphCpu();
+        if (serial == gtShanhai$NO_REDISPATCH_CPU || serial != gtShanhai$currentRedispatchSerial()
+                || (Object) this instanceof CraftingStatusMenuAccessor && serial < 0
+                || (quantumCpu == null || !quantumCpu.isActive()) && graph == null) {
+            getPlayer().displayClientMessage(Component.translatable("gt_shanhai.quantum_cpu.redispatch.no_selection")
+                    .withStyle(ChatFormatting.RED), false);
             return;
         }
-        Player player = getPlayer();
-        QuantumCraftingCPU quantumCpu = gtShanhai$resolveExplicitSelectedQuantumCpu();
-        if (quantumCpu == null) {
-            player.displayClientMessage(Component.literal("§c[量子 CPU] 当前未选择运行中的量子 CPU"), false);
+        if (graph != null) {
+            getPlayer().displayClientMessage(graph.gtShanhai$requestRedispatch()
+                    ? Component.translatable("gt_shanhai.quantum_cpu.redispatch.graph_queued")
+                    : Component.translatable("gt_shanhai.quantum_cpu.redispatch.graph_unavailable"), false);
             return;
         }
         QuantumCraftingCPULogic.RedispatchResult result = quantumCpu.craftingLogic.retryRemainingDispatch();
         Component message = switch (result.state()) {
-            case GRAPH_MANAGED -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.graph_managed");
-            case NO_JOB -> Component.literal("§e[量子 CPU] 当前没有待重发配任务");
-            case GRID_OFFLINE -> Component.literal("§c[量子 CPU] AE 网络离线，无法补取原料");
-            case MATERIAL_UNAVAILABLE -> Component.literal(
-                    "§c[量子 CPU] 未从网络取到缺失原料；仍缺 " + result.missingKinds() + " 类");
-            case RETRIGGERED -> Component.literal("§a[量子 CPU] 原料已在 CPU，已重新触发发配");
-            case REFILLED -> Component.literal("§a[量子 CPU] 已补取 " + result.extractedKinds()
-                    + "/" + result.missingKinds() + " 类原料，下一 tick 继续发配");
+            case GRAPH_QUEUED -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.graph_queued");
+            case GRAPH_UNAVAILABLE -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.graph_unavailable");
+            case NO_JOB -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.no_job")
+                    .withStyle(ChatFormatting.YELLOW);
+            case GRID_OFFLINE -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.grid_offline")
+                    .withStyle(ChatFormatting.RED);
+            case MATERIAL_UNAVAILABLE -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.material_unavailable",
+                    result.missingKinds()).withStyle(ChatFormatting.RED);
+            case RETRIGGERED -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.retriggered")
+                    .withStyle(ChatFormatting.GREEN);
+            case REFILLED -> Component.translatable("gt_shanhai.quantum_cpu.redispatch.refilled",
+                    result.extractedKinds(), result.missingKinds()).withStyle(ChatFormatting.GREEN);
         };
-        player.displayClientMessage(message, false);
+        getPlayer().displayClientMessage(message, false);
     }
 
     @Unique
@@ -200,6 +253,12 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
     // broadcastChanges = AbstractContainerMenu.m_38946_
     @Inject(method = "m_38946_", at = @At("HEAD"), remap = false, require = 0)
     private void gtShanhai$broadcastQuantumChanges(CallbackInfo ci) {
+        if (isServerSide()) {
+            int serial = gtShanhai$currentRedispatchSerial();
+            QuantumCraftingCPU selected = gtShanhai$resolveExplicitSelectedQuantumCpu();
+            boolean available = (selected != null && selected.isActive()) || gtShanhai$resolveNativeGraphCpu() != null;
+            gtShanhai$redispatchSerial = available ? serial : gtShanhai$NO_REDISPATCH_CPU;
+        }
         if (isServerSide() && gtShanhai$quantumCpu != null) {
             if (gtShanhai$resolveExplicitSelectedQuantumCpu() == null) {
                 setCPU(null);

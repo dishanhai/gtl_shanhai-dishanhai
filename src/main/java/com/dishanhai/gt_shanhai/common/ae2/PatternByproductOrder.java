@@ -1,16 +1,13 @@
 package com.dishanhai.gt_shanhai.common.ae2;
 
 import appeng.api.crafting.IPatternDetails;
-import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
-import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.crafting.pattern.EncodedPatternItem;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.gregtechceu.gtceu.common.data.GTItems;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -22,7 +19,6 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -89,29 +85,6 @@ public final class PatternByproductOrder {
         lines.add(Component.translatable(key).withStyle(marked ? ChatFormatting.GREEN : ChatFormatting.GRAY));
     }
 
-    /**
-     * 樣板總成在 {@code keepByProduct=false} 時會把網路樣板重編碼成只剩主產物，根標籤一併丟掉。
-     * 有標識時改回保留全部產出，並把原樣板根標籤抄回去。
-     */
-    public static IPatternDetails withByproductOutputs(AEProcessingPattern pattern, Level level) {
-        if (pattern == null || level == null || !isMarked(pattern)) return null;
-        GenericStack[] originalInputs = pattern.getSparseInputs();
-        GenericStack[] originalOutputs = pattern.getSparseOutputs();
-        if (originalOutputs == null || originalOutputs.length <= 1) return null;
-        ArrayList<GenericStack> inputs = withoutCircuit(originalInputs);
-        if (inputs.isEmpty()) inputs = nonNull(originalInputs);
-        try {
-            ItemStack encoded = PatternDetailsHelper.encodeProcessingPattern(
-                    inputs.toArray(new GenericStack[0]), originalOutputs);
-            copyExtraTags(pattern.getDefinition() == null ? null : pattern.getDefinition().getTag(), encoded);
-            setMarked(encoded, true);
-            return PatternDetailsHelper.decodePattern(encoded, level);
-        } catch (RuntimeException exception) {
-            logFailure(exception);
-            return null;
-        }
-    }
-
     public static int toggleCommand(CommandSourceStack source) {
         if (!(source.getEntity() instanceof ServerPlayer player)) {
             source.sendFailure(Component.translatable("gt_shanhai.message.pattern_byproduct_order.need_player"));
@@ -175,30 +148,6 @@ public final class PatternByproductOrder {
         return keys == null ? List.of() : keys;
     }
 
-    private static ArrayList<GenericStack> withoutCircuit(GenericStack[] inputs) {
-        ArrayList<GenericStack> filtered = new ArrayList<>();
-        if (inputs == null) return filtered;
-        for (int i = 0; i < inputs.length; i++) {
-            GenericStack input = inputs[i];
-            if (input == null || input.what() == null) continue;
-            AEKey what = input.what();
-            if (what instanceof AEItemKey && ((AEItemKey) what).getItem() == GTItems.INTEGRATED_CIRCUIT.get()) {
-                continue;
-            }
-            filtered.add(input);
-        }
-        return filtered;
-    }
-
-    private static ArrayList<GenericStack> nonNull(GenericStack[] inputs) {
-        ArrayList<GenericStack> filtered = new ArrayList<>();
-        if (inputs == null) return filtered;
-        for (int i = 0; i < inputs.length; i++) {
-            if (inputs[i] != null) filtered.add(inputs[i]);
-        }
-        return filtered;
-    }
-
     /**
      * 樣板重編碼只寫 in/out。把原定義上的根標籤抄回去，否則副產物下單標識會在倍率改寫後消失。
      */
@@ -208,7 +157,7 @@ public final class PatternByproductOrder {
         copyExtraTags(definition == null ? null : definition.getTag(), encoded);
     }
 
-    private static void copyExtraTags(CompoundTag original, ItemStack encoded) {
+    public static void copyExtraTags(CompoundTag original, ItemStack encoded) {
         if (original == null || encoded == null || encoded.isEmpty()) return;
         CompoundTag tag = encoded.getOrCreateTag();
         for (String key : original.getAllKeys()) {
