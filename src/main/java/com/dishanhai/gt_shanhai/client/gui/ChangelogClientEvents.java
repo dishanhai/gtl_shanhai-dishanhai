@@ -1,8 +1,11 @@
+// Author: dishanhai
 package com.dishanhai.gt_shanhai.client.gui;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.dishanhai.gt_shanhai.common.config.ChangelogConfig;
+import com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths;
+import com.dishanhai.sh_common_lib.api.client.announcement.FullscreenAnnouncements;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -25,9 +28,11 @@ public final class ChangelogClientEvents {
         if (shownThisLaunch || !(event.getScreen() instanceof TitleScreen titleScreen)) {
             return;
         }
-        shownThisLaunch = true;
-        if (ChangelogConfig.shouldShow()) {
-            ChangelogScreen.open(titleScreen);
-        }
+        var client = Minecraft.getInstance();
+        client.tell(() -> {
+            if (shownThisLaunch || client.screen != titleScreen) return;
+            shownThisLaunch = true;
+            new FullscreenAnnouncements(ShanhaiConfigPaths.changelog()).openUnread(titleScreen);
+        });
     }
 }

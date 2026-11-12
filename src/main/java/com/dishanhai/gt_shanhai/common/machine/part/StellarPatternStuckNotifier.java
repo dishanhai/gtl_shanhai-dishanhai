@@ -190,8 +190,11 @@ public final class StellarPatternStuckNotifier {
 
     private static void send(ServerPlayer player, ServerLevel level, BlockPos pos,
             Component route, ShanhaiTerminalReport report, boolean announce) {
-        ShanhaiTerminalReportPacket.sendTo(player, report);
-        if (!announce) return;
+        if (!announce) {
+            ShanhaiTerminalReportPacket.sendTo(player, report);
+            return;
+        }
+        ShanhaiTerminalReportPacket.sendAndNotifyTo(player, report);
         Component link = Component.translatable(PREFIX + "link_details").withStyle(style -> style
                 .withColor(ChatFormatting.AQUA).withUnderlined(true)
                 .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,

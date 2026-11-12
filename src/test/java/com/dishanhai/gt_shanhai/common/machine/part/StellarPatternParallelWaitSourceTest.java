@@ -52,7 +52,7 @@ class StellarPatternParallelWaitSourceTest {
         String module = Files.readString(MAIN.resolve("common/machine/primordial/PrimordialModuleRecipeLogic.java"));
         assertTrue(module.contains("public long gtShanhai$getStuckWatchParallelLimit()"),
                 "保留原初批次內候選名額的診斷入口");
-        assertTrue(module.contains("stellarLastAllocatedRecipes = recipeList.size()"));
+        assertTrue(module.contains("stellarLastAllocatedRecipes = index"));
         String vision = Files.readString(MAIN.resolve("common/machine/primordial/guixu/GuixuVisionCoreRecipeLogic.java"));
         assertTrue(vision.contains("public long gtShanhai$getLastAllocatedParallel()"));
         String watch = Files.readString(MAIN.resolve("common/machine/part/StellarPatternStuckWatch.java"));

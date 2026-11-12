@@ -29,6 +29,11 @@ public final class ShanhaiTerminalReportClient {
         }
     }
 
+    /** 活动岛仍可打开已被普通聊天报告挤出缓存的告警。 */
+    public static void openLatest(ShanhaiTerminalReport report) {
+        Minecraft.getInstance().setScreen(new TerminalReportScreen(REPORTS.getOrDefault(report.id(), report)));
+    }
+
     /** @return 該指令屬於本功能（無論成功與否都應攔截）。 */
     public static boolean run(String command) {
         if (command == null || !command.startsWith(COMMAND)) return false;

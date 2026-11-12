@@ -36,8 +36,6 @@ class StellarPatternStuckReportSourceTest {
         String client = read("client/ShanhaiTerminalReportClient.java");
         assertTrue(client.contains("screen.reportId() == report.id()"));
         assertTrue(client.contains("screen.refreshed(report)"));
-        String notifier = read("common/machine/part/StellarPatternStuckNotifier.java");
-        assertTrue(notifier.contains("if (!announce) return;"), "訂單完成或取消只更新報告，不另洗一則卡死通知");
     }
 
     @Test
@@ -149,11 +147,36 @@ class StellarPatternStuckReportSourceTest {
     @Test
     void reportPacketDefaultsToCacheOnlyAndExplicitlyOpensAfterStorage() throws IOException {
         String packet = read("network/ShanhaiTerminalReportPacket.java");
-        assertTrue(packet.contains("this(report, false)"));
-        assertTrue(packet.contains("buf.writeBoolean(open)"));
-        assertTrue(packet.contains("this.open = buf.readBoolean()"));
+        assertTrue(packet.contains("this(report, Delivery.CACHE)"));
+        assertTrue(packet.contains("buf.writeEnum(delivery)"));
+        assertTrue(packet.contains("buf.readEnum(Delivery.class)"));
         int store = packet.indexOf("ShanhaiTerminalReportClient.store(report)");
-        int open = packet.indexOf("if (open) ShanhaiTerminalReportClient.run(");
+        int open = packet.indexOf("case OPEN -> ShanhaiTerminalReportClient.run(");
         assertTrue(store >= 0 && open > store);
+    }
+
+    @Test
+    void onlyNewWarningBatchesRequestAnActivityIslandNotification() throws IOException {
+        String notifier = read("common/machine/part/StellarPatternStuckNotifier.java");
+        assertTrue(notifier.replaceAll("\\s+", " ").contains(
+                "if (!announce) { ShanhaiTerminalReportPacket.sendTo(player, report); return; }"),
+                "刷新历史只缓存报告");
+        assertTrue(notifier.contains("ShanhaiTerminalReportPacket.sendAndNotifyTo(player, report)"));
+        String packet = read("network/ShanhaiTerminalReportPacket.java");
+        int store = packet.indexOf("ShanhaiTerminalReportClient.store(report)");
+        int notify = packet.indexOf("case NOTIFY -> StellarWarningKernelModule.notify(report)");
+        assertTrue(store >= 0 && notify > store, "活动岛动作需要先缓存报告");
+    }
+
+    @Test
+    void activityIslandMergesByReportWithinTheCurrentConnection() throws IOException {
+        String module = read("client/gui/terminal/StellarWarningKernelModule.java");
+        assertTrue(module.contains("NotificationService.KEY"));
+        assertTrue(module.contains(".session(module, SESSION)"));
+        assertTrue(module.contains("Long.toUnsignedString(report.id())"));
+        assertTrue(module.contains("NotificationService.Merge.REPLACE"));
+        assertTrue(module.contains("ShanhaiTerminalReportClient.openLatest(report)"));
+        String modules = Files.readString(Path.of("src/main/resources/META-INF/sh_better_ui.modules"));
+        assertTrue(modules.contains("com.dishanhai.gt_shanhai.client.gui.terminal.StellarWarningKernelModule"));
     }
 }
