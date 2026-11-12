@@ -11,6 +11,8 @@ import com.dishanhai.gt_shanhai.common.item.PatternEncodeOverride;
 import com.dishanhai.gt_shanhai.common.item.PatternEncodePreferences;
 import com.dishanhai.gt_shanhai.common.item.PatternWrapControlMenu;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
@@ -149,27 +151,29 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
         }
     }
 
-    @Inject(method = "encodeProcessingPattern", at = @At("HEAD"), remap = false)
-    private void gtShanhai$pushWrapOverride(CallbackInfoReturnable<ItemStack> cir) {
-        PatternEncodeOverride.push(new PatternEncodeOverride(this.gtShanhai$wrapMode, this.gtShanhai$markedSlots));
+    @WrapMethod(method = "encodeProcessingPattern", remap = false)
+    private ItemStack gtShanhai$encodeWithWrapOverride(Operation<ItemStack> original) {
+        PatternEncodeOverride.push(new PatternEncodeOverride(this.gtShanhai$wrapMode, this.gtShanhai$markedSlots,
+                (PatternEncodingTermMenu) (Object) this));
+        try {
+            return original.call();
+        } finally {
+            PatternEncodeOverride.pop();
+            PatternEncodeOverride.consumeLastDiagnostic();
+        }
     }
 
     @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), cancellable = true, remap = false)
-    private void gtShanhai$popWrapOverride(CallbackInfoReturnable<ItemStack> cir) {
-        String diagnostic;
-        try {
-            if (cir.getReturnValue() == null) {
-                ItemStack recovered = gtShanhai$encodeVirtualOnlyPattern();
-                if (!recovered.isEmpty()) {
-                    PatternEncodeOverride.setLastDiagnostic(
-                            "all visible inputs omitted; restored virtual non-consumables");
-                    cir.setReturnValue(recovered);
-                }
+    private void gtShanhai$recoverAndReportWrap(CallbackInfoReturnable<ItemStack> cir) {
+        if (cir.getReturnValue() == null) {
+            ItemStack recovered = gtShanhai$encodeVirtualOnlyPattern();
+            if (!recovered.isEmpty()) {
+                PatternEncodeOverride.setLastDiagnostic(
+                        "all visible inputs omitted; restored virtual non-consumables");
+                cir.setReturnValue(recovered);
             }
-            diagnostic = PatternEncodeOverride.consumeLastDiagnostic();
-        } finally {
-            PatternEncodeOverride.pop();
         }
+        String diagnostic = PatternEncodeOverride.consumeLastDiagnostic();
         if (diagnostic == null || diagnostic.isEmpty()) return;
         Player player = getPlayer();
         if (player != null) {

@@ -46,6 +46,7 @@
   ],
   "client": [
     "JEISelectedRecipeContextMixin",
+    "Ae2JeiEncodingTooltipMixin",
     "CraftingCPUScreenCancelButtonMixin",
     "EaepGtlCoreUploadButtonLayoutMixin",
     "CraftingStatusTableRendererTooltipMixin",

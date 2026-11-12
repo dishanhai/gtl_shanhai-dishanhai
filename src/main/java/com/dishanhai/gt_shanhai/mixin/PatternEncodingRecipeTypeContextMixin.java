@@ -2,19 +2,20 @@ package com.dishanhai.gt_shanhai.mixin;
 
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
-import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.dishanhai.gt_shanhai.common.item.PatternWrapControlMenu;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
+import com.dishanhai.gt_shanhai.common.item.PatternWrapControlMenu;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.lang.reflect.Field;
 
@@ -28,49 +29,39 @@ import java.lang.reflect.Field;
 public class PatternEncodingRecipeTypeContextMixin {
 
     @Unique
+    private static final Logger gtShanhai$encodingContextLogger = LoggerFactory.getLogger("VirtualPatternEncoding");
+
+    @Unique
     private static Field gtShanhai$pendingRecipeTypeField;
 
     @Unique
     private static boolean gtShanhai$pendingRecipeTypeReadFailureLogged;
 
-    @Unique
-    private boolean gtShanhai$pushedEncodingRecipeType;
-
-    @Unique
-    private boolean gtShanhai$pushedSelectedEncodingRecipe;
-
-    @Inject(method = "encodeProcessingPattern", at = @At("HEAD"), require = 0, remap = false)
-    private void gtShanhai$pushRecipeTypeForEncoding(CallbackInfoReturnable<ItemStack> cir) {
+    @WrapMethod(method = "encodeProcessingPattern", require = 0, remap = false)
+    private ItemStack gtShanhai$encodeWithRecipeContext(Operation<ItemStack> original) {
         PatternRecipeTypeHelper.popSelectedEncodingRecipe();
         PatternRecipeTypeHelper.popEncodingRecipeType();
-        gtShanhai$pushedSelectedEncodingRecipe = false;
-        gtShanhai$pushedEncodingRecipeType = false;
-        if (this instanceof PatternWrapControlMenu control) {
-            String selectedRecipeId = control.gtShanhai$getSelectedRecipeId();
-            GTRecipe selectedRecipe = PatternRecipeTypeHelper.resolveRecipe(selectedRecipeId);
-            if (selectedRecipe != null) {
-                PatternRecipeTypeHelper.pushSelectedEncodingRecipe(selectedRecipe);
-                gtShanhai$pushedSelectedEncodingRecipe = true;
-                GTDishanhaiMod.LOGGER.debug("[VirtualPatternEncoding] using JEI-selected recipe {}",
-                        selectedRecipe.id);
+        try {
+            if (this instanceof PatternWrapControlMenu control
+                    && ((PatternEncodingTermMenu) (Object) this).getPlayer() instanceof ServerPlayer player) {
+                String selectedRecipeId = control.gtShanhai$getSelectedRecipeId();
+                GTRecipe selectedRecipe = PatternRecipeTypeHelper.resolveRecipe(player.level(), selectedRecipeId);
+                if (selectedRecipe != null) {
+                    PatternRecipeTypeHelper.pushSelectedEncodingRecipe(selectedRecipe);
+                    gtShanhai$encodingContextLogger.debug("[VirtualPatternEncoding] using JEI-selected recipe {}",
+                            selectedRecipe.id);
+                }
             }
-        }
-        String recipeTypeId = gtShanhai$readPendingRecipeTypeId(this);
-        if (recipeTypeId.isEmpty()) return;
-        PatternRecipeTypeHelper.pushEncodingRecipeType(recipeTypeId);
-        gtShanhai$pushedEncodingRecipeType = true;
-        GTDishanhaiMod.LOGGER.debug("[VirtualPatternEncoding] using GTLCore pending recipe type {}", recipeTypeId);
-    }
-
-    @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), require = 0, remap = false)
-    private void gtShanhai$popRecipeTypeAfterEncoding(CallbackInfoReturnable<ItemStack> cir) {
-        if (gtShanhai$pushedSelectedEncodingRecipe) {
+            String recipeTypeId = gtShanhai$readPendingRecipeTypeId(this);
+            if (!recipeTypeId.isEmpty()) {
+                PatternRecipeTypeHelper.pushEncodingRecipeType(recipeTypeId);
+                gtShanhai$encodingContextLogger.debug("[VirtualPatternEncoding] using GTLCore pending recipe type {}", recipeTypeId);
+            }
+            return original.call();
+        } finally {
             PatternRecipeTypeHelper.popSelectedEncodingRecipe();
-            gtShanhai$pushedSelectedEncodingRecipe = false;
+            PatternRecipeTypeHelper.popEncodingRecipeType();
         }
-        if (!gtShanhai$pushedEncodingRecipeType) return;
-        PatternRecipeTypeHelper.popEncodingRecipeType();
-        gtShanhai$pushedEncodingRecipeType = false;
     }
 
     @Unique
@@ -88,7 +79,7 @@ public class PatternEncodingRecipeTypeContextMixin {
         } catch (ReflectiveOperationException | RuntimeException exception) {
             if (!gtShanhai$pendingRecipeTypeReadFailureLogged) {
                 gtShanhai$pendingRecipeTypeReadFailureLogged = true;
-                GTDishanhaiMod.LOGGER.warn(
+                gtShanhai$encodingContextLogger.warn(
                         "[VirtualPatternEncoding] 无法读取 GTLCore pending 配方类型，自动包裹将回退到全局匹配",
                         exception);
             }

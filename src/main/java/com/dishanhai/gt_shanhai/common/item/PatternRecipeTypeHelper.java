@@ -409,8 +409,8 @@ public final class PatternRecipeTypeHelper {
         GTRecipe selectedRecipe = currentSelectedEncodingRecipe();
         if (selectedRecipe != null) {
             GTRecipe matchedRecipe = VirtualPatternEncodingHelper.findMatchingRecipeForEncoding(inputs, outputs);
-            if (matchedRecipe != null) {
-                writeAuthoritativeRecipeType(stack, matchedRecipe);
+            if (matchedRecipe == selectedRecipe) {
+                writeAuthoritativeRecipeType(stack, selectedRecipe);
                 return;
             }
             // JEI 传输后槽位可能被玩家改动；无法重新得到唯一配方时，不能把旧选中配方

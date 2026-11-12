@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.integration.jei;
 
 import appeng.api.stacks.GenericStack;
-import appeng.core.definitions.AEItems;
+import appeng.client.gui.Icon;
 import appeng.menu.me.common.MEStorageMenu;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
@@ -16,6 +16,7 @@ import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
+import com.dishanhai.sh_better_ui.client.gui.display.GraphicIcon;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.integration.jei.multipage.MultiblockInfoWrapper;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
@@ -30,7 +31,6 @@ import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
 import mezz.jei.api.forge.ForgeTypes;
-import mezz.jei.api.helpers.IGuiHelper;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.advanced.IRecipeButtonControllerFactory;
@@ -51,7 +51,6 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.fluids.FluidStack;
 
@@ -68,21 +67,56 @@ import java.util.stream.Stream;
 
 public final class JeiPatternQuickEncodeButtons {
 
+    // 仅在客户端渲染线程使用，作用域限于当前山海按钮借用的槽位高亮。
+    private static GuiGraphics transferHighlightGraphics;
+
     private JeiPatternQuickEncodeButtons() {}
 
+    public static boolean isDrawingTransferHighlights(GuiGraphics graphics) {
+        return transferHighlightGraphics == graphics;
+    }
+
     public static void register(IAdvancedRegistration registration) {
-        IGuiHelper guiHelper = registration.getJeiHelpers().getGuiHelper();
-        IDrawable patternIcon = guiHelper.createDrawableItemStack(AEItems.PROCESSING_PATTERN.stack());
+        IDrawable patternIcon = new RecipeButtonIcon(GraphicIcon.QUICK_PATTERN_ENCODE);
         registration.addRecipeButtonFactory(new Factory(patternIcon, false));
-        IDrawable cloudIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.ENDER_CHEST));
+        IDrawable cloudIcon = new RecipeButtonIcon(GraphicIcon.CLOUD_PATTERN_LIBRARY);
         registration.addRecipeButtonFactory(new CloudUploadFactory(cloudIcon));
-        IDrawable recipeTypeIcon = guiHelper.createDrawableItemStack(AEItems.CRAFTING_PATTERN.stack());
+        IDrawable recipeTypeIcon = new RecipeButtonIcon(GraphicIcon.RECIPE_TYPE);
         registration.addRecipeButtonFactory(new Factory(recipeTypeIcon, true));
-        IDrawable bookmarkIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.BOOK));
+        IDrawable bookmarkIcon = new RecipeButtonIcon(GraphicIcon.BOOKMARK_FAVORITE);
         registration.addRecipeButtonFactory(new BookmarkFactory(bookmarkIcon));
-        IDrawable byproductIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.LIME_DYE));
+        IDrawable byproductIcon = new RecipeButtonIcon(GraphicIcon.EXPORT);
         registration.addRecipeButtonFactory(new ByproductUploadFactory(byproductIcon));
         registration.addRecipeButtonFactory(new MultiblockFactory(patternIcon));
+    }
+
+    private record RecipeButtonIcon(GraphicIcon icon) implements IDrawable {
+        private static final int SIZE = 13; // JEI 配方侧栏按钮的尺寸
+        private static final float ICON_SCALE = (float) (SIZE - 2) / GraphicIcon.PIXELS;
+
+        @Override
+        public int getWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getHeight() {
+            return SIZE;
+        }
+
+        @Override
+        public void draw(GuiGraphics graphics, int x, int y) {
+            Icon.TOOLBAR_BUTTON_BACKGROUND.getBlitter().dest(x, y, SIZE, SIZE).blit(graphics);
+            var pose = graphics.pose();
+            pose.pushPose();
+            try {
+                pose.translate(x + 1, y + 1, 0);
+                pose.scale(ICON_SCALE, ICON_SCALE, 1);
+                icon.draw(graphics, 0, 0, 1, 0xFF20252E);
+            } finally {
+                pose.popPose();
+            }
+        }
     }
 
     private static ResourceLocation extractRecipeId(Object recipeBase) {
@@ -296,7 +330,7 @@ public final class JeiPatternQuickEncodeButtons {
                     && mouseX < area.getX() + area.getWidth()
                     && mouseY >= area.getY()
                     && mouseY < area.getY() + area.getHeight()) {
-                drawNativeTransferError(graphics, mouseX, mouseY);
+                drawNativeTransferHighlights(graphics, mouseX, mouseY);
             }
             if (wholeRecipeType) {
                 graphics.drawString(Minecraft.getInstance().font, "+",
@@ -306,7 +340,7 @@ public final class JeiPatternQuickEncodeButtons {
             }
         }
 
-        private void drawNativeTransferError(GuiGraphics graphics, int mouseX, int mouseY) {
+        private void drawNativeTransferHighlights(GuiGraphics graphics, int mouseX, int mouseY) {
             Minecraft minecraft = Minecraft.getInstance();
             if (!(minecraft.player != null
                     && minecraft.player.containerMenu instanceof PatternEncodingTermMenu menu)) {
@@ -325,10 +359,13 @@ public final class JeiPatternQuickEncodeButtons {
 
             Rect2i recipeRect = recipeLayout.getRect();
             graphics.pose().pushPose();
+            GuiGraphics previousGraphics = transferHighlightGraphics;
+            transferHighlightGraphics = graphics;
             try {
                 transferError.showError(graphics, mouseX, mouseY, recipeLayout.getRecipeSlotsView(),
                         recipeRect.getX(), recipeRect.getY());
             } finally {
+                transferHighlightGraphics = previousGraphics;
                 graphics.pose().popPose();
             }
         }

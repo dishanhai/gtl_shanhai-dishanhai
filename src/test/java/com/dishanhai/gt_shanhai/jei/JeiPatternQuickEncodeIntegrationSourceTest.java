@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -63,6 +64,22 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
         int packetRegistration = network.indexOf("JeiPatternQuickEncodeRequestPacket.class");
         assertTrue(packetRegistration >= 0);
         assertTrue(network.substring(packetRegistration).contains("NetworkDirection.PLAY_TO_SERVER"));
+    }
+
+    @Test
+    void onlyCustomButtonSlotHighlightsSuppressTheNativeEncodingTooltip() throws Exception {
+        String buttons = Files.readString(BUTTONS);
+        assertTrue(buttons.contains("transferHighlightGraphics = graphics;"));
+        assertTrue(buttons.contains("transferError.showError(graphics,"), "保留原生槽位高亮");
+        assertTrue(Pattern.compile("finally\\s*\\{\\s*transferHighlightGraphics = previousGraphics;")
+                .matcher(buttons).find());
+        assertTrue(buttons.contains("return transferHighlightGraphics == graphics;"));
+
+        String mixin = Files.readString(source("mixin", "Ae2JeiEncodingTooltipMixin.java"));
+        assertTrue(mixin.contains("drawHoveringText(Lnet/minecraft/client/gui/GuiGraphics;Ljava/util/List;II)V"));
+        assertTrue(mixin.contains("if (JeiPatternQuickEncodeButtons.isDrawingTransferHighlights(graphics))"));
+        assertTrue(mixin.contains("ci.cancel();"));
+        assertTrue(MixinConfigs.readAll().contains("\"Ae2JeiEncodingTooltipMixin\""));
     }
 
     @Test

@@ -1,18 +1,22 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import appeng.client.gui.Icon;
+import appeng.client.Point;
 import appeng.client.gui.me.common.MEStorageScreen;
 import appeng.client.gui.me.items.PatternEncodingTermScreen;
 import appeng.client.gui.style.ScreenStyle;
-import appeng.client.gui.widgets.IconButton;
+import appeng.client.gui.style.WidgetStyle;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.client.gui.PatternEncodingIconButton;
+import com.dishanhai.gt_shanhai.client.gui.PatternEncodingIconButton.Appearance;
 import com.dishanhai.gt_shanhai.common.ae2.CloudPatternUploadMenu;
+import com.dishanhai.sh_better_ui.client.gui.display.GraphicIcon;
 
 import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,13 +26,16 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.lang.reflect.Field;
-import java.util.List;
 
 @Mixin(value = PatternEncodingTermScreen.class, priority = 100)
 public abstract class EaepGtlCoreUploadButtonLayoutMixin extends MEStorageScreen<PatternEncodingTermMenu> {
 
     @Unique
-    private IconButton gtShanhai$cloudUploadButton;
+    private static final GraphicIcon gtShanhai$compactCloudIcon = new GraphicIcon(
+            new ResourceLocation(GTDishanhaiMod.MOD_ID, "textures/gui/cloud_upload_compact.png"));
+
+    @Unique
+    private PatternEncodingIconButton gtShanhai$cloudUploadButton;
 
     @Unique
     private static Field gtShanhai$eaepUploadButtonField;
@@ -61,8 +68,8 @@ public abstract class EaepGtlCoreUploadButtonLayoutMixin extends MEStorageScreen
 
     @Inject(method = "updateBeforeRender", at = @At("TAIL"), remap = false)
     private void gtShanhai$moveUndoButtonAfterEaep(CallbackInfo ci) {
+        gtShanhai$placeCloudUploadButton();
         AbstractWidget quickUploadButton = gtShanhai$getButton(this, "gtlcore$quickUploadButton", 1);
-        gtShanhai$placeCloudUploadButton(quickUploadButton);
         AbstractWidget eaepButton = gtShanhai$getButton(this, "eap$uploadBtn", 0);
         AbstractWidget undoButton = gtShanhai$getButton(this, "gtlcore$quickUploadUndoButton", 2);
         if (eaepButton == null || quickUploadButton == null || undoButton == null) {
@@ -105,42 +112,25 @@ public abstract class EaepGtlCoreUploadButtonLayoutMixin extends MEStorageScreen
     }
 
     @Unique
-    private void gtShanhai$placeCloudUploadButton(AbstractWidget quickUpload) {
+    private void gtShanhai$placeCloudUploadButton() {
+        if (!(this.menu instanceof CloudPatternUploadMenu cloudMenu)) {
+            return;
+        }
         if (gtShanhai$cloudUploadButton == null) {
-            gtShanhai$cloudUploadButton = new CloudUploadButton(button -> {
-                if (this.menu instanceof CloudPatternUploadMenu cloudMenu) {
-                    cloudMenu.gtShanhai$requestCloudUpload("");
-                }
-            });
+            Component label = Component.translatable("gt_shanhai.cloud.ui.upload_from_terminal");
+            Appearance appearance = new Appearance(gtShanhai$compactCloudIcon, 0xFF10151D, label);
+            gtShanhai$cloudUploadButton = new PatternEncodingIconButton(() -> appearance, 0x73D4FA,
+                    button -> cloudMenu.gtShanhai$requestCloudUpload(""));
         }
         if (!this.renderables.contains(gtShanhai$cloudUploadButton)) {
             addRenderableWidget(gtShanhai$cloudUploadButton);
         }
-        gtShanhai$cloudUploadButton.setVisibility(quickUpload != null && quickUpload.visible);
-        if (quickUpload != null) {
-            gtShanhai$cloudUploadButton.setX(quickUpload.getX());
-            gtShanhai$cloudUploadButton.setY(quickUpload.getY() - gtShanhai$cloudUploadButton.getHeight() - 2);
-        }
-    }
-
-    @Unique
-    private static final class CloudUploadButton extends IconButton {
-        private CloudUploadButton(Button.OnPress onPress) {
-            super(onPress);
-            setHalfSize(true);
-            setWidth(8);
-            setHeight(8);
-        }
-
-        @Override
-        public List<Component> getTooltipMessage() {
-            return List.of(Component.translatable("gt_shanhai.cloud.ui.upload_from_terminal"));
-        }
-
-        @Override
-        protected Icon getIcon() {
-            return Icon.AUTO_EXPORT_ON;
-        }
+        WidgetStyle encode = getStyle().getWidget("encodePattern");
+        Point anchor = encode.resolve(new Rect2i(this.leftPos, this.topPos, this.imageWidth, this.imageHeight));
+        int encodeWidth = encode.getWidth() > 0 ? encode.getWidth() : 16;
+        // 使用编码区右侧的空位，避开编码槽和 GTLCore 上传、回收控件。
+        gtShanhai$cloudUploadButton.setX(anchor.getX() + encodeWidth + 2);
+        gtShanhai$cloudUploadButton.setY(anchor.getY() - gtShanhai$cloudUploadButton.getHeight() - 6);
     }
 
     @Unique

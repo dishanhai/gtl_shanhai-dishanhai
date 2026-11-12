@@ -14,6 +14,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class VirtualPatternEncodingHelperTest {
 
     @Test
+    void inferredFurnaceRecipeCannotRestoreAnUnselectedProgrammedCircuit() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+        int fallback = source.indexOf("falling back to unscoped exact lookup");
+        int end = source.indexOf("private static GTRecipe findMatchingRecipe(", fallback);
+        String lookup = source.substring(fallback, end);
+
+        assertFalse(lookup.contains("StackBag.EMPTY, true)"),
+                "无精确选中配方的反查不能把缺失的 8 号电路算作已匹配");
+        assertTrue(source.contains("applyInputMatchPlan(inputs, recipe, plan, null)"),
+                "反查命中也不能取得补回缺失项的候选优先级");
+    }
+
+    @Test
+    void selectedRecipeRestoresCatalystsWithTheQuickEncoderCandidatePriority() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+        String menu = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/mixin/PatternWrapControlMenuMixin.java"));
+
+        assertTrue(source.contains("ShanhaiPatternEncoder.selectItemInput(content, priority, true)"));
+        assertTrue(source.contains("ShanhaiPatternEncoder.selectFluidInput(content, priority)"));
+        assertTrue(menu.contains("(PatternEncodingTermMenu) (Object) this"),
+                "补回的候选取料需使用当前菜单的网络与库存");
+    }
+
+    @Test
+    void automaticRewritePreservesSparseSlotsForManualMarks() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+        assertTrue(source.contains("new ArrayList<>(Arrays.asList(inputs))"),
+                "手动标记按菜单槽位索引读取，自动包裹后不能压缩这些索引");
+    }
+
+    @Test
     void preservesSelectedConsumableInputsDuringVirtualProviderRewrite() throws IOException {
         String source = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
@@ -60,24 +95,18 @@ public class VirtualPatternEncodingHelperTest {
         String configScreen = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/client/config/DShanhaiConfigScreen.java"));
 
-        assertTrue(source.contains("findMatchingRecipeForEncoding(inputs, outputs)"),
-                "普通样板编码必须使用允许 GTCEu 省略不消耗输入的专用反查路径");
-        assertTrue(source.contains("allowOmittedNonConsumables"),
-                "编码反查和星律运行时严格反推必须显式隔离");
+        assertTrue(source.contains("findInputMatchPlan(recipe, scoredInputs, StackBag.EMPTY, true, false)"),
+                "已选配方要允许省略不消耗输入，同时校验其他输入");
         assertTrue(config.contains("public ForgeConfigSpec.BooleanValue virtualProviderForceWrapOmittedNonConsumables;"),
                 "必须提供缺失不消耗输入强制包裹开关");
         assertTrue(config.contains(".define(\"forceWrapOmittedNonConsumables\", true)"),
                 "缺失不消耗输入应默认补回虚拟供应器");
         assertTrue(DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.getDefault(),
                 "缺失不消耗输入的运行时默认值应开启");
-        String guard = "if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get())";
+        assertTrue(source.contains("&& DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()"));
+        String guard = "if (priority != null && plan.wasOmitted(content))";
         assertTrue(source.indexOf(guard) >= 0 && source.indexOf(guard, source.indexOf(guard) + guard.length()) >= 0,
-                "物品和流体缺失分支都必须尊重强制包裹配置");
-        assertTrue(source.contains("GenericStack missingInput = createVirtualItemInput(sample, amount)"));
-        assertTrue(source.contains("rewritten.add(missingInput)"),
-                "开启配置后仍需保留旧的物品补回能力");
-        assertTrue(source.contains("createVirtualFluidInput(fluidKeyOf(sample), sample.getAmount())"),
-                "开启配置后缺失流体必须补回保存实际需求量的供应器，不能只补裸 1 mB");
+                "物品和流体都只在补回条件成立时取料");
         assertTrue(configScreen.contains("cfg.virtualProviderForceWrapOmittedNonConsumables.get()"),
                 "配置界面必须显示强制包裹开关");
     }
@@ -89,8 +118,8 @@ public class VirtualPatternEncodingHelperTest {
 
         assertTrue(source.contains("at = @At(\"RETURN\"), cancellable = true"),
                 "必须等 AE 原始编码返回 null 后再恢复，保留配方类型与包裹上下文");
-        assertTrue(source.contains("priority = 900"),
-                "恢复编码必须先于配方类型上下文的 RETURN pop 执行");
+        assertTrue(source.contains("@WrapMethod(method = \"encodeProcessingPattern\""),
+                "包裹上下文要覆盖原始编码和返回后的恢复逻辑");
         assertTrue(source.contains("if (cir.getReturnValue() == null)"));
         assertTrue(source.contains("gtShanhai$encodeVirtualOnlyPattern()"));
         assertTrue(source.contains("VirtualPatternEncodingHelper.encodeProcessingPatternRecoveringVirtualInputs(inputs, outputs)"));
@@ -109,14 +138,13 @@ public class VirtualPatternEncodingHelperTest {
     @Test
     void omittedIntegratedCircuitIsRestoredRawAndNeverWrapped() throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/ShanhaiPatternEncoder.java"));
 
-        assertTrue(source.contains("IntCircuitBehaviour.isIntegratedCircuit(sample)"),
-                "缺失编程电路必须有独立分支");
-        assertTrue(source.contains("return new GenericStack(AEItemKey.of(sample), amount)"),
+        int circuitCheck = source.indexOf("IntCircuitBehaviour.isIntegratedCircuit(stack)");
+        assertTrue(circuitCheck >= 0 && circuitCheck < source.indexOf("createBoundProvider(stack)"),
+                "共享物品包裹逻辑必须在创建供应器前拦下编程电路");
+        assertTrue(source.contains("wrapped == null ? new GenericStack(AEItemKey.of(stack), amount) : wrapped"),
                 "编程电路只能按原物品补回样板");
-        assertFalse(source.contains("createBoundProvider(sample)"),
-                "编程电路在任何情况下都不得直接传入供应器创建逻辑");
     }
 
     @Test
@@ -313,7 +341,7 @@ public class VirtualPatternEncodingHelperTest {
                 "配方 ID 锚定必须允许玩家删掉部分输入");
         assertTrue(source.contains("plan.clearOmissions()"),
                 "格子里多了不属于该配方的输入时，不能把删掉的催化剂补回来");
-        assertTrue(source.contains("if (!plan.wasOmitted(content) || !isNonConsumable(content)) continue;"),
+        assertTrue(source.contains("if (!isNonConsumable(content)) continue;"),
                 "被玩家删掉的消耗输入不能补回样板");
         assertTrue(source.contains("falling back to unscoped exact lookup"),
                 "配方 ID 对不上当前样板时仍要退回唯一反查，不能把旧 ID 写成另一张配方");

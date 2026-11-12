@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import appeng.menu.me.items.PatternEncodingTermMenu;
+
 import java.util.Collections;
 import java.util.Set;
 
@@ -18,10 +20,12 @@ public final class PatternEncodeOverride {
 
     public final WrapMode mode;
     public final Set<Integer> forcedSlots;
+    final PatternEncodingTermMenu menu;
 
-    public PatternEncodeOverride(WrapMode mode, Set<Integer> forcedSlots) {
+    public PatternEncodeOverride(WrapMode mode, Set<Integer> forcedSlots, PatternEncodingTermMenu menu) {
         this.mode = mode;
         this.forcedSlots = forcedSlots == null ? Collections.emptySet() : forcedSlots;
+        this.menu = menu;
     }
 
     public static void push(PatternEncodeOverride override) {

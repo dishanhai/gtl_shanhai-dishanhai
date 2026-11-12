@@ -68,7 +68,7 @@ class ShanhaiPatternDebugToolSourceTest {
         assertTrue(source.contains("isNonConsumable(content)"));
         assertTrue(source.contains("VirtualItemProviderHelper.createBoundProvider(stack)"));
         assertTrue(source.contains("respectAutoWrapExclusions"));
-        assertTrue(source.contains("!respectAutoWrapExclusions"));
+        assertTrue(source.contains("respectAutoWrapExclusions && VirtualItemProviderHelper.isAutoWrapExcluded(stack)"));
     }
 
     @Test

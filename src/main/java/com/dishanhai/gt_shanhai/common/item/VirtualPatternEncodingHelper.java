@@ -14,6 +14,7 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
+import com.dishanhai.gt_shanhai.common.item.ShanhaiPatternEncoder.CandidatePriority;
 import com.dishanhai.gt_shanhai.common.machine.output.ForgeOutputMultiplier;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
@@ -150,7 +151,8 @@ public final class VirtualPatternEncodingHelper {
                 if (raw == null || raw.amount() <= 0L) continue;
                 if (raw.what() instanceof AEItemKey key) {
                     ItemStack rawStack = key.toStack();
-                    if (VirtualItemProviderHelper.isProviderItem(rawStack)
+                    if (IntCircuitBehaviour.isIntegratedCircuit(rawStack)
+                            || VirtualItemProviderHelper.isProviderItem(rawStack)
                             || VirtualItemProviderHelper.isAutoWrapExcluded(rawStack)) continue;
                 }
                 ItemStack provider = VirtualItemProviderHelper.createBoundProvider(raw);
@@ -983,14 +985,14 @@ public final class VirtualPatternEncodingHelper {
             }
             // 选择上下文已经失配时，不能继续沿用旧 recipe type；重新按完整输入/输出做唯一反查。
             GTRecipe unscoped = findMatchingRecipe(inputs, outputs, getRecipeOutputIndex(), null,
-                    StackBag.EMPTY, true);
+                    StackBag.EMPTY);
             return unscoped;
         }
         String encodingRecipeTypeId = PatternRecipeTypeHelper.currentEncodingRecipeTypeId();
         GTRecipeType encodingRecipeType = PatternRecipeTypeHelper.resolveRecipeType(encodingRecipeTypeId);
         if (!encodingRecipeTypeId.isEmpty() && encodingRecipeType == null) return null;
         return findMatchingRecipe(inputs, outputs, getRecipeOutputIndex(), encodingRecipeType,
-                StackBag.EMPTY, true);
+                StackBag.EMPTY);
     }
 
     private static GTRecipe findMatchingRecipe(GenericStack[] inputs, GenericStack[] outputs,
@@ -1726,25 +1728,29 @@ public final class VirtualPatternEncodingHelper {
     }
 
     /**
-     * 編碼當下已經有配方 ID 時，用這條配方的 chance 決定哪些輸入要包。
-     * 玩家刪掉若干輸入、拿掉副產物或改了整數倍率後，唯一反查會失敗，這裡仍按已對上的槽位包裹。
-     * 產出和這條配方沒有任何交集，或輸入一個都對不上時，退回唯一反查，避免舊 ID 套到另一張配方。
-     * 格子裡多了不屬於這條配方的輸入時，只包對得上的不消耗槽，不把刪掉的催化劑補回來。
+     * 用选中的 GT 配方识别槽位。编辑过的样板仍可包裹已匹配的输入，
+     * 补回缺失项需要完整匹配当前输入和产出，允许省略副产物与不消耗输入。
      */
     private static GenericStack[] rewriteInputsAnchoredToKnownRecipe(GenericStack[] inputs,
             GenericStack[] outputs, GTRecipe recipe) {
-        long multiplier = anchoredOutputMultiplier(recipe, outputs);
+        long verifiedMultiplier = detectPartialRecipeOutputMultiplier(recipe, StackBag.of(outputs).amounts());
+        long multiplier = verifiedMultiplier > 0L ? verifiedMultiplier : anchoredOutputMultiplier(recipe, outputs);
         if (multiplier <= 0L) return null;
         GenericStack[] scoredInputs = multiplier > 1L ? scaleDivisibleInputs(inputs, multiplier) : inputs;
         InputMatchPlan plan = findInputMatchPlan(recipe, scoredInputs, StackBag.EMPTY, true, false);
         if (plan == null) {
             plan = findInputMatchPlan(recipe, scoredInputs, StackBag.EMPTY, true, true);
-        }
-        if (plan == null) return null;
-        if (hasUnmatchedPatternInput(scoredInputs, plan)) {
+            if (plan == null) return null;
+            plan.clearOmissions();
+        } else if (verifiedMultiplier <= 0L) {
             plan.clearOmissions();
         }
-        return applyInputMatchPlan(inputs, recipe, plan);
+        CandidatePriority priority = null;
+        if (!plan.omitted.isEmpty() && DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
+            PatternEncodeOverride override = PatternEncodeOverride.current();
+            priority = CandidatePriority.from(override == null ? null : override.menu);
+        }
+        return applyInputMatchPlan(inputs, recipe, plan, priority);
     }
 
     private static long anchoredOutputMultiplier(GTRecipe recipe, GenericStack[] outputs) {
@@ -1782,16 +1788,8 @@ public final class VirtualPatternEncodingHelper {
         return scaled;
     }
 
-    private static boolean hasUnmatchedPatternInput(GenericStack[] patternInputs, InputMatchPlan plan) {
-        int count = compactStacks(patternInputs).size();
-        for (int i = 0; i < count; i++) {
-            if (!plan.binds(i)) return true;
-        }
-        return false;
-    }
-
     private static GenericStack[] rewriteInputsPreservingSelections(GenericStack[] inputs, GTRecipe recipe) {
-        InputMatchPlan plan = findInputMatchPlan(recipe, inputs, StackBag.EMPTY, true);
+        InputMatchPlan plan = findInputMatchPlan(recipe, inputs, StackBag.EMPTY, false);
         if (plan == null) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("[VirtualPatternEncoding] recipe={} exact input assignment failed, wrap skipped",
@@ -1799,96 +1797,75 @@ public final class VirtualPatternEncodingHelper {
             }
             return inputs;
         }
-        return applyInputMatchPlan(inputs, recipe, plan);
+        return applyInputMatchPlan(inputs, recipe, plan, null);
     }
 
-    private static GenericStack[] applyInputMatchPlan(GenericStack[] inputs, GTRecipe recipe, InputMatchPlan plan) {
-        List<GenericStack> original = compactStacks(inputs);
-        List<GenericStack> rewritten = new ArrayList<>(original);
-        rewriteItemInputsFromPlan(recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, plan);
-        rewriteFluidInputsFromPlan(recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, plan);
+    private static GenericStack[] applyInputMatchPlan(GenericStack[] inputs, GTRecipe recipe, InputMatchPlan plan,
+            CandidatePriority priority) {
+        List<Integer> inputSlots = new ArrayList<>();
+        for (int slot = 0; slot < inputs.length; slot++) {
+            GenericStack input = inputs[slot];
+            if (input != null && input.what() != null && input.amount() > 0L) inputSlots.add(slot);
+        }
+        List<GenericStack> rewritten = new ArrayList<>(Arrays.asList(inputs));
+        rewriteItemInputsFromPlan(recipe.getInputContents(ItemRecipeCapability.CAP), inputSlots, rewritten, plan, priority);
+        rewriteFluidInputsFromPlan(recipe.getInputContents(FluidRecipeCapability.CAP), inputSlots, rewritten, plan, priority);
         return rewritten.toArray(new GenericStack[0]);
     }
 
     private static void rewriteItemInputsFromPlan(List<Content> contents,
-            List<GenericStack> original, List<GenericStack> rewritten, InputMatchPlan plan) {
+            List<Integer> inputSlots, List<GenericStack> rewritten, InputMatchPlan plan, CandidatePriority priority) {
         if (contents == null || contents.isEmpty()) return;
         for (Content content : contents) {
-            Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            long amount = getItemAmount(content, firstItemStack(content));
+            if (!isNonConsumable(content)) continue;
             Integer matchedIndex = plan.indexFor(content);
             if (matchedIndex == null) {
-                if (!plan.wasOmitted(content) || !isNonConsumable(content)) continue;
-                if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
-                    continue;
+                if (priority != null && plan.wasOmitted(content)) {
+                    restoreOmittedInput(rewritten, ShanhaiPatternEncoder.selectItemInput(content, priority, true));
                 }
-                ItemStack sample = firstItemStack(content);
-                GenericStack missingInput = createVirtualItemInput(sample, amount);
-                if (missingInput != null) rewritten.add(missingInput);
                 continue;
             }
-            if (!isNonConsumable(content)) continue;
-            ItemStack selected = original.get(matchedIndex).what() instanceof AEItemKey key
-                    ? key.toStack() : ItemStack.EMPTY;
-            if (VirtualItemProviderHelper.isProviderItem(selected)) continue;
-
-            selected.setCount((int) Math.min(Integer.MAX_VALUE, amount));
-            GenericStack virtualInput = createVirtualItemInput(selected, amount);
-            if (virtualInput == null) continue;
-            rewritten.set(matchedIndex, virtualInput);
+            int slot = inputSlots.get(matchedIndex);
+            if (!(rewritten.get(slot).what() instanceof AEItemKey key)) continue;
+            long amount = getItemAmount(content, firstItemStack(content));
+            GenericStack virtualInput = ShanhaiPatternEncoder.wrapItemInput(key.toStack(), amount, true);
+            if (virtualInput != null) rewritten.set(slot, virtualInput);
         }
     }
 
     private static void rewriteFluidInputsFromPlan(List<Content> contents,
-            List<GenericStack> original, List<GenericStack> rewritten, InputMatchPlan plan) {
+            List<Integer> inputSlots, List<GenericStack> rewritten, InputMatchPlan plan, CandidatePriority priority) {
         if (contents == null || contents.isEmpty()) return;
         for (Content content : contents) {
-            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
-            if (sample == null) continue;
+            if (!isNonConsumable(content)) continue;
             Integer matchedIndex = plan.indexFor(content);
             if (matchedIndex == null) {
-                if (!plan.wasOmitted(content) || !isNonConsumable(content)) continue;
-                if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) continue;
-                GenericStack missingInput = createVirtualFluidInput(fluidKeyOf(sample), sample.getAmount());
-                if (missingInput != null) rewritten.add(missingInput);
+                if (priority != null && plan.wasOmitted(content)) {
+                    GenericStack target = ShanhaiPatternEncoder.selectFluidInput(content, priority);
+                    restoreOmittedInput(rewritten, ShanhaiPatternEncoder.wrapFluidInput(target));
+                }
                 continue;
             }
-            if (isNonConsumable(content)) {
-                GenericStack selected = original.get(matchedIndex);
-                if (!(selected.what() instanceof AEFluidKey key)) continue;
-                GenericStack virtualInput = createVirtualFluidInput(key, sample.getAmount());
-                if (virtualInput != null) rewritten.set(matchedIndex, virtualInput);
-            }
+            int slot = inputSlots.get(matchedIndex);
+            if (!(rewritten.get(slot).what() instanceof AEFluidKey key)) continue;
+            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+            if (sample == null) continue;
+            GenericStack virtualInput = createVirtualFluidInput(key, sample.getAmount());
+            if (virtualInput != null) rewritten.set(slot, virtualInput);
         }
+    }
+
+    private static void restoreOmittedInput(List<GenericStack> rewritten, GenericStack input) {
+        if (input == null) return;
+        int emptySlot = rewritten.indexOf(null);
+        if (emptySlot >= 0) rewritten.set(emptySlot, input);
+        else rewritten.add(input);
     }
 
     private static GenericStack createVirtualFluidInput(AEFluidKey key, long amount) {
         if (key == null || amount <= 0L) return null;
-        if (!PatternEncodePreferences.writeVirtualProvider()) {
-            return new GenericStack(key, amount);
-        }
-        ItemStack provider = VirtualItemProviderHelper.createBoundProvider(new GenericStack(key, amount));
-        return provider.isEmpty() ? null : new GenericStack(AEItemKey.of(provider), 1L);
-    }
-
-    private static GenericStack createVirtualItemInput(ItemStack sample, long amount) {
-        if (sample == null || sample.isEmpty()) return null;
-        sample = sample.copy();
-        sample.setCount((int) Math.min(Integer.MAX_VALUE, amount));
-        if (IntCircuitBehaviour.isIntegratedCircuit(sample)
-                || VirtualItemProviderHelper.isAutoWrapExcluded(sample)
-                || !PatternEncodePreferences.writeVirtualProvider()) {
-            return new GenericStack(AEItemKey.of(sample), amount);
-        }
-        ItemStack provider = VirtualItemProviderHelper.createBoundProvider(sample.copy());
-        if (provider.isEmpty()) {
-            LOG.warn("[VirtualPatternEncoding] item={} createBoundProvider returned EMPTY", sample.getItem());
-            return null;
-        }
-        return new GenericStack(AEItemKey.of(provider), 1);
+        GenericStack target = new GenericStack(key, amount);
+        return PatternEncodePreferences.writeVirtualProvider() ? ShanhaiPatternEncoder.wrapFluidInput(target) : target;
     }
 
     private static List<GenericStack> createVirtualInputs(GTRecipe recipe) {
@@ -2249,13 +2226,6 @@ public final class VirtualPatternEncodingHelper {
 
         private boolean wasOmitted(Content content) {
             return omitted.containsKey(content);
-        }
-
-        private boolean binds(int inputIndex) {
-            for (Integer matched : matches.values()) {
-                if (matched != null && matched.intValue() == inputIndex) return true;
-            }
-            return false;
         }
 
         private void clearOmissions() {

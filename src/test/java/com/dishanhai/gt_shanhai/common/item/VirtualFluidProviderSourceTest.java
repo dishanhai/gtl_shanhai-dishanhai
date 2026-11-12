@@ -23,7 +23,7 @@ class VirtualFluidProviderSourceTest {
         assertTrue(helper.contains("createBoundProvider(GenericStack target)"));
         assertTrue(helper.contains("GenericStack.wrapInItemStack(target)"),
                 "The fluid key, NBT and long amount must be saved in the provider payload");
-        assertTrue(encoding.contains("createVirtualFluidInput(fluidKeyOf(sample), sample.getAmount())"));
+        assertTrue(encoding.contains("restoreOmittedInput(rewritten, ShanhaiPatternEncoder.wrapFluidInput(target))"));
         assertFalse(encoding.contains("rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT))"));
     }
 
@@ -70,9 +70,12 @@ class VirtualFluidProviderSourceTest {
 
         assertFalse(encoder.contains("VIRTUAL_FLUID_MARKER_AMOUNT"),
                 "The authoritative encoder bypasses generic rewriting and must never write a bare marker");
-        assertTrue(method.contains("VirtualItemProviderHelper.createBoundProvider(target)"));
-        assertTrue(method.contains("new GenericStack(fluidKeyOf(stack), Math.max(1L, stack.getAmount()))"));
-        assertTrue(method.contains("new GenericStack(AEItemKey.of(provider), 1L)"));
+        assertTrue(method.contains("selectFluidInput(content, priority)"));
+        assertTrue(method.contains("wrapFluidInput(target)"));
+        assertTrue(encoder.contains("new GenericStack(fluidKeyOf(stack), Math.max(1L, stack.getAmount()))"));
+        String wrapper = block(encoder, "static GenericStack wrapFluidInput(");
+        assertTrue(wrapper.contains("VirtualItemProviderHelper.createBoundProvider(target)"));
+        assertTrue(wrapper.contains("new GenericStack(AEItemKey.of(provider), 1L)"));
     }
 
     @Test

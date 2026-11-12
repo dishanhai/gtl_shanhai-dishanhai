@@ -353,9 +353,9 @@ public final class DShanhaiConfig {
                              "例：gtceu:programmed_circuit。被排除物品会按原物品直接写入样板，保留自身 NBT")
                     .defineList("autoWrapExclusions", List.of("gtceu:programmed_circuit"), value -> value instanceof String);
             virtualProviderForceWrapOmittedNonConsumables = builder
-                    .comment("编码器反查到不消耗输入但玩家未放入时，是否强行补回虚拟供应器/流体标记",
-                             "true=自动补回缺失的不消耗物品或流体（默认）",
-                             "false=尊重玩家删除输入的操作，不包裹该缺失项")
+                    .comment("编码时确认所选 GT 配方后，是否补回缺失的不消耗输入",
+                             "true=按快速编码的候选优先级补回（默认）",
+                             "false=保留玩家当前的输入选择")
                     .define("forceWrapOmittedNonConsumables", true);
             encodeWriteRecipeId = builder
                     .comment("样板编码时是否写入 gt_shanhai_recipe_id",

@@ -46,11 +46,14 @@ class EaepGtlCoreUploadButtonLayoutSourceTest {
     }
 
     @Test
-    void registersAnIndependentCloudUploadWidgetAboveQuickUpload() throws IOException {
+    void registersCloudUploadUsingTheNativeEncodeControlEvenWithoutGtlCoreQuickUpload() throws IOException {
         String source = Files.readString(MIXIN);
+        assertOrder(source, "gtShanhai$placeCloudUploadButton();", "gtShanhai$getButton(this,",
+                "星律上传必须在可选按钮查找前独立布局");
         assertTrue(source.contains("addRenderableWidget(gtShanhai$cloudUploadButton)"));
         assertTrue(source.contains("cloudMenu.gtShanhai$requestCloudUpload(\"\")"));
-        assertTrue(source.contains("quickUpload.getY() - gtShanhai$cloudUploadButton.getHeight() - 2"));
+        assertTrue(source.contains("getStyle().getWidget(\"encodePattern\")"));
+        assertFalse(source.contains("quickUpload.visible"));
         assertTrue(source.contains("Component.translatable(\"gt_shanhai.cloud.ui.upload_from_terminal\")"));
     }
 

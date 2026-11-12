@@ -146,31 +146,29 @@ public final class ShanhaiPatternEncoder {
         List<Content> contents = recipe.getInputContents(ItemRecipeCapability.CAP);
         if (contents == null || contents.isEmpty()) return;
         for (Content content : contents) {
-            if (content == null) continue;
-            ItemStack stack = bestItemStack(content, priority);
-            if (stack.isEmpty()) continue;
-
-            // Programmed circuits are recipe selectors, not virtual inventory requirements.
-            if (IntCircuitBehaviour.isIntegratedCircuit(stack)) {
-                inputs.add(new GenericStack(AEItemKey.of(stack.copy()), getItemAmount(content, stack)));
-                continue;
-            }
-
-            if (isNonConsumable(content) && !VirtualItemProviderHelper.isProviderItem(stack)
-                    && PatternEncodePreferences.writeVirtualProvider()) {
-                boolean excluded = respectAutoWrapExclusions
-                        && VirtualItemProviderHelper.isAutoWrapExcluded(stack);
-                if (!respectAutoWrapExclusions || !excluded) {
-                    ItemStack provider = VirtualItemProviderHelper.createBoundProvider(stack);
-                    if (!provider.isEmpty() && VirtualItemProviderHelper.isBoundProvider(provider)) {
-                        inputs.add(new GenericStack(AEItemKey.of(provider), 1));
-                        continue;
-                    }
-                }
-            }
-
-            inputs.add(new GenericStack(AEItemKey.of(stack.copy()), getItemAmount(content, stack)));
+            GenericStack input = selectItemInput(content, priority, respectAutoWrapExclusions);
+            if (input != null) inputs.add(input);
         }
+    }
+
+    static GenericStack selectItemInput(Content content, CandidatePriority priority, boolean respectAutoWrapExclusions) {
+        if (content == null) return null;
+        ItemStack stack = bestItemStack(content, priority);
+        if (stack.isEmpty()) return null;
+        long amount = getItemAmount(content, stack);
+        GenericStack wrapped = isNonConsumable(content) ? wrapItemInput(stack, amount, respectAutoWrapExclusions) : null;
+        return wrapped == null ? new GenericStack(AEItemKey.of(stack), amount) : wrapped;
+    }
+
+    static GenericStack wrapItemInput(ItemStack stack, long amount, boolean respectAutoWrapExclusions) {
+        if (stack.isEmpty() || IntCircuitBehaviour.isIntegratedCircuit(stack)
+                || !PatternEncodePreferences.writeVirtualProvider()
+                || VirtualItemProviderHelper.isProviderItem(stack)) return null;
+        if (respectAutoWrapExclusions && VirtualItemProviderHelper.isAutoWrapExcluded(stack)) return null;
+        stack = stack.copy();
+        stack.setCount((int) Math.min(Integer.MAX_VALUE, amount));
+        ItemStack provider = VirtualItemProviderHelper.createBoundProvider(stack);
+        return VirtualItemProviderHelper.isBoundProvider(provider) ? new GenericStack(AEItemKey.of(provider), 1L) : null;
     }
 
     private static void appendFluidInputs(GTRecipe recipe, List<GenericStack> inputs,
@@ -178,24 +176,31 @@ public final class ShanhaiPatternEncoder {
         List<Content> contents = recipe.getInputContents(FluidRecipeCapability.CAP);
         if (contents == null || contents.isEmpty()) return;
         for (Content content : contents) {
-            if (content == null) continue;
-            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            com.lowdragmc.lowdraglib.side.fluid.FluidStack[] stacks = ingredient.getStacks();
-            com.lowdragmc.lowdraglib.side.fluid.FluidStack stack =
-                    bestFluidStack(stacks, priority);
-            if (stack == null || stack.isEmpty()) continue;
-            GenericStack target = new GenericStack(fluidKeyOf(stack), Math.max(1L, stack.getAmount()));
+            GenericStack target = selectFluidInput(content, priority);
+            if (target == null) continue;
             if (isNonConsumable(content) && PatternEncodePreferences.writeVirtualProvider()) {
-                ItemStack provider = VirtualItemProviderHelper.createBoundProvider(target);
-                if (provider.isEmpty()) {
+                GenericStack wrapped = wrapFluidInput(target);
+                if (wrapped == null) {
                     throw new IllegalStateException("Cannot wrap non-consumable fluid for " + recipe.id);
                 }
-                inputs.add(new GenericStack(AEItemKey.of(provider), 1L));
+                inputs.add(wrapped);
             } else {
                 inputs.add(target);
             }
         }
+    }
+
+    static GenericStack selectFluidInput(Content content, CandidatePriority priority) {
+        if (content == null) return null;
+        FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+        if (ingredient == null || ingredient.isEmpty()) return null;
+        com.lowdragmc.lowdraglib.side.fluid.FluidStack stack = bestFluidStack(ingredient.getStacks(), priority);
+        return stack == null ? null : new GenericStack(fluidKeyOf(stack), Math.max(1L, stack.getAmount()));
+    }
+
+    static GenericStack wrapFluidInput(GenericStack target) {
+        ItemStack provider = VirtualItemProviderHelper.createBoundProvider(target);
+        return provider.isEmpty() ? null : new GenericStack(AEItemKey.of(provider), 1L);
     }
 
     private static void appendItemOutputs(GTRecipe recipe, List<GenericStack> outputs) {
@@ -303,7 +308,7 @@ public final class ShanhaiPatternEncoder {
                 && BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath().contains("universal_circuit");
     }
 
-    private static final class CandidatePriority {
+    static final class CandidatePriority {
         private final IGrid grid;
         private final KeyCounter availableStacks;
 
@@ -312,7 +317,7 @@ public final class ShanhaiPatternEncoder {
             this.availableStacks = availableStacks;
         }
 
-        private static CandidatePriority from(PatternEncodingTermMenu menu) {
+        static CandidatePriority from(PatternEncodingTermMenu menu) {
             if (menu == null) return new CandidatePriority(null, null);
             IGridNode node = menu.getNetworkNode();
             IGrid grid = node == null ? null : node.getGrid();

@@ -4,11 +4,12 @@ import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,12 +18,13 @@ import java.util.HashMap;
 
 import com.dishanhai.gt_shanhai.mixin.PatternEncodingRecipeTypeContextMixin;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 class PatternEncodingRecipeTypeContextSourceTest {
 
@@ -45,42 +47,37 @@ class PatternEncodingRecipeTypeContextSourceTest {
 
     @Test
     void nextEncodingClearsAbandonedContextFromAnotherMenu() throws Exception {
-        assertAbandonedContextCleared(false);
-    }
-
-    @Test
-    void nextEncodingAlsoResetsFlagsLeftByAnInterruptedEncoding() throws Exception {
-        assertAbandonedContextCleared(true);
-    }
-
-    private static void assertAbandonedContextCleared(boolean staleFlags) throws Exception {
         GTRecipe staleRecipe = new GTRecipe(null, new ResourceLocation("gtceu", "stale/recipe"),
                 new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
                 new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
                 new ArrayList<>(), new ArrayList<>(), new CompoundTag(), 20, false);
         PatternRecipeTypeHelper.pushSelectedEncodingRecipe(staleRecipe);
         PatternRecipeTypeHelper.pushEncodingRecipeType("gtceu:stale_type");
-        FakeEncodingMenu menu = new FakeEncodingMenu();
-        Field selectedFlag = PatternEncodingRecipeTypeContextMixin.class
-                .getDeclaredField("gtShanhai$pushedSelectedEncodingRecipe");
-        Field typeFlag = PatternEncodingRecipeTypeContextMixin.class
-                .getDeclaredField("gtShanhai$pushedEncodingRecipeType");
-        selectedFlag.setAccessible(true);
-        typeFlag.setAccessible(true);
-        selectedFlag.setBoolean(menu, staleFlags);
-        typeFlag.setBoolean(menu, staleFlags);
-        Method head = PatternEncodingRecipeTypeContextMixin.class.getDeclaredMethod(
-                "gtShanhai$pushRecipeTypeForEncoding", CallbackInfoReturnable.class);
-        head.setAccessible(true);
+        invokeEncoding(new FakeEncodingMenu(null), args -> {
+            assertNull(PatternRecipeTypeHelper.currentSelectedEncodingRecipe());
+            assertEquals("", PatternRecipeTypeHelper.currentEncodingRecipeTypeId());
+            return null;
+        });
+    }
 
-        head.invoke(menu, new Object[] {null});
+    @Test
+    void interruptedEncodingReleasesItsRecipeContext() {
+        RuntimeException failure = new IllegalStateException("test encoding failure");
+        InvocationTargetException thrown = assertThrows(InvocationTargetException.class,
+                () -> invokeEncoding(new FakeEncodingMenu(new ResourceLocation("gtceu", "assembler")), args -> {
+                    assertEquals("gtceu:assembler", PatternRecipeTypeHelper.currentEncodingRecipeTypeId());
+                    throw failure;
+                }));
+        assertSame(failure, thrown.getCause());
+        assertNull(PatternRecipeTypeHelper.currentSelectedEncodingRecipe());
+        assertEquals("", PatternRecipeTypeHelper.currentEncodingRecipeTypeId());
+    }
 
-        assertNull(PatternRecipeTypeHelper.currentSelectedEncodingRecipe(),
-                "沒有新選中配方的編碼不能繼承上一輪例外留下的權威來源");
-        assertEquals("", PatternRecipeTypeHelper.currentEncodingRecipeTypeId(),
-                "沒有 pending 類型時也必須清除上輪 ThreadLocal");
-        assertFalse(selectedFlag.getBoolean(menu));
-        assertFalse(typeFlag.getBoolean(menu));
+    private static void invokeEncoding(FakeEncodingMenu menu, Operation<ItemStack> original) throws Exception {
+        Method encode = PatternEncodingRecipeTypeContextMixin.class.getDeclaredMethod(
+                "gtShanhai$encodeWithRecipeContext", Operation.class);
+        encode.setAccessible(true);
+        encode.invoke(menu, original);
     }
 
     @Test
@@ -122,6 +119,7 @@ class PatternEncodingRecipeTypeContextSourceTest {
         String wrapMenuMixin = Files.readString(WRAP_MENU_MIXIN);
         String helper = Files.readString(HELPER);
         String encodingHelper = Files.readString(ENCODING_HELPER);
+        String context = Files.readString(MIXIN);
         String config = MixinConfigs.readAll();
 
         assertTrue(selectedMixin.contains("JEISelectedRecipeContextMixin"));
@@ -137,6 +135,8 @@ class PatternEncodingRecipeTypeContextSourceTest {
                 "样板终端必须注册服务端动作接收精确配方 ID");
         assertTrue(helper.contains("currentSelectedEncodingRecipe()"),
                 "编码反查必须优先读取 JEI 选中的配方上下文");
+        assertTrue(context.contains("PatternRecipeTypeHelper.resolveRecipe(player.level(), selectedRecipeId)"),
+                "应与快速编码一样，按服务端玩家所在世界解析所选配方 ID");
         assertTrue(encodingHelper.contains("falling back to unscoped exact lookup"),
                 "选中配方失配后不能继续沿用旧配方类型猜测");
         assertTrue(encodingHelper.contains("matchesRecipeInputsAtMultiplier(selectedRecipe"),
@@ -156,6 +156,10 @@ class PatternEncodingRecipeTypeContextSourceTest {
     private static final class FakeEncodingMenu extends PatternEncodingRecipeTypeContextMixin {
 
         @SuppressWarnings("unused")
-        private ResourceLocation gTLCore$pendingQuickUploadRecipeTypeId;
+        private final ResourceLocation gTLCore$pendingQuickUploadRecipeTypeId;
+
+        private FakeEncodingMenu(ResourceLocation recipeTypeId) {
+            this.gTLCore$pendingQuickUploadRecipeTypeId = recipeTypeId;
+        }
     }
 }
