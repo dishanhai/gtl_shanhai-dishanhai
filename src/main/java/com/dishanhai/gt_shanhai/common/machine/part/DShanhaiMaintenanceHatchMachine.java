@@ -24,6 +24,7 @@ import com.dishanhai.gt_shanhai.api.machine.part.IMaintenanceBypassPart;
 import com.dishanhai.gt_shanhai.api.machine.part.IRecipeThreadSource;
 import com.dishanhai.gt_shanhai.common.machine.part.ui.RecipeThreadConfigurationPage;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadBudget;
 import com.dishanhai.gt_shanhai.common.machine.thread.RecipeThreadSources;
 import com.dishanhai.gt_shanhai.common.machine.trait.InfiniteCWUContainer;
 import com.gregtechceu.gtceu.api.GTValues;
@@ -222,8 +223,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     @Override
     public long getRecipeThreadCapacity() {
         return RecipeThreadHatchPartMachine.capacityForBoost(recipeThreadsEnabled,
-                com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase
-                        .getThreadBoostForStack(threadBoostSlot.getStackInSlot(0)));
+                PrimordialOmegaEngineModuleBase.getRecipeThreadBoostForStack(threadBoostSlot.getStackInSlot(0)));
     }
 
     @Override
@@ -501,17 +501,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
     @Override
     public int getThreadCount() {
-        if (!threadEnabled) return 0;
-        if (hasParallelOverdriver()) return PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
-        long multiplier = getThreadBoostFromSlot();
-        long base = Math.min(threadCount, threadMax);
-        if (multiplier > 1) {
-            long result = base * multiplier;
-            if (result < 0) result = Long.MAX_VALUE; // 溢出保护
-            result = Math.min(result, Long.MAX_VALUE);
-            return result > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) result;
-        }
-        return base > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) base;
+        return (int) Math.min(Integer.MAX_VALUE, getRawThreadCount());
     }
 
     /** 获取碎片倍率（base × 堆叠数），无碎片返回 1（不乘） */
@@ -528,11 +518,8 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     /** 获取原始 long 线程值（突破 Integer.MAX_VALUE 限制） */
     public long getRawThreadCount() {
         if (!threadEnabled) return 0;
-        if (hasParallelOverdriver()) return PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
-        long multiplier = getThreadBoostFromSlot();
-        long base = Math.min(threadCount, threadMax);
-        long result = base * multiplier;
-        return result < base ? Long.MAX_VALUE : result; // 溢出保护
+        if (hasParallelOverdriver()) return Long.MAX_VALUE;
+        return RecipeThreadBudget.multiply(Math.min(threadCount, threadMax), getThreadBoostFromSlot());
     }
 
     private static Component overdriverThreadInfo() {
@@ -890,9 +877,10 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
         // ====== 并行数量 ======
         list.add(Component.literal(""));
-        list.add(Component.literal("§6§l→ 并行数量 §r" + currentParallel));
+        list.add(Component.literal("§6§l→ 并行数量 §r" + getRawParallel()));
         list.add(Component.literal(
-                String.format("§7  [1 ~ %s]  §8C+S=1亿 C=100w S=10w", formatBigNum(maxParallel))));
+                String.format("§7  [1 ~ %s]  §8C+S=1亿 C=100w S=10w",
+                        formatBigNum(hasParallelOverdriver() ? Long.MAX_VALUE : maxParallel))));
         var parMod = Component.literal("§r调整 ");
         parMod.append(ComponentPanelWidget.withButton(Component.literal("[-]"), "psub"));
         parMod.append(" ");
@@ -912,7 +900,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         boolean overdriver = hasParallelOverdriver();
         if (overdriver) {
             threadInfo = "";
-            displayThreadMax = PrimordialOmegaEngineModuleBase.OVERDRIVER_THREAD_CAPACITY;
+            displayThreadMax = Long.MAX_VALUE;
         } else if (hasCreateMkModule()) {
             threadInfo = "§d◇ 创始现实修改模块 → 线程范围 0~4,294,967,294";
             displayThreadMax = 4294967294L;

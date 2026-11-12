@@ -22,7 +22,7 @@ class PrimordialThreadEntrySourceTest {
         assertTrue(host.contains("@Persisted\n    private final NotifiableItemStackHandler recipeThreadSlot;")
                 || host.contains("@Persisted\r\n    private final NotifiableItemStackHandler recipeThreadSlot;"));
         assertTrue(host.contains("clearInventory(recipeThreadSlot.storage)"));
-        assertTrue(host.contains("getThreadBoostForStack(recipeThreadSlot.storage.getStackInSlot(0))"));
+        assertTrue(host.contains("getRecipeThreadBoostForStack(recipeThreadSlot.storage.getStackInSlot(0))"));
         assertTrue(host.contains("size.height - 88"), "避開歸墟等級覆寫槽");
         assertTrue(module.contains("page.getSize().height - 88"), "特殊發電模組仍有線程入口");
     }

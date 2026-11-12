@@ -210,13 +210,13 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             }
         };
         recipeThreadSlot.setFilter(stack -> stack == null || stack.isEmpty()
-                || PrimordialOmegaEngineModuleBase.getThreadBoostForStack(stack) > 0L);
+                || PrimordialOmegaEngineModuleBase.getRecipeThreadBoostForStack(stack) > 0L);
     }
 
     /** 山海：與模組共用線程物品入口，無物品時保留一個配方執行緒。 */
     public long getParallelRecipeThreadCount() {
         return PrimordialThreadScheduler.threadCount(
-                PrimordialOmegaEngineModuleBase.getThreadBoostForStack(recipeThreadSlot.storage.getStackInSlot(0)));
+                PrimordialOmegaEngineModuleBase.getRecipeThreadBoostForStack(recipeThreadSlot.storage.getStackInSlot(0)));
     }
 
     @Override

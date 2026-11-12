@@ -99,7 +99,10 @@ public enum HubInfoProvider implements IBlockComponentProvider, IServerDataProvi
 
         long thr = data.getLong("thread");
         boolean thrOn = data.getBoolean("threadOn");
-        tooltip.add(helper.text(Component.literal("§5跨配方线程: " + (thrOn ? ("§f" + (data.getBoolean("overdriver") ? "§d∞ MAX" : formatNum(thr))) : "§8未启用"))));
+        tooltip.add(helper.text(thrOn
+                ? Component.translatable("gt_shanhai.recipe_threads.cross_recipe_multiplier",
+                        thr == Long.MAX_VALUE ? "∞ MAX" : formatNum(thr))
+                : Component.literal("§5跨配方线程: §8未启用")));
 
         // 绕过状态一行
         var bypassLine = new StringBuilder("§c绕过: ");

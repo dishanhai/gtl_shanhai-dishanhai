@@ -242,10 +242,9 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     protected ParallelData calculateParallels() {
         stellarLastAllocatedRecipes = 0L;
         matchableScaledRecipeCache.clear();
-        long crossTypeThreads = getMachine() instanceof PrimordialOmegaEngineModuleBase module
-                && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : 0L;
         boolean independentPools = usesIndependentRecipePools();
-        boolean crossType = crossTypeThreads > 0L && !independentPools;
+        boolean crossType = !independentPools && getMachine() instanceof PrimordialOmegaEngineModuleBase module
+                && module.isCrossTypeParallelActive();
         Set<GTRecipe> recipes = crossType ? threadCandidates(this::lookupRecipeIterator) : priorityCandidates(this::lookupRecipeIterator);
         if (recipes.isEmpty()) {
             // 与父类 calculateParallels 同款语义：是否清缓存必须先问 shouldInvalidateLookupCacheWhenNoRunnableRecipe()。
@@ -259,9 +258,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
             invalidateLookupSetCacheIfConfigured();
             return null;
         }
-        int candidateLimit = independentPools ? 1 : crossType
-                ? (int) Math.min(recipes.size(), Math.min(crossTypeThreads, totalParallel))
-                : recipes.size();
+        int candidateLimit = independentPools ? 1 : (int) Math.min(recipes.size(), totalParallel);
         Iterable<GTRecipe> candidates = recipes;
         if (crossType && recipes.size() > 1) {
             // 即使整批容得下所有候選，也輪流讓各配方先扣共用原料。
@@ -315,11 +312,10 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
         return allocated;
     }
 
-    /** 山海：保留批次內候選名額診斷；星律的在途占用另讀多執行緒調度器。 */
+    /** 山海：候选至少占用一份并行；星律的在途占用另读独立批次调度器。 */
     @Override
     public long gtShanhai$getStuckWatchParallelLimit() {
-        return getMachine() instanceof PrimordialOmegaEngineModuleBase module && module.isCrossTypeParallelActive()
-                ? Math.max(1L, module.getRecipeLogicThreadMultiplier()) : Long.MAX_VALUE;
+        return getParallelCapacity();
     }
 
     @Override
@@ -364,8 +360,9 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
     private MatchableScaledRecipe findMaxMatchableScaledRecipe(GTRecipe recipe, long limit) {
         if (recipe == null || limit <= 0L) return null;
         GTRecipe amplified = amplifyForMountedCore(recipe);
-        long inputMax = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
-        if (inputMax <= 0L) return null;
+        // GTLCore 的库存估算会为每个 Ingredient 只选一个匹配物。
+        // 标签库存可以跨多个匹配物凑齐一份，零估算时仍由真实输入处理器模拟确认。
+        long inputMax = Math.max(1L, IParallelLogic.getMaxParallel(getMachine(), amplified, limit));
         // GTLCore 的 getMinParallel() 內部用 double ContentModifier 做輸出容量二分；
         // Long.MAX_VALUE 超限並行與大批量輸出會在 2^53 後失去整數精度。
         // 直接以精確 long 縮放配方測試輸出容量，讓二分與最終扣料使用同一條路徑。
@@ -402,6 +399,13 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                 long parallel = parallelData.getParallels()[i];
 
                 if (parallelData.getShouldProcess()) {
+                    if (energyConsumer) {
+                        parallel = getAffordableParallel(recipe, parallel, euMultiplier, maxTotalEu.subtract(accumulatedEu));
+                        if (parallel <= 0L) {
+                            if (!processedRecipe) RecipeResult.of(getMachine(), RecipeResult.FAIL_NO_ENOUGH_EU_IN);
+                            continue;
+                        }
+                    }
                     MatchableScaledRecipe matchable = matchableScaledRecipeCache.remove(recipe);
                     if (matchable == null || matchable.parallel != parallel) {
                         GTRecipe amplifiedRecipe = amplifyForMountedCore(recipe);
@@ -413,12 +417,6 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                     GTRecipe scaledRecipe = matchable.scaledRecipe;
                     parallel = matchable.parallel;
                     BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
-                    if (energyConsumer && nextEu.compareTo(maxTotalEu) > 0) {
-                        if (accumulatedEu.signum() == 0) {
-                            RecipeResult.of(getMachine(), RecipeResult.FAIL_NO_ENOUGH_EU_IN);
-                        }
-                        continue;
-                    }
                     GTRecipe processed = IParallelLogic.getRecipeOutputChance(machine, scaledRecipe);
                     if (matchRecipeInputHandlePartCache(processed)
                             && handleRecipeInputHandlePartCache(processed)) {
@@ -643,6 +641,11 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
             }
         }
         return lo;
+    }
+
+    long getAffordableParallel(GTRecipe recipe, long limit, double euMultiplier, BigInteger energy) {
+        return findHighestMatchableParallel(limit,
+                parallel -> calculateRecipeEu(recipe, parallel, euMultiplier).compareTo(energy) <= 0);
     }
 
     private BigInteger calculateRecipeEu(GTRecipe recipe, long parallel, double euMultiplier) {

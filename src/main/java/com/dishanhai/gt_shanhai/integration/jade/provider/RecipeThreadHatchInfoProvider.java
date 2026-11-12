@@ -47,7 +47,7 @@ public enum RecipeThreadHatchInfoProvider implements IBlockComponentProvider, IS
         if (!stack.isEmpty()) {
             tag.put("item", stack.save(new CompoundTag()));
             tag.putInt("itemCount", stack.getCount());
-            tag.putLong("itemBoost", PrimordialOmegaEngineModuleBase.getThreadBoostForStack(stack));
+            tag.putLong("itemBoost", PrimordialOmegaEngineModuleBase.getRecipeThreadBoostForStack(stack));
         }
 
         var owners = hatch.getControllers();

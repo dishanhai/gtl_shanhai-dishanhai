@@ -159,7 +159,7 @@ public class ParallelHatchContributionMixin {
             if (gtShanhai$isModuleMachine(controller)) return;
             if (!controller.isFormed()) return;
 
-            int extra = 0;
+            long extra = 0;
             for (IMultiPart part : controller.getParts()) {
                 if (part instanceof com.gtladd.gtladditions.api.machine.feature.IThreadModifierPart tp) {
                     int t = tp.getThreadCount();

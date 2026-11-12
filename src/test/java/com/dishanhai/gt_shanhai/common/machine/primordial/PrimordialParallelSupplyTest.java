@@ -94,7 +94,7 @@ class PrimordialParallelSupplyTest {
         host.bonus = new GuixuContainmentBonus(4L, 0.5D, 5, 0.5D, 2, 0D, false);
         module.host = host;
         assertEquals(512L, available(module));
-        assertArrayEquals(new long[] {256L, 256L}, module.logic.calculateParallels().getParallels());
+        assertArrayEquals(new long[] {171L, 171L, 170L}, module.logic.calculateParallels().getParallels());
         host.formed = false;
         assertEquals(128L, available(module));
     }
@@ -114,21 +114,24 @@ class PrimordialParallelSupplyTest {
         }
     }
 
-    @Test void ordinaryCrossTypeThreadsStillLimitTheBatchAndRecoverAfterSupplyChanges() throws Exception {
+    @Test void ordinaryCrossTypeMultiplierChangesTheBudgetWithoutLimitingRecipeCount() throws Exception {
         String source = java.nio.file.Files.readString(java.nio.file.Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialModuleRecipeLogic.java"));
         assertTrue(source.contains("long parallel = getMaxParallel(recipe, recipeLimit);"),
                 "分配必須復用公開的可行並行查詢；JUnit 不載入 GTLCore ContentModifier Mixin");
         Module module = module(15, 0L);
         module.logic.recipeLimit = 1L;
-        assertEquals(1, module.logic.calculateParallels().getOriginRecipeList().size());
+        assertEquals(64L, available(module));
+        assertEquals(3, module.logic.calculateParallels().getOriginRecipeList().size());
         module.boost = 2L;
-        assertEquals(2, module.logic.calculateParallels().getOriginRecipeList().size());
+        assertEquals(128L, available(module));
+        assertEquals(3, module.logic.calculateParallels().getOriginRecipeList().size());
         module.parallelLevel = 17;
         assertEquals(3, module.logic.calculateParallels().getOriginRecipeList().size());
         module.parallelLevel = 15;
         module.boost = 0L;
-        assertEquals(1, module.logic.calculateParallels().getOriginRecipeList().size());
+        assertEquals(64L, available(module));
+        assertEquals(3, module.logic.calculateParallels().getOriginRecipeList().size());
     }
 
     @Test void blockedCandidatesDoNotConsumeThreadsAndNextBatchRecomputesAvailability() throws Exception {
@@ -178,6 +181,7 @@ class PrimordialParallelSupplyTest {
 
     @Test void crossTypeBatchesRotateWhenOnlyOneSourceFits() throws Exception {
         Module module = module(15, 0L);
+        setThreadAllowance(module.logic, 1L);
         List<GTRecipe> candidates = List.copyOf(module.logic.recipes);
 
         for (GTRecipe candidate : candidates) {
@@ -188,19 +192,33 @@ class PrimordialParallelSupplyTest {
     @Test void overdriverPlansOneIndependentFullPoolPerThread() throws Exception {
         Module module = module(0, 0L);
         module.overdriver = true;
+        assertEquals(Long.MAX_VALUE, module.getRecipeLogicThreadMultiplier());
+        assertEquals(Integer.MAX_VALUE, module.getAdditionalThread());
+        assertEquals(96L, module.getParallelRecipeThreadCount());
         ParallelData allocation = module.logic.calculateParallels();
         assertEquals(1, allocation.getOriginRecipeList().size());
         assertArrayEquals(new long[] {Long.MAX_VALUE}, allocation.getParallels());
         assertTrue(allocation.getShouldProcess());
     }
 
+    @Test void oversizedBatchCanStillRunTheAffordableParallel() throws Exception {
+        Module module = module(0, 0L);
+        GTRecipe recipe = module.logic.recipes.iterator().next();
+        assertEquals(4L, module.logic.getAffordableParallel(recipe, Long.MAX_VALUE, 0.25D, BigInteger.valueOf(21)));
+        assertEquals(0L, module.logic.getAffordableParallel(recipe, Long.MAX_VALUE, 0.25D, BigInteger.valueOf(4)));
+        assertEquals(Long.MAX_VALUE, module.logic.getAffordableParallel(recipe, Long.MAX_VALUE, 0.25D,
+                BigInteger.valueOf(Long.MAX_VALUE).multiply(BigInteger.valueOf(5))));
+    }
+
     @Test void overdriverStackKeepsNinetySixTotalSlotsEvenWithAnOldRegistration() {
         String id = "dishanhai:universal_parallel_overdriver";
         PrimordialOmegaEngineModuleBase.registerThreadBoostItem(id, Long.MAX_VALUE);
         assertEquals(0L, PrimordialOmegaEngineModuleBase.getThreadBoostValue(id, 0));
+        assertEquals(0L, PrimordialOmegaEngineModuleBase.getRecipeThreadBoostValue(id, 0));
         for (int count : new int[] {1, 2, 64}) {
-            long boost = PrimordialOmegaEngineModuleBase.getThreadBoostValue(id, count);
-            assertEquals(96L, PrimordialThreadScheduler.threadCount(boost));
+            assertEquals(Long.MAX_VALUE, PrimordialOmegaEngineModuleBase.getThreadBoostValue(id, count));
+            long extraSlots = PrimordialOmegaEngineModuleBase.getRecipeThreadBoostValue(id, count);
+            assertEquals(96L, PrimordialThreadScheduler.threadCount(extraSlots));
         }
     }
 
@@ -300,6 +318,7 @@ class PrimordialParallelSupplyTest {
         @Override public SelectableRecipeTypeSetMachine getMachine() { return module; }
         @Override public IWirelessElectricMultiblockMachine getWirelessMachine() { return module; }
         @Override protected Set<GTRecipe> lookupRecipeIterator() { return recipes; }
+        @Override protected long getWirelessRecipeEut(GTRecipe recipe) { return 1L; }
         @Override public long getMaxParallel(GTRecipe recipe, long limit) {
             if (recipe == limitedRecipe) return Math.min(limitedParallel, limit);
             return recipe == blocked ? 0L : recipeLimit > 0L ? Math.min(recipeLimit, limit) : limit;

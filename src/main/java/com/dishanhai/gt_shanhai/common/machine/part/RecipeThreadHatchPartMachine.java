@@ -41,7 +41,7 @@ public class RecipeThreadHatchPartMachine extends MultiblockPartMachine
                 }
             }
         };
-        threadSlot.setFilter(stack -> PrimordialOmegaEngineModuleBase.getThreadBoostForStack(stack) > 0);
+        threadSlot.setFilter(stack -> PrimordialOmegaEngineModuleBase.getRecipeThreadBoostForStack(stack) > 0);
     }
 
     public NotifiableItemStackHandler getThreadSlot() { return threadSlot; }
@@ -61,7 +61,7 @@ public class RecipeThreadHatchPartMachine extends MultiblockPartMachine
     @Override
     public long getRecipeThreadCapacity() {
         return capacityForBoost(recipeThreadsEnabled,
-                PrimordialOmegaEngineModuleBase.getThreadBoostForStack(threadSlot.getStackInSlot(0)));
+                PrimordialOmegaEngineModuleBase.getRecipeThreadBoostForStack(threadSlot.getStackInSlot(0)));
     }
 
     @Override

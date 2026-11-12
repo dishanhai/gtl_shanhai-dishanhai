@@ -159,7 +159,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 提供给外部类查询线程倍率 */
     public static long getThreadBoostValue(String itemId) {
-        if (OVERDRIVER_ID.equals(itemId)) return OVERDRIVER_THREAD_CAPACITY - 1L;
+        if (OVERDRIVER_ID.equals(itemId)) return Long.MAX_VALUE;
         Long v = GLOBAL_THREAD_BOOST_IDS.get(itemId);
         return v == null ? 0 : v;
     }
@@ -167,7 +167,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     static long getThreadBoostValue(String itemId, int count) {
         if (count <= 0) return 0L;
         long base = getThreadBoostValue(itemId);
-        if (OVERDRIVER_ID.equals(itemId)) return base;
         return base <= 0L ? 0L : base > Long.MAX_VALUE / count ? Long.MAX_VALUE : base * count;
     }
 
@@ -176,6 +175,18 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (stack == null || stack.isEmpty()) return 0L;
         var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
         return id == null ? 0L : getThreadBoostValue(id.toString(), stack.getCount());
+    }
+
+    /** 左侧配方线程入口使用额外批次槽数。 */
+    public static long getRecipeThreadBoostForStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0L;
+        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id == null ? 0L : getRecipeThreadBoostValue(id.toString(), stack.getCount());
+    }
+
+    static long getRecipeThreadBoostValue(String itemId, int count) {
+        if (count > 0 && OVERDRIVER_ID.equals(itemId)) return OVERDRIVER_THREAD_CAPACITY - 1L;
+        return getThreadBoostValue(itemId, count);
     }
 
     /** 获取线程倍率（已乘以堆叠数量） */
@@ -191,6 +202,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 山海：「多线程并行」的批次數獨立於物質模組提供的跨配方名額。 */
     public long getParallelRecipeThreadCount() {
+        if (hasParallelOverdriver()) return OVERDRIVER_THREAD_CAPACITY;
         return PrimordialThreadScheduler.threadCount(getThreadBoost());
     }
 
@@ -678,8 +690,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     public int getAdditionalThread() {
-        if (hasParallelOverdriver()) return OVERDRIVER_THREAD_CAPACITY - 1;
-        long boost = hasInfiniteMatterThreads() ? Long.MAX_VALUE : getThreadBoost();
+        long boost = hasParallelOverdriver() || hasInfiniteMatterThreads() ? Long.MAX_VALUE : getThreadBoost();
         return boost > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) boost;
     }
 
@@ -689,8 +700,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     }
 
     public long getRecipeLogicThreadMultiplier() {
-        if (hasParallelOverdriver()) return OVERDRIVER_THREAD_CAPACITY;
-        if (hasInfiniteMatterThreads()) return Long.MAX_VALUE;
+        if (hasParallelOverdriver() || hasInfiniteMatterThreads()) return Long.MAX_VALUE;
         long boost = getThreadBoost();
         return boost > 0L ? boost : 1L;
     }
