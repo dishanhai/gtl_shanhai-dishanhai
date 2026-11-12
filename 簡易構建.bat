@@ -3,8 +3,8 @@ chcp 65001 > nul
 setlocal
 cd /d "%~dp0"
 
-rem 構建前清除舊的 build\libs 目錄。
-rem build 會跑 reobfJar。遊戲要用混淆產物，不是中途的 Mojmap class。
+rem Remove old build outputs before building.
+rem The build runs reobfJar; use its output for the game.
 set "JAVA_HOME=%ProgramFiles%\Java\jdk-21.0.11"
 set "GRADLE_OPTS=-Xmx4G -Xms1G -Dfile.encoding=UTF-8"
 set "GRADLE_CMD=%~dp0gradle-install\gradle-8.8\bin\gradle.bat"

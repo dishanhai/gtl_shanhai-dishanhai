@@ -5,7 +5,7 @@ title: gt_shanhai 4.9.1 更新公告
 title_en: gt_shanhai 4.9.1 Release Notes
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai](https://github.com/dishanhai/gtl_shanhai-dishanhai)] - GitHub 仓库 / GitHub Repository
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/commits/master/](https://github.com/dishanhai/gtl_shanhai-dishanhai/commits/master/)] - 提交历史 / Commit History
-link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/releases](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)] - 模组和完整包文件发布页 / Releases
+link: [[gt_shanhai v4.9.1](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)] - 本版本发布说明与完整包 / Release notes and complete package
 link: [[https://docs.qq.com/sheet/DYWFtSEtvTWVodkJn?tab=000002](https://docs.qq.com/sheet/DYWFtSEtvTWVodkJn?tab=000002)] - 【腾讯文档】gt_shanhai 模组问题与建议反馈表 / Feedback Sheet
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/issues](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)] - 提交与查看模组问题反馈 / GitHub Issues
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13)] - 新功能意见征集 / Feature Requests
@@ -18,11 +18,11 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 此更新贡献者：**dishanhai**——`核心代码贡献者`、**AutumnRainLF**——`issues #36` 反馈者、**aiwan-98**——`issues #37` 反馈者
 爱发电赞助鸣谢：**爱发电用户_CVqE**、**纪念**、**爱发电用户_1e1c5**、**落幕**、**有c** `（排名不分先后以及大小）`
 
-本次更新承接 4.9.0。重整了原初多线程调度的「跨配方线程倍率」、独立配方并行池与批次合并机制；新增从 AE2 样板编码终端与 JEI 直接将样板「上传到星律样板库」的快捷链路，并为「星律云端样板库核心」补上专属六面贴图；同时修复了「山海无线样板管理终端」大体积数据包断连与专用服务端加载「星界玻璃」UI 渲染类崩溃的问题。开屏更新公告界面现支持底部按钮一键切换简体中文与英文。
+4.9.1 改进了原初模块的多线程调度，支持同配方与跨配方批次合并。你可以从 AE2 样板编码终端或 JEI 直接上传样板到星律云端样板库。本次也修复了无线样板管理终端同步大量样板时的断连，以及专用服务端构建玻璃界面时的崩溃。
 
 ## 联机兼容
 
-- 网络协议升级至 17（4.9.0 为 16）。客户端与服务端需使用相同协议版本，请统一更新至 4.9.1。
+- 网络协议从 4.9.0 的 **16** 升至 **17**。联机请将客户端与服务端一并更新至 **4.9.1**。
 
 ## 原初多线程批次合并与独立并行池
 
@@ -48,6 +48,7 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 
 - **样板管理终端大包分片传输（`ShanhaiPatternTerminalUpdateChunkPacket`）**：当「山海无线样板管理终端」的全量或增量更新超过 1 MiB 原生上限时，自动按约 1 MiB 分片下发（最高支持 32 MiB 负载，单画面共享 64 MiB NBT 额度），客户端重组校验后再交由 AE2 处理，并放宽增量同步节流，解决样板极多或含大体积 NBT 时打开终端掉线的问题。
 - **专用服务端玻璃 UI 隔离（`StellarGlassTexture`，`issues #36`）**：将星界玻璃与烟色玻璃的客户端纹理与渲染 Lambda 延迟至客户端内部类初始化，在专用服务端（Dedicated Server）环境下安全回退为空纹理，修复服务端构建「星律样板总成」等机器 UI 时触发客户端渲染类加载导致的崩溃。
+- **更新公告语言切换**。点击公告底部的语言按钮可在简体中文和英文之间切换。
 
 <!-- lang:en -->
 <details>
@@ -59,11 +60,11 @@ Release Date: `November 8, 2026`
 Contributors: **dishanhai** — `Core Code Contributor`, **AutumnRainLF** — `issues #36` reporter, **aiwan-98** — `issues #37` reporter
 Afdian Sponsors Special Thanks: **爱发电用户_CVqE**, **纪念**, **爱发电用户_1e1c5**, **落幕**, **有c** `(Listed in no particular order or tier)`
 
-Following up on 4.9.0, this update refines Primordial multi-threaded scheduling with cross-recipe thread multipliers, independent per-recipe parallel pools, and batch merging; adds direct "Upload to Stellar Pattern Library" shortcuts from both the AE2 Pattern Encoding Terminal and JEI along with dedicated 6-sided textures for the "Stellar Cloud Pattern Library Core"; and fixes large-payload disconnections in the "Shanhai Wireless Pattern Management Terminal" as well as a dedicated server crash caused by client glass UI rendering classes. The in-game changelog screen now also supports toggling between Simplified Chinese and English.
+Version 4.9.1 improves Primordial scheduling and adds same-recipe and cross-recipe batch merging. You can upload patterns directly to the Stellar Cloud Pattern Library from the AE2 Pattern Encoding Terminal or JEI. This release also fixes large-payload disconnects in the wireless pattern terminal and a crash while building glass UIs on dedicated servers.
 
 ## Multiplayer Compatibility
 
-- Network protocol version bumped to `17` (up from `16` in 4.9.0). Clients and servers must use matching protocol versions; please update both sides to `4.9.1`.
+- The network protocol changes from **16** in 4.9.0 to **17**. For multiplayer, update both the client and server to **4.9.1**.
 
 ## Primordial Thread Batch Merging & Independent Parallel Pools
 
@@ -89,5 +90,6 @@ Following up on 4.9.0, this update refines Primordial multi-threaded scheduling 
 
 - **Chunked Pattern Terminal Updates (`ShanhaiPatternTerminalUpdateChunkPacket`)**: Full or incremental updates for the `Shanhai Wireless Pattern Management Terminal` exceeding the 1 MiB native limit are now split into ~1 MiB chunks (up to 32 MiB total payload, with a shared 64 MiB NBT accounter budget on reassembly) and reassembled on the client, preventing disconnections when opening terminals with massive pattern counts or complex NBT.
 - **Dedicated Server Glass UI Isolation (`StellarGlassTexture`, `issues #36`)**: Deferred client-only glass textures and rendering lambdas into an inner client class and returned `IGuiTexture.EMPTY` on dedicated servers, fixing a server crash when opening/constructing `Stellar Law Pattern Buffer` and other machine UIs on a dedicated server.
+- **Changelog language switch.** Use the language button at the bottom of the changelog to switch between Simplified Chinese and English.
 
 </details>

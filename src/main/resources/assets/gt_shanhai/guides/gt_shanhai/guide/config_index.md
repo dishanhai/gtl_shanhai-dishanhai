@@ -129,6 +129,6 @@ categories:
 > `autoWrapExclusions` - 默认 `gtceu:programmed_circuit`\
 > 自动写样板时不包裹成虚拟物品提供器的物品 ID 列表。被排除物品会按原物品写入样板，保留自身 NBT。\
 > `forceWrapOmittedNonConsumables` - 默认 `true`\
-> 编码器反查到不消耗输入但玩家未放入时，`true` 自动补回虚拟供应器或流体标记；`false` 尊重玩家删除输入的操作，不主动补回缺失的不消耗输入。
+> 编码时确认所选 GT 配方后，`true` 按快速编码的候选优先级补回缺失的不消耗输入；`false` 保留玩家当前的输入选择。
 
 </Column>
