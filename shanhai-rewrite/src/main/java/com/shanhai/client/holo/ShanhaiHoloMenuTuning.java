@@ -243,6 +243,32 @@ public final class ShanhaiHoloMenuTuning {
     /** 单帧最大步进（秒）。窗口失焦/卡顿后回来时不让插值跳一大步。 */
     public static final float MAX_FRAME_DT_SEC = 0.25f;
 
+    // ---- 🆕 2026-11-08：开关去抖窗口（修"连点互相抵消"）----
+
+    /**
+     * 🔴 <b>两次开关键切换的最小间隔</b>（毫秒）：间隔 {@code < 250 ms} 的那一拍
+     * 一律<b>忽略</b>，并打一行 {@code holo_toggle_debounced gap_ms=<n> dropped=true}。
+     *
+     * <h4>为什么必须有这一条（日志实证，不是推测）</h4>
+     * 2026-11-08 的取证里，同一秒内出现 6 次
+     * {@code holo_menu_toggled_by_item … now=true / now=false} 交替
+     * ⇒ 用户"连点两下"让两次切换<b>互相抵消</b>，净状态落回"关"，
+     * 而他看到的现象就是「<b>打不开面板</b>」。这一条与"摆位"是两条独立的病根。
+     *
+     * <h4>为什么是 250</h4>
+     * <pre>
+     *   人手快速双击的间隔约 80~200 ms；而"我确实想再切一次"的间隔通常 ≥ 300 ms
+     *   （要看到画面变化再决定，人的反应时约 250 ms）。
+     *   ⇒ 250 ms 正好卡在"误触"与"有意"之间，且与
+     *     {@link #MAX_FRAME_DT_SEC}（250 ms）同一个数量级，读日志时不必换算。
+     * </pre>
+     * <p>⚠️ 边界口径是 {@code < 250 才丢}：{@code gap == 250} <b>接受</b>
+     * （见 {@link ShanhaiHoloMenuToggleGate#accept} 与它的自检 D2）。
+     * <p>⚠️ 它<b>只</b>决定"这一拍要不要真的落下去"，
+     * <b>不改</b>「拿着模块右键 = 切换投影（开着就关）」这条已验收语义的任何一个判据。
+     */
+    public static final long TOGGLE_DEBOUNCE_MS = 250L;
+
     // ==================================================================== 六、板内排版（bu）
 
     /** 序号文字距板左边的距离（甲案 {@code .idx{left:17px}}）。 */

@@ -646,6 +646,7 @@ public final class ShanhaiWhyCommand {
             // 一条样板读不出产物 ⇒ 就让它空着（画面上是 unknown，不是"没产物"）
         }
         String type = null;
+        String rawDeclaration = "";
         try {
             final AEItemKey definition = pattern.getDefinition();
             if (definition != null) {
@@ -661,11 +662,13 @@ public final class ShanhaiWhyCommand {
                         type = String.join("|", resolution.ids()) + "（歧义，不采信）";
                     }
                 }
+                // 🆕 原始声明字符串（解析前）。只读：直接读那块样板的 NBT，失败就是空串。
+                rawDeclaration = ShanhaiPatternTypeReader.rawDeclaration(definition.getReadOnlyStack());
             }
         } catch (Throwable ignored) {
             type = null;
         }
-        return new ShanhaiWhyCore.PatternView(outputs, type);
+        return new ShanhaiWhyCore.PatternView(outputs, type, rawDeclaration);
     }
 
     // ══════════════════════════════════ ④⑤ 目标类型与配方 ══════════════════════════════════

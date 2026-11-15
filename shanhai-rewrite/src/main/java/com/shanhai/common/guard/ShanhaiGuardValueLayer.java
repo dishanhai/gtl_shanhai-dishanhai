@@ -2,10 +2,8 @@ package com.shanhai.common.guard;
 
 import com.shanhai.ShanhaiMod;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.util.concurrent.atomic.AtomicBoolean;
-import net.minecraft.nbt.CompoundTag;
+import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
@@ -13,18 +11,15 @@ import net.minecraft.world.entity.LivingEntity;
 /**
  * 🔴 <b>【创始现实修改模块】「值层兜底」的执行层</b>（2026-10-17 新增；只这一份，所有调用点共用）。
  *
- * <h2>为什么要有这一层（实机证据 ＋ 对手字节码，两条都不推翻）</h2>
+ * <h2>为什么要有这一层（实机证据 ＋ 日志证据，两条都不推翻）</h2>
  * <pre>
  *   ① 实机：敌人不走 LivingAttackEvent 时 —— 事件层三条拦截都在生效、补血自证也成功，
  *      玩家却进入「死但没死透」：死亡界面被压住，人僵住不能动。
- *   ② 对手字节码：它的杀人链【根本不过 setHealth】——
- *        EntityUtil.damageHealth：`真血 - 伤害`（**没有** max(0, ·)）
- *        → EntityUtil.forceSetHealth
- *        → forceSetEntityData(LivingEntity.f_20961_（即 DATA_HEALTH_ID）, 值)   ← 直接裸写同步血量字段
+ *   ② 日志证据：有的第三方 mod 的杀人链【根本不经过 setHealth】——
+ *      它直接裸写同步血量字段（LivingEntity.f_20961_，即 DATA_HEALTH_ID）⇒ setHealth 上的拦截看不到这一笔；
  *      它还：
- *        · 在 setHealth 上挂 `@Inject(HEAD, cancellable=true)`：counter>=5 且新值 &gt; getHealth() ⇒ cancel，
- *          而 counter 是【单向锁存】⇒ 一旦中招，我们的 setHealth 补血【永久无效】；
- *        · 给 getHealth() 的每条 return 插了 `+ delta`（delta 同步给客户端）⇒ 读回值 != 真实血量。
+ *        · 在 getHealth() 的 return 上做手脚 ⇒ 读回值 != 真实血量（假死 / 假血）；
+ *        · 把别人的 setHealth 取消掉 ⇒ "以为补上了、其实没补"。
  *   ⇒ 三条结论：只拦 setHealth 不够 ／ 只信 getHealth() 不够 ／ 只走 setHealth 补血不够。
  * </pre>
  *
@@ -38,12 +33,12 @@ import net.minecraft.world.entity.LivingEntity;
  *       并报出<b>是哪一条腿成的</b>（{@code heal_channel=setHealth / direct / failed}）。</li>
  *   <li>②/③/④ 共用的复位动作：{@link #resetDeathFlow(LivingEntity)}（补血两条腿 ＋ {@code deathTime = 0}
  *       ＋ {@code hurtTime = 0}）与 ④ 的 {@link #refuseDie(Object, String)}。</li>
- *   <li>⑤ <b>对手桥</b>（全部反射 + try/catch，类找不到就跳过）：用对手<b>自己的</b> public static API
- *       {@code setHealthDelta(LivingEntity, float)} 把 {@code getHealth()} 的偏移清零，
- *       并清它 ForgeData 里的单向锁存计数器（{@code omnimobs_counter_data}，阈值 5）。
- *       ⚠ 这层依赖对手的类名/方法名/数据键 ⇒ <b>换版本就失效</b>；失效时只记一行
- *       {@code omnimobs_bridge unavailable: <原因>}，之后不再重试，自动退回值层。</li>
  * </ol>
+ *
+ * <p>🔴 <b>本类不引用任何第三方 mod 的类名／方法名／数据键</b>：所有判据只用
+ * {@code LivingEntity} 的原版 API（{@code getHealth()} / {@code getMaxHealth()} / {@code getEntityData()}）
+ * ＋ 下面用反射拿到的那一个原版字段 {@code DATA_HEALTH_ID}。写血那一路上另有一条
+ * <b>与具体 mod 无关</b>的读侧交叉校验（{@link #noteReadSideMismatch(LivingEntity)}）。
  *
  * <h2>🔴 为什么本类必须是<b>普通类</b>，而不是把逻辑写进 mixin</h2>
  * 本工程既定的 mixin 写法（见 {@code ShanhaiSetBlockWatchMixin} 类注释 §2、实测 refmap）：
@@ -80,6 +75,37 @@ import net.minecraft.world.entity.LivingEntity;
 public final class ShanhaiGuardValueLayer {
 
     private ShanhaiGuardValueLayer() {}
+
+    // ═══════════════════════════ 钩子自检的降级标志（data_only） ═══════════════════════════
+
+    /**
+     * 🔴 <b>降级标志</b>（{@code data_only}；由扩展侧
+     * {@code com.shanhai.add.guard.selfcheck.ShanhaiHookSelfCheck} 在"我们的注入没了 ／ 判据失效"时置上）。
+     *
+     * <p>true ⇒ {@link #healTwoLegs(LivingEntity)} <b>跳过 setHealth 那条腿</b>，只走第二通道
+     * （读 {@code DATA_HEALTH_ID} ＋ 直写同步血量字段）。理由：自检说 setHealth 那条注入可能已经被剥掉，
+     * 那么"调 setHealth 再自证"这一步就是在靠一条没人守的路；直写字段本来就绕开它，而判据
+     * （{@code directWriteProof} / {@code healRoundTrip}）<b>一字不改</b>。
+     *
+     * <p>🔴 <b>默认 false ⇒ 行为与加这个开关之前逐字相同</b>；它<b>不</b>参与任何拦截判定
+     * （setHealth 入参改写 / die 拒绝 / setRemoved 拒绝都不看它），只改"补血先走哪条腿"。
+     * 存储放在本体而不是扩展：依赖方向是 add → 本体，本体不许 import {@code com.shanhai.add.*}。
+     */
+    private static volatile boolean dataOnly;
+
+    /** 现在是降级（data_only）模式吗。 */
+    public static boolean dataOnly() {
+        return dataOnly;
+    }
+
+    /**
+     * 置/清降级标志（只有扩展侧的钩子自检会调）。
+     *
+     * <p>⚠️ 刻意<b>不打日志</b>：失效那一行由自检统一打，保证"失效时恰好一行"。
+     */
+    public static void setDataOnly(boolean on) {
+        dataOnly = on;
+    }
 
     /**
      * 🔴 <b>重入闸门</b>：只有本类自己的复位动作会把它置 true。
@@ -128,6 +154,11 @@ public final class ShanhaiGuardValueLayer {
                     value, true, ShanhaiGuardEvents.isGuarded(player), ShanhaiGuardCore.enabled).yes) {
                 return value;   // 权威判据（开关 / 受保护）
             }
+            // 🆕 T 件 R3（只读）：走到这儿必然是【外部直调 setHealth(<=0)】——
+            //    上面「值 > 0 一律原样」那道闸门保证了我们自己的 setHealth(max) 永远进不到这里。
+            //    刻意放在 BUSY 判断【之前】：重入也算"外部直调"，两条分支都要记到。
+            //    ⚠️ 它只是往一个计数里置一个布尔，绝不影响本方法的返回值。
+            ShanhaiGuardTriageBridge.noteDirectSetHealth(player, value);
             if (BUSY.get()) {
                 // 🔴 防递归：我们自己的复位路径里又进来了 ⇒ 原样放行（绝不二次改写）
                 return value;
@@ -277,197 +308,44 @@ public final class ShanhaiGuardValueLayer {
         }
     }
 
-    // ═══════════════ ⑤ 对手桥：用对手自己的 public API 反向修复（反射；失效自动退回值层） ═══════════════
-    //
-    // 对手（coremod=true 满功率）那三件套，以及本类怎么反向修复（全部反射 + try/catch，类找不到就跳过）：
-    //   ① getHealth() 的每条 return 加 delta（delta 存在同步数据里，客户端同样带偏移）
-    //        ⇒ 调它自己的 public static setHealthDelta(LivingEntity, float) 把 delta 写成 0
-    //          ⇒ 它的 getHealth() = 血量字段 + 0 = 真值（假死/假血一起消失）
-    //   ② setHealth 上挂【单向锁存】：counter>=5 且新值 > 当前血 ⇒ cancel
-    //        ⇒ counter 在玩家 ForgeData 的 omnimobs_counter_data（实测 /data get entity @s ForgeData.omnimobs_counter_data）
-    //          ⇒ 读到 >= 5 就 putInt(..., 0) ⇒ 我们的 setHealth 又能生效
-    //   ③ 它自己的"判死"：checkEntityDead(LivingEntity) ⇒ 每 tick 问一次，true 就并入复位判据
-    //
-    // 🔴 这一层【依赖对手的类名/方法名/数据键】，换版本就会失效：
-    //    失效时只记一行 `omnimobs_bridge unavailable: <原因>`，之后不再重试；
-    //    值层（setHealth ／ 直写 DATA_HEALTH_ID）照旧工作 ⇒ 功能不会因此消失，只是少一层。
+    // ═══════════ 读侧交叉校验（与具体 mod 无关：只比原版两个读数） ═══════════
 
-    /** 只探测对手 API 一次。 */
-    private static final AtomicBoolean OMNI_PROBED = new AtomicBoolean(false);
+    /** 这一行日志的节流窗口（毫秒）：最多 5 秒一行（复用工程里既有的 {@link ShanhaiGuardTriage.Throttle}）。 */
+    private static final ShanhaiGuardTriage.Throttle READ_SIDE_LOG =
+            new ShanhaiGuardTriage.Throttle(5_000L);
 
-    /** 运行时失败只刷一行日志。 */
-    private static final AtomicBoolean OMNI_FAILURE_LOGGED = new AtomicBoolean(false);
-
-    /** 反射到的三个 Method（一次拿到就缓存，绝不每 tick 查名字）；任一为 null ⇒ 这层不可用。 */
-    private static volatile Method omniSetDelta;
-    private static volatile Method omniGetDelta;
-    private static volatile Method omniCheckDead;
-
-    /** 不可用的原因（只用于日志/诊断）。 */
-    private static volatile String omniUnavailable = "(未探测)";
-
-    /** 一旦确认不可用（类缺失 / 方法抛异常）⇒ 之后一律跳过，不再重试、不再刷日志。 */
-    private static volatile boolean omniDisabled = false;
+    /** 命中次数（累计，从不减；这一行被节流时照样累加）。 */
+    private static final AtomicLong READ_SIDE_HITS = new AtomicLong();
 
     /**
-     * 反射探测对手的 {@code flashfur.omnimobs.util.GetHealthModifyUtil} 三个 {@code public static} 方法。
+     * 🔴 <b>读侧交叉校验</b>：拿 {@code entity.getHealth()}（读侧）跟 {@link #readHealthField}
+     * （同步血量字段的真值）比 —— <b>读数明显小于字段值</b> ⇒ 判「读侧被改写了」：字段里其实还有血，
+     * {@code getHealth()} 却报了一个更小的数（最毒的一种是把活人报成 0 ⇒ 客户端/别的 mod 都当他死了）。
      *
-     * <p>失败（没装 / 换了版本 / 方法签名变了）⇒ 记一次 {@code omnimobs_bridge unavailable: <原因>}，
-     * 并且<b>永久跳过这一层</b>（自动退回值层）。
+     * <p>判据本体在纯逻辑核里（{@link ShanhaiGuardCore#readSideMismatch}，容差
+     * {@link ShanhaiGuardCore#READ_SIDE_TOLERANCE} = 0.01）—— 本方法只做两件事：
+     * ① 读两个读数；② 命中时记一行<b>限流</b>日志（最多 5 秒一行 ＋ 累计计数）。
+     * <b>写血逻辑一个字都不改</b>：调方（{@link #healTwoLegs}）照旧把字段写回满值。
+     *
+     * <p>🔴 判据只碰原版这两样：{@code LivingEntity#getHealth()} 与
+     * {@code getEntityData().get(DATA_HEALTH_ID)}（后者由 {@link #readHealthField} 提供）
+     * ⇒ <b>零第三方类名／零第三方方法名／零自定义数据键</b>，也不需要任何配置项。
+     *
+     * <p>⚠ 读数与字段<b>相等</b>、读数<b>偏大</b>、任一读不到（NaN）⇒ 这一条都不成立（不猜、不报）。
      */
-    private static boolean probeOmnimobs() {
-        if (omniDisabled) {
-            return false;
+    private static void noteReadSideMismatch(LivingEntity entity) {
+        final float field = readHealthField(entity);
+        final float hp = entity.getHealth();
+        if (!ShanhaiGuardCore.readSideMismatch(hp, field)) {
+            return;   // 没有"读数明显偏小"⇒ 这一条不成立
         }
-        if (omniSetDelta != null) {
-            return true;
+        final long hits = READ_SIDE_HITS.incrementAndGet();
+        if (!READ_SIDE_LOG.admit("read_side_mismatch", System.currentTimeMillis())) {
+            return;   // 5 秒内已经打过一行 ⇒ 只累计、不刷屏
         }
-        if (!OMNI_PROBED.compareAndSet(false, true)) {
-            return false;   // 另一个线程正在探测 / 已经探测失败
-        }
-        try {
-            final Class<?> util = Class.forName(ShanhaiGuardCore.OMNIMOBS_UTIL_CLASS);
-            final Method set = util.getMethod(ShanhaiGuardCore.OMNIMOBS_METHOD_SET_DELTA,
-                    LivingEntity.class, float.class);
-            final Method get = util.getMethod(ShanhaiGuardCore.OMNIMOBS_METHOD_GET_DELTA, LivingEntity.class);
-            final Method dead = util.getMethod(ShanhaiGuardCore.OMNIMOBS_METHOD_CHECK_DEAD, LivingEntity.class);
-            requirePublicStatic(set);
-            requirePublicStatic(get);
-            requirePublicStatic(dead);
-            set.setAccessible(true);
-            get.setAccessible(true);
-            dead.setAccessible(true);
-            omniSetDelta = set;
-            omniGetDelta = get;
-            omniCheckDead = dead;
-            ShanhaiMod.LOGGER.info(ShanhaiGuardCore.LOG_PREFIX + "omnimobs_bridge ready："
-                    + ShanhaiGuardCore.OMNIMOBS_UTIL_CLASS + " 的 "
-                    + ShanhaiGuardCore.OMNIMOBS_METHOD_SET_DELTA + " / "
-                    + ShanhaiGuardCore.OMNIMOBS_METHOD_GET_DELTA + " / "
-                    + ShanhaiGuardCore.OMNIMOBS_METHOD_CHECK_DEAD + " 都拿到了"
-                    + "（⑤ 用对手自己的 API 反向修复：清 delta ＋ 清锁存计数器）");
-            return true;
-        } catch (Throwable t) {
-            omniUnavailable = "omnimobs_bridge unavailable: " + t;
-            omniDisabled = true;
-            // 对手没装 / 版本不同都是正常情况（其它整合包就没有这个 mod）⇒ INFO，一行，之后不再提
-            ShanhaiMod.LOGGER.info(ShanhaiGuardCore.LOG_PREFIX + omniUnavailable
-                    + "（这一层跳过、之后不再重试；值层 setHealth / 直写 DATA_HEALTH_ID 照旧工作）");
-            return false;
-        }
-    }
-
-    /** 校验对手的方法确实是 {@code public static} 且参数对（javap 说是；变了就明确报不可用，不硬调）。 */
-    private static void requirePublicStatic(Method method) {
-        final int mod = method.getModifiers();
-        if (!Modifier.isPublic(mod) || !Modifier.isStatic(mod)) {
-            throw new IllegalStateException(method.getName() + " 不是 public static（签名变了 ⇒ 这层不可用）");
-        }
-    }
-
-    /** 反射失败的处理：确认这一层不可用 ＋ 只刷一行日志（之后永不重试）。 */
-    private static void noteOmniFailure(String what, Throwable t) {
-        omniDisabled = true;
-        omniUnavailable = "omnimobs_bridge unavailable: " + what + " → " + t;
-        if (OMNI_FAILURE_LOGGED.compareAndSet(false, true)) {
-            ShanhaiMod.LOGGER.warn(ShanhaiGuardCore.LOG_PREFIX + omniUnavailable
-                    + "（这一层之后不再重试；值层照旧工作）");
-        }
-    }
-
-    /**
-     * ⑤ <b>读对手给 {@code getHealth()} 加的偏移</b>（{@code obtainHealthDelta}）。
-     *
-     * @return 偏移值；这一层不可用 ⇒ {@code Float.NaN}
-     */
-    public static float obtainOmnimobsDelta(LivingEntity entity) {
-        if (entity == null || !probeOmnimobs()) {
-            return Float.NaN;
-        }
-        try {
-            final Object value = omniGetDelta.invoke(null, entity);
-            return value instanceof Number number ? number.floatValue() : Float.NaN;
-        } catch (Throwable t) {
-            noteOmniFailure("obtainHealthDelta", t);
-            return Float.NaN;
-        }
-    }
-
-    /**
-     * ⑤ <b>问对手自己的"判死"</b>（{@code checkEntityDead}）—— 这是它最全的一条死亡信号。
-     *
-     * @return true = 它说这个实体死了（这一层不可用 / 抛异常 ⇒ false，由值层的另外三条判据兜）
-     */
-    public static boolean omnimobsSaysDead(LivingEntity entity) {
-        if (entity == null || !probeOmnimobs()) {
-            return false;
-        }
-        try {
-            final Object value = omniCheckDead.invoke(null, entity);
-            return value instanceof Boolean bool && bool.booleanValue();
-        } catch (Throwable t) {
-            noteOmniFailure("checkEntityDead", t);
-            return false;
-        }
-    }
-
-    /**
-     * ⑤ <b>把 {@code getHealth()} 的偏移清零</b>（{@code setHealthDelta(entity, 0f)}）——
-     * 对手的 {@code getHealth()} = 血量字段 + delta，delta 归零后读数就是真值，假死/假血一起消失。
-     *
-     * <p>只在 delta 非 0 时才写（避免每 tick 都发一次同步包）；写完记一句
-     * {@code omnimobs_bridge=delta_reset}。
-     *
-     * @return 给日志的一段话；没有偏移 / 这一层不可用 ⇒ {@code null}
-     */
-    public static String clearOmnimobsDelta(LivingEntity entity) {
-        if (entity == null || !probeOmnimobs()) {
-            return null;
-        }
-        try {
-            final Object current = omniGetDelta.invoke(null, entity);
-            final float before = current instanceof Number number ? number.floatValue() : 0f;
-            if (before == 0f) {
-                return null;   // 没有偏移 ⇒ 不动它（别每 tick 发一次同步包）
-            }
-            omniSetDelta.invoke(null, entity, 0f);
-            return "omnimobs_bridge=delta_reset ／ delta 原值=" + before + " → 0.0"
-                    + "（它的 getHealth() 恢复真值）";
-        } catch (Throwable t) {
-            noteOmniFailure("clearOmnimobsDelta", t);
-            return null;
-        }
-    }
-
-    /**
-     * ⑤ <b>清对手的「单向锁存计数器」</b>：{@code counter >= 5} 起它会 cancel 任何"加血"的 {@code setHealth}
-     * ⇒ 不清零的话我们的第一条腿<b>永久无效</b>（这就是"中招后 setHealth 补血永久无效"的机制）。
-     *
-     * <p>这个键住在玩家 ForgeData 里（{@code player.getPersistentData()}，实测
-     * {@code /data get entity @s ForgeData.omnimobs_counter_data}）—— <b>不需要反射</b>，但同样只对受保护玩家生效。
-     *
-     * @return 给日志的一段话；没锁 / 没有这个键 ⇒ {@code null}
-     */
-    public static String clearOmnimobsCounter(ServerPlayer player) {
-        if (player == null) {
-            return null;
-        }
-        try {
-            final CompoundTag data = player.getPersistentData();
-            if (data == null) {
-                return null;
-            }
-            final int before = data.getInt(ShanhaiGuardCore.OMNIMOBS_COUNTER_KEY);
-            if (!ShanhaiGuardCore.shouldResetOmnimobsCounter(before)) {
-                return null;   // 没到锁存阈值 ⇒ 不碰别人的数据
-            }
-            data.putInt(ShanhaiGuardCore.OMNIMOBS_COUNTER_KEY, 0);
-            return "omnimobs_bridge=counter_reset ／ " + ShanhaiGuardCore.OMNIMOBS_COUNTER_KEY
-                    + " 原值=" + before + " → 0（对手的 setHealth 锁已解）";
-        } catch (Throwable t) {
-            noteOmniFailure("clearOmnimobsCounter", t);
-            return null;
-        }
+        ShanhaiMod.LOGGER.warn(ShanhaiGuardCore.LOG_PREFIX
+                + "read_side_mismatch hp=" + hp + " field=" + field + " lost=" + (field - hp)
+                + " hits=" + hits);
     }
 
     // ═══════════════════════════════ 两条腿补血（第二通道的落地） ═══════════════════════════════
@@ -508,29 +386,38 @@ public final class ShanhaiGuardValueLayer {
      * <p>两条腿都失败 ⇒ {@code channel = FAILED}（<b>不假装成功</b>）。
      * 每次调用都会给核里的 {@code healFailureCount()} 记一次（走 {@link ShanhaiGuardCore#healRoundTrip}），
      * 语义与老的单腿版本一致："一次补血动作的自证次数/失败次数"。
+     *
+     * <p>🔴 <b>降级（{@link #dataOnly()} = true）</b>：第一腿<b>直接跳过</b>，只走第二腿
+     * （读 {@code DATA_HEALTH_ID} 真值 ＋ 直写同步血量字段）。判据一条都不改（还是
+     * {@link ShanhaiGuardCore#directWriteProof} ＋ {@link ShanhaiGuardCore#healRoundTrip}），
+     * 只改"先走哪条腿"；默认 false ⇒ 与加这个开关之前逐字相同。
      */
     public static HealOutcome healTwoLegs(LivingEntity entity) {
         if (entity == null) {
             return new HealOutcome(ShanhaiGuardCore.HealChannel.FAILED, "heal_channel=failed ／ 实体为空");
         }
+        // 🔴 写血之前先做一次读侧交叉校验（每 tick 兜底写血这条路都会走到这里）：
+        //    getHealth() 明显小于字段真值 ⇒ "读侧被改写了"，记一行限流日志（写血逻辑一个字都不改）。
+        noteReadSideMismatch(entity);
         final float target = ShanhaiGuardCore.healTarget(entity.getMaxHealth());
-        final StringBuilder bridge = new StringBuilder();   // ⑤ 对手桥这一段干了两件什么（进日志）
-
-        // ── ⑤-1 🔴 先清对手的「单向锁存计数器」：不清它，下面第一腿一定被它的 @Inject 取消 ──
-        if (entity instanceof ServerPlayer serverPlayer) {
-            final String counter = clearOmnimobsCounter(serverPlayer);
-            if (counter != null) {
-                bridge.append(" ／ ").append(counter);
-            }
-        }
 
         // ── 第一腿：setHealth（老通道；可能被别人的 @Inject(HEAD, cancellable) 直接取消）──
-        entity.setHealth(target);
-        final float fieldAfterFirst = readHealthField(entity);
-        // 计数用的读数必须与"自证用的读数"同源：字段真值读不到时才退回 getHealth()（否则会把"读不到"记成失败）
-        final float firstReadBack = Float.isNaN(fieldAfterFirst) ? entity.getHealth() : fieldAfterFirst;
-        final ShanhaiGuardCore.Decision first = ShanhaiGuardCore.setHealthProof(
-                target, fieldAfterFirst, entity.getHealth());
+        // 🔴 降级（data_only）：钩子自检判"setHealth 那条注入已经没了"⇒ 跳过这条腿，
+        //    直接进第二腿（读 DATA_HEALTH_ID 真值 ＋ 直写同步血量字段）。判据一条都不改，
+        //    只是不再把"补血"押在一条没人守的 setHealth 上。
+        final boolean dataOnlyHeal = dataOnly();
+        final ShanhaiGuardCore.Decision first;
+        float firstReadBack = Float.NaN;
+        if (dataOnlyHeal) {
+            first = ShanhaiGuardCore.Decision.of(true,
+                    "data_only 降级：跳过 setHealth 腿（强制直写同步血量字段）");
+        } else {
+            entity.setHealth(target);
+            final float fieldAfterFirst = readHealthField(entity);
+            // 计数用的读数必须与"自证用的读数"同源：字段真值读不到时才退回 getHealth()（否则会把"读不到"记成失败）
+            firstReadBack = Float.isNaN(fieldAfterFirst) ? entity.getHealth() : fieldAfterFirst;
+            first = ShanhaiGuardCore.setHealthProof(target, fieldAfterFirst, entity.getHealth());
+        }
         final ShanhaiGuardCore.HealChannel channel;
         final String detail;
         if (!first.yes) {
@@ -546,21 +433,19 @@ public final class ShanhaiGuardValueLayer {
             if (!second.yes) {
                 channel = ShanhaiGuardCore.HealChannel.DIRECT;
                 detail = "heal_channel=" + channel.label()
-                        + " ／ 第一腿 setHealth 自证没通过（" + first.reason + "）"
+                        + (dataOnlyHeal ? " ／ data_only 降级：跳过 setHealth 腿"
+                                        : " ／ 第一腿 setHealth 自证没通过（" + first.reason + "）")
                         + " ⇒ 第二腿直写同步血量成功：" + second.reason;
             } else {
                 channel = ShanhaiGuardCore.HealChannel.FAILED;
                 detail = "heal_channel=" + channel.label()
-                        + " ／ 第一腿（" + first.reason + "）／ 第二腿（" + second.reason + "）";
+                        + (dataOnlyHeal ? " ／ data_only 降级：跳过 setHealth 腿"
+                                        : " ／ 第一腿（" + first.reason + "）")
+                        + " ／ 第二腿（" + second.reason + "）";
             }
         }
 
-        // ── ⑤-3 🔴 最后清对手的 getHealth() 偏移（delta）：它的 getHealth() = 血量字段 + delta ──
-        final String delta = clearOmnimobsDelta(entity);
-        if (delta != null) {
-            bridge.append(" ／ ").append(delta);
-        }
-        return new HealOutcome(channel, detail + bridge);
+        return new HealOutcome(channel, detail);
     }
 
     // ═══════════════════════════ ②/③/④ 共用的复位动作（唯一一份） ═══════════════════════════
@@ -641,6 +526,8 @@ public final class ShanhaiGuardValueLayer {
                 }
             }
             // 🆕 A 件·取证：REFUSED die 这条路上的外部调用帧（限流 3 次，标签 die_caller#N）
+            // 🆕 T 件 R4＋R2：die 被触达 ⇒ R4；"拒死"本身就是一次救 ⇒ R2 的"救过"（两行都只读，不改返回值）
+            ShanhaiGuardTriageBridge.noteDie(player);
             noteDieCaller(player, callSite);
             ShanhaiGuardEvents.noteDieRefused(player, callSite, decision.reason + " ／ " + healNote);
             return true;

@@ -210,9 +210,19 @@ public final class GtlAddCompat {
     }
 
     /**
-     * 转发自 {@code …common.recipe.GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL}
-     * （🆕 2026-10-03；<b>public 静态字段</b>，不是 Kotlin object 的 getter —— 与
-     * {@link #molecularDeconstruction()} 同一种形态，见本类注释里"两种访问形态并存"那一段）。
+     * 转发自 {@code …common.recipe.GTLAddRecipesTypes.INSTANCE.getEVOLUTION_OF_PRIMORDIAL()}。
+     *
+     * <p>🔴 <b>访问形态在 gtladditions 3.3.1Custom 变了（实测，不是推断）</b>：
+     * <pre>
+     *   3.2.8Custom-fix2：{@code public static final GTRecipeType EVOLUTION_OF_PRIMORDIAL;}  ← public 静态字段
+     *   3.3.1Custom     ：{@code private static final GTRecipeType EVOLUTION_OF_PRIMORDIAL;}  ← 改成 private
+     *                     ＋ {@code public final GTRecipeType getEVOLUTION_OF_PRIMORDIAL();}（Kotlin object 的实例 getter）
+     * </pre>
+     * 依据：{@code javap -p -s} 两版 {@code …common.recipe.GTLAddRecipesTypes}（3.3.1 的 class 头写着
+     * {@code Compiled from "GTLAddRecipesTypes.kt"}）。⇒ 直接读字段会<b>编译失败</b>
+     * （{@code EVOLUTION_OF_PRIMORDIAL 在 GTLAddRecipesTypes 中是 private 访问权限}），
+     * 必须走 {@code INSTANCE.getEVOLUTION_OF_PRIMORDIAL()} —— 与 {@link #voidfluxReaction()} /
+     * {@link #photonMatrixEtch()} 同一种形态。
      *
      * <p><b>中文名 = 太素衍化</b>；<b>注册 id = {@code gtceu:evolution_of_primordial}</b>
      * —— 命名空间是 {@code gtceu}，<b>不是</b> {@code gtladditions}。实证（本轮实际执行，非推断）：
@@ -230,7 +240,7 @@ public final class GtlAddCompat {
      * 出处 {@code handoff/outbound/类型名自动反查.md:514}。
      */
     public static GTRecipeType evolutionOfPrimordial() {
-        return GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL;
+        return GTLAddRecipesTypes.INSTANCE.getEVOLUTION_OF_PRIMORDIAL();
     }
 
     /**

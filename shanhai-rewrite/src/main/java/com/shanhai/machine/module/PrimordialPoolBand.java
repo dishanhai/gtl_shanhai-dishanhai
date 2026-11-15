@@ -2,6 +2,8 @@ package com.shanhai.machine.module;
 
 import com.shanhai.common.log.ShanhaiLogThrottle;
 
+import org.jetbrains.annotations.Nullable;
+
 import java.math.BigInteger;
 
 /**
@@ -201,6 +203,18 @@ public final class PrimordialPoolBand {
         /** BigInteger 档且 {@code |差额| ≤ 1e19} ⇒ <b>INFO</b>（看得见，但不是异常）。 */
         BIGINT_WITHIN("已知带(bigint)"),
 
+        /**
+         * 🆕 2026-11-18（用户点单「当差额正好等于整数倍乘积时不该报 WARN」）：
+         * 差额 <b>逐位等于 {@code k × 乘积}（k ≥ 1 整数）</b> ⇒ <b>INFO</b>，不是 WARN。
+         *
+         * <p>现场语义：同一玩家/队伍里<b>另一台同款机器</b>按同样的乘积入池。
+         * 例（本次日志）：发电模块自己 {@code 乘积=19807040619342710626364425}、
+         * 归墟那台 {@code 乘积=4056481920730330707157014216704}，
+         * 差额 = {@code 6 × 归墟乘积} 的量级 ⇒ 这是"另一台在写同额的账"，不是池子漏。
+         * <p>⚠️ 仍然打 INFO（不是静默）：可见性不降级 —— 只是不再每 5 秒一条 WARN。
+         */
+        BIGINT_INT_MULTIPLE("已知带(整数倍乘积)"),
+
         /** long 档且差额<b>逐位等于</b>「每次被夹掉的那一段」⇒ 静默（long 档今天跑不到，保持原判据不动）。 */
         LONG_WITHIN("已知带(long 夹)"),
 
@@ -232,7 +246,32 @@ public final class PrimordialPoolBand {
         if (band == Band.OUT_OF_BAND) {
             return ShanhaiLogThrottle.Level.WARN;
         }
-        return band == Band.BIGINT_WITHIN ? ShanhaiLogThrottle.Level.INFO : ShanhaiLogThrottle.Level.NONE;
+        if (band == Band.BIGINT_WITHIN || band == Band.BIGINT_INT_MULTIPLE) {
+            return ShanhaiLogThrottle.Level.INFO;
+        }
+        return ShanhaiLogThrottle.Level.NONE;
+    }
+
+    /**
+     * 🆕 2026-11-18（用户点单）：<b>差额是不是"整数倍乘积"</b>。
+     *
+     * <p>判据（三条全中才算）：{@code diff != 0}、{@code unit > 0}、{@code diff % unit == 0} 且 {@code |k| ≥ 1}。
+     * <p>语义：差额正好是"另一台同款机器按同一个乘积入池了 |k| 笔"（k 为负 = 另一台在<b>取</b>同额的电）。
+     * @return 倍数 {@code k}（可负）；不是整数倍 ⇒ {@code null}
+     */
+    @Nullable
+    public static BigInteger integerMultipleFactor(@Nullable BigInteger diff, @Nullable BigInteger unit) {
+        if (diff == null || unit == null) {
+            return null;
+        }
+        if (diff.signum() == 0 || unit.signum() <= 0) {
+            return null;
+        }
+        if (diff.remainder(unit).signum() != 0) {
+            return null;
+        }
+        final BigInteger k = diff.divide(unit);
+        return k.abs().compareTo(BigInteger.ONE) >= 1 ? k : null;
     }
 
     /**
@@ -252,9 +291,27 @@ public final class PrimordialPoolBand {
      */
     public static Band bandOf(DepositOverload overload, BigInteger others,
                               BigInteger rawSum, BigInteger longClampedSum) {
+        return bandOf(overload, others, rawSum, longClampedSum, null);
+    }
+
+    /**
+     * 🆕 2026-11-18：多带一个「乘积」参数 —— 差额正好是它的整数倍 ⇒ {@link Band#BIGINT_INT_MULTIPLE}（INFO）。
+     *
+     * @param unitProduct 本窗口"一次入池"的乘积（{@code null} / {@code <=0} ⇒ 这条判据不生效，
+     *                    行为与四参数版本完全相同）
+     */
+    public static Band bandOf(DepositOverload overload, BigInteger others,
+                              BigInteger rawSum, BigInteger longClampedSum,
+                              @Nullable BigInteger unitProduct) {
         final BigInteger diff = others == null ? BigInteger.ZERO : others;
         if (overload == DepositOverload.BIGINT) {
-            return diff.abs().compareTo(BIGINT_INFO_LIMIT) <= 0 ? Band.BIGINT_WITHIN : Band.OUT_OF_BAND;
+            if (diff.abs().compareTo(BIGINT_INFO_LIMIT) <= 0) {
+                return Band.BIGINT_WITHIN;
+            }
+            if (integerMultipleFactor(diff, unitProduct) != null) {
+                return Band.BIGINT_INT_MULTIPLE;
+            }
+            return Band.OUT_OF_BAND;
         }
         final BigInteger expected = longOverloadExpectedDiff(rawSum, longClampedSum);
         return diff.subtract(expected).abs().compareTo(LONG_TOLERANCE) == 0 ? Band.LONG_WITHIN : Band.OUT_OF_BAND;
@@ -263,8 +320,11 @@ public final class PrimordialPoolBand {
     /** 日志里「已知带 = …」那一段的文本（按重载 + 两级给，别让人再猜）。 */
     public static String bandText(DepositOverload overload, BigInteger rawSum, BigInteger longClampedSum) {
         if (overload == DepositOverload.BIGINT) {
-            return "|差额| ≤ " + BIGINT_INFO_LIMIT + " ⇒ INFO（看得见，不算异常）；> " + BIGINT_INFO_LIMIT
-                    + " ⇒ WARN（bigint 档下池子增量应与我们的 Σ 逐位相等，理想差额 = 0）";
+            return "|差额| ≤ " + BIGINT_INFO_LIMIT + " ⇒ INFO（看得见，不算异常）；"
+                    + "差额 = 乘积的整数倍 ⇒ INFO（" + Band.BIGINT_INT_MULTIPLE.token
+                    + "：通常=另一台同款机器在同一个池子里写同额的账）；"
+                    + "其余 > " + BIGINT_INFO_LIMIT + " ⇒ WARN"
+                    + "（bigint 档下 Δ池 应与「我们全部入池的 Σ」逐位相等，理想差额 = 0）";
         }
         return "差额 == Σ(min(xᵢ, Long.MAX) − xᵢ) = " + longOverloadExpectedDiff(rawSum, longClampedSum)
                 + "（long 档 ⇒ 预期差额就是把每次夹掉的那一段加起来；容差 = " + LONG_TOLERANCE + "）";
@@ -436,6 +496,31 @@ public final class PrimordialPoolBand {
         // INFO 行永不追加 witness（那是异常档专用字段）
         require(witnessSuffix(typicalBand, false).isEmpty(),
                 "⑥-② INFO 档不许追加 witness=unreadable");
+
+        // ── ⑦ 🆕 2026-11-18 用户点单：差额 == 整数倍乘积 ⇒ 不许 WARN ──
+        //    现场真值（本次日志）：发电模块自己一笔 19807040619342710626364425（= int.MAX × 9223372036854775），
+        //    归墟那台一笔 40564819207303340707157014216704 ⇒ 6 笔 = 2.433889e32 量级。
+        final BigInteger unit = new BigInteger("19807040619342710626364425");
+        // ① 正向：恰好 6 倍 ⇒ 落新档，且级别必须是 INFO（可见，但不是 WARN）
+        final Band sixTimes = bandOf(DepositOverload.BIGINT, unit.multiply(BigInteger.valueOf(6L)),
+                OBSERVED_MY_SUM, OBSERVED_MY_SUM, unit);
+        require(sixTimes == Band.BIGINT_INT_MULTIPLE,
+                "⑦' 差额 = 6 × 乘积 必须落 BIGINT_INT_MULTIPLE，实际 " + sixTimes.token);
+        require(levelOf(sixTimes) == ShanhaiLogThrottle.Level.INFO,
+                "⑦' 差额 = 6 × 乘积 必须判 INFO（不许 WARN），实际 " + levelOf(sixTimes));
+        // ② 负面对照（这条最重要）：差一个 1 就不是整数倍 ⇒ 必须仍判 WARN
+        require(bandOf(DepositOverload.BIGINT, unit.multiply(BigInteger.valueOf(6L)).add(BigInteger.ONE),
+                        OBSERVED_MY_SUM, OBSERVED_MY_SUM, unit) == Band.OUT_OF_BAND,
+                "⑦' 6 × 乘积 + 1 必须仍判 OUT_OF_BAND ⇒ 否则这条豁免会把真异常吃掉");
+        // ③ 负面对照：没有乘积（null / 0）时行为必须与四参数版本逐位相同
+        require(bandOf(DepositOverload.BIGINT, unit.multiply(BigInteger.valueOf(6L)),
+                        OBSERVED_MY_SUM, OBSERVED_MY_SUM) == Band.OUT_OF_BAND,
+                "⑦' 没有乘积读数时必须退回四参数口径（仍 OUT_OF_BAND）");
+        // ④ 差 0 / 差 1 倍以下不能被当成整数倍
+        require(integerMultipleFactor(BigInteger.ZERO, unit) == null,
+                "⑦' 差额 0 不是整数倍（0 走 1e19 带，不走这条）");
+        require(integerMultipleFactor(unit, BigInteger.ZERO) == null,
+                "⑦' 乘积 0 时不许判整数倍（否则会除出 undefined）");
     }
 
     private static void require(boolean ok, String what) {

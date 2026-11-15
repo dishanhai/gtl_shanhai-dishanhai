@@ -94,6 +94,9 @@ public final class ShanhaiHoloMenuClient {
     @SubscribeEvent
     public static void onLoggingOut(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
         final int n = ShanhaiHoloRemoteState.clearAll("logged_out");
+        // 🆕 2026-11-08：外来实体在场标记也一并清干净 —— 否则下次进世界时 holo_click 会带着上一次世界的
+        //   env_near=true（一条会撒谎的读数）。
+        ShanhaiHoloEnvScan.clear("logged_out");
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " " + ShanhaiHoloRemoteView.PREFIX
                 + " holo_mp_logout_client cleared={} {}", n, ShanhaiHoloRemoteState.describe());
     }
@@ -342,9 +345,16 @@ public final class ShanhaiHoloMenuClient {
                 ShanhaiHoloMenuTuning.EYE_HEIGHT_BLOCKS, p.getYRot(), ShanhaiHoloMenuState.distance());
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " pose_json " + poseJson);
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " pose_check layout=" + layout + " " + checks);
+        // 🆕 2026-11-08：定位抓拍 —— 5 块板的世界坐标 / 朝向 / 屏幕投影 + 附近外来实体 + 规范化 yaw、pitch。
+        //   为什么它必须是另一行（而不是塞进 pose_json）：pose_json 是"解算是对的吗"（纯几何），
+        //   这一行是"屏幕上到底能不能看见"（投影 + 附近外来实体 + 最后一帧的真实位姿）—— 两个问题的答案不同源。
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " visibility_dump "
+                + ShanhaiHoloMenuRenderer.visibilityDumpJson(p));
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " env_readout " + ShanhaiHoloEnvScan.describe());
 
         reply(source, "§b全部参数与位姿已写进日志 §7（grep §f" + LOG_PREFIX + " pose_json§7 / "
-                + "§f" + LOG_PREFIX + " pose_check§7 / §f" + LOG_PREFIX + " tuning_json§7）");
+                + "§f" + LOG_PREFIX + " pose_check§7 / §f" + LOG_PREFIX + " tuning_json§7 / "
+                + "§f" + LOG_PREFIX + " visibility_dump§7）");
         reply(source, "§7判据：" + checks.replace("yaw_invariance=true", "§a转头板不动 §7")
                 .replace("yaw_invariance=false", "§c转头板跟着转 §7")
                 .replace("pos_follow=true", "§a走哪跟哪§7")

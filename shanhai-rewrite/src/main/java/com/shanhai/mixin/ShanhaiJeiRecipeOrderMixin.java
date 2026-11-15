@@ -144,8 +144,20 @@ public class ShanhaiJeiRecipeOrderMixin {
                 return;
             }
             List<?> base = original.toList();
+            // 🔴🔴 2026-11-09（用户报：「JEI 里按 R/U 看获取方式/用途时，会混进配方编辑器创建/改过的配方」）：
+            //    **这一拍到底有没有焦点（按物品查）**，必须往补丁那层传下去。
+            //    · {@code IFocusGroup#isEmpty()} 是 JEI 的<b>公开 API</b>（javap 实测：
+            //      {@code public abstract boolean isEmpty()} 是接口第一行）；
+            //    · 而 JEI 自己的 {@code PluginManager} 内部正是按这一位分成两条路
+            //      （{@code javap -c} 实测 {@code getPluginRecipeStream} 偏移 0–44：
+            //       {@code if (focusGroup.isEmpty()) 全分类 else 逐 focus 走物品索引}）
+            //      ⇒ 本 mixin 注的是<b>外层同一个方法</b>，所以**有焦点的调用同样被加工**。
+            //    · 焦点语义 = "这个物品真正参与的配方" ⇒ 往里【追加】别的配方必然是错的
+            //      ⇒ 追加兜底只许在【无焦点=浏览分类页】时生效（见 {@code ShanhaiJeiRecipePatches#patched} 三参重载）。
+            //    ⚠️ null 判一下是纯防御（JEI 自己的调用点从不传 null，"没有焦点"是 {@code IFocusGroup.EMPTY}）。
+            boolean focused = focusGroup != null && !focusGroup.isEmpty();
             // 🔴 顺序有意为之：先贴补丁（配方内容变了），再排序（按贴完之后的输入形态分档）。
-            List<?> patched = hasPatches ? ShanhaiJeiRecipePatches.patched(base, uid) : base;
+            List<?> patched = hasPatches ? ShanhaiJeiRecipePatches.patched(base, uid, focused) : base;
             List<?> ordered = targetCategory ? ShanhaiJeiRecipeOrdering.order(patched, uid) : patched;
             cir.setReturnValue(ordered.stream());
         } catch (Throwable throwable) {

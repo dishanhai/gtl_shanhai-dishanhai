@@ -102,8 +102,9 @@ public final class ShanhaiRecipeTypeNameIndex {
     /**
      * 把候选对建成「归一化名字 → id」表。
      *
-     * <p>🔴 同名撞多个 id ⇒ 该名字<b>整体丢弃</b>（记进 {@code ambiguous}，见 {@link #build} 的重载），
-     * 于是查它只会得到空串 —— 宁可查不到，也不给一个「可能是对的」的类型。
+     * <p>🔴 同名撞多个 id ⇒ 该名字<b>整体丢弃</b>（要诊断丢掉了哪些，用
+     * {@link #ambiguousNames(List)}），于是查它只会得到空串 —— 宁可查不到，
+     * 也不给一个「可能是对的」的类型。
      *
      * @param entries 候选（{@code null} 项跳过；空 id / 空名字跳过）
      */

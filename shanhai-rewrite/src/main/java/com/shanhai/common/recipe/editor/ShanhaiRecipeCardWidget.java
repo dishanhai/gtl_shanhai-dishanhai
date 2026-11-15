@@ -202,7 +202,7 @@ public final class ShanhaiRecipeCardWidget extends Widget {
         //     🔴 第 11 刀：原来这句后面硬接一整句「这个数是从【活的配方】上读的（＝实际生效值）」，
         //        它自己就 ≈ 210 px，加上前面的数值 ≈ 400+ px ⇒ 挤出卡片右边被截断（用户报的 ④）。
         //        现在按像素挑"放得下的那一档最短说法"，完整句子放进 tooltip 里（见 drawInForeground）。──
-        final long total = c.duration() * c.eut();
+        final long total = totalEu(c.duration(), c.eut());
         final String euMain = "§7" + tr("gtceu.recipe.total", fmt(total))
                 + " §8· §7" + tr("gtceu.recipe.eu", fmt(c.eut()))
                 + " §8(" + ampsText(c.eut(), displayTier(c.tierIndex(), c.eut())) + "A)";
@@ -222,7 +222,7 @@ public final class ShanhaiRecipeCardWidget extends Widget {
             tooltipTexts.add(Component.literal("§f" + c.typeName() + " §8· §7" + c.id()));
             tooltipTexts.add(Component.literal("§7原始耗时 §f" + c.original() + " t"
                     + " §8· §7实际耗时 §f" + c.duration() + " t"));
-            tooltipTexts.add(Component.literal("§7总计 §f" + (c.duration() * c.eut()) + " EU"
+            tooltipTexts.add(Component.literal("§7总计 §f" + totalEuText(c.duration(), c.eut()) + " EU"
                     + " §8· §7耗能功率 §f" + c.eut() + " EU/t §8("
                     + ampsText(c.eut(), displayTier(c.tierIndex(), c.eut())) + "A)"));
             // 🔴 第 11 刀：卡片上那句说明被截断（用户报的 ④）⇒ 完整那句话放在这里，一个字不少。
@@ -497,6 +497,32 @@ public final class ShanhaiRecipeCardWidget extends Widget {
         return String.format(java.util.Locale.ROOT, "%.2f%s", d, unit[i]);
     }
 
+    /**
+     * 🆕 2026-11：<b>「总计 = 耗时 × 耗能」的溢出保护</b>。
+     *
+     * <p>为什么现在才需要：这一刀把电流上限放到 {@code int} 上限 ⇒ 单条配方的 EUt 可以到
+     * 4.61e18（{@code 2147483647 × 2147483647}）。而耗时是 {@code int}（最大 2.1e9）
+     * ⇒ 两者相乘最大 9.7e27，<b>远超 {@code long}</b>，会回绕成负数 —— 卡片上就会出现
+     * 「总计 -1234… EU」这种一眼是 bug 的读数。
+     * ⇒ 溢出时不再给一个假数字，显示 {@code ≥9.2e18}（"至少这么多"），不撒谎也绝不显示负数。
+     */
+    private static long totalEu(int duration, long eut) {
+        final long d = Math.abs((long) duration);
+        final long e = Math.abs(eut);
+        if (d != 0L && e > Long.MAX_VALUE / d) {
+            return Long.MAX_VALUE;
+        }
+        return d * e;
+    }
+
+    /** 同一口径的文本（溢出时加 {@code ≥}，见 {@link #totalEu(int, long)}）。 */
+    private static String totalEuText(int duration, long eut) {
+        final long d = Math.abs((long) duration);
+        final long e = Math.abs(eut);
+        final boolean over = d != 0L && e > Long.MAX_VALUE / d;
+        return (over ? "≥" : "") + fmt(totalEu(duration, eut));
+    }
+
     /** 「实际 ÷ 原始」的比值（两位小数），只用于那句说明。 */
     private static String ratioText(int actual, int original) {
         if (original == 0) {
@@ -519,7 +545,13 @@ public final class ShanhaiRecipeCardWidget extends Widget {
         if (v <= 0L) {
             return "?";
         }
-        return String.format(java.util.Locale.ROOT, "%.2f", (double) eut / (double) v);
+        final String s = String.format(java.util.Locale.ROOT, "%.2f", (double) eut / (double) v);
+        // 🆕 2026-11：两位小数会把"有电但极小"的电流显示成 0.00 —— 用户明确说过"改完别显示成 0"。
+        //    真的 0 EU/t 才显示 0.00；>0 但四舍五入成 0.00 的显示 <0.01（绝不把"有电"说成"没电"）。
+        if ("0.00".equals(s) && eut > 0L) {
+            return "<0.01";
+        }
+        return s;
     }
 
     /**

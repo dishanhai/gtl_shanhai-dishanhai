@@ -63,24 +63,35 @@ public final class ShanhaiRecipeBase {
                        com.google.gson.JsonObject inputs,
                        com.google.gson.JsonObject outputs,
                        com.google.gson.JsonObject tickInputs,
-                       boolean hasEut, long eut,
+                       boolean hasEut, long eut, String eutSide,
                        boolean hasConditions,
                        com.google.gson.JsonArray conditions) {
 
         public static final Edit EMPTY =
-                new Edit(-1, false, false, null, null, null, false, 0L, false, null);
+                new Edit(-1, false, false, null, null, null, false, 0L, null, false, null);
 
         public boolean hasIo() {
             return inputs != null || outputs != null || tickInputs != null;
         }
 
+        /**
+         * 🆕 <b>这条配方被切换过"发电/耗电"吗</b>（{@code null} = 没切过，沿用底本那一侧）。
+         * <p>取值就是 {@link ShanhaiRecipeIoApply.EuSide} 的名字（{@code CONSUME} / {@code GENERATE}）。
+         * 单独一个字段而不是"塞进 tickInputs 里"：{@code tickInputs} 只表达"这张表要写什么"，
+         * 而"EU 该落哪一侧"是另一件事（两侧都要动），混在一起会让
+         * {@link ShanhaiRecipeEditorOps#fieldsAppliedTo} 那类逐键判据认不出来。
+         */
+        public boolean hasEutSide() {
+            return eutSide != null && !eutSide.isEmpty();
+        }
+
         public Edit withDuration(int d) {
-            return new Edit(d, removed, true, inputs, outputs, tickInputs, hasEut, eut,
+            return new Edit(d, removed, true, inputs, outputs, tickInputs, hasEut, eut, eutSide,
                     hasConditions, conditions);
         }
 
         public Edit withoutDuration() {
-            return new Edit(-1, removed, false, inputs, outputs, tickInputs, hasEut, eut,
+            return new Edit(-1, removed, false, inputs, outputs, tickInputs, hasEut, eut, eutSide,
                     hasConditions, conditions);
         }
 
@@ -91,17 +102,23 @@ public final class ShanhaiRecipeBase {
                     in != null ? in : inputs,
                     out != null ? out : outputs,
                     tickIn != null ? tickIn : tickInputs,
-                    hasEut, eut, hasConditions, conditions);
+                    hasEut, eut, eutSide, hasConditions, conditions);
         }
 
         public Edit withEut(long v) {
             return new Edit(duration, removed, hasDuration, inputs, outputs, tickInputs, true, v,
-                    hasConditions, conditions);
+                    eutSide, hasConditions, conditions);
+        }
+
+        /** 🆕 切换发电/耗电：{@code side == null} = 清掉这条记录（当作"没切过"）。 */
+        public Edit withEutSide(String side) {
+            return new Edit(duration, removed, hasDuration, inputs, outputs, tickInputs, hasEut, eut,
+                    (side == null || side.isEmpty()) ? null : side, hasConditions, conditions);
         }
 
         public Edit withoutEut() {
             return new Edit(duration, removed, hasDuration, inputs, outputs, tickInputs, false, 0L,
-                    hasConditions, conditions);
+                    null, hasConditions, conditions);
         }
 
         /**
@@ -112,22 +129,22 @@ public final class ShanhaiRecipeBase {
          */
         public Edit withConditions(com.google.gson.JsonArray arr) {
             return new Edit(duration, removed, hasDuration, inputs, outputs, tickInputs, hasEut, eut,
-                    true, arr);
+                    eutSide, true, arr);
         }
 
         public Edit withoutConditions() {
             return new Edit(duration, removed, hasDuration, inputs, outputs, tickInputs, hasEut, eut,
-                    false, null);
+                    eutSide, false, null);
         }
 
         public Edit asRemoved() {
-            return new Edit(-1, true, hasDuration, inputs, outputs, tickInputs, hasEut, eut,
+            return new Edit(-1, true, hasDuration, inputs, outputs, tickInputs, hasEut, eut, eutSide,
                     hasConditions, conditions);
         }
 
         public Edit asPresent() {
             return new Edit(duration, false, hasDuration, inputs, outputs, tickInputs, hasEut, eut,
-                    hasConditions, conditions);
+                    eutSide, hasConditions, conditions);
         }
     }
 
@@ -424,11 +441,11 @@ public final class ShanhaiRecipeBase {
                 removed++;
                 continue;
             }
-            if (!e.hasDuration() && !e.hasIo() && !e.hasEut() && !e.hasConditions()) {
+            if (!e.hasDuration() && !e.hasIo() && !e.hasEut() && !e.hasEutSide() && !e.hasConditions()) {
                 out.add(b);
                 continue;
             }
-            if (e.hasDuration() && !e.hasIo() && !e.hasEut() && !e.hasConditions()
+            if (e.hasDuration() && !e.hasIo() && !e.hasEut() && !e.hasEutSide() && !e.hasConditions()
                     && liveDurationOf(b.getType(), e.duration()) == b.duration) {
                 out.add(b);
                 continue;
@@ -665,6 +682,24 @@ public final class ShanhaiRecipeBase {
         LEDGER.put(id, (cur == null ? Edit.EMPTY : cur).asPresent().withEut(eut));
     }
 
+    /**
+     * 🆕 记下"这条配方被切到哪一侧"（发电 / 耗电）。
+     *
+     * <p>与 {@link #setEut} <b>同拍</b>调用（{@code ShanhaiRecipeEditorOps.applyEdits} 里），
+     * 因为切换侧时 EU 值本身<b>没变</b> —— 只写 EUt 的话，重建出来的副本仍然把 EU 放回老那一侧，
+     * 用户看到的就是"点了切换、保存了，机器还是把它当耗电配方"。
+     *
+     * @param side {@link ShanhaiRecipeIoApply.EuSide} 的名字；{@code null} = 撤掉这条记录
+     */
+    public static synchronized void setEutSide(ResourceLocation id, String side) {
+        if (id == null) {
+            return;
+        }
+        EVER_TOUCHED.add(id);
+        final Edit cur = LEDGER.get(id);
+        LEDGER.put(id, (cur == null ? Edit.EMPTY : cur).asPresent().withEutSide(side));
+    }
+
     /** 台账里这条 id 的 IO 表（没改过就是 null）。 */
     public static synchronized Edit ioOf(ResourceLocation id) {
         final Edit e = id == null ? null : LEDGER.get(id);
@@ -711,8 +746,26 @@ public final class ShanhaiRecipeBase {
     }
 
     private static void applyEutTo(Edit e, GTRecipe copy) {
+        if (!e.hasEut() && !e.hasEutSide()) {
+            return;
+        }
+        // 🆕 切换过发电/耗电 ⇒ 走"带侧"的那一个（它会把两侧的 EU 都清掉再写目标侧）；
+        //    没切过 ⇒ 传 null，行为与改动之前逐字相同（按底本当前那一侧写）。
+        ShanhaiRecipeIoApply.EuSide side = null;
+        if (e.hasEutSide()) {
+            try {
+                side = ShanhaiRecipeIoApply.EuSide.valueOf(e.eutSide());
+            } catch (IllegalArgumentException ignored) {
+                // 认不出的名字 ⇒ 当作"没切过"（宁可不动侧，也不猜）
+                ShanhaiMod.LOGGER.warn("{} ledger_eut_side_unknown id={} side={} -> treated as未切换",
+                        PREFIX, copy == null ? "?" : copy.id, e.eutSide());
+            }
+        }
         if (e.hasEut()) {
-            ShanhaiRecipeIoApply.applyEut(copy, e.eut());
+            ShanhaiRecipeIoApply.applyEut(copy, e.eut(), side);
+        } else if (side != null) {
+            // 只有"侧"被改过（EUt 值没写）⇒ 保留活配方当前的 EUt，只搬侧
+            ShanhaiRecipeIoApply.applyEut(copy, ShanhaiRecipeIoApply.euOf(copy), side);
         }
     }
 

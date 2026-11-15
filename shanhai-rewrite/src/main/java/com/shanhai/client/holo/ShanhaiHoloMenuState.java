@@ -779,6 +779,16 @@ public final class ShanhaiHoloMenuState {
                 bad.append("负对照没响(").append(legacy).append(" 也转头不变);");
             }
         }
+        // ⑯🆕 2026-11-08：开关去抖闸门（"连点互相抵消"那一条的回归防线；边界 249/250 ms 见它的自检）
+        final String gateBad = ShanhaiHoloMenuToggleGate.selfTest();
+        if (gateBad != null) {
+            bad.append("去抖闸门:").append(gateBad);
+        }
+        // ⑰🆕 2026-11-08：生命态三字段的格式（hp= dead= death_time=，判"死亡态假设"那三条读数）
+        final String vitalsBad = ShanhaiHoloVitals.selfTest();
+        if (vitalsBad != null) {
+            bad.append("生命态字段:").append(vitalsBad);
+        }
         return bad.length() == 0 ? null : bad.toString();
     }
 
@@ -801,8 +811,9 @@ public final class ShanhaiHoloMenuState {
     public static void logSelfTest() {
         final String bad = selfTest();
         if (bad == null) {
-            ShanhaiMod.LOGGER.info("[SHANHAI-HOLO] selftest ok cases=17 (含 4 条负对照；"
-                    + "环绕档 yaw_invariance / pos_follow 都在内)");
+            ShanhaiMod.LOGGER.info("[SHANHAI-HOLO] selftest ok cases=19 (含 4 条负对照；"
+                    + "环绕档 yaw_invariance / pos_follow 都在内；"
+                    + "⑯ 开关去抖 7 条 / ⑰ 生命态字段 7 条)");
         } else {
             ShanhaiMod.LOGGER.error("[SHANHAI-HOLO] selftest FAILED: " + bad);
         }

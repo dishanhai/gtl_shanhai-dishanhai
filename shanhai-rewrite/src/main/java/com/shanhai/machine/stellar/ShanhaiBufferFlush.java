@@ -417,9 +417,21 @@ public final class ShanhaiBufferFlush {
         public final boolean chased;
         /** 追那一轮真正入网的总量。 */
         public final long chaseMoved;
+        /**
+         * <b>夹掉的那部分里，有多少被转存进了二级缓存（L2）</b>（{@code 0} = 那时还没有 L2 / 没转成）。
+         *
+         * <h2>为什么它必须进这个账本（而不是另开一个读数）</h2>
+         * 有 L2 之后，{@code dropped > 0} 已经<b>不等于</b>"真的丢了"：被夹掉的那部分会原额落进 L2，
+         * 下一轮免电搬运照样送进网络。若 {@link #lost()} 还只看 {@code dropped}，就会出现
+         * 「一批量明明还在 L2 里排着队，日志却报 {@code rescue=failed} 说丢了」——
+         * 与用户 2026-11-01 拍板的口径（<b>WARN 就是真的丢了</b>）正好相反。
+         * ⇒ 判据改成 <b>{@code dropped - parked > 0}</b>（见 {@link #lostAmount()}），
+         * 转存成功的量<b>一条 WARN 都不打</b>。
+         */
+        public final long parked;
 
         private ChaseWrite(long existingBefore, long existingAfter, long want, long write,
-                           long dropped, boolean chased, long chaseMoved, long droppedBefore) {
+                           long dropped, boolean chased, long chaseMoved, long droppedBefore, long parked) {
             this.existingBefore = existingBefore;
             this.existingAfter = existingAfter;
             this.want = want;
@@ -428,16 +440,46 @@ public final class ShanhaiBufferFlush {
             this.droppedBefore = droppedBefore;
             this.chased = chased;
             this.chaseMoved = chaseMoved;
+            this.parked = parked;
         }
 
         /**
-         * <b>这一单最后是不是真丢了</b>（{@code dropped > 0}）—— <b>WARN 的唯一判据</b>（见 {@link #writeEvents}）。
+         * <b>把"转存进 L2 的量"补记进这份账</b>（返回<b>新</b>实例；本类是不可变的）。
          *
-         * <p>⚠️ 判据是<b>追写之后</b>的 {@link #dropped}，不是 {@link #droppedBefore}：
+         * <p>为什么不在 {@link #writeWithChase} 里算：那一步是纯核，它<b>看不到 L2</b>
+         * （L2 属于机器、要经 accessor 取），转存发生在生产侧 {@code ShanhaiBufClampTrait#writeClamped}。
+         * 补记进来之后 {@link #writeEvents} 用的还是同一份判据，不需要第二套口径。
+         */
+        public ChaseWrite withParked(long parkedAmount) {
+            long p = parkedAmount;
+            if (p <= 0L) {
+                p = 0L;
+            } else if (p > this.dropped) {
+                // 转存不可能比"夹掉的"还多（多了说明上游账本被改坏）：夹住，读数自洽
+                p = this.dropped;
+            }
+            return new ChaseWrite(this.existingBefore, this.existingAfter, this.want, this.write,
+                    this.dropped, this.chased, this.chaseMoved, this.droppedBefore, p);
+        }
+
+        /**
+         * <b>真正丢了多少</b>（{@code dropped - parked}，非负）—— <b>WARN 的唯一判据</b>
+         * （见 {@link #writeEvents}）。
+         */
+        public long lostAmount() {
+            final long lost = this.dropped - this.parked;
+            return lost > 0L ? lost : 0L;
+        }
+
+        /**
+         * <b>这一单最后是不是真丢了</b>（{@link #lostAmount()} {@code > 0}）—— <b>WARN 的唯一判据</b>。
+         *
+         * <p>⚠️ 判据是<b>追写之后</b>的读数，不是 {@link #droppedBefore}：
          * 拿追之前的读数当判据，就会出现"救回来了也报 WARN"（这正是 2026-11-01 要治的那件事）。
+         * <p>⚠️ 而且还要扣掉 {@link #parked}：转存进 L2 的量<b>没丢</b>，下一轮就会被免电搬运送走。
          */
         public boolean lost() {
-            return this.dropped > 0L;
+            return lostAmount() > 0L;
         }
 
         /** 追写真正救回来的量（{@code droppedBefore - dropped}，非负；没追 / 没救着就是 0）。 */
@@ -447,21 +489,28 @@ public final class ShanhaiBufferFlush {
         }
     }
 
-    /** 一轮的<b>可变</b>账本（{@link #sweep} 内部用；饱和累加在这里做）。 */
-    private static final class Round {
+    /**
+     * 一轮的<b>可变</b>账本（{@link #sweep} 用；饱和累加在这里做）。
+     *
+     * <p>为什么是 {@code public}（原先是私有的 {@code Round}）：二级缓存（{@link ShanhaiBufferOverflow#sweep}）
+     * 要对一张 <b>Int128 表</b>搬一轮，而"读数必须非负、饱和要自带自白"这条判据<b>只能有一份</b>
+     * ⇒ 那边也复用这一个账本（再用 {@link #toSweep()} 交出去）。两个账本各写一遍，
+     * 迟早在"加爆了"这条边界上漂成两套口径。
+     */
+    public static final class Acc {
 
-        int entries;
-        int ok;
-        int fail;
-        int consecutiveFails;
-        int negatives;
-        long moved;
-        boolean satMoved;
-        long remaining;
-        boolean satRemaining;
-        Object negKey;
-        long negValue;
-        boolean aborted;
+        public int entries;
+        public int ok;
+        public int fail;
+        public int consecutiveFails;
+        public int negatives;
+        public long moved;
+        public boolean satMoved;
+        public long remaining;
+        public boolean satRemaining;
+        public Object negKey;
+        public long negValue;
+        public boolean aborted;
 
         void noteMoved(long amount) {
             final long sum = this.moved + amount;
@@ -512,7 +561,7 @@ public final class ShanhaiBufferFlush {
      *
      * @return 真正入网的量（{@code ≤0} 与"搬不动"都返回 0）
      */
-    private static <K> long moveOne(Round r, K key, long amount, Mover<? super K> mover) {
+    private static <K> long moveOne(Acc r, K key, long amount, Mover<? super K> mover) {
         // 🔴 负值/零值：不搬、不删、不归零；负的记一笔账（BUFNEG 那行要用）
         if (amount <= 0L) {
             if (amount < 0L) {
@@ -543,7 +592,7 @@ public final class ShanhaiBufferFlush {
     }
 
     /** 扫一遍 buffer 里<b>正值</b>的和（饱和）。 */
-    private static <K> void scanRemaining(Object2LongOpenHashMap<K> buffer, Round r) {
+    private static <K> void scanRemaining(Object2LongOpenHashMap<K> buffer, Acc r) {
         final ObjectIterator<Object2LongMap.Entry<K>> rest = buffer.object2LongEntrySet().fastIterator();
         while (rest.hasNext()) {
             final long value = rest.next().getLongValue();
@@ -580,10 +629,10 @@ public final class ShanhaiBufferFlush {
     public static <K> Sweep sweep(Object2LongOpenHashMap<K> buffer, Mover<? super K> mover, int maxEntries,
                                   K priority) {
         if (buffer == null || buffer.isEmpty()) {
-            return new Round().toSweep();
+            return new Acc().toSweep();
         }
         final int budget = maxEntries <= 0 ? MAX_ENTRIES : maxEntries;
-        final Round r = new Round();
+        final Acc r = new Acc();
 
         // ---- 1) 优先键：先搬它（这一条就是"追着写"能治住 dropped 的原因）
         boolean priorityDone = false;
@@ -692,8 +741,38 @@ public final class ShanhaiBufferFlush {
         }
         ShanhaiBufferClamp.commit(buffer, key, want, write);
         final long dropped = want > write ? want - write : 0L;
+        // parked = 0：这一步是纯核，它看不到 L2；转存发生在生产侧，补记走 ChaseWrite#withParked
         return new ChaseWrite(existingBefore, existing, want, write, dropped, chased, chaseMoved,
-                droppedBefore);
+                droppedBefore, 0L);
+    }
+
+    /**
+     * <b>把两轮读数合成一份</b>（L1 那轮 ＋ L2 那轮 ⇒ 一行日志能说的真数）。
+     *
+     * <p>为什么必须有它：加了二级缓存之后，"还剩多少 / 这轮搬了多少"如果只报 L1 那一层，
+     * 就会出现「L1 空了 ⇒ 日志说"剩余=0"，可 L2 里还压着 1e18 件」——<b>面板在说谎</b>。
+     * 合并口径只有这一份（条数/成功/失败/入网量/剩余 全相加，饱和；负值读数取先有的那一条），
+     * 生产侧（{@code StellarSampleAssemblerPartMachine#shanhaiTickFreeFlush}）拿到后只做派发。
+     *
+     * @param a L1 那一轮的读数（可为 null ⇒ 当作空读数）
+     * @param b L2 那一轮的读数（同上）
+     */
+    public static Sweep merge(Sweep a, Sweep b) {
+        if (a == null) {
+            return b == null ? new Acc().toSweep() : b;
+        }
+        if (b == null) {
+            return a;
+        }
+        final long moved = satAdd(a.moved, b.moved);
+        final long remaining = satAdd(a.remaining, b.remaining);
+        final boolean negFromA = a.negatives > 0;
+        return new Sweep(a.entries + b.entries, a.ok + b.ok, a.fail + b.fail, moved, remaining,
+                a.negatives + b.negatives,
+                negFromA ? a.negKey : b.negKey,
+                negFromA ? a.negValue : b.negValue,
+                a.aborted || b.aborted,
+                a.satMoved || b.satMoved, a.satRemaining || b.satRemaining);
     }
 
     // ================================================================ 日志正文
@@ -801,7 +880,7 @@ public final class ShanhaiBufferFlush {
      * <p>为什么行尾多了 {@code pos=}：真丢是要修的，不知道<b>哪台机</b>丢的就只能靠猜；
      * 前缀 {@code bufclamp key=} 没动（老习惯的 grep 照旧能捞到）。
      *
-     * @return 没丢（{@code dropped <= 0}）或 {@code w == null} ⇒ {@code null}（一次都不许误报）
+     * @return 没丢（{@link ChaseWrite#lost()} 为 {@code false}）或 {@code w == null} ⇒ {@code null}（一次都不许误报）
      */
     public static String lostLine(String pos, String keyId, ChaseWrite w) {
         if (w == null || !w.lost()) {
@@ -811,7 +890,10 @@ public final class ShanhaiBufferFlush {
                 + " existing=" + w.existingBefore
                 + " want=" + w.want
                 + " write=" + w.write
-                + " dropped=" + w.dropped
+                // 🔴 dropped= 报的是【真丢】（已扣掉转存进 L2 的那部分）；parked= 是"在 L2 里排着队"的量。
+                //    parked=0 时一个字段都不加 ⇒ 没有 L2 的机器那行与加 L2 之前【逐字相同】（老 grep 照旧）。
+                + " dropped=" + w.lostAmount()
+                + (w.parked > 0L ? " parked=" + w.parked : "")
                 + " rescue=" + (w.chased ? "failed" : "none")
                 + " pos=" + (pos == null ? "?" : pos);
     }
@@ -820,10 +902,10 @@ public final class ShanhaiBufferFlush {
      * <b>「写不进去 ⇒ 就地追一轮」那行</b>（{@code rescued=1} 就是"这一单救回来了"的直接读数）：
      * <pre>
      *   bufflush CHASE pos=… key=… existing=&lt;夹之前&gt; moved=&lt;追回来多少&gt; want=&lt;本来要写&gt;
-     *           write=&lt;实际写了&gt; dropped=&lt;还丢了多少&gt; rescued=&lt;1|0&gt;
+     *           write=&lt;实际写了&gt; dropped=&lt;夹掉多少&gt; parked=&lt;其中进了 L2 多少&gt; rescued=&lt;1|0&gt;
      * </pre>
-     * <p>{@code rescued=1} ⇔ 最终 {@code dropped == 0}（整笔救回）；{@code rescued=0} ⇔ 还丢了
-     * （这时同一时刻会有那行 WARN，{@code moved} 告诉你追写搬走了多少）。
+     * <p>{@code rescued=1} ⇔ {@link ChaseWrite#lostAmount()} == 0（整笔有去处：进了 L1 或进了 L2）；
+     * {@code rescued=0} ⇔ 还丢了（这时同一时刻会有那行 WARN，{@code moved} 告诉你追写搬走了多少）。
      * <p>⚠️ 这一行是<b>证据</b>，不是告警 —— 它<b>不走 WARN</b>（用户口径：WARN 就是真的丢了）。
      */
     public static String chaseLine(String pos, String keyId, ChaseWrite w) {
@@ -837,7 +919,9 @@ public final class ShanhaiBufferFlush {
                 + " want=" + w.want
                 + " write=" + w.write
                 + " dropped=" + w.dropped
-                + " rescued=" + (w.dropped == 0L ? 1 : 0);
+                // parked=0 ⇒ 不加字段：没有 L2 的机器那行与加 L2 之前【逐字相同】
+                + (w.parked > 0L ? " parked=" + w.parked : "")
+                + " rescued=" + (w.lostAmount() == 0L ? 1 : 0);
     }
 
     // ================================================================ 日志级别（唯一判据）
@@ -865,13 +949,15 @@ public final class ShanhaiBufferFlush {
      * <b>🔴 一单"写 buffer"该打哪些日志、什么级别</b>（用户 2026-11-01 拍板：<b>WARN 就是真的丢了</b>）。
      *
      * <pre>
-     *   真丢了（dropped &gt; 0）   ⇒ [WARN bufclamp … rescue=failed] ＋（追过就）[INFO bufflush CHASE … rescued=0]
-     *   救回来了（dropped == 0，且追过）⇒ [INFO bufflush CHASE … rescued=1]      ← 一条 WARN 都没有
+     *   真丢了（{@code lostAmount() > 0}）  ⇒ [WARN bufclamp … rescue=failed] ＋（追过就）[INFO bufflush CHASE … rescued=0]
+     *   转存进 L2 了（{@code dropped > 0} 但 {@code lostAmount() == 0}）⇒ [INFO bufflush CHASE … parked=&lt;n&gt; rescued=1]
+     *                                                              ← 一条 WARN 都没有（量在 L2 里，下一轮就送走）
+     *   救回来了（{@code dropped == 0}，且追过）⇒ [INFO bufflush CHASE … rescued=1]      ← 一条 WARN 都没有
      *   没被夹（大多数情况）     ⇒ []                                          ← 连字符串都不拼
      * </pre>
      *
-     * <p><b>判据只有 {@link ChaseWrite#dropped}</b>（追写之后的最终读数）。拿 {@code droppedBefore}
-     * 当判据就是旧口径的错：实机 11 条 {@code bufclamp} 里 10 条其实都救回来了，日志却是 WARN。
+     * <p><b>判据只有 {@link ChaseWrite#lostAmount()}</b>（追写之后的最终读数，且扣掉转存进 L2 的量）。
+     * 拿 {@code droppedBefore} 当判据就是旧口径的错：实机 11 条 {@code bufclamp} 里 10 条其实都救回来了，日志却是 WARN。
      *
      * <p>两个供给器（{@code keyIdOf} / {@code posOf}）是<b>惰性</b>的：99.99% 的产出走"没被夹"这条，
      * 一次 {@code AEKey#getId()} / 一次位置拼接都不会发生（热路径零代价）；取不到就给 {@code ?}。
@@ -929,14 +1015,38 @@ public final class ShanhaiBufferFlush {
     public static List<Event> heartbeatEvents(String pos, String dim, Sweep sweep, int cadenceTicks,
                                               long rounds, long entries, long moved, long remaining,
                                               int upstreamMin) {
+        return heartbeatEvents(pos, dim, sweep, cadenceTicks, rounds, entries, moved, remaining,
+                upstreamMin, null);
+    }
+
+    /**
+     * <b>同上，但给两行末尾追加一段"二级缓存"后缀</b>（{@code suffix} 为 null/空 ⇒ 与上面那版逐字相同）。
+     *
+     * <p>为什么后缀要在这里拼、而不是让机器自己 {@code event.text + suffix}：
+     * 机器那一侧<b>只能做派发</b>（{@code if (event.warn) warn(event.text) else info(event.text)}），
+     * 一旦它开始拼字符串，"哪一行该长什么样"就有了第二份实现，而这一份是<b>离线证不了</b>的。
+     * 放在纯核 ⇒ 后缀的格式也能被离线断言（见 {@link ShanhaiBufferOverflow#wideSuffix}）。
+     */
+    public static List<Event> heartbeatEvents(String pos, String dim, Sweep sweep, int cadenceTicks,
+                                              long rounds, long entries, long moved, long remaining,
+                                              int upstreamMin, String suffix) {
         if (sweep == null) {
             return List.of();
         }
         final boolean warn = statusWarns();
         final List<Event> out = new ArrayList<>(2);
-        out.add(new Event(warn, logLine(pos, dim, sweep)));
-        out.add(new Event(warn, cadenceLine(pos, cadenceTicks, rounds, entries, moved, remaining, upstreamMin)));
+        out.add(new Event(warn, withSuffix(logLine(pos, dim, sweep), suffix)));
+        out.add(new Event(warn, withSuffix(
+                cadenceLine(pos, cadenceTicks, rounds, entries, moved, remaining, upstreamMin), suffix)));
         return out;
+    }
+
+    /** 行尾后缀（{@code null} / 空串 ⇒ 原样返回，一个字符都不加 —— 没有 L2 的机器日志零变化）。 */
+    public static String withSuffix(String line, String suffix) {
+        if (line == null || suffix == null || suffix.isEmpty()) {
+            return line;
+        }
+        return line + suffix;
     }
 
     /**

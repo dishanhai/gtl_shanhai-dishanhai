@@ -245,6 +245,31 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     /** 列表屏的底部状态行（四种屏里除编辑屏都显示）。 */
     private final List<Widget> statusBar = new ArrayList<>();
 
+    /**
+     * 🆕 <b>「已删除配方」详情页的两颗按钮</b>（用户原话：「下面的按钮只剩下
+     * <b>恢复这条配方+返回</b>按钮」）。
+     *
+     * <p>按钮的<b>文案与顺序</b>不写在这里，直接取
+     * {@link ShanhaiDeletedRecipeList#DETAIL_BUTTONS} —— 离线自检断言的正是那个数组，
+     * ⇒ "自检说的按钮集合"与"界面上真建出来的按钮"不可能分叉。
+     */
+    private final List<Widget> previewOnly = new ArrayList<>();
+
+    /**
+     * 🆕 <b>只在"真编辑"时出现、在"已删除配方详情"里必须消失</b>的那些控件
+     * （5 颗动作按钮 / 耗时与电流输入框 / 电压下拉 / 条件入口 / 那几行标签）。
+     *
+     * <p>为什么要单开一组：{@code editOnly} 里还装着<b>要保留</b>的东西
+     * （输入输出格子、上限读数、"指到哪一格"那行）—— 详情页要<b>看着和编辑页一样</b>，
+     * 只是<b>改不了</b>。把这两个集合分开，{@code refreshVisibility} 才不会一刀切错。
+     */
+    private final List<Widget> editChrome = new ArrayList<>();
+
+    /** 🆕 已删除配方列表每行左边的那个主产物小图标（12 个，与行一一对应）。 */
+    @SuppressWarnings("unused")
+    private final DeletedRowIcon[] rowIcons =
+            new DeletedRowIcon[ShanhaiDeletedRecipeList.ROWS_PER_PAGE];
+
     /** 🆕 第 7 轮：卡片屏的 4 张卡（下标 = 本页第几张）。 */
     private final ShanhaiRecipeCardWidget[] cards =
             new ShanhaiRecipeCardWidget[ShanhaiRecipeEditorWorkspace.CARDS_PER_PAGE];
@@ -297,6 +322,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         buildQueryBar();
         buildNavRow();
         buildEditStage();
+        // 🆕 已删除配方详情页的那两颗按钮（「恢复这条配方」＋「返回」）。
+        //    ⚠️ 必须排在 buildTierSelector() 【之前】—— 电压下拉必须是【最后一个】子控件。
+        buildDeletedPreviewStage();
         // 🆕 阶段 2：非 GT 输入侧那一套（3×3 网格 / 无序列表 / 单格）。
         //    ⚠️ 必须排在 buildTierSelector() 【之前】—— 电压下拉必须是【最后一个】子控件
         //       （LDLib 的 mouseClicked 倒序遍历，见 buildTierSelector 的类注释）。
@@ -403,6 +431,14 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             addWidget(label);
             typeRowWidgets.add(button);
             typeRowWidgets.add(label);
+            // 🆕 已删除配方列表：每行左边画一个主产物小图标（12×12，正好一行高）。
+            //    它建在行按钮【之后】⇒ 在子控件表里更靠后 ⇒ 画在按钮上面、点击也先轮到它；
+            //    而它不处理点击（Widget 默认 return false）⇒ 点击继续落到行按钮上
+            //    （LDLib 的 WidgetGroup.mouseClicked 是倒序遍历、false 就继续）。
+            final DeletedRowIcon icon = new DeletedRowIcon(row, 5, ROW_Y0 + row * ROW_STEP, 12);
+            addWidget(icon);
+            typeRowWidgets.add(icon);          // 只在第一屏可见
+            rowIcons[row] = icon;
         }
     }
 
@@ -477,6 +513,29 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         addWidget(note2);
         queryOnly.add(note1);
         queryOnly.add(note2);
+
+        // ── 🆕 「已删除配方」入口（用户点单：「在图1红框这里添加一个按钮」）──
+        //
+        // 位置依据（逐条算过，不靠猜）：
+        //   · 第一屏那一行 "§7当前：§f未查询" 是 `queryKindText()`，画在 (4, 241)；
+        //     它右边 70..336 是空的（`queryNoteText()` 那一行在 251，默认也是空串）；
+        //   · 下面 260 是状态行、276 是公共翻页行 ⇒ 241..259 这一块就是用户截图里那块空白。
+        //   ⇒ 按钮 176..336 × 241..259（h=NAV_H=18，与公共翻页行同高，手感一致）。
+        // ⚠️ 已知边界：**查询失败**时（"查不到"那条 note 会写在 251 那一行）长 note 的尾巴
+        //    会被这颗按钮盖住；成功查询会切到查询结果屏（这颗按钮跟着第一屏一起藏掉）。
+        //    取舍理由：宁可盖住一句失败提示的尾巴，也不把入口塞进边角（他要的是"一眼看见"）。
+        final Widget delBtn = new ButtonWidget(176, QNOTE_Y, 160, NAV_H, GuiTextures.BUTTON,
+                cd -> onToggleDeletedList());
+        final Widget delLbl = new LabelWidget(181, QNOTE_Y + 5,
+                ShanhaiLdlText.sup((Supplier<String>) session::deletedEntryButtonText));
+        addWidget(delBtn);
+        addWidget(delLbl);
+        queryOnly.add(delBtn);
+        queryOnly.add(delLbl);
+        delBtn.setHoverTooltips(
+                net.minecraft.network.chat.Component.literal("§c已删除配方 §7/ §fDeleted Recipes"),
+                net.minecraft.network.chat.Component.literal("§7列出被编辑器删掉的配方（主产物 ＋ 配方 id）"),
+                net.minecraft.network.chat.Component.literal("§8点一行看它的输入输出 ⇒ 那里可以「恢复这条配方」"));
     }
 
     /**
@@ -540,6 +599,108 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         addNavLike(190, 54, NAV_Y, "§f重读配方表", cd -> onReload(), navWidgets);
         addNavLike(248, 54, NAV_Y, "§a新建配方", cd -> onNewRecipe(), navWidgets, newRecipeOnly);
         addNavLike(306, 30, NAV_Y, "§f返回", cd -> onBack(), navWidgets);
+    }
+
+    /**
+     * 🆕 <b>「已删除配方」详情页底部那两颗按钮</b> —— <b>只有这两颗</b>。
+     *
+     * <h4>为什么复用编辑屏而不是新开一屏</h4>
+     * 用户要的是「显示配方的<b>输入和输出</b>」—— 那套控件（{@code ShanhaiIOWidget} 格子 ＋
+     * 上限读数 ＋ 分页）已经验收过；重画一套只会多出一份会漂的实现。
+     * ⇒ 详情页 = <b>编辑屏的同一个 {@code Stage.EDIT}</b>，只是：
+     * <ol>
+     *   <li>数据来自快照 JSON（{@code ShanhaiDeletedRecipeIndex.parseForDisplay}），不是活配方；</li>
+     *   <li>{@code editChrome} 那批"能改东西"的控件整批藏掉（{@code refreshVisibility}）；</li>
+     *   <li>底部换成这里这两颗（{@link #previewOnly}），文案取自
+     *       {@link ShanhaiDeletedRecipeList#DETAIL_BUTTONS}。</li>
+     * </ol>
+     * 写入侧还有第二道闸：工作区里 {@code offerIngredient / clearCell / save / deleteSelected}
+     * 全部对"预览态"直接拒收（{@code session.deletedPreview()}）—— 不把正确性押在"控件藏住了"上。
+     *
+     * <p>位置与编辑屏那排动作按钮（{@code BTN_Y=196}）逐像素相同，所以"按钮换了一套"这件事
+     * 在视觉上是"原地替换"，不会让人以为少了什么。
+     */
+    private void buildDeletedPreviewStage() {
+        final String[] texts = ShanhaiDeletedRecipeList.DETAIL_BUTTONS;   // ← 唯一真值（离线自检断言的就是它）
+        // 宽度按文案长度给（「恢复这条配方」6 个汉字 ≈ 54px ⇒ 96 宽够；「返回」2 汉字 ⇒ 44 宽）
+        final Widget restore = new ButtonWidget(4, BTN_Y, 96, 20, GuiTextures.BUTTON,
+                cd -> onRestoreDeleted());
+        final Widget restoreLbl = new LabelWidget(10, BTN_Y + 7, ShanhaiLdlText.esc("§a" + texts[0]));
+        restore.setHoverTooltips(
+                net.minecraft.network.chat.Component.literal("§a" + texts[0]),
+                net.minecraft.network.chat.Component.literal("§7把这条配方放回配方表（等价于 /shanhai edit restore <id>）"));
+        final Widget back = new ButtonWidget(104, BTN_Y, 44, 20, GuiTextures.BUTTON,
+                cd -> onPreviewBack());
+        final Widget backLbl = new LabelWidget(110, BTN_Y + 7, ShanhaiLdlText.esc("§f" + texts[1]));
+        addWidget(restore);
+        addWidget(restoreLbl);
+        addWidget(back);
+        addWidget(backLbl);
+        previewOnly.add(restore);
+        previewOnly.add(restoreLbl);
+        previewOnly.add(back);
+        previewOnly.add(backLbl);
+        // 详情页那一行说明（"这是只读预览 / 有没有快照"）。
+        // 🔴 位置 = TIER_Y(276)：这一行在预览态是空的（电压下拉与它的标签都在 editChrome 里被藏掉），
+        //    而 246/256/266 那三行是编辑屏的状态读数（预览态照样显示，不能被盖）。
+        final Widget note = new LabelWidget(4, TIER_Y, ShanhaiLdlText.sup(
+                (Supplier<String>) session::deletedPreviewNote));
+        addWidget(note);
+        previewOnly.add(note);
+        for (Widget w : previewOnly) {
+            w.setVisible(false);
+        }
+    }
+
+    /**
+     * 🆕 <b>已删除配方列表每行左边那个主产物小图标</b>。
+     *
+     * <h4>为什么自己写一个 15 行的控件</h4>
+     * ① LDLib 没有 {@code ItemStackWidget}（本机 javap 实测：这个类名不存在），
+     *    只有 {@code SlotWidget} —— 而 {@code SlotWidget} 会<b>吃掉鼠标点击</b>（它要处理取放物品），
+     *    行点击就再也到不了下面那颗行按钮；<br>
+     * ② 行高只有 12 px，而 {@code renderItem} 画的是 16×16 ⇒ 必须缩放 0.75 才不压到下一行。<br>
+     * ⇒ 一个只画、不碰鼠标的控件是最小正确解（{@code Widget.mouseClicked} 默认返回 false ⇒
+     *   点击继续往后面的子控件走）。
+     *
+     * <p>⚠️ <b>如实交代</b>：这一段是唯一"只有真机才看得出对不对"的地方（红线禁止开客户端）。
+     * 图标拿不到（没有主产物 / 物品 id 认不出）时<b>什么都不画</b>，绝不拿近似物品冒充。
+     */
+    private final class DeletedRowIcon extends Widget {
+
+        private final int row;
+        private final int size;
+
+        DeletedRowIcon(int row, int x, int y, int size) {
+            super(x, y, size, size);
+            this.row = row;
+            this.size = size;
+        }
+
+        @Override
+        public void drawInBackground(net.minecraft.client.gui.GuiGraphics graphics,
+                                     int mouseX, int mouseY, float partialTicks) {
+            if (!session.deletedListMode()) {
+                return;
+            }
+            final net.minecraft.world.item.ItemStack stack = session.deletedRowIcon(row);
+            if (stack == null || stack.isEmpty()) {
+                return;
+            }
+            final int x = getPositionX();
+            final int y = getPositionY();
+            final float k = size / 16.0f;
+            try {
+                final com.mojang.blaze3d.vertex.PoseStack pose = graphics.pose();
+                pose.pushPose();
+                pose.translate(x, y, 0.0f);
+                pose.scale(k, k, 1.0f);
+                graphics.renderItem(stack, 0, 0);
+                pose.popPose();
+            } catch (Throwable ignored) {
+                // 画不出来不影响功能（列表文字里本来就有物品名）
+            }
+        }
     }
 
     /**
@@ -691,11 +852,38 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 (Supplier<Integer>) session::pendingDuration,
                 (Consumer<Integer>) session::setPendingDuration);
         addEdit(dur, chronoOnly);
+        editChrome.add(dur);                  // 🆕 只读预览里不许出现（见 editChrome 注释）
         addEditLabel(OUT_X, INP_Y + 4, () -> "§7电流(A)", gtOnly);
-        final Widget amps = new IntInputWidget(new Position(OUT_X + 38, INP_Y),
+        // 🔴 2026-11（用户点单「把那个上限64A的去掉」）：
+        //    电流框的上下限交给 GT 的 IntInputWidget 自己管 —— 上限就是 int 上限
+        //    （2147483647，见 ShanhaiRecipeEnergy#AMPERAGE_MAX 的溢出证明），
+        //    下限 1A（0A 的耗电配方在 GT 里没有意义）。原来那个 64 是 ShanhaiRecipeEditorWorkspace
+        //    里的 clamp，与控件本身的上下限无关；两处现在都按 int 边界走。
+        final IntInputWidget amps = new IntInputWidget(new Position(OUT_X + 38, INP_Y),
                 (Supplier<Integer>) session::amperage,
                 (Consumer<Integer>) session::setAmperage);
+        amps.setMin(ShanhaiRecipeEditorWorkspace.AMPERAGE_MIN);
+        amps.setMax(ShanhaiRecipeEditorWorkspace.AMPERAGE_MAX);
         addEdit(amps, gtOnly);
+        editChrome.add(amps);                 // 🆕 同上
+
+        // ── 🆕 2026-11：发电 / 耗电一键切换（用户点单原话：
+        //    「我不能修改/添加发电的配方，你把这个功能补上，在配方编辑的页面加个一键切换发电or耗电的按钮」）──
+        //    位置：电压下拉缩到 58..196，这颗按钮 200..258，条件按钮仍 262..334（三者不重叠，逐个算过）。
+        //    z-order：它排在 buildTierSelector() 【之前】—— 下拉仍是最后一个子控件（见构造函数注释），
+        //    而两者 x 区间不相交 ⇒ 下拉展开时不会压到它。
+        final Widget euBtn = new ButtonWidget(200, TIER_Y, 58, 20, GuiTextures.BUTTON, cd -> onToggleEuSide());
+        final Widget euLbl = new LabelWidget(206, TIER_Y + 7,
+                ShanhaiLdlText.sup((Supplier<String>) session::euSideButtonText));
+        addWidget(euBtn);
+        addWidget(euLbl);
+        editOnly.add(euBtn);
+        editOnly.add(euLbl);
+        gtOnly.add(euBtn);                    // 原版配方没有"发电"这个概念 ⇒ 非 GT 屏藏起来
+        gtOnly.add(euLbl);
+        editChrome.add(euBtn);                // 只读预览里也不许出现（点不动的按钮会骗人）
+        editChrome.add(euLbl);
+        euBtn.setHoverTooltips(tip(EU_SIDE_TIP));
 
         // ── 按钮（按钮铺满 ＋ 上面盖 Label，理由见类注释 §3②）──
         //    🆕「保存并退出」⇒「保存并返回」（用户原话：「你这个保存并退出怎么是直接关闭 gui 了，
@@ -745,6 +933,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         // 🆕 「额外条件」是 GT 专有的字段（原版配方没有这个概念）⇒ 编辑原版配方时藏起来
         gtOnly.add(condBtn);
         gtOnly.add(condLbl);
+        // 🆕 已删除配方详情页也藏起来（那里是只读预览，点开条件页会让人以为能改）
+        editChrome.add(condBtn);
+        editChrome.add(condLbl);
     }
 
     /**
@@ -883,7 +1074,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         addEditLabel(IN_X, TIER_Y + 5, () -> "§7电压等级", gtOnly);
         final com.lowdragmc.lowdraglib.gui.widget.SelectorWidget tier =
                 new com.lowdragmc.lowdraglib.gui.widget.SelectorWidget(
-                        IN_X + 52, TIER_Y, 200, 18,
+                        IN_X + 52, TIER_Y, 138, 18,
                         List.of(ShanhaiRecipeEditorWorkspace.TIER_NAMES), 8);
         tier.setSupplier(() -> {
             final int idx = session.tierIndex();
@@ -933,6 +1124,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         addWidget(label);
         editOnly.add(label);
         group.add(label);
+        // 🆕 挂条件可见组的标签 = "只在真编辑时才有意义"的那几行（耗时 / 电流 / 电压等级）
+        //    ⇒ 同一批在「已删除配方详情」里也要消失（那是只读预览，改不了）。
+        editChrome.add(label);
     }
 
     private void addEdit(Widget widget) {
@@ -953,6 +1147,11 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         addWidget(label);
         editOnly.add(button);
         editOnly.add(label);
+        // 🆕 这一版重载**只**给编辑屏那 5 颗动作按钮用（保存并返回/保存/返回/删除这条/恢复原样）
+        //    ⇒ 它们正是「已删除配方详情页」里必须消失的那批（详情页只留 恢复 + 返回）。
+        //    ⚠️ 带 group 的那个重载（翻页 ◀▶）**不**登记 —— 详情页还要靠它们翻看更多输入输出。
+        editChrome.add(button);
+        editChrome.add(label);
     }
 
     /** 同 {@link #addEditButton}，但额外登记进某一个"按非 GT 压下去"的组（{@code gtOnly}）。 */
@@ -1342,8 +1541,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         }
         // 🔴 条件页打开时把电压下拉藏掉：它是【最后一个子控件】、点击优先级最高，
         //    而条件页覆盖了它的位置 ⇒ 不藏的话"点条件页里那一行"会被它截走。
+        //    🆕 已删除配方详情页（只读预览）同样藏掉 —— 那里改不了任何东西。
+        final boolean preview = session.deletedPreview();
         if (tierSelector != null) {
-            tierSelector.setVisible(edit && !condsOpen && !vanilla);
+            tierSelector.setVisible(edit && !condsOpen && !vanilla && !preview);
         }
         // 🆕 阶段 2：非 GT 输入侧那一套（3×3 网格 / 单格 / 产物格）。
         //    🔴 口径只有一条：`edit && vanilla && !condsOpen`，输入那 9 格再按"这份输入的形态"细分。
@@ -1362,6 +1563,20 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         //   来加材料的；往那里拖会被入口闸门收下）。单格输入：只画第 0 格。
         for (int i = 0; i < vanillaCellsGrid.length; i++) {
             vanillaCellsGrid[i].setVisible(vanGrid || (vanSingle && i == 0));
+        }
+        // ── 🆕 已删除配方详情页（只读预览）—— 【必须是最后一段】────────────────
+        // 🔴 上面每一轮都按自己的口径 setVisible 过一次，而"预览态该看到什么"是最终裁决
+        //    （谁最后写谁赢 —— 本工程已经踩过这个坑一次）。
+        //   · editChrome：5 颗动作按钮 / 耗时与电流输入框 / 电压那几行 / 条件入口 ⇒ 一律藏；
+        //   · previewOnly：只留「恢复这条配方」＋「返回」两颗（文案取自
+        //     ShanhaiDeletedRecipeList.DETAIL_BUTTONS）。
+        if (preview) {
+            for (Widget w : editChrome) {
+                w.setVisible(false);
+            }
+        }
+        for (Widget w : previewOnly) {
+            w.setVisible(preview && edit);
         }
     }
 
@@ -1587,6 +1802,18 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             "§f输出栏翻页§7：◀ ▶ 一次一页 · §f首页§7/§f末页§7 直达两头 · "
                     + "中间那个小框§f直接填页号§7（从 1 数起，填完回车）";
 
+    /**
+     * 🆕 2026-11：发电 / 耗电切换那颗按钮的 tooltip。
+     * <p>口径（GT 侧实测见 {@code ShanhaiRecipeIoApply#applyEut(GTRecipe, long, EuSide)} 的 javap 引文）：
+     * 耗电 = EU 在 {@code tickInputs}、发电 = EU 在 {@code tickOutputs}，两者<b>只会有一个</b>。
+     */
+    private static final String EU_SIDE_TIP =
+            "§f发电 / 耗电 一键切换§7：点一下把这条配方改成另一侧\n"
+                    + "§8· §b耗电§8 = EU 写进 tickInputs（机器每 tick 扣电）\n"
+                    + "§8· §6发电§8 = EU 写进 tickOutputs（发电机每 tick 产电）\n"
+                    + "§8· 保存之后§f只会有一侧有 EU§8（另一侧会被清掉，不会两侧都留）\n"
+                    + "§8· 改完记得点「保存」";
+
     /** 输入栏【首页】/【末页】两颗按钮。 */
     private void onInPageEdge(boolean last) {
         if (clientSide || !session.stageIsEdit()) {
@@ -1671,6 +1898,19 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     }
 
     /**
+     * 🆕 2026-11：发电 / 耗电一键切换。
+     *
+     * <p>与其它写操作同一条纪律：<b>只在服务端改</b>（{@code clientSide} 早退），
+     * 客户端靠状态泵推回来的 {@code euGenerate()} 画按钮上的字。
+     */
+    private void onToggleEuSide() {
+        if (clientSide || session.countCell() >= 0 || !session.stageIsEdit()) {
+            return;
+        }
+        session.toggleEuSide();
+    }
+
+    /**
      * 🆕「保存并返回」：保存完<b>回到该类型的配方列表</b>，不是关掉整个 GUI。
      * （用户原话：「你这个保存并退出怎么是直接关闭 gui 了，应该是保存并退回吧，
      *   不然我编辑第二条的时候还要再打开面版」）
@@ -1701,6 +1941,38 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             return;
         }
         session.restoreSelected();
+    }
+
+    // ---------------------------------------------------------------- 🆕 已删除配方（恢复删除掉的那几条）
+
+    /**
+     * 第一屏那块空白里的「已删除配方 / Deleted Recipes」按钮。
+     *
+     * <p>点一下<b>把中间那块列表区换成"已删除配方列表"</b>（同一个列表控件、换数据源 ——
+     * 用户点单口径：不要新开一屏）；再点一下回类型列表（按钮文字会跟着换，见
+     * {@code session.deletedEntryButtonText}）。
+     */
+    private void onToggleDeletedList() {
+        if (clientSide || session.stage() != ShanhaiRecipeEditorWorkspace.Stage.TYPES) {
+            return;
+        }
+        session.toggleDeletedList();
+    }
+
+    /** 详情页那颗「恢复这条配方」（= 复用 {@code /shanhai edit restore <id>} 的服务端逻辑）。 */
+    private void onRestoreDeleted() {
+        if (clientSide || !session.deletedPreview()) {
+            return;
+        }
+        session.restoreDeletedPreview();
+    }
+
+    /** 详情页那颗「返回」——回到已删除配方列表（不是关掉整个面板）。 */
+    private void onPreviewBack() {
+        if (clientSide || !session.deletedPreview()) {
+            return;
+        }
+        session.closeDeletedPreview();
     }
 
     private void onConfirmCount() {

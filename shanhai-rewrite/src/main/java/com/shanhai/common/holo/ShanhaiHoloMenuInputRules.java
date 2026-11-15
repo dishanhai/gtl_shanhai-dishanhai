@@ -138,7 +138,7 @@ public final class ShanhaiHoloMenuInputRules {
             case ACT_OPEN_SETTINGS -> "打开设置面板";
             case ACT_OPEN_COMMAND -> "打开命令输入框";
             case ACT_OPEN_CREATIVE_ITEMS -> "打开现实物品面板";
-            case ACT_REALITY_PURGE -> "清除实体（点一次直接执行）";
+            case ACT_REALITY_PURGE -> "清除实体（连点两次确认）";
             default -> "无动作";
         };
     }
@@ -220,8 +220,8 @@ public final class ShanhaiHoloMenuInputRules {
         c(bad, n, "没拿模块点『现实物品』=打开现实物品面板",
                 decide(false, true, true, ShanhaiHoloMenuBoards.CREATIVE_ITEMS_INDEX, true, true),
                 ACT_OPEN_CREATIVE_ITEMS);
-        // 🆕 清除实体那格（点一次直接执行；动作码必须对得上）
-        c(bad, n, "没拿模块点『清除实体』=清除实体(点一次直接执行)",
+        // 🆕 清除实体那格（连点两次确认；动作码必须对得上）
+        c(bad, n, "没拿模块点『清除实体』=清除实体(连点两次确认)",
                 decide(false, true, true, ShanhaiHoloMenuBoards.PURGE_INDEX, true, true),
                 ACT_REALITY_PURGE);
         c(bad, n, "拿着模块点『清除实体』=切换投影(不是抹除)",

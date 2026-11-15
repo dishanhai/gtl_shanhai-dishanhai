@@ -122,6 +122,47 @@ public final class ShanhaiRecipeOverrideStore {
         return o;
     }
 
+    /**
+     * 🆕 <b>这份账本里"被整条删掉"的那些 id</b>（{@code op=remove} / {@code op=disable}）。
+     *
+     * <p>用途：编辑器里那个「已删除配方」列表（{@link ShanhaiDeletedRecipeIndex}），
+     * 以及开机补份 —— 覆盖文件对 {@code remove} 条目<b>不存产物</b>
+     * （见 {@link #makeRemoveEntry}：只有 uid/op/id/type/fields/base_fp/ts），
+     * 所以那几条的输入输出只能在 KubeJS 的配方事件窗口里补一份到
+     * {@link ShanhaiRemovedRecipeSnapshot}。
+     *
+     * @return id 列表（去重、保持文件里的顺序；读不出来就是空表）
+     */
+    public static java.util.List<String> removedIds() {
+        final java.util.List<String> out = new java.util.ArrayList<>();
+        try {
+            final JsonObject root = loadRoot();
+            if (root == null || !root.has("entries") || !root.get("entries").isJsonArray()) {
+                return out;
+            }
+            for (JsonElement e : root.getAsJsonArray("entries")) {
+                if (!e.isJsonObject()) {
+                    continue;
+                }
+                final JsonObject o = e.getAsJsonObject();
+                if (!o.has("id") || !o.has("op")) {
+                    continue;
+                }
+                final String op = o.get("op").getAsString();
+                if (!"remove".equals(op) && !"disable".equals(op)) {
+                    continue;
+                }
+                final String id = o.get("id").getAsString();
+                if (id != null && !id.isEmpty() && !out.contains(id)) {
+                    out.add(id);
+                }
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} removed_ids_failed err={}", PREFIX, t.toString());
+        }
+        return out;
+    }
+
     /** 当前 entries 条数（读不到就 0）。 */
     public static int entryCount() {
         final JsonObject root = loadRoot();

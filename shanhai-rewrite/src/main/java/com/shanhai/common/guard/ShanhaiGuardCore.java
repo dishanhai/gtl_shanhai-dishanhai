@@ -529,7 +529,7 @@ public final class ShanhaiGuardCore {
     //   · 事件层：伤害 / 死亡 / 死亡界面 三条拦截都在生效，补血自证也成功（回血自证失败 = 0 次）；
     //   · 但玩家最终进入「死但没死透」：死亡界面被压住，人却僵住不能动。
     //   · 对手的杀人链【不过 setHealth】：
-    //       EntityUtil.damageHealth：算 `真血 - 伤害`（没有 max(0, ·)）→ EntityUtil.forceSetHealth
+    //       EntityHelper.damageHealth：算 `真血 - 伤害`（没有 max(0, ·)）→ EntityHelper.forceSetHealth
     //       → forceSetEntityData(LivingEntity.f_20961_ /* DATA_HEALTH_ID */, 值)  ← 直接裸写同步血量字段
     //   · 它另在 setHealth 上挂 `@Inject(HEAD, cancellable=true)`：counter>=5 且新值 > getHealth() ⇒ 直接 cancel，
     //     而 counter 是【单向锁存】⇒ 一旦中招，我们的 setHealth 补血永久无效；
@@ -596,6 +596,39 @@ public final class ShanhaiGuardCore {
     }
 
     /**
+     * 🔴 <b>读侧交叉校验的容差</b>：{@code getHealth()} 与同步血量字段真值相差在 0.01 以内
+     * ⇒ 当成同一个数（血量是 float，别把 1e-6 的浮点误差报成"被改写"）。
+     */
+    public static final float READ_SIDE_TOLERANCE = 0.01f;
+
+    /**
+     * 🔴 <b>读侧交叉校验</b>：{@code getHealth()}（读侧）明显小于同步血量字段真值
+     * ⇒ 判「<b>读侧被改写了</b>」：字段里其实还有血，读接口却报了一个更小的数
+     * （最毒的一种是把活人报成 0 ⇒ 客户端与别的 mod 都当这个人死了）。
+     *
+     * <p>🔴 <b>判据只碰原版两样东西</b>：{@code LivingEntity#getHealth()} 与
+     * {@code getEntityData().get(DATA_HEALTH_ID)}（真值由调用方读好传进来）
+     * ⇒ <b>零第三方类名／零第三方方法名／零自定义数据键</b>，也不需要任何配置项。
+     *
+     * <pre>
+     *   字段 20 / 读 20            ⇒ false（相等）
+     *   字段 20 / 读 19.995        ⇒ false（差 0.005 ≤ 0.01，容差内）
+     *   字段 20 / 读 0 或 -57      ⇒ true （读数明显偏小 ⇒ 读侧被改写）
+     *   字段 20 / 读 25            ⇒ false（读数偏大：这一条只抓"往下改"）
+     *   任一为 NaN                 ⇒ false（读不到就<b>不猜</b>）
+     * </pre>
+     *
+     * @param getHealthValue   {@code entity.getHealth()}（NaN = 读不到）
+     * @param fieldHealthValue 同步血量字段真值（NaN = 第二通道读不到）
+     */
+    public static boolean readSideMismatch(float getHealthValue, float fieldHealthValue) {
+        if (Float.isNaN(getHealthValue) || Float.isNaN(fieldHealthValue)) {
+            return false;   // 读不到 ⇒ 不猜、不报
+        }
+        return fieldHealthValue - getHealthValue > READ_SIDE_TOLERANCE;
+    }
+
+    /**
      * ① 值层兜底：{@code LivingEntity#setHealth(float)} 的入参要不要被改写成满血上限。
      *
      * <pre>
@@ -631,19 +664,20 @@ public final class ShanhaiGuardCore {
     /**
      * ② 服务端每 tick 看门狗：这个人是不是<b>已经进入死亡流程</b>（该把血和两个计时器拉回来）。
      *
-     * <p>四条判据（任一为真 ⇒ 复位）：
+     * <p>三条判据（任一为真 ⇒ 复位）：
      * <ol>
      *   <li>{@code isDeadOrDying()} = true —— 原版判据（内部就是 {@code getHealth() <= 0}）；</li>
      *   <li>{@code deathTime > 0} —— 死亡计时器在走（有人每 tick 把它推到 20 直接处决）；</li>
-     *   <li>🔴 <b>2026-10-17 新增：同步血量字段真值 &lt;= 0</b> —— 因为对手给 {@code getHealth()} 加了偏移，
-     *       {@code isDeadOrDying()} 与 {@code deathTime} 这两条都可能被绕过 ⇒ 直接看字段真值；
+     *   <li>🔴 <b>2026-10-17 新增：同步血量字段真值 &lt;= 0</b> —— 因为有人会给 {@code getHealth()}
+     *       加偏移，{@code isDeadOrDying()} 与 {@code deathTime} 这两条都可能被绕过 ⇒ 直接看字段真值；
      *       字段读不到（NaN）时这一条<b>不参与判断</b>（原因串里会点出来，不静默）。</li>
-     *   <li>🔴 <b>2026-10-17 新增（⑤ 对手桥）：对手自己的 {@code checkEntityDead} 说是死</b> ——
-     *       它自己的判死可能比我们这三条都宽（coremod=true 满功率时）⇒ 并进来一起判。</li>
      * </ol>
+     *
+     * <p>🔴 <b>这里只看原版读数</b>（{@code LivingEntity} 的 API ＋ 同步血量字段），
+     * <b>不引用任何第三方 mod 的类名／方法名／数据键</b>。
      */
     public static Decision deathFlowResetDecision(boolean isDeadOrDying, int deathTime, float fieldHealth,
-                                                  boolean omnimobsSaysDead, boolean enabledFlag) {
+                                                  boolean enabledFlag) {
         if (!enabledFlag) {
             return Decision.of(false, "开关关闭（enabled=false）⇒ 不复位");
         }
@@ -659,40 +693,12 @@ public final class ShanhaiGuardCore {
             return Decision.of(true, "同步血量字段 <= 0（" + fieldHealth
                     + "）⇒ 复位（getHealth() 可能带偏移，不可信）");
         }
-        if (omnimobsSaysDead) {
-            return Decision.of(true, "对手自检 checkEntityDead=true ⇒ 复位（它的判死比我们这三条宽；"
-                    + fieldNote + "）");
-        }
-        return Decision.of(false, "血 > 0 且 deathTime=0 且对手也不说死 ⇒ 不用复位（" + fieldNote + "）");
+        return Decision.of(false, "血 > 0 且 deathTime=0 ⇒ 不用复位（" + fieldNote + "）");
     }
 
     /** 同上，用类里的开关（生产调用点只关心"要不要复位"）。 */
-    public static boolean needsDeathFlowReset(boolean isDeadOrDying, int deathTime, float fieldHealth,
-                                             boolean omnimobsSaysDead) {
-        return deathFlowResetDecision(isDeadOrDying, deathTime, fieldHealth, omnimobsSaysDead, enabled).yes;
-    }
-
-    /**
-     * ⑤ 对手桥：玩家 ForgeData 里那个「单向锁存计数器」要不要清零。
-     *
-     * <p>对手的判据是 {@code counter >= 5 && 新值 > 当前血 ⇒ cancel setHealth}，而 counter 单向锁存
-     * ⇒ 不清零的话我们的 {@code setHealth} <b>永久无效</b>。
-     *
-     * @param counterValue 从 {@code player.getPersistentData().getInt("omnimobs_counter_data")} 读到的值
-     *                     （键不存在 ⇒ 原版 {@code getInt} 返回 0 ⇒ 不用清）
-     */
-    public static boolean shouldResetOmnimobsCounter(int counterValue) {
-        return counterValue >= OMNIMOBS_COUNTER_LOCKED;
-    }
-
-    /** 同上，带原因串（进日志）。 */
-    public static Decision omnimobsCounterDecision(int counterValue) {
-        if (shouldResetOmnimobsCounter(counterValue)) {
-            return Decision.of(true, "counter=" + counterValue + " >= " + OMNIMOBS_COUNTER_LOCKED
-                    + "（对手已锁存）⇒ 清零，否则我们的 setHealth 会被它 cancel");
-        }
-        return Decision.of(false, "counter=" + counterValue + " < " + OMNIMOBS_COUNTER_LOCKED
-                + " ⇒ 没锁，不动它");
+    public static boolean needsDeathFlowReset(boolean isDeadOrDying, int deathTime, float fieldHealth) {
+        return deathFlowResetDecision(isDeadOrDying, deathTime, fieldHealth, enabled).yes;
     }
 
     /**
@@ -733,6 +739,16 @@ public final class ShanhaiGuardCore {
         private final Map<String, Long> pending = new LinkedHashMap<>();
 
         /**
+         * 🔴 2026-11-08：<b>能带任意 ASCII 正文的那一路</b>的待合并表（键 = 正文本身）。
+         *
+         * <p>为什么与 {@link #pending} 分开：那一边的键是"类别串"（{@code 伤害}／{@code 死亡}…），
+         * 由 {@code render} 拼成中文日志行；这一边的键是**最终正文**（{@code PATCHED …}），
+         * 直接加前缀就发。混在一张表里会让日志行冒出英文正文、也会让聊天行冒出类别串。
+         * <b>两者共用同一把锁与同一个 {@link #lastEmitMillis}（= 同一份"每秒最多一行"节流）。</b>
+         */
+        private final Map<String, Long> pendingRaw = new LinkedHashMap<>();
+
+        /**
          * @param kind      类别（{@code 伤害} / {@code 死亡} / {@code 补血} / {@code 死亡界面} …）
          * @param nowMillis 当前毫秒（调用方喂，便于离线用假时钟复现）
          * @return 该打出去的一整行；本次不打则 {@code null}
@@ -760,8 +776,51 @@ public final class ShanhaiGuardCore {
                 return null;
             }
             lastEmitMillis = nowMillis;
-            final Batch batch = new Batch(pending);
+            // 🆕 2026-11-08：这一窗口里攒下的【原始正文】也一起交出去（见 admitRawBatch）——
+            //   它们已经在同一个窗口里等了一个"每秒最多一行"，不能因为"这一拍是类别事件"
+            //   就再等下一拍（那会让热改播报无声地被拖到下一场战斗）。
+            final Batch batch = new Batch(pending, pendingRaw);
             pending.clear();
+            pendingRaw.clear();
+            return batch;
+        }
+
+        /**
+         * 🔴 <b>能带任意 ASCII 正文的那一路</b>（2026-11-08 加，为"主动热改播报"而加）。
+         *
+         * <p>与 {@link #admitBatch} 的<b>同一套</b>东西：同类照旧合并（键 = 正文本身 ⇒ 同一条正文
+         * 重复就合并成 {@code xN}）、每秒照旧最多一次、锁是同一把、{@link #lastEmitMillis} 是同一个
+         * （⇒ 聊天栏整体仍然是"每秒最多一行"，不是另开一条通道）。
+         *
+         * <p>🔴 只有一处不同，而且是<b>故意的</b>：这一路<b>不消费</b> {@link #pending}（类别计数）。
+         * 那一边的计数要靠 {@code logLine()} 打进日志，谁拿走却没人打 ⇒ 日志会静默丢行。
+         * 反过来是安全的：类别那次落盘会连 {@link #pendingRaw} 一起交出去（见 {@link #admitBatch}）。
+         *
+         * <p>非 ASCII／空白的正文<b>在这里就被丢掉</b>（{@link ShanhaiGuardCore#isBroadcastableBody}），
+         * 连"那一秒的名额"都不占 —— 与诊断类不进聊天栏同一条口径。
+         *
+         * @param bodies    这一次要播的正文（一次一条也无所谓，数组便于"一次 patch 多个方法"一起投递）
+         * @param nowMillis 当前毫秒（调用方喂，便于离线用假时钟复现）
+         * @return 这一窗口该发的那一批；本次不发（没有可播正文 ／ 同一秒里已经有过了）⇒ {@code null}
+         */
+        public synchronized Batch admitRawBatch(String[] bodies, long nowMillis) {
+            if (bodies != null) {
+                for (final String body : bodies) {
+                    if (!isBroadcastableBody(body)) {
+                        continue;   // 🔴 非 ASCII ／ 空白：拒收（负对照在 main 的 ⑱）
+                    }
+                    pendingRaw.merge(body, 1L, Long::sum);
+                }
+            }
+            if (pendingRaw.isEmpty()) {
+                return null;       // 一条可播的都没有 ⇒ 不占名额、不动时钟
+            }
+            if (nowMillis - lastEmitMillis < LOG_MIN_INTERVAL_MILLIS) {
+                return null;       // 同一秒里已经有过一行 ⇒ 合并进下一行（不是丢，见类注释）
+            }
+            lastEmitMillis = nowMillis;
+            final Batch batch = new Batch(null, pendingRaw);
+            pendingRaw.clear();
             return batch;
         }
 
@@ -776,6 +835,7 @@ public final class ShanhaiGuardCore {
 
         public synchronized void reset() {
             pending.clear();
+            pendingRaw.clear();   // 🆕 2026-11-08：原始正文那一份也是这个闸门的状态，一起清
             lastEmitMillis = Long.MIN_VALUE / 2L;
         }
 
@@ -809,13 +869,41 @@ public final class ShanhaiGuardCore {
 
             private final Map<String, Long> merged;
 
+            /**
+             * 🆕 2026-11-08：本窗口攒下的<b>原始正文</b>（键 = 正文，值 = 出现次数）。
+             *
+             * <p>与 {@link #merged} 一起被 {@link #admitBatch} 交出来（那一拍是"这一秒的落盘点"），
+             * 也可以只由 {@link #admitRawBatch} 单独交出来。
+             */
+            private final Map<String, Long> rawMerged;
+
             Batch(Map<String, Long> source) {
-                this.merged = new LinkedHashMap<>(source);   // 拷一份：pending 随后就被 clear
+                this(source, null);
+            }
+
+            Batch(Map<String, Long> source, Map<String, Long> rawSource) {
+                // 拷一份：pending / pendingRaw 随后就被 clear
+                this.merged = source == null ? new LinkedHashMap<>() : new LinkedHashMap<>(source);
+                this.rawMerged = rawSource == null ? new LinkedHashMap<>() : new LinkedHashMap<>(rawSource);
             }
 
             /** 本窗口各类别来了几次（只读快照；键的顺序 = 首次出现的顺序）。 */
             public Map<String, Long> merged() {
                 return java.util.Collections.unmodifiableMap(merged);
+            }
+
+            /** 本窗口攒下的原始正文（只读快照；键 = 正文本身，值 = 出现次数）。 */
+            public Map<String, Long> rawMerged() {
+                return java.util.Collections.unmodifiableMap(rawMerged);
+            }
+
+            /**
+             * 🔴 本窗口的<b>热改播报</b>：<b>每一条正文一行</b>（同一条正文重复 ⇒ 合并成 {@code xN}）。
+             *
+             * @return 该发的整行（已含前缀）；本窗口没有原始正文 ⇒ 空表（不是 null，免得每次调用都要判）
+             */
+            public List<String> rawLines() {
+                return ShanhaiGuardCore.chatRawLines(rawMerged);
             }
 
             /** 本窗口一共拦了几次（各类别相加）。 */
@@ -829,7 +917,8 @@ public final class ShanhaiGuardCore {
 
             /** 日志那一行（与加本方法之前逐字相同）。 */
             public String logLine() {
-                return render(merged);
+                // 只带原始正文的那一批（admitRawBatch 交出来的）没有类别可打 ⇒ null，不许打一行空壳。
+                return merged.isEmpty() ? null : render(merged);
             }
 
             /** 🔴 给玩家本人的那一行 ＋ 前缀；本窗口一个"该给玩家看"的类别都没有 ⇒ {@code null}（一条都不发）。 */
@@ -1521,8 +1610,6 @@ public final class ShanhaiGuardCore {
     public static final String KIND_DIE_REFUSED = "拒绝死亡";
     /** 🔴 2026-10-17 新增：客户端死亡态复位（③ 客户端每 tick；<b>诊断类</b>，只进日志、不进聊天栏）。 */
     public static final String KIND_CLIENT_RESET = "客户端死亡态复位";
-    /** 🔴 2026-10-17 新增：对手桥维护（⑤ 反射清它的 delta / 计数器；<b>诊断类</b>，只进日志、不进聊天栏）。 */
-    public static final String KIND_OMNIMOBS = "对手桥维护";
     /**
      * 🔴 2026-10-17 新增：<b>反击退 / 反挤压</b>（清零 {@code hurtMarked} ＋ 窗口内把 {@code deltaMovement}
      * 的 x/z 清零）。<b>诊断类</b>：只进日志、<b>不进聊天栏</b>（用户口径「不播报」）；
@@ -1530,35 +1617,6 @@ public final class ShanhaiGuardCore {
      * {@link ShanhaiGuardKnockback#broadcastText} 里，与本表分开。
      */
     public static final String KIND_KNOCKBACK = "反击退";
-
-    // ═══════════ ⑤ 对手桥（2026-10-17 新增：用对手自己的 public API 反向修复；失效自动退回值层） ═══════════
-    //
-    // 对手（coremod=true 满功率）那三件套，以及本工程怎么反向修复：
-    //   ① getHealth() 的每条 return 加 delta（delta 存在同步数据里，客户端同样带偏移）
-    //        ⇒ 调它自己的 public static `setHealthDelta(LivingEntity, float)` 把 delta 写成 0
-    //          ⇒ 它的 getHealth() = 血量字段 + 0 = 真值（假死/假血一起消失）
-    //   ② setHealth 上挂【单向锁存】：counter>=5 且新值 > 当前血 ⇒ cancel
-    //        ⇒ counter 存在玩家 ForgeData 的 `omnimobs_counter_data`
-    //          （实测：`/data get entity @s ForgeData.omnimobs_counter_data`）
-    //          ⇒ 读到 >= 5 就 putInt(..., 0) ⇒ 我们的 setHealth 又能生效
-    //   ③ 它自己的"判死"：`checkEntityDead(LivingEntity)` ⇒ 每 tick 问一次，true 就并入复位判据
-    //
-    // 🔴 这些常量是【对手的类名/方法名/数据键】的原样抄写：**换版本就失效**。
-    //    失效时的行为：只记一行 `omnimobs_bridge unavailable: <原因>`，之后不再重试；
-    //    值层（setHealth ／ 直写 DATA_HEALTH_ID）照旧工作 ⇒ 功能不会因此消失，只是少一层。
-
-    /** 对手的工具类（三个都是 {@code public static}；javap 已确认）。 */
-    public static final String OMNIMOBS_UTIL_CLASS = "flashfur.omnimobs.util.GetHealthModifyUtil";
-    /** 对手：写 {@code getHealth()} 的偏移（{@code setHealthDelta(LivingEntity, float)}）。 */
-    public static final String OMNIMOBS_METHOD_SET_DELTA = "setHealthDelta";
-    /** 对手：读 {@code getHealth()} 的偏移（{@code obtainHealthDelta(LivingEntity)}）。 */
-    public static final String OMNIMOBS_METHOD_GET_DELTA = "obtainHealthDelta";
-    /** 对手：它自己的"判死"（{@code checkEntityDead(LivingEntity)}）。 */
-    public static final String OMNIMOBS_METHOD_CHECK_DEAD = "checkEntityDead";
-    /** 对手的"单向锁存计数器"在玩家 ForgeData 里的键（实测命令读到的就是它）。 */
-    public static final String OMNIMOBS_COUNTER_KEY = "omnimobs_counter_data";
-    /** 对手锁住的阈值：{@code counter >= 5} 起，它对任何"加血"的 {@code setHealth} 一律 cancel。 */
-    public static final int OMNIMOBS_COUNTER_LOCKED = 5;
 
     // ═══════════════ 机制名（用户追加口径：必须回答"拦了哪个事件 / 哪条代码路"） ═══════════════
     //
@@ -1779,6 +1837,120 @@ public final class ShanhaiGuardCore {
         return phrase == null ? null : CHAT_PREFIX + phrase;
     }
 
+    // ═══════════════ ⑰【热改播报】能带【任意 ASCII 正文】的入口（2026-11-08；同一个 LogGate、同一份节流） ═══════════════
+    //
+    // 需求口径（用户给的样例行就是规格；下面的模组名/类名一律是中立占位，不是真模组）：
+    //   [创始现实修改模块] PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)
+    //   [创始现实修改模块] PATCH_REFUSED examplemod EntityHelper#forceSetHealth (gate_already_patched)
+    //   [创始现实修改模块] PATCH_REVERTED examplemod EntityHelper#forceSetHealth (observed_only)
+    //
+    // 🔴 为什么不复用 chatPhrase：那张表是"固定文案"（正文由类别决定）；热改播报的正文是
+    //    「目标类#方法 ＋ 为什么」现拼出来的**任意**字符串 ⇒ 必须有能带任意正文的入口。
+    //    **不新开第二条通道**（用户硬要求）：前缀仍是 CHAT_PREFIX（含那一个半角空格）、收件人仍走
+    //    chatRecipients（只发持有者本人）、节流仍是同一个 LogGate 实例（同一份 LOG_MIN_INTERVAL_MILLIS）、
+    //    "同类合并"仍是"同一条正文重复 ⇒ xN"。
+    //
+    // 五条硬口径：
+    //   ① 前缀逐字，后面那**一个半角空格**必须在（自检 ⑭ 里那条 [创始现实修改模块]DAMAGE_BLOCKED
+    //      的负对照对这条路同样成立）；
+    //   ② 正文**纯 ASCII** 是硬判据：{@link #isBroadcastableBody} 当场拒收（自检 ⑱ 带"塞一个中文"的负对照）；
+    //   ③ 一次 patch 改了几个方法 ⇒ **每个方法一行**（不许拼成一行；所以这一路按行出，
+    //      而不是像 chatLine 那样把多个类别用 " + " 连起来）；
+    //   ④ 同一条正文重复（例如同一个 target 反复 gate_already_patched）⇒ 合并成 {@code xN}；
+    //   ⑤ 控制台／没有玩家上下文 ⇒ 一条都不发（那一侧日志照旧；本类不参与"发不发"的判断）。
+
+    /** 🔴 热改播报的三条动作词（逐字 —— 用户样例就是规格，不许改写）。 */
+    public static final String PATCH_WORD_PATCHED = "PATCHED";
+    /** 热改被门槛拒绝（括号里放 {@code detail} 原值）。 */
+    public static final String PATCH_WORD_REFUSED = "PATCH_REFUSED";
+    /** 热改被撤掉／没落地（括号里放 {@code reason} 原值；**只报不重打**）。 */
+    public static final String PATCH_WORD_REVERTED = "PATCH_REVERTED";
+
+    /**
+     * 🔴 判据：这条<b>正文</b>能不能播进聊天栏（<b>纯 ASCII</b> 是硬判据）。
+     *
+     * <pre>
+     *   null / 空 / 全空白                ⇒ false（空正文会在聊天栏留一条只有前缀的行）
+     *   含任何一个 &gt; 0x7F 的字符       ⇒ false（中文 ／ 全角符号 ／ § 色码都在这里被挡）
+     *   含控制字符（&lt; 0x20 或 0x7F）    ⇒ false（换行会把"一行"变成两行，等于绕过"每方法一行"）
+     *   其余                              ⇒ true
+     * </pre>
+     *
+     * <p>负对照在 {@code main} 的 ⑱：同一个"该为真"的样本文案 ＋ 一条塞了中文的 ⇒ 判据必须一真一假。
+     */
+    public static boolean isBroadcastableBody(String body) {
+        if (body == null || body.isEmpty()) {
+            return false;
+        }
+        boolean seenNonSpace = false;
+        for (int i = 0; i < body.length(); i++) {
+            final char c = body.charAt(i);
+            if (c > 0x7F) {
+                return false;   // 非 ASCII：硬判据
+            }
+            if (c < 0x20 || c == 0x7F) {
+                return false;   // 控制字符（含 \n \r \t）：一行就必须是一行
+            }
+            if (c != ' ') {
+                seenNonSpace = true;
+            }
+        }
+        return seenNonSpace;
+    }
+
+    /** 只留下可播的正文（顺序不变；非 ASCII／空的一条都不留）。 */
+    public static List<String> broadcastableBodies(List<String> bodies) {
+        if (bodies == null || bodies.isEmpty()) {
+            return List.of();
+        }
+        final List<String> out = new java.util.ArrayList<>(bodies.size());
+        for (final String body : bodies) {
+            if (isBroadcastableBody(body)) {
+                out.add(body);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 一条热改播报的<b>整行</b>：{@code [创始现实修改模块] ＋ 正文 ＋（重复时 " xN"）}。
+     *
+     * <p>为什么"重复才缀 xN"：与 {@link #chatPhrase} 同一条口径（一次不缀、多次才缀），
+     * 这样用户样例里那三条（各只发生一次）逐字不带尾巴。
+     *
+     * @param body  正文（纯 ASCII；{@code "PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)"} 这种）
+     * @param count 本窗口同一条正文出现了几次（&lt; 1 一律当 1）
+     * @return 整行；正文不可播 ⇒ {@code null}（一条都不发）
+     */
+    public static String chatRawLine(String body, long count) {
+        if (!isBroadcastableBody(body)) {
+            return null;
+        }
+        final long n = count < 1L ? 1L : count;
+        return n > 1L ? CHAT_PREFIX + body + " x" + n : CHAT_PREFIX + body;
+    }
+
+    /**
+     * 一整个窗口的原始正文 → <b>每一条正文一行</b>（同一条正文重复 ⇒ 合并成 {@code xN}）。
+     *
+     * <p>🔴 这里**不用** {@link #SEP} 把多条连成一行：用户口径是"每个方法一行"。连接符那条规则
+     * 属于"类别合并"（{@link #chatLine}），与"按目标逐行播报"是两件事。
+     */
+    public static List<String> chatRawLines(Map<String, Long> merged) {
+        if (merged == null || merged.isEmpty()) {
+            return List.of();
+        }
+        final List<String> out = new java.util.ArrayList<>(merged.size());
+        for (final Map.Entry<String, Long> e : merged.entrySet()) {
+            final long n = e.getValue() == null ? 0L : e.getValue();
+            final String line = chatRawLine(e.getKey(), n);
+            if (line != null) {
+                out.add(line);
+            }
+        }
+        return out;
+    }
+
     /**
      * 🔴 <b>收件人 = 只有持有者本人</b>（<b>绝不广播</b>）。
      *
@@ -1928,24 +2100,22 @@ public final class ShanhaiGuardCore {
 
     /** ② 死亡流程复位判据的函数形态（正样本 = {@link #needsDeathFlowReset}）。 */
     private interface ResetFn {
-        boolean apply(boolean isDeadOrDying, int deathTime, float fieldHealth, boolean omnimobsSaysDead);
+        boolean apply(boolean isDeadOrDying, int deathTime, float fieldHealth);
     }
 
-    /** 🔴 ② 的判据本体：复位必须<b>只</b>在「死亡标志 ／ deathTime&gt;0 ／ 字段真值&lt;=0 ／ 对手自检说死」任一为真时发生。 */
+    /** 🔴 ② 的判据本体：复位必须<b>只</b>在「死亡标志 ／ deathTime&gt;0 ／ 字段真值&lt;=0」任一为真时发生。 */
     private static boolean resetOnlyWhenInDeathFlow(ResetFn fn) {
-        final boolean positives = fn.apply(true, 0, 20.0f, false)    // 死亡标志（血读数还满着也算死）
-                && fn.apply(false, 5, 20.0f, false)                  // 计时器在走
-                && fn.apply(false, 0, 0.0f, false)                   // 🔴 两个读接口都被绕过，只剩字段真值 = 0
-                && fn.apply(false, 0, -1.0f, false)                  // 字段真值是负的
-                && fn.apply(false, 0, 20.0f, true);                  // 🔴 ⑤ 对手自己的 checkEntityDead 说死
-        final boolean negatives = !fn.apply(false, 0, 20.0f, false)  // 活得好好的 ⇒ 不许动
-                && !fn.apply(false, 0, Float.NaN, false);            // 字段读不到 ＋ 别的判据都说没死 ⇒ 不许动
+        final boolean positives = fn.apply(true, 0, 20.0f)    // 死亡标志（血读数还满着也算死）
+                && fn.apply(false, 5, 20.0f)                  // 计时器在走
+                && fn.apply(false, 0, 0.0f)                   // 🔴 两个读接口都被绕过，只剩字段真值 = 0
+                && fn.apply(false, 0, -1.0f);                 // 字段真值是负的
+        final boolean negatives = !fn.apply(false, 0, 20.0f)  // 活得好好的 ⇒ 不许动
+                && !fn.apply(false, 0, Float.NaN);            // 字段读不到 ＋ 别的判据都说没死 ⇒ 不许动
         return positives && negatives;
     }
 
-    /** 【故意写坏】只看 {@code deathTime > 0}（把另三条判据都漏掉）。 */
-    private static boolean mutantResetOnlyDeathTime(boolean isDeadOrDying, int deathTime, float fieldHealth,
-                                                    boolean omnimobsSaysDead) {
+    /** 【故意写坏】只看 {@code deathTime > 0}（把另两条判据都漏掉）。 */
+    private static boolean mutantResetOnlyDeathTime(boolean isDeadOrDying, int deathTime, float fieldHealth) {
         return deathTime > 0;
     }
 
@@ -2006,17 +2176,6 @@ public final class ShanhaiGuardCore {
     private static Decision realDirectProof(float expected, boolean wrote, float fieldHealthValue,
                                            float getHealthValue) {
         return directWriteProof(expected, wrote, fieldHealthValue);
-    }
-
-    /** ⑤ 计数器判据的函数形态（正样本 = {@link #shouldResetOmnimobsCounter}）。 */
-    private interface CounterFn {
-        boolean apply(int counterValue);
-    }
-
-    /** 🔴 ⑤ 的判据本体：只在 {@code counter >= 5} 时清零（4 ／ 0 ／ -1 一律不动别人的数据）。 */
-    private static boolean resetCounterOnlyFromFive(CounterFn fn) {
-        return fn.apply(5) && fn.apply(7) && fn.apply(1234)
-                && !fn.apply(4) && !fn.apply(0) && !fn.apply(-1);
     }
 
     /** 记录调用的救回实现（离线判据用；{@code addReturns} 就是要喂给判据的返回值）。 */
@@ -3087,35 +3246,48 @@ public final class ShanhaiGuardCore {
 
         // ② 服务端每 tick 看门狗：判"是不是已经进了死亡流程"
         expect("⑮②", "isDeadOrDying=true（血读数还满着）⇒ 要复位", true,
-                needsDeathFlowReset(true, 0, MAX, false),
-                "→ " + deathFlowResetDecision(true, 0, MAX, false, true).reason);
+                needsDeathFlowReset(true, 0, MAX),
+                "→ " + deathFlowResetDecision(true, 0, MAX, true).reason);
         expect("⑮②", "deathTime=5 > 0 ⇒ 要复位", true,
-                needsDeathFlowReset(false, 5, MAX, false),
-                "→ " + deathFlowResetDecision(false, 5, MAX, false, true).reason);
+                needsDeathFlowReset(false, 5, MAX),
+                "→ " + deathFlowResetDecision(false, 5, MAX, true).reason);
         expect("⑮②", "🔴 两个读接口都被绕过：字段真值=0（getHealth 说 20）⇒ 仍要复位", true,
-                needsDeathFlowReset(false, 0, 0.0f, false),
-                "→ " + deathFlowResetDecision(false, 0, 0.0f, false, true).reason);
+                needsDeathFlowReset(false, 0, 0.0f),
+                "→ " + deathFlowResetDecision(false, 0, 0.0f, true).reason);
         expect("⑮②", "字段真值=-1 ⇒ 要复位", true,
-                needsDeathFlowReset(false, 0, -1.0f, false),
-                "→ " + deathFlowResetDecision(false, 0, -1.0f, false, true).reason);
-        expect("⑮②", "🔴 ⑤ 我们三条都说没死、对手自己的 checkEntityDead 说死 ⇒ 仍要复位", true,
-                needsDeathFlowReset(false, 0, MAX, true),
-                "→ " + deathFlowResetDecision(false, 0, MAX, true, true).reason);
-        expect("⑮②", "字段真值=20 ＋ 没死 ＋ 计时器归零 ＋ 对手也不说死 ⇒ 不复位（不许每 tick 动活人）", false,
-                needsDeathFlowReset(false, 0, MAX, false),
-                "→ " + deathFlowResetDecision(false, 0, MAX, false, true).reason);
+                needsDeathFlowReset(false, 0, -1.0f),
+                "→ " + deathFlowResetDecision(false, 0, -1.0f, true).reason);
+        expect("⑮②", "字段真值=20 ＋ 没死 ＋ 计时器归零 ⇒ 不复位（不许每 tick 动活人）", false,
+                needsDeathFlowReset(false, 0, MAX),
+                "→ " + deathFlowResetDecision(false, 0, MAX, true).reason);
         expect("⑮②", "字段真值读不到（NaN）＋ 别的判据都说没死 ⇒ 不复位（这一条不参与判断）", false,
-                needsDeathFlowReset(false, 0, Float.NaN, false),
-                "→ " + deathFlowResetDecision(false, 0, Float.NaN, false, true).reason);
+                needsDeathFlowReset(false, 0, Float.NaN),
+                "→ " + deathFlowResetDecision(false, 0, Float.NaN, true).reason);
         expect("⑮②", "enabled=false ⇒ 不复位", false,
-                deathFlowResetDecision(true, 5, 0.0f, true, false).yes,
-                "→ " + deathFlowResetDecision(true, 5, 0.0f, true, false).reason);
-        expect("⑮②", "判据本体对【本工程实现】成立（5 个该复位 ＋ 2 个不该）", true,
+                deathFlowResetDecision(true, 5, 0.0f, false).yes,
+                "→ " + deathFlowResetDecision(true, 5, 0.0f, false).reason);
+        expect("⑮②", "判据本体对【本工程实现】成立（4 个该复位 ＋ 2 个不该）", true,
                 resetOnlyWhenInDeathFlow(ShanhaiGuardCore::needsDeathFlowReset),
                 "→ " + resetOnlyWhenInDeathFlow(ShanhaiGuardCore::needsDeathFlowReset));
-        expect("⑮②负对照", "突变体「只看 deathTime>0」漏掉另外三条 ⇒ 判据【报红】", false,
+        expect("⑮②负对照", "突变体「只看 deathTime>0」漏掉另外两条 ⇒ 判据【报红】", false,
                 resetOnlyWhenInDeathFlow(ShanhaiGuardCore::mutantResetOnlyDeathTime),
                 "→ " + resetOnlyWhenInDeathFlow(ShanhaiGuardCore::mutantResetOnlyDeathTime));
+
+        // 🔴 读侧交叉校验（与具体 mod 无关：只比原版两个读数 —— getHealth() 与同步血量字段真值）
+        expect("⑮读侧", "字段 20 ／ 读 20（相等）⇒ 不算被改写", false, readSideMismatch(20.0f, 20.0f),
+                "→ " + readSideMismatch(20.0f, 20.0f));
+        expect("⑮读侧", "字段 20 ／ 读 19.995（差 0.005 ≤ 容差 0.01）⇒ 不算", false,
+                readSideMismatch(19.995f, 20.0f), "→ " + readSideMismatch(19.995f, 20.0f));
+        expect("⑮读侧", "字段 20 ／ 读 0（活人被报成死）⇒ 🔴 算被改写", true, readSideMismatch(0.0f, 20.0f),
+                "→ " + readSideMismatch(0.0f, 20.0f));
+        expect("⑮读侧", "字段 20 ／ 读 -57（实机日志里的负血）⇒ 算被改写", true, readSideMismatch(-57.0f, 20.0f),
+                "→ " + readSideMismatch(-57.0f, 20.0f));
+        expect("⑮读侧", "字段 20 ／ 读 25（读数偏大）⇒ 不算（这一条只抓「往下改」）", false,
+                readSideMismatch(25.0f, 20.0f), "→ " + readSideMismatch(25.0f, 20.0f));
+        expect("⑮读侧", "字段读不到（NaN）⇒ 不猜（不算）", false, readSideMismatch(0.0f, Float.NaN),
+                "→ " + readSideMismatch(0.0f, Float.NaN));
+        expect("⑮读侧", "读数读不到（NaN）⇒ 不猜（不算）", false, readSideMismatch(Float.NaN, 20.0f),
+                "→ " + readSideMismatch(Float.NaN, 20.0f));
 
         // ④ die(DamageSource) 直接拒绝
         expect("⑮④", "开关开 ＋ 受保护 ⇒ 拒绝死亡", true, shouldRefuseDie(true, true),
@@ -3187,29 +3359,163 @@ public final class ShanhaiGuardCore {
                 "SET_HEALTH=" + HealChannel.SET_HEALTH.label() + " ／ DIRECT=" + HealChannel.DIRECT.label()
                         + " ／ FAILED=" + HealChannel.FAILED.label());
 
-        // ─────── ⑯【⑤ 对手桥】用对手自己的 public API 反向修复（阈值判据；失效自动退回值层） ───────
-        OUT.println("── ⑯【⑤ 对手桥】清对手的单向锁存计数器（" + OMNIMOBS_COUNTER_KEY
-                + "，阈值 " + OMNIMOBS_COUNTER_LOCKED + "）──");
-        OUT.println("· 对手类/方法（反射调用，全部 public static）：" + OMNIMOBS_UTIL_CLASS + "."
-                + OMNIMOBS_METHOD_SET_DELTA + " / " + OMNIMOBS_METHOD_GET_DELTA + " / " + OMNIMOBS_METHOD_CHECK_DEAD);
-        OUT.println("· ⚠ 这层【依赖对手的类名/方法名/数据键】：换版本就失效 ⇒ 失效时只记一行"
-                + " `omnimobs_bridge unavailable` 并自动退回值层");
-        expect("⑯计数", "counter=5（刚好锁存）⇒ 清零", true, shouldResetOmnimobsCounter(5),
-                "→ " + omnimobsCounterDecision(5).reason);
-        expect("⑯计数", "counter=7 ⇒ 清零", true, shouldResetOmnimobsCounter(7),
-                "→ " + omnimobsCounterDecision(7).reason);
-        expect("⑯计数", "counter=4（还没锁存）⇒ 不动它", false, shouldResetOmnimobsCounter(4),
-                "→ " + omnimobsCounterDecision(4).reason);
-        expect("⑯计数", "counter=0（键不存在时 getInt 的读数）⇒ 不动它", false, shouldResetOmnimobsCounter(0),
-                "→ " + omnimobsCounterDecision(0).reason);
-        expect("⑯计数", "counter=-1（怪值）⇒ 不动它（不许乱写别人的数据）", false, shouldResetOmnimobsCounter(-1),
-                "→ " + omnimobsCounterDecision(-1).reason);
-        expect("⑯计数", "判据本体对【本工程实现】成立（5/7/1234 该清，4/0/-1 不该）", true,
-                resetCounterOnlyFromFive(ShanhaiGuardCore::shouldResetOmnimobsCounter),
-                "→ " + resetCounterOnlyFromFive(ShanhaiGuardCore::shouldResetOmnimobsCounter));
-        expect("⑯计数负对照", "阈值写成 >=6 的突变体（counter=5 时不清）⇒ 判据【报红】", false,
-                resetCounterOnlyFromFive(value -> value >= 6),
-                "→ " + resetCounterOnlyFromFive(value -> value >= 6));
+        // ─────── ⑰【热改播报】三条新文案逐字 ＋ 每个方法一行 ＋ 同一条合并 xN（2026-11-08） ───────
+        //
+        // 🔴 这一节的样本文案形态是【用户需求里给的样例】，**格式一个字都不许改**；
+        //    其中的模组名 / 类名一律是中立占位（examplemod / EntityHelper / Gizmo）——
+        //    源码里不许出现任何具体第三方模组的名字，样本也不能例外：
+        //   [创始现实修改模块] PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)
+        //   [创始现实修改模块] PATCHED examplemod EntityHelper#playDamageSounds -> RETURN (die)
+        //   [创始现实修改模块] PATCHED examplemod Gizmo#m_8119_ -> RETURN (motion)
+        //   另外两条（同一种形，括号里换成拒绝／回退的原因原值）：
+        //   [创始现实修改模块] PATCH_REFUSED examplemod EntityHelper#forceSetHealth (gate_already_patched)
+        //   [创始现实修改模块] PATCH_REVERTED examplemod EntityHelper#forceSetHealth (observed_only)
+        // 注意 SRG 名 m_8119_ 是【原样保留】的（下划线、尾下划线都在），格式化那边不许"美化"。
+        OUT.println("── ⑰【热改播报】PATCHED ／ PATCH_REFUSED ／ PATCH_REVERTED 三条逐字"
+                + "（[创始现实修改模块] ＋ 那一个半角空格）──");
+        final String PATCH_BODY_1 = "PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)";
+        final String PATCH_BODY_2 = "PATCHED examplemod EntityHelper#playDamageSounds -> RETURN (die)";
+        final String PATCH_BODY_3 = "PATCHED examplemod Gizmo#m_8119_ -> RETURN (motion)";
+        final String PATCH_BODY_REFUSED = "PATCH_REFUSED examplemod EntityHelper#forceSetHealth (gate_already_patched)";
+        final String PATCH_BODY_REVERTED = "PATCH_REVERTED examplemod EntityHelper#forceSetHealth (observed_only)";
+        final String[] PATCH_SAMPLE_LINES = {
+            "[创始现实修改模块] PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)",
+            "[创始现实修改模块] PATCHED examplemod EntityHelper#playDamageSounds -> RETURN (die)",
+            "[创始现实修改模块] PATCHED examplemod Gizmo#m_8119_ -> RETURN (motion)",
+        };
+        final String[] PATCH_SAMPLE_BODIES = { PATCH_BODY_1, PATCH_BODY_2, PATCH_BODY_3 };
+        int patchExact = 0;
+        for (int i = 0; i < PATCH_SAMPLE_BODIES.length; i++) {
+            final String got = chatRawLine(PATCH_SAMPLE_BODIES[i], 1L);
+            final boolean same = PATCH_SAMPLE_LINES[i].equals(got);
+            if (same) {
+                patchExact++;
+            }
+            OUT.println(String.format("    PATCHED#%d 逐字读数 = %s   %s", i + 1, got,
+                    same ? "✓" : "✗ 期望「" + PATCH_SAMPLE_LINES[i] + "」"));
+        }
+        expect("⑰三条", "三条 PATCHED 整行逐字 = 用户样例（3/3）", true, patchExact == 3,
+                patchExact + "/3 逐字相等");
+        expect("⑰三条", "PATCH_REFUSED 整行逐字（括号里是 detail 原值）", true,
+                "[创始现实修改模块] PATCH_REFUSED examplemod EntityHelper#forceSetHealth (gate_already_patched)"
+                        .equals(chatRawLine(PATCH_BODY_REFUSED, 1L)),
+                "→ " + chatRawLine(PATCH_BODY_REFUSED, 1L));
+        expect("⑰三条", "PATCH_REVERTED 整行逐字（括号里是 reason 原值）", true,
+                "[创始现实修改模块] PATCH_REVERTED examplemod EntityHelper#forceSetHealth (observed_only)"
+                        .equals(chatRawLine(PATCH_BODY_REVERTED, 1L)),
+                "→ " + chatRawLine(PATCH_BODY_REVERTED, 1L));
+        int patchPrefixOk = 0;
+        int patchAsciiOk = 0;
+        final StringBuilder patchDetail = new StringBuilder();
+        for (int i = 0; i < PATCH_SAMPLE_BODIES.length; i++) {
+            final String one = chatRawLine(PATCH_SAMPLE_BODIES[i], 1L);
+            final boolean p = hasFounderPrefix(one);
+            final boolean a = bodyIsPureAscii(one);
+            if (p) {
+                patchPrefixOk++;
+            }
+            if (a) {
+                patchAsciiOk++;
+            }
+            patchDetail.append("\n      ").append(one).append("   [前缀=").append(p)
+                    .append(" ASCII=").append(a).append(']');
+        }
+        OUT.println("· 三条逐条读数：" + patchDetail);
+        expect("⑰三条", "三条都逐字以 [创始现实修改模块]␠ 开头（那一个半角空格）", true,
+                patchPrefixOk == 3, patchPrefixOk + "/3 前缀逐字");
+        expect("⑰三条", "三条正文都纯 ASCII（⑭ 那条判据对这条路同样成立）", true,
+                patchAsciiOk == 3, patchAsciiOk + "/3 纯 ASCII");
+        expect("⑰三条", "三条的动作词逐字 = PATCHED（不是 PATCH／PATCHED_OK 之类）", true,
+                PATCH_SAMPLE_BODIES[0].startsWith(PATCH_WORD_PATCHED + " ")
+                        && PATCH_BODY_REFUSED.startsWith(PATCH_WORD_REFUSED + " ")
+                        && PATCH_BODY_REVERTED.startsWith(PATCH_WORD_REVERTED + " "),
+                "三个常量 = " + PATCH_WORD_PATCHED + " / " + PATCH_WORD_REFUSED + " / " + PATCH_WORD_REVERTED);
+
+        // 一次 patch 改了同类多个方法 ⇒ 每个方法一行（绝不拼成一行）
+        final LogGate rawGate = new LogGate();
+        final LogGate.Batch rawBatch = rawGate.admitRawBatch(
+                new String[] { PATCH_BODY_1, PATCH_BODY_2, PATCH_BODY_3 }, 0L);
+        final List<String> rawBatchLines = rawBatch == null ? List.of() : rawBatch.rawLines();
+        note("一次投递 3 个方法的读数 → " + rawBatchLines);
+        expect("⑰逐行", "一次改同类 3 个方法 ⇒ 出 3 行（不是拼成 1 行）", true, rawBatchLines.size() == 3,
+                "行数=" + rawBatchLines.size() + " ／ " + rawBatchLines);
+        expect("⑰逐行", "这 3 行逐字 = 三条样例（顺序按首次出现）", true,
+                rawBatchLines.equals(List.of(PATCH_SAMPLE_LINES)), "→ " + rawBatchLines);
+        expect("⑰逐行", "这批只有原始正文 ⇒ 旧日志行 logLine()=null（不出一条空壳日志）", true,
+                rawBatch != null && rawBatch.logLine() == null,
+                "logLine=" + (rawBatch == null ? "（本窗口没落盘，不该）" : rawBatch.logLine()));
+
+        // 同类合并：同一个 target 连续多次 gate_already_patched ⇒ 一行 xN（不许每 tick 刷屏）
+        final LogGate rawMergeGate = new LogGate();
+        rawMergeGate.admitRawBatch(new String[] { PATCH_BODY_REFUSED }, 0L);      // 第一行当场落盘
+        rawMergeGate.admitRawBatch(new String[] { PATCH_BODY_REFUSED }, 100L);    // 下面两次进待合并表
+        rawMergeGate.admitRawBatch(new String[] { PATCH_BODY_REFUSED }, 200L);
+        final LogGate.Batch mergedRaw = rawMergeGate.admitRawBatch(new String[] { PATCH_BODY_REFUSED }, 1_200L);
+        final List<String> mergedRawLines = mergedRaw == null ? List.of() : mergedRaw.rawLines();
+        expect("⑰合并", "同一个 target 连续 3 次拒绝 ⇒ 一行 x3（不刷屏）", true,
+                mergedRawLines.size() == 1
+                        && ("[创始现实修改模块] PATCH_REFUSED examplemod EntityHelper#forceSetHealth"
+                                + " (gate_already_patched) x3").equals(mergedRawLines.get(0)),
+                "→ " + mergedRawLines);
+
+        // 节流：同一秒里第 2 次开始一律不发（与类别那一路共用同一个 lastEmitMillis）
+        final LogGate rawRateGate = new LogGate();
+        int rawEmitted = 0;
+        for (int i = 0; i < 5; i++) {
+            final LogGate.Batch b = rawRateGate.admitRawBatch(new String[] { "PATCHED examplemod X#m" + i + " -> RETURN (pos)" }, i * 100L);
+            if (b != null && !b.rawLines().isEmpty()) {
+                rawEmitted++;
+            }
+        }
+        expect("⑰节流", "同一秒里投 5 条不同正文 ⇒ 只落 1 批（每秒最多一行）", true, rawEmitted == 1,
+                "落盘批数=" + rawEmitted);
+        // 类别那一路落盘时，会把攒着的原始正文一起带走（否则热改播报会被拖到下一场战斗）
+        final LogGate sharedGate = new LogGate();
+        sharedGate.admitRawBatch(new String[] { PATCH_BODY_1 }, 0L);   // 占掉这一秒
+        sharedGate.admitRawBatch(new String[] { PATCH_BODY_2 }, 100L); // 进待合并表
+        final LogGate.Batch kindBatch = sharedGate.admitBatch(KIND_DAMAGE, 1_100L);
+        expect("⑰共用闸门", "类别落盘那一拍把攒着的原始正文一起带走（同一份节流、不另开通道）", true,
+                kindBatch != null && kindBatch.rawLines().size() == 1
+                        && kindBatch.chatLine() != null,
+                "rawLines=" + (kindBatch == null ? null : kindBatch.rawLines())
+                        + " ；chatLine=" + (kindBatch == null ? null : kindBatch.chatLine()));
+
+        // ─────── ⑱【负对照】正文非 ASCII ⇒ 拒收；前缀少那一个空格 ⇒ 报红 ───────
+        OUT.println("── ⑱【负对照】非 ASCII 正文必须被拒收 ／ 前缀少那一个空格必须报红 ──");
+        final String cjkPatchBody = "PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (血量)";
+        expect("⑱非ASCII", "正文塞一个中文 ⇒ isBroadcastableBody【报红】（正样本同时为真）", true,
+                isBroadcastableBody(PATCH_BODY_1) && !isBroadcastableBody(cjkPatchBody),
+                "正样本=" + isBroadcastableBody(PATCH_BODY_1) + " ；塞中文那条=" + isBroadcastableBody(cjkPatchBody));
+        expect("⑱非ASCII", "正文塞一个中文 ⇒ chatRawLine 返回 null（这条不发）", true,
+                chatRawLine(PATCH_BODY_1, 1L) != null && chatRawLine(cjkPatchBody, 1L) == null,
+                "正样本=" + chatRawLine(PATCH_BODY_1, 1L) + " ；塞中文那条=" + chatRawLine(cjkPatchBody, 1L));
+        expect("⑱非ASCII", "全角括号也算非 ASCII（（health）这种写法必须被拒）", true,
+                !isBroadcastableBody("PATCHED examplemod EntityHelper#forceSetHealth -> RETURN （health）"),
+                "读数=" + isBroadcastableBody("PATCHED examplemod EntityHelper#forceSetHealth -> RETURN （health）"));
+        expect("⑱非ASCII", "正文带换行 ⇒ 也拒（一行就必须是一行，不许顶出两行）", true,
+                !isBroadcastableBody("PATCHED examplemod X#m -> RETURN (health)\nPATCHED examplemod Y#m -> RETURN (die)"),
+                "读数=" + isBroadcastableBody("PATCHED examplemod X#m -> RETURN (health)\nPATCHED examplemod Y#m -> RETURN (die)"));
+        final LogGate badBodyGate = new LogGate();
+        final LogGate.Batch badBodyBatch = badBodyGate.admitRawBatch(new String[] { cjkPatchBody }, 0L);
+        expect("⑱非ASCII", "整批都是非 ASCII ⇒ admitRawBatch 返回 null（一条都不发）", true,
+                badBodyBatch == null, "批次=" + badBodyBatch);
+        final LogGate.Batch afterBad = badBodyGate.admitRawBatch(new String[] { PATCH_BODY_1 }, 0L);
+        expect("⑱非ASCII", "而且它没占那一秒的名额：紧接着投合法正文 ⇒ 当场就能发", true,
+                afterBad != null && afterBad.rawLines().size() == 1,
+                "→ " + (afterBad == null ? null : afterBad.rawLines()));
+        // 前缀后面那一个半角空格（与 ⑭ 里 MUTANT_NO_SPACE_PREFIX_LINE 同一条判据，这里针对新的整行）
+        final String noSpacePatchLine = "[创始现实修改模块]PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)";
+        expect("⑱空格", "前缀丢尾随空格 ⇒ hasFounderPrefix【报红】（正样本为真）", true,
+                hasFounderPrefix(chatRawLine(PATCH_BODY_1, 1L)) && !hasFounderPrefix(noSpacePatchLine),
+                "正样本=" + hasFounderPrefix(chatRawLine(PATCH_BODY_1, 1L))
+                        + " ；少空格那条=" + hasFounderPrefix(noSpacePatchLine) + "（" + noSpacePatchLine + "）");
+        expect("⑱空格", "同一条丢空格的整行 ⇒ bodyIsPureAscii 也【报红】", true,
+                bodyIsPureAscii(chatRawLine(PATCH_BODY_1, 1L)) && !bodyIsPureAscii(noSpacePatchLine),
+                "正样本=" + bodyIsPureAscii(chatRawLine(PATCH_BODY_1, 1L))
+                        + " ；少空格那条=" + bodyIsPureAscii(noSpacePatchLine));
+        expect("⑱空格", "少空格那条**逐字**不等于正常整行（用户样例逐字有形，粘成一坨就是另一条）", true,
+                !PATCH_SAMPLE_LINES[0].equals(noSpacePatchLine),
+                "少空格那条=" + noSpacePatchLine);
         OUT.println();
 
         OUT.println("=== 汇总：判据 " + checks + " 条，报红 " + reds + " 条 ⇒ "

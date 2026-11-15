@@ -168,6 +168,252 @@ public final class ShanhaiRecipeFingerprintCapture {
         // 原地装进 duration 缓存表（同一窗口的第二张表）。落在这里而不是上面，
         // 是为了让"指纹为空"那条 error 仍然按原样先打出来。
         ShanhaiRecipeDuration.installOriginals(orig);
+        // 🆕 「已删除配方」列表的产物补份（见方法注释）。
+        backfillRemovedSnapshots(event);
+    }
+
+    /**
+     * 🆕 <b>给"已经被删掉的配方"补一份原样快照</b>（{@code config/shanhai/removed_recipe_snapshots.json}）。
+     *
+     * <h4>为什么必须在这个窗口里做</h4>
+     * 覆盖文件里 {@code op=remove} 的条目<b>只有 id/type/base_fp</b>，<b>没有产物</b>
+     * （{@link ShanhaiRecipeOverrideStore#makeRemoveEntry}）；而"删掉之后主产物是什么"这件事
+     * <b>只在 KubeJS 的配方事件里还看得到</b>：那条被删的配方仍然躺在
+     * {@code event.takenIds / originalRecipes / addedRecipes} 里
+     * （本机字节码实证：{@code RecipesEventJS.remove} 走 {@code IDFilter} 那一支时只调
+     * {@code RecipeJS.remove()} ⇒ 只把 {@code removed} 置 true，<b>不</b>从 map 里摘掉；
+     * 现场见 {@code temp\editor-restore\ev\RecipesEventJS.javap.txt:1347} 与
+     * {@code RecipeJS.javap.txt:1100}）。出了这个窗口 {@code RecipeJS} 就被丢弃了。
+     *
+     * <h4>🔴 2026-11-07 修的两个真因（用户实测「全是主产物未知，点进去输入输出为空」）</h4>
+     * <ol>
+     *   <li><b>漏了 {@code addedRecipes} 这个源</b>：用户那 17 条 {@code op=remove} 里，
+     *       16 条是 <b>KubeJS 脚本新增</b>的配方 —— 覆盖层日志逐条写着
+     *       {@code lookup id=… source=addedRecipes targets=1}，它们只存在于 {@code event.addedRecipes}，
+     *       而老实现只查 {@code takenIds} + {@code originalRecipes} ⇒ 当场被判 {@code missing}。
+     *       实测读数：{@code snapshot_backfill wanted=17 wrote=1 missing=16}（latest.log:3591）
+     *       ⇒ 列表 {@code with_main=1/17}（latest.log:13041）。</li>
+     *   <li><b>脚本新增配方的 {@code RecipeJS.json} 是个 18 字符的空壳</b>
+     *       {@code {"type":"unknown"}}。字节码根因：{@code RecipeJS.createRecipe()} 先判
+     *       {@code if (removed) return null;}，而"把组件值写进 json"的 {@code serialize()} 在那之后
+     *       才调用（{@code RecipeJS.javap.txt} 里 {@code createRecipe} 偏移 0-8 / 23-27）
+     *       ⇒ <b>被删的脚本配方永远不会被 serialize</b>，{@code json} 一直是空壳；
+     *       {@code save()} 只置 {@code changed=true}，不写 json（同文件 498-505）。
+     *       旁证：{@code duration_orig_installed unique_ids=52703}（latest.log:3589）明显小于
+     *       指纹缓存 69231 —— 少的那一万多条正是 addedRecipes，它们连 {@code duration} 都没有。
+     *       ⇒ 光把 {@code addedRecipes} 加进查找还不够，必须<b>主动 {@code serialize()} 一次再读</b>，
+     *       而且读出来仍不可用就<b>不写</b>（写空壳等于把"缺快照"伪装成"有快照但未知"，
+     *       并且让下次补份永远跳过它）。</li>
+     * </ol>
+     *
+     * <h4>代价与安全</h4>
+     * 只对覆盖文件里<b>确实有</b> remove/disable 条目的 id 干活（通常是几条到几十条），
+     * 每条存一份 json；已经存过<b>可用</b>的一份直接跳过。任何一条失败都只打一条 warn，
+     * <b>绝不影响</b>上面那两条既有缓存（指纹 / 原始时长）。
+     */
+    private static void backfillRemovedSnapshots(RecipesEventJS event) {
+        final long t0 = System.nanoTime();
+        int wanted = 0;
+        int missing = 0;
+        int repaired = 0;
+        int unusable = 0;
+        int fromTaken = 0;
+        int fromOriginal = 0;
+        int fromAdded = 0;
+        final java.util.List<ShanhaiRemovedRecipeSnapshot.Pending> pending = new java.util.ArrayList<>();
+        try {
+            final java.util.List<String> removed = ShanhaiRecipeOverrideStore.removedIds();
+            wanted = removed.size();
+            if (wanted == 0) {
+                ShanhaiMod.LOGGER.info("{} snapshot_backfill wanted=0（覆盖层里没有 op=remove/disable 条目）", PREFIX);
+                return;
+            }
+            // 已有**可用**的那些先筛掉（一次读全表，别每条都读一遍文件）。
+            // 🔴 注意口径：判的是"已有那份能不能用"，不是"id 在不在表里" ——
+            //    旧版本写进去的空壳必须能被打回重做，否则永远不会被修好。
+            final java.util.Map<String, JsonObject> have = ShanhaiRemovedRecipeSnapshot.allJson();
+            final java.util.Set<String> wantedIds = new java.util.LinkedHashSet<>(removed);
+
+            // 源 ③：addedRecipes（KubeJS 脚本新增的那批）。**单次线性扫**，只收 wanted 里的 id。
+            //   为什么不用 takenIds：脚本新增的配方不在 takenIds 里（实测 missing=16 就是这么来的）。
+            final java.util.Map<String, RecipeJS> addedById = new java.util.HashMap<>();
+            try {
+                final Collection<RecipeJS> added = event.addedRecipes;
+                if (added != null) {
+                    for (RecipeJS js : added) {
+                        if (js == null) {
+                            continue;
+                        }
+                        String id = null;
+                        try {
+                            final ResourceLocation rid = js.kjs$getOrCreateId();
+                            id = rid == null ? null : rid.toString();
+                        } catch (Throwable ignored) {
+                            id = null;
+                        }
+                        if (id != null && wantedIds.contains(id)) {
+                            addedById.put(id, js);
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} snapshot_backfill addedRecipes_scan_failed err={}", PREFIX, t.toString());
+            }
+
+            for (String rid : removed) {
+                if (rid == null || rid.isEmpty()) {
+                    continue;
+                }
+                if (ShanhaiDeletedRecipeList.isUsableRecipeJson(have.get(rid))) {
+                    continue;                          // 已经有好的那份 ⇒ 不动
+                }
+                final ResourceLocation id = ResourceLocation.tryParse(rid);
+                if (id == null) {
+                    missing++;
+                    continue;
+                }
+                RecipeJS js = null;
+                String from = "takenIds";
+                try {
+                    js = event.takenIds == null ? null : event.takenIds.get(id);
+                    if (js != null) {
+                        fromTaken++;
+                    }
+                } catch (Throwable ignored) {
+                    js = null;
+                }
+                if (js == null && event.originalRecipes != null) {
+                    try {
+                        js = event.originalRecipes.get(id);
+                        if (js != null) {
+                            fromOriginal++;
+                            from = "originalRecipes";
+                        }
+                    } catch (Throwable ignored) {
+                        js = null;
+                    }
+                }
+                if (js == null) {
+                    js = addedById.get(rid);
+                    if (js != null) {
+                        fromAdded++;
+                        from = "addedRecipes";
+                    }
+                }
+                if (js == null) {
+                    missing++;
+                    continue;
+                }
+                final RecipeJS found = js;
+                // type 的真值来源 = KubeJS 自己（不是我们猜的）：它既写进条目，也在
+                // "json 是空壳"时用来把 type 补回 json（见 ShanhaiDeletedRecipeList#withTypeFrom）。
+                String type = null;
+                try {
+                    final ResourceLocation t = found.kjs$getType();
+                    type = t == null ? null : t.toString();
+                } catch (Throwable ignored) {
+                    type = null;
+                }
+                final JsonObject cur = safeJson(found);
+                // 🔴 三段修复链（见 ShanhaiDeletedRecipeList#repairRecipeJson 的注释）：
+                //    ① 现有 json 就够 ⇒ 不动它；② serialize()（值缺失会抛 RecipeExceptionJS，纯核里兜住）；
+                //    ③ 翻 removed 借 createRecipe() 把 type/组件补齐（finally 必还原）。
+                //    返回值（Recipe<?>）直接丢弃、不注册；newRecipe 一个字节都不动。
+                final ShanhaiDeletedRecipeList.Repair rep = ShanhaiDeletedRecipeList.repairRecipeJson(
+                        cur, type, new ShanhaiDeletedRecipeList.RepairSource() {
+                            @Override
+                            public JsonObject peekJson() {
+                                return safeJson(found);
+                            }
+
+                            @Override
+                            public JsonObject serializeJson() {
+                                found.serialize();          // 值缺失 ⇒ throw RecipeExceptionJS（纯核里 catch）
+                                return safeJson(found);
+                            }
+
+                            @Override
+                            public JsonObject flipAndCreateJson() {
+                                return ShanhaiDeletedRecipeList.flipAndCreate(
+                                        found.removed,
+                                        v -> found.removed = Boolean.TRUE.equals(v),
+                                        () -> found.createRecipe(),
+                                        () -> safeJson(found));
+                            }
+                        });
+                final JsonObject json = rep == null ? null : rep.json();
+                if (json == null) {
+                    unusable++;
+                    ShanhaiMod.LOGGER.warn("{} snapshot_backfill_unusable id={} from={} type={} "
+                                    + "cur_chars={} cur_keys={} why={}"
+                                    + "（补不到完整内容 ⇒ 不写半成品；列表会显示「缺快照」）",
+                            PREFIX, rid, from, type, lenOf(cur), keysOf(cur),
+                            rep == null ? "(null)" : rep.why());
+                    continue;
+                }
+                if (!"raw".equals(rep.via())) {
+                    repaired++;
+                    ShanhaiMod.LOGGER.info("{} snapshot_backfill_repaired id={} from={} type={} snapshot_via={} "
+                                    + "keys={} why={}",
+                            PREFIX, rid, from, type, rep.via(), keysOf(json), rep.why());
+                }
+                pending.add(new ShanhaiRemovedRecipeSnapshot.Pending(rid, type, json));
+            }
+            // 一次读 + 一次写（见 ShanhaiRemovedRecipeSnapshot#putAllIfMissingOrUnusable 的理由）
+            final int wrote = ShanhaiRemovedRecipeSnapshot.putAllIfMissingOrUnusable(pending);
+            ShanhaiMod.LOGGER.info("{} snapshot_backfill wanted={} wrote={} missing={} repaired={} unusable={} "
+                            + "sources[takenIds={} originalRecipes={} addedRecipes={}] ms={} "
+                            + "（missing = 三个源里都没有它；unusable = 找到了但拿不到真内容。"
+                            + "两者都 ⇒ 列表里显示「缺快照」，不会假装有）",
+                    PREFIX, wanted, wrote, missing, repaired, unusable,
+                    fromTaken, fromOriginal, fromAdded, (System.nanoTime() - t0) / 1_000_000L);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} snapshot_backfill_failed wanted={} pending={} err={}（不影响指纹/时长那两张表）",
+                    PREFIX, wanted, pending.size(), t.toString());
+        }
+    }
+
+    /** 读 {@code RecipeJS.json}（不许抛：这个字段是 KubeJS 的公共字段，但读的时候可能被改成 null）。 */
+    private static JsonObject safeJson(RecipeJS js) {
+        try {
+            return js == null ? null : js.json;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 一份 json 的字符数（日志用）。 */
+    private static int lenOf(JsonObject o) {
+        try {
+            return o == null ? -1 : o.toString().length();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /** 一份 json 的键名（日志用，最多 10 个 —— 只为看清"是不是空壳"）。 */
+    private static String keysOf(JsonObject o) {
+        if (o == null) {
+            return "(null)";
+        }
+        try {
+            final StringBuilder sb = new StringBuilder("[");
+            int n = 0;
+            for (String k : o.keySet()) {
+                if (n > 0) {
+                    sb.append(',');
+                }
+                if (n >= 10) {
+                    sb.append('…');
+                    break;
+                }
+                sb.append(k);
+                n++;
+            }
+            return sb.append(']').toString();
+        } catch (Throwable t) {
+            return "(?)";
+        }
     }
 
     private static int harvest(Map<ResourceLocation, RecipeJS> source, Map<ResourceLocation, String> out,

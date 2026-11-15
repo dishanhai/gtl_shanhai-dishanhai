@@ -38,6 +38,27 @@ import java.util.Locale;
  * <h2>4. 为什么所有时间函数都吃一个显式的 {@code nowNanos}</h2>
  * 同 {@link ShanhaiHoloMenuPending}：只有把"现在几点"当参数传进来，
  * 自检才能构造"开了 0.1 秒 / 关了 0.2 秒 / 走到一半反转"这种确定性现场。
+ *
+ * <h2>5. 🔴 推进点：客户端 tick（不是渲染帧）—— 2026-10-10 的改动</h2>
+ * <b>原来</b>{@link #advanceFrame} 由渲染器在 {@code RenderLevelStageEvent(AFTER_PARTICLES)} 里调，
+ * 也就是<b>一帧的最末尾</b>。用户报的「把猫放出来就看不到 5 块板」的真因就在那里：
+ * 两次右键（开 → 关）落在<b>同一个没走完的帧</b>里（间隔 1.53 s）⇒ 那一帧的 AFTER_PARTICLES
+ * 永远没走到 ⇒ 本类<b>一次都没被推进</b> ⇒ {@code progress} 停在 0 ⇒ {@link #hidden()} 为真 ⇒
+ * 渲染器在画板之前就 return（用户看到的就是"板上不来"）。
+ *
+ * <p><b>现在</b>推进点是 {@code TickEvent.ClientTickEvent.Phase.END}（见
+ * {@code ShanhaiHoloMenuRenderer#onClientTickEnd()}）。选它的理由是<b>顺序</b>，不是频率：
+ * <pre>
+ *   Minecraft.tick()   （javap 取证：offset 17 = onPreClientTick，offset 828 = onPostClientTick）
+ *     ├─ handleKeybinds → startUseItem → 右键事件（PlayerInteractEvent / InputEvent）  ← 点在这里被处理
+ *     └─ 结尾 offset 828 → ClientTickEvent.END → {@link #advanceFrame}                    ← 推进在这里
+ *   之后才是这一帧的渲染
+ * </pre>
+ * ⇒ "这一帧点了开关"<b>必然</b>先于"这一帧推进动画"，再之后才画 ⇒ 连"开→关"落在同一帧里，
+ * 那一帧也已经把 {@code progress} 推过 0 了，不可能出现"开了却一帧都没画"。
+ * <p>⚠️ 步长因此从"1 帧（≈16.7 ms，60 fps 下 21 步）"变成"1 tick（50 ms，7 步）"——
+ * {@link #MAX_FRAME_DT_SEC} 的封顶语义<b>一个字没改</b>（只是步长变小之后的自然结果）；
+ * 步数换算见 {@link #stepsFor}，实测量在 {@link #stepsSelfTest()} 里（连"21 帧 → 7 步"一起断言）。
  */
 public final class ShanhaiHoloMenuAnim {
 
@@ -53,6 +74,13 @@ public final class ShanhaiHoloMenuAnim {
 
     /** 单帧最大步进（秒）。窗口失焦/卡顿后回来时不许一跳到底（同 ShanhaiHoloMenuState 的口径）。 */
     public static final float MAX_FRAME_DT_SEC = 0.25f;
+
+    /**
+     * 一个推进步长的标称值 = <b>1 客户端 tick</b> = 50 ms（{@link #advanceFrame} 现在由客户端 tick 调用）。
+     * <p>⚠️ 它只是"名义步长"：真正的 dt 仍然是 {@code nowNanos} 的差值经 {@link #MAX_FRAME_DT_SEC} 封顶
+     * —— 一个渲染帧里可能连跑 0 拍或 2~3 拍（{@code runTick} 的追赶循环），dt 会跟着变。
+     */
+    public static final float CLIENT_TICK_SEC = 1.0f / 20.0f;
 
     /** 收起状态下的整块缩放（不是 0：留一点点，能看到它"是一团东西"而不是凭空出现）。 */
     public static final float MIN_SCALE = 0.10f;
@@ -97,11 +125,15 @@ public final class ShanhaiHoloMenuAnim {
     // ==================================================================== 推帧
 
     /**
-     * 每渲染帧推进一次。
+     * 推进<b>一步</b>（现在由 {@code TickEvent.ClientTickEvent.Phase.END} 每 tick 调一次；
+     * 渲染器只读 {@link #open01()} 那一批读数，<b>不再</b>自己推进 —— 理由见类注释 §5）。
+     *
+     * <p>⚠️ 方法名里的 "Frame" 是历史名（改成 advanceTick 要动自检里 20 处调用点，
+     * 而自检正是"调用链没断"的证据，所以名字<u>刻意不动</u>）。
      *
      * @param enabled   逻辑状态（{@code ShanhaiHoloMenuState.enabled()}）—— 目标是 1 还是 0 由它定
      * @param nowNanos  {@code System.nanoTime()}
-     * @return 本帧发生了什么（{@link Step#changed()} 为真时调用方打一行日志）
+     * @return 这一步发生了什么（{@link Step#changed()} 为真时调用方打一行日志）
      */
     public static Step advanceFrame(boolean enabled, long nowNanos) {
         final int want = enabled ? 1 : 0;
@@ -251,6 +283,116 @@ public final class ShanhaiHoloMenuAnim {
         segStartProgress = 0.0f;
         primed = false;
         settled = true;
+    }
+
+    // ==================================================================== 步长（B 的纯算术部分）
+
+    /**
+     * 一个步长实际能推进多少秒：先把 {@code dtSec} 按 {@link #MAX_FRAME_DT_SEC} 封顶。
+     * <p>负数 / 0 / NaN ⇒ 0（"这一步不动"，与 {@code advanceFrame} 里那条 {@code if (dt < 0) dt = 0} 同口径）。
+     */
+    public static float stepCap(float dtSec) {
+        if (!(dtSec > 0.0f)) {
+            return 0.0f;
+        }
+        return Math.min(dtSec, MAX_FRAME_DT_SEC);
+    }
+
+    /**
+     * 一段动画（{@code durationSec} 秒）按每步 {@code dtSec} 走完需要几步。
+     * <p>{@code 0} = <b>永远走不完</b>（dt ≤ 0 或时长 ≤ 0），不是"一步走完"。
+     * <p>这个函数就是"~21 帧 → ~7 步"那条观感结论的<b>可计算的版本</b>：
+     * <pre>
+     *   stepsFor(1/60, 0.35) = 21   ← 旧的渲染帧口径（60 fps）
+     *   stepsFor(0.05, 0.35) = 7    ← 现在的客户端 tick 口径（20 Hz）
+     * </pre>
+     */
+    public static int stepsFor(float dtSec, float durationSec) {
+        final float step = stepCap(dtSec);
+        if (step <= 0.0f || !(durationSec > 0.0f)) {
+            return 0;
+        }
+        final double n = (double) durationSec / (double) step;
+        return Math.max(1, (int) Math.ceil(n - 1.0e-6));   // 消掉浮点"7.0000001 ⇒ 8"这种假进位
+    }
+
+    /** 一步推进多少进度（0..1 的份额）。 */
+    public static float progressPerStep(float dtSec, float durationSec) {
+        final float step = stepCap(dtSec);
+        if (step <= 0.0f || !(durationSec > 0.0f)) {
+            return 0.0f;
+        }
+        return step / durationSec;
+    }
+
+    /**
+     * 拿固定的步长<b>真的跑一遍</b> {@link #advanceFrame}，数"从关着到展开完毕要几步"（负数 = 走不完）。
+     * <p>这是"步数"这件事唯一的实测口径：{@link #stepsFor} 只是它的解析近似。
+     */
+    public static int measureOpenSteps(long stepNanos) {
+        resetForTest();
+        final long t0 = 5_000_000_000L;
+        advanceFrame(false, t0);                       // 首次：直接就位（关着 ⇒ progress=0, primed）
+        for (int i = 1; i <= 1000; i++) {
+            final Step s = advanceFrame(true, t0 + stepNanos * i);
+            if (s.event() == EV_OPENED) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 步数自检读数（一行）。 */
+    public static String stepsSelfTestLine() {
+        final Report r = stepsSelfTest();
+        return "holo_anim_steps_selftest " + r.pass() + "/" + r.total() + " PASS=" + r.ok()
+                + (r.ok() ? "（tick 口径 " + stepsFor(CLIENT_TICK_SEC, DURATION_OPEN_SEC)
+                        + " 步 / 帧口径 " + stepsFor(1.0f / 60.0f, DURATION_OPEN_SEC) + " 帧）"
+                : (" FAILED:" + r.bad()));
+    }
+
+    /**
+     * <b>步长自检</b>（离线可跑，不改动 {@link #selfTest()} 的判据 → 那条读数逐位不变）。
+     * <p>含 4 条负对照：{@code stepCap} 的封顶 / 负 dt / NaN / "dt=0 永远走不完"。
+     */
+    public static Report stepsSelfTest() {
+        final StringBuilder bad = new StringBuilder();
+        final int[] n = {0, 0};
+
+        // ---- 封顶语义：一个字都没改 ----
+        c(bad, n, "stepCap(50ms)=50ms", Math.abs(stepCap(CLIENT_TICK_SEC) - 0.05f) < 1.0e-7f, true);
+        c(bad, n, "封顶语义：stepCap(10s)=MAX_FRAME_DT_SEC",
+                Math.abs(stepCap(10.0f) - MAX_FRAME_DT_SEC) < 1.0e-6f, true);
+        c(bad, n, "N1 负对照：stepCap(-1s)=0（负 dt 不动）", stepCap(-1.0f) == 0.0f, true);
+        c(bad, n, "N2 负对照：stepCap(NaN)=0", stepCap(Float.NaN) == 0.0f, true);
+
+        // ---- 步数换算 ----
+        c(bad, n, "stepsFor(50ms, 展开 0.35s)=7", stepsFor(CLIENT_TICK_SEC, DURATION_OPEN_SEC), 7);
+        c(bad, n, "stepsFor(50ms, 收回 0.28s)=6", stepsFor(CLIENT_TICK_SEC, DURATION_CLOSE_SEC), 6);
+        c(bad, n, "stepsFor(1/60s, 展开 0.35s)=21（旧口径）", stepsFor(1.0f / 60.0f, DURATION_OPEN_SEC), 21);
+        c(bad, n, "N3 负对照：stepsFor(10s, 0.35s)=2（超大 dt 只按封顶算，不是 1 步）",
+                stepsFor(10.0f, DURATION_OPEN_SEC), 2);
+        c(bad, n, "N4 负对照：stepsFor(0, 0.35s)=0（永远走不完，不是一步走完）",
+                stepsFor(0.0f, DURATION_OPEN_SEC), 0);
+        c(bad, n, "负对照：stepsFor(50ms, 0s)=0（时长为 0 也不许除零）",
+                stepsFor(CLIENT_TICK_SEC, 0.0f), 0);
+        c(bad, n, "每步份额 × 步数 ≥ 1（两步口径互相自洽）",
+                progressPerStep(CLIENT_TICK_SEC, DURATION_OPEN_SEC) * 7 >= 0.999f, true);
+
+        // ---- 实测：真的跑 advanceFrame，数步数 ----
+        final int tickSteps = measureOpenSteps(50_000_000L);
+        final int frameSteps = measureOpenSteps(16_666_667L);
+        c(bad, n, "实测 tick 口径（50ms/步）展开用 " + tickSteps + " 步",
+                Math.abs(tickSteps - 7) <= 1, true);
+        c(bad, n, "实测 帧口径（16.7ms/步）展开用 " + frameSteps + " 帧（旧）",
+                Math.abs(frameSteps - 21) <= 1, true);
+        c(bad, n, "tick 口径的步数 ≤ 帧口径的一半（观感：更跳，但不再被长帧吞掉）",
+                tickSteps > 0 && frameSteps >= tickSteps * 2, true);
+        c(bad, n, "N5 负对照：一步都不推（stepNanos=0）⇒ 走不完（-1）", measureOpenSteps(0L), -1);
+
+        resetForTest();
+        final String b = bad.length() == 0 ? null : bad.toString();
+        return new Report(n[0], n[1], b);
     }
 
     // ==================================================================== 自检

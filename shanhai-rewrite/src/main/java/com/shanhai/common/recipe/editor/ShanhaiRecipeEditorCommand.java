@@ -486,11 +486,34 @@ public final class ShanhaiRecipeEditorCommand {
         final var server = ctx.getSource().getServer();
         final var recipe = ShanhaiRecipeReverseIndex.byId(server, recipeId);
         if (recipe == null) {
-            ctx.getSource().sendFailure(Component.literal("§c找不到这条配方：" + recipeId));
-            return 0;
+            // 🆕 2026-11：这条在活表里没有 —— 它很可能<b>就是被删掉的那一条</b>
+            //    （用户原话：「我现在没法在配方编辑器恢复删除掉的配方」）。
+            //    原来的实现到这里就报「找不到这条配方」，于是"删掉之后就没法用命令恢复"。
+            //    现在改走同一条服务端逻辑的 by-id 入口（不是另写一份恢复逻辑）：
+            //    类型从覆盖文件那条 entry 的 type 拿，拿不到再退到活配方/底本。
+            final String typeId = typeOfDeadRecipe(recipeId);
+            final var r = ShanhaiRecipeEditorOps.restoreDeletedById(server, recipeId, typeId);
+            ctx.getSource().sendSuccess(() -> Component.literal("§a" + r.message()
+                    + " §7(这条已经不在活配方表里 ⇒ 按已删除配方处理)"
+                    + " §8(" + r.detail() + ")"), true);
+            return r.ok() ? 1 : 0;
         }
         final var r = ShanhaiRecipeEditorOps.restoreOne(server, recipe, true, true);
         ctx.getSource().sendSuccess(() -> Component.literal("§a" + r.message() + " §8(" + r.detail() + ")"), true);
         return r.ok() ? 1 : 0;
+    }
+
+    /** 覆盖文件里那条 {@code op=remove/disable} 记录的 {@code type}（没有就 {@code null}）。 */
+    private static String typeOfDeadRecipe(ResourceLocation recipeId) {
+        try {
+            final com.google.gson.JsonObject e = ShanhaiRecipeOverrideStore.findEntry(recipeId);
+            if (e != null && e.has("type") && !e.get("type").isJsonNull()) {
+                return e.get("type").getAsString();
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} restore_cmd_type_lookup_failed id={} err={}",
+                    PREFIX, recipeId, t.toString());
+        }
+        return null;
     }
 }

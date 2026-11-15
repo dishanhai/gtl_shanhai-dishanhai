@@ -265,6 +265,31 @@ public final class HostFxGlassArModel {
         /** 动力仓已存 EU（同上）。 */
         public long energyOutStored = -1;
 
+        // ── 🆕 2026-11-17：大整数通道（用户：「能源仓好像到 long 上限了」＋「AR 面版也没显示发电功率」）──
+        /**
+         * 主机级：<b>发电功率</b>（{@code EU/t}，BigInteger 真值）。
+         *
+         * <p>取数 = 归墟写进<b>无线池</b>的速率（{@code GuixuZeroPointGeneration.Readings#product}），
+         * <b>不是</b>动力仓 IO —— 归墟的电直接进池、不经过动力仓 ⇒ {@link #totalEuGenPerTick} 对本机恒 0。
+         * <p>{@code null} = 读不到（画 {@code --}）；{@code 0} = 真的没在入池（<b>合法真读数</b>）。
+         */
+        public java.math.BigInteger genPerTickBig;
+        /**
+         * 能源仓（{@code IO.IN}）已存的 <b>BigInteger 真值</b>
+         * （池子记账时 = 无线池余额；{@code null} = 用 {@link #energyInStored} 的 long 兜底）。
+         *
+         * <p>🔴 为什么必须有这一格：无线电网终端的 {@code getEnergyStored()} 是
+         * {@code NumberUtils.getLongValue(池子)} ⇒ {@code >Long.MAX} 会被<b>静默压平到 9.22e18</b>，
+         * 面板上那个 {@code 9.22E} 就是这么来的（<b>假读数</b>，不是"仓里真有 9.22e18"）。
+         */
+        public java.math.BigInteger energyInStoredBig;
+        /**
+         * 两侧能量仓的显示口径标志（低 4 位 = 能源仓，高 4 位 = 动力仓）。
+         * <p>🔴 <b>与 {@code GuixuVisionCoreMachine.E_FLAG_*} 逐值相同</b>（两处必须同步改；与
+         * {@code REASON_*} 同一条纪律）。{@code 0} = 快照还没到。
+         */
+        public int energyFlags = 0;
+
         // ── 2026-10-25 第二十一改新增：AR 遮罩 + 已装模块 ──
         /**
          * <b>AR 屏背后是否铺灰色半透明底</b>（机器 {@code hostArMaskEnabled} 的副本，经
@@ -393,8 +418,20 @@ public final class HostFxGlassArModel {
     public static final int ENERGY_KIND_NORMAL = 0;
     /** 见 {@link State#energyInKind}：创造模式能源仓（无限供电）。 */
     public static final int ENERGY_KIND_CREATIVE = 1;
-    /** 见 {@link State#energyInKind}：无线电网输入终端（无限供电）。 */
+    /** 见 {@link State#energyInKind}：无限供电的无线电网输入终端。 */
     public static final int ENERGY_KIND_NET_TERMINAL = 2;
+
+    // ── 🆕 2026-11-17：能量仓显示口径标志（镜像 {@code GuixuVisionCoreMachine.E_FLAG_*}）────────
+    /** 这一侧能力代理读取抛异常 ⇒ 画 {@code --（读不到）}。 */
+    public static final int E_FLAG_UNREADABLE = 1;
+    /** 这一侧容量 = {@code Long.MAX_VALUE}（上游"无限"哨兵）⇒ 画 {@code ∞}，不画 9.22E。 */
+    public static final int E_FLAG_INFINITE = 2;
+    /** 这一侧已存来自无线池（仓侧读数被压平 ⇒ 只信池子的 BigInteger）。 */
+    public static final int E_FLAG_POOL = 4;
+    /** 这一侧真的装了仓（{@code 0} = 没装 ⇒ 画"无仓"，不编 {@code 0 / 0}）。 */
+    public static final int E_FLAG_HAS_HATCH = 8;
+    /** 动力仓（{@code IO.OUT}）在这条位域里的起点；能源仓（{@code IO.IN}）从第 0 位开始。 */
+    public static final int E_FLAG_SHIFT_OUT = 4;
 
     // ═══════════════════════════════════════════════════════════════════════════════════
     //  ⑦ 行末「为什么没在跑」标签（2026-10-25 第三十三改）
@@ -737,13 +774,14 @@ public final class HostFxGlassArModel {
         text[1] = st.formed ? "结构已成型" : "结构未成型";
         col[1] = st.formed ? C_MAIN : C_WARN;
         text[2] = "已连接模块 " + intOrDash(st.moduleCount) + " / " + intOrDash(st.maxModules);
-        text[3] = "能源仓 " + storedOverCapacity(st.energyInStored, st.energyInCapacity);
-        if (st.energyInCapacity < 0) {
+        // 2026-11-17：能源仓 / 动力仓两格改用 BigInteger 安全口径（见 energyCellText 的长注释）
+        text[3] = "能源仓 " + energyCellText(st, false);
+        if ((st.energyFlags & (E_FLAG_UNREADABLE | E_FLAG_HAS_HATCH)) != E_FLAG_HAS_HATCH) {
             col[3] = C_DIM;
         }
         // 栏 2：动力仓 / 等级 / 复写 / 增产
-        text[4] = "动力仓 " + storedOverCapacity(st.energyOutStored, st.energyOutCapacity);
-        if (st.energyOutCapacity < 0) {
+        text[4] = "动力仓 " + energyCellText(st, true);
+        if ((st.energyFlags >>> E_FLAG_SHIFT_OUT & (E_FLAG_UNREADABLE | E_FLAG_HAS_HATCH)) != E_FLAG_HAS_HATCH) {
             col[4] = C_DIM;
         }
         text[5] = "物质模块等级 " + levelText(st.matterLevel);
@@ -1123,8 +1161,10 @@ public final class HostFxGlassArModel {
                 //    第二十六改补上"无限供电"的三档语义（见 energyUsedPowerText 的 javadoc）。
                 "总耗能功率 " + energyUsedPowerText(st, modEuSum),
                 // 🔴 玩家真正想看的那条：模块侧实际烧了多少电（创造仓下也有意义）
-                "模块耗电合计 " + powerText(modEuSum) + " · 总发电功率 "
-                        + powerText(st.totalEuGenPerTick),
+                // 🆕 2026-11-17（用户：「AR 面版也没显示发电功率」）：这一格改成【发电功率 = 无线池入池速率】。
+                //    原来那半格是 totalEuGenPerTick（**动力仓**吞吐）——归墟的电直接进无线池、不经动力仓
+                //    ⇒ 对这台机器恒 0，等于一直在报一个"看起来很真"的假 0。
+                "模块耗电合计 " + powerText(modEuSum) + " · 产能 " + generationPowerText(st),
                 "特效 " + (deg ? "降级" : "开") + " 透镜 " + (st.lensOn ? "开" : "关")
                         + " 环舰 " + (deg ? "冻结" : "转"),
                 "中央两束 " + (deg ? "红" : "青白") + " 主柱 " + st.mdPillarCount
@@ -1135,7 +1175,7 @@ public final class HostFxGlassArModel {
                 (installed < 0 && st.totalOutputCount < 0L && st.totalOutputKinds < 0) ? C_DIM : C_MAIN,
                 (st.totalEuUsedPerTick < 0L && st.energyInKind != ENERGY_KIND_CREATIVE
                         && st.energyInKind != ENERGY_KIND_NET_TERMINAL) ? C_DIM : C_MAIN,
-                (modEuSum < 0L && st.totalEuGenPerTick < 0L) ? C_DIM : C_MAIN,
+                (modEuSum < 0L && st.genPerTickBig == null) ? C_DIM : C_MAIN,
                 deg ? C_WARN : C_MAIN,
                 st.mdPillarCount <= 0 ? C_WARN : C_MAIN,
         };
@@ -1999,6 +2039,90 @@ public final class HostFxGlassArModel {
             return stored < 0L ? "--" : energyText(stored) + " / --";
         }
         return (stored < 0L ? "已存 --" : energyText(stored)) + " / " + energyText(capacity);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🆕 2026-11-17：能源仓 / 发电功率两格（用户三条原话里的第 2、3 条）
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * <b>能源仓 / 动力仓</b>那一格（{@code BigInteger} 安全 + {@code ∞} 哨兵 + 无仓 / 读不到分开）。
+     *
+     * <h2>用户原话（逐字）</h2>
+     * <blockquote>「AR 它这个能源仓好像到 long 上限了，这个改成大整数的科学计数法吧」</blockquote>
+     *
+     * <h2>🔴 那个 {@code 9.22E} 到底是什么（不是"仓里真有 9.22e18"）</h2>
+     * <pre>
+     *   无线电网终端  NetworkEnergyContainer.getEnergyStored()
+     *                 = NumberUtils.getLongValue(WirelessEnergyManager.getUserEU(uuid))
+     *                 ⇒ 池子（BigInteger）被【静默饱和】到 Long.MAX_VALUE = 9.22e18  ← 假读数
+     *   创造模式能源仓 InfinityEnergyContainer.getEnergyCapacity() = Long.MAX_VALUE   ← 上游的"无限"哨兵
+     * </pre>
+     * ⇒ 本方法的三种修正：
+     * <ol>
+     *   <li>池子记账（{@link #E_FLAG_POOL}）⇒ 已存读<b>池子的 BigInteger 真值</b>
+     *       （{@link State#energyInStoredBig}，走 {@code byte[]} 同步通道）；</li>
+     *   <li>容量 = {@code Long.MAX_VALUE} ⇒ 画 {@code ∞}（{@link #E_FLAG_INFINITE}），<b>不再画 9.22E</b>；</li>
+     *   <li>没装仓 / 读不到分开画（{@link #E_FLAG_HAS_HATCH} / {@link #E_FLAG_UNREADABLE}），
+     *       <b>绝不把"读不到"画成 0</b>。</li>
+     * </ol>
+     *
+     * @param outSide {@code true} = 动力仓（{@code IO.OUT}）；{@code false} = 能源仓（{@code IO.IN}）
+     */
+    static String energyCellText(State st, boolean outSide) {
+        final int shift = outSide ? E_FLAG_SHIFT_OUT : 0;
+        final int flags = (st.energyFlags >>> shift) & 0xF;
+        final long stored = outSide ? st.energyOutStored : st.energyInStored;
+        final long capacity = outSide ? st.energyOutCapacity : st.energyInCapacity;
+        if (stored < 0L && capacity < 0L) {
+            return "--（等伺服同步）";
+        }
+        if ((flags & E_FLAG_UNREADABLE) != 0) {
+            return "--（读不到：能力代理异常）";
+        }
+        // 有没有仓：位是权威；老快照（flags 全 0）退化用两个读数非零来判，免得把"没同步"画成"无仓"
+        if ((flags & E_FLAG_HAS_HATCH) == 0 && stored == 0L && capacity == 0L) {
+            // 2026-11-15（用户：「动力仓还是0，这应该是因为直连无线电网导致的」）：输出侧没仓时
+            // 不要只写「无仓」—— 归墟的发电直连无线池、本来就不经过动力仓，写清楚才不会每次都被误读成故障。
+            return outSide ? "无（发电直连无线电网）" : "无仓";
+        }
+        final boolean infinite = (flags & E_FLAG_INFINITE) != 0 || capacity == Long.MAX_VALUE;
+        final String storedText;
+        if ((flags & E_FLAG_POOL) != 0) {
+            // 池子余额（BigInteger）；读不到 ⇒ `--`，绝不回落到那个被压平的 long
+            storedText = com.shanhai.common.text.ShanhaiBigNumberText.compact(st.energyInStoredBig);
+        } else if (infinite && stored == Long.MAX_VALUE) {
+            storedText = "∞";                               // 创造仓：存量=容量=Long.MAX 是"无限"
+        } else {
+            storedText = com.shanhai.common.text.ShanhaiBigNumberText.compactLong(stored);
+        }
+        return storedText + " EU / "
+                + com.shanhai.common.text.ShanhaiBigNumberText.capacity(capacity, infinite) + " EU";
+    }
+
+    /**
+     * <b>产能</b>那一格的内容（不带前缀）：{@code 19.8Y/t} / {@code 0/t} / {@code --/t}。
+     *
+     * <p>取数见 {@link State#genPerTickBig}（= 无线池入池速率，<b>不是</b>动力仓 IO）。
+     * 单位里的 {@code EU} 由行首「产能」两个字承担，照 {@link #powerText(long)} 的老口径省字宽。
+     *
+     * <p>🔴 2026-11-19（用户点单）：行首字从「发电功率」改成「<b>产能</b>」，与 Jade 抬头那行措辞统一；
+     * <b>数字口径是同一个函数</b>（{@link com.shanhai.common.text.ShanhaiBigNumberText#upstream}，
+     * 就是 Jade 那行调的那个）⇒ 两处数值与后缀字母不会互相打脸。
+     * ⚠️ 这一格<b>不</b>带 {@code (…A 电压档)}：AR 汇总行是定宽列（{@code HostFxGlassArPanel}：
+     * B 列 5.20→10.10 格 ≈ 245 px，现有文字已占≈200 px），塞不下 18 位安培 + 档名 ——
+     * 那半截只放在 Jade 抬头里（抬头宽度自由）。
+     */
+    static String generationPowerText(State st) {
+        if (st.genPerTickBig == null) {
+            // 🔴 2026-11-18（用户点单）：读不到就写「读不到」，**不许**写成 0 ——
+            //   现场 bug 就是"池子在涨、面板印 0/t"；而 0 是合法真读数（真的没在入池）⇒ 两者必须能分辨。
+            return "--（读不到…）";
+        }
+        if (st.genPerTickBig.signum() == 0) {
+            return "0/t";                                   // 0 是合法真读数（没在入池）
+        }
+        return com.shanhai.common.text.ShanhaiBigNumberText.upstream(st.genPerTickBig) + "/t";
     }
 
     /** 一位小数（用于角速度 / 半径 / 秒）。 */
