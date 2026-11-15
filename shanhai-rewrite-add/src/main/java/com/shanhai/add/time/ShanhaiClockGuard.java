@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.add.time.replay.ShanhaiReplayGate;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -84,6 +85,8 @@ public final class ShanhaiClockGuard {
         PLACE("放置方块"),
         ITEM_USE("使用会改世界的物品"),
         ATTACK("攻击造成伤害"),
+        /** 玩家<b>挨打</b>（受害者侧）。与 {@link #ATTACK} 分开是为了日志能分清"被拦的是谁"。 */
+        DAMAGE("受伤"),
         DROP("丢出物品"),
         PICKUP("捡起物品"),
         CONTAINER("容器内物品转移"),
@@ -154,7 +157,7 @@ public final class ShanhaiClockGuard {
 
     /** 挖方块。 */
     public static void onBreak(BlockEvent.BreakEvent event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         event.setCanceled(true);
@@ -163,7 +166,7 @@ public final class ShanhaiClockGuard {
 
     /** 放置方块（{@code EntityMultiPlaceEvent} 是它的子类，双半砖/床/门会走子类）。 */
     public static void onPlace(BlockEvent.EntityPlaceEvent event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         event.setCanceled(true);
@@ -172,7 +175,7 @@ public final class ShanhaiClockGuard {
 
     /** 右键方块：只拦"会改世界的物品"，其余（开箱子/开机器面板/看告示牌）放行。 */
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
-        if (!paused() || !isWorldChangingItem(event.getItemStack())) {
+        if (!frozen() || !isWorldChangingItem(event.getItemStack())) {
             return;
         }
         event.setCanceled(true);
@@ -181,7 +184,7 @@ public final class ShanhaiClockGuard {
 
     /** 右键空中（桶、食物、药水、末影珍珠、雪球、打火石…）。 */
     public static void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
-        if (!paused() || !isWorldChangingItem(event.getItemStack())) {
+        if (!frozen() || !isWorldChangingItem(event.getItemStack())) {
             return;
         }
         event.setCanceled(true);
@@ -190,7 +193,7 @@ public final class ShanhaiClockGuard {
 
     /** 左键攻击（取消事件 ⇒ 伤害不进 {@code hurt} 链）。 */
     public static void onAttack(AttackEntityEvent event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         event.setCanceled(true);
@@ -198,21 +201,34 @@ public final class ShanhaiClockGuard {
     }
 
     /**
-     * 伤害兜底：任何<b>玩家造成</b>的伤害一律抹掉。
+     * 伤害兜底（<b>受害者侧</b>）：暂停期间<b>玩家挨打一律抹掉</b>——不看是谁打的。
      *
-     * <p>为什么还要这条：{@link #onAttack} 只覆盖"玩家左键实体"，覆盖不到
-     * 弓箭/三叉戟/药水/荆棘/TNT 这类"玩家造成"的间接伤害。
+     * <p>🔴 2026-10-19 判据换过（用户实测的 bug）：原来判 {@code getSource().getEntity() instanceof Player}
+     * —— 拦的是"谁发起"，不是"谁挨打" ⇒ 第三方 mod 的实体打玩家直接漏过（暂停中照样掉血）。
+     * 现在只判一条：暂停中 且 <b>受害者是玩家</b>（{@link ShanhaiClockRules#denyVictimDamage}）。
+     *
+     * <p>🔴 这一条<b>不能</b>放宽成"所有实体"：{@code ShanhaiPurge#killOne} 抹实体走
+     * {@code living.hurt(level.damageSources().playerAttack(owner), …)}（受害者是 mob）⇒ 必须放行，
+     * 否则暂停期间 purge 一只都抹不掉。
+     *
+     * <p>🔴 <b>为什么只挂这一条事件、不去挂更早的 {@code LivingAttackEvent}</b>：
+     * Forge 的 {@code ForgeHooks#onLivingAttack} 写的是
+     * {@code return entity instanceof Player || !EVENT_BUS.post(event)}
+     * ⇒ <b>受害者是玩家时直接短路返回 {@code true}，事件根本不发</b> ⇒ 它保护不了玩家，
+     * 挂上去只是给非玩家受害者用。而 {@code LivingHurtEvent}（在 {@code actuallyHurt} 里发）
+     * 是<b>对玩家也发</b>的那一道 ⇒ 本 bug 的主线就在这里。
+     * 真想挡在 {@code LivingEntity#hurt} 最前面，需要 HEAD mixin（另一个改动，本轮没做）。
+     *
+     * <p>每条被挡下的伤害顺带打一行只读诊断 {@code SHANHAI-CLOCK-HURT}（见 {@link #noteHurtDiag}）。
      */
     public static void onHurt(LivingHurtEvent event) {
-        if (!paused()) {
-            return;
-        }
-        Entity source = event.getSource().getEntity();
-        if (!(source instanceof Player player)) {
+        final Entity victim = event.getEntity();
+        if (!ShanhaiClockRules.denyVictimDamage(frozen(), victim instanceof Player)) {
             return;
         }
         event.setCanceled(true);
-        blocked(Category.ATTACK, player);
+        blocked(Category.DAMAGE, victim);
+        noteHurtDiag(event, victim);
     }
 
     /** 丢出物品（Q 键 / 拖出 GUI）。
@@ -223,7 +239,7 @@ public final class ShanhaiClockGuard {
      *  只取消本事件会造出"背包少了、地上没有"的凭空消失（用户实机反馈）。
      *  保留它是为了兜"别的 mod 直接发 {@code ItemTossEvent}"这类路径。 */
     public static void onToss(ItemTossEvent event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         event.setCanceled(true);
@@ -237,7 +253,7 @@ public final class ShanhaiClockGuard {
      * 这条是<b>显式保险</b>：万一有 mod 直接把物品塞给玩家，这里也会被拦。
      */
     public static void onPickup(EntityItemPickupEvent event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         event.setCanceled(true);
@@ -246,7 +262,7 @@ public final class ShanhaiClockGuard {
 
     /** 爆炸（TNT/苦力怕/床）：取消整个爆炸的起爆。 */
     public static void onExplosionStart(ExplosionEvent.Start event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         event.setCanceled(true);
@@ -263,7 +279,7 @@ public final class ShanhaiClockGuard {
      * （命令方块本来也不会 tick）。
      */
     public static void onCommand(CommandEvent event) {
-        if (!paused()) {
+        if (!frozen()) {
             return;
         }
         CommandSourceStack source = event.getParseResults().getContext().getSource();
@@ -318,10 +334,89 @@ public final class ShanhaiClockGuard {
             "difficulty", "setworldspawn", "setidletimeout", "forceload", "spreadplayers",
             "function", "data", "execute", "place", "loot", "advancement", "recipe", "jfr");
 
+    // ================================================================== 伤害诊断（只读）
+
+    /** 诊断行节流窗口：同一个来源 5 秒最多一行。 */
+    private static final long HURT_DIAG_INTERVAL_MS = 5_000L;
+
+    /** 键 = 来源类名 + {@code getMsgId()} ⇒ 上次打诊断行的时刻（只用于节流，不参与判定）。 */
+    private static final Map<String, Long> HURT_DIAG_LAST = new HashMap<>();
+
+    /**
+     * 暂停期间「这一下伤害是从哪进来的」的<b>只读</b>诊断行（日志前缀 {@code SHANHAI-CLOCK-HURT}，INFO）。
+     *
+     * <h2>1. 为什么要有这一行</h2>
+     * 用户实测：暂停中第三方 mod 的实体照样能打玩家。<b>不去读对手的代码</b> —— 让栈自己说：
+     * 是 {@code tickNonPassenger}、{@code LevelTickEvent}、网络包，还是某个 mod 自己的
+     * {@code playerTouch} 在打。下次进游戏复现，按一次就有答案。
+     *
+     * <h2>2. 判据（读日志的人只需记这一条）</h2>
+     * <b>出现即为证据</b>：「这场暂停里，玩家在某一帧挨了这一下（而且已被挡下）」。
+     * <b>不出现</b>说明这场暂停里<b>没有</b>走 {@code LivingHurtEvent} 的伤害 —— 此时若仍在掉血，
+     * 那它就不在 hurt 这条路上（例如第三方 mod 直接 {@code setHealth} / 改字段），本行本来就管不到。
+     *
+     * <h2>3. 三样内容</h2>
+     * ① 来源：{@code getSource().getEntity()} 的类名（没有就写 {@code null}）+ {@code getMsgId()}
+     * （{@code mob} / {@code player} / {@code inFire} …）+ 直接命中体的类名（箭、火球…）；
+     * ② 受害者类名；③ 当前线程栈前 8 帧（<b>只要 类名#方法名</b>，不带文件行号）。
+     *
+     * <h2>4. 只读与代价</h2>
+     * 不改事件、不改世界。只有判据已经成立（暂停中且受害者是玩家）才会走到；
+     * 同一个来源 5 秒最多一行 ⇒ 怪物连打不会刷屏。
+     */
+    private static void noteHurtDiag(LivingHurtEvent event, Entity victim) {
+        final var source = event.getSource();
+        final Entity src = source.getEntity();
+        final Entity direct = source.getDirectEntity();
+        final String key = (src == null ? "-" : src.getClass().getName()) + '/' + source.getMsgId();
+        final long now = System.currentTimeMillis();
+        final Long last = HURT_DIAG_LAST.get(key);
+        if (last != null && now - last < HURT_DIAG_INTERVAL_MS) {
+            return;
+        }
+        HURT_DIAG_LAST.put(key, now);
+        ShanhaiMod.LOGGER.info("[SHANHAI-CLOCK-HURT] victim={} src={} direct={} msg={} at={}",
+                victim.getClass().getName(),
+                src == null ? "null" : src.getClass().getName(),
+                direct == null ? "null" : direct.getClass().getName(),
+                source.getMsgId(),
+                stack8());
+    }
+
+    /** 当前线程栈前 8 帧（{@code 类名#方法名}，<b>不带行号</b>）。 */
+    private static String stack8() {
+        final StringBuilder sb = new StringBuilder();
+        int n = 0;
+        for (StackTraceElement e : Thread.currentThread().getStackTrace()) {
+            final String cn = e.getClassName();
+            if (n == 0 && isPlumbingFrame(cn)) {
+                continue;   // 跳过 getStackTrace / 本类的转发帧 / Forge 的事件分发 —— 它们不回答"谁在打"
+            }
+            if (n == 8) {
+                break;
+            }
+            if (n > 0) {
+                sb.append(" <- ");
+            }
+            sb.append(cn).append('#').append(e.getMethodName());
+            n++;
+        }
+        return sb.toString();
+    }
+
+    /** 栈顶噪声：{@code Thread#getStackTrace}、本类的转发方法、Forge 的事件分发/钩子。 */
+    private static boolean isPlumbingFrame(String className) {
+        return "java.lang.Thread".equals(className)
+                || ShanhaiClockGuard.class.getName().equals(className)
+                || className.startsWith("net.minecraftforge.eventbus.")
+                || className.startsWith("net.minecraftforge.common.ForgeHooks")
+                || className.startsWith("net.minecraftforge.common.ForgeEventFactory");
+    }
+
     // ================================================================== 提示 / 计数
 
-    private static boolean paused() {
-        return ShanhaiWorldClock.SERVER.isPaused();
+    private static boolean frozen() {
+        return ShanhaiReplayGate.frozen(ShanhaiWorldClock.SERVER.getMode());
     }
 
     /**
@@ -352,10 +447,16 @@ public final class ShanhaiClockGuard {
             Long last = LAST_MESSAGE.get(key);
             if (last == null || now - last >= MESSAGE_INTERVAL_MS) {
                 LAST_MESSAGE.put(key, now);
-                serverPlayer.sendSystemMessage(Component.literal("[山海时钟] 时间已暂停：不能")
+                // 2026-11：倒流与暂停共用同一套拦截，提示文案必须能区分是哪一种
+                //（否则玩家在倒流时看到"时间已暂停"，会去敲 /clock resume 而把倒流打断）
+                final String head = ShanhaiWorldClock.SERVER.isReplay() ? "倒流中" : "时间已暂停";
+                final String tail = ShanhaiWorldClock.SERVER.isReplay()
+                        ? "（/shanhai_add time rewind stop 可中止）"
+                        : "（/shanhai_add clock resume 恢复）";
+                serverPlayer.sendSystemMessage(Component.literal("[山海时钟] " + head + "：不能")
                         .withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal(category.cn).withStyle(ChatFormatting.RED))
-                        .append(Component.literal("（/shanhai_add clock resume 恢复）").withStyle(ChatFormatting.GRAY)));
+                        .append(Component.literal(tail).withStyle(ChatFormatting.GRAY)));
             }
         }
     }
@@ -383,6 +484,7 @@ public final class ShanhaiClockGuard {
         PENDING_COUNT.clear();
         LAST_LOG.clear();
         LAST_MESSAGE.clear();
+        HURT_DIAG_LAST.clear();
     }
 
     private ShanhaiClockGuard() {

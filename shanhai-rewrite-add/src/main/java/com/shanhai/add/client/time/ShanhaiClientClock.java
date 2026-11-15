@@ -1,13 +1,17 @@
 package com.shanhai.add.client.time;
 
 import com.mojang.logging.LogUtils;
+import com.shanhai.add.time.ShanhaiClockMode;
 import com.shanhai.add.time.ShanhaiClockNetwork;
 import com.shanhai.add.time.ShanhaiClockRules;
 import com.shanhai.add.time.ShanhaiWorldClock;
+import com.shanhai.add.time.replay.ShanhaiReplayGate;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Timer;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -70,13 +74,24 @@ public final class ShanhaiClientClock {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    /** 世界时钟是否处在冻结态（单机兜底读服务端那份）。 */
-    public static boolean paused() {
-        if (ShanhaiWorldClock.CLIENT.isPaused()) {
+    /**
+     * 世界时钟是否处在<b>冻结态</b>（{@code PAUSED} <b>或</b> {@code REPLAY}；单机兜底读服务端那份）。
+     *
+     * <h2>2026-11 时间倒流：为什么这里从"只认暂停"变成"认冻结"</h2>
+     * 倒流期间方块在往回跳，如果客户端不冻，水面/岩浆/火焰的贴图动画、粒子、生物动画会继续往前走
+     * ⇒ 用户看到的是"方块在倒退，但整个世界还在动"（设计 §1.2 的"半冻状态"）。
+     * 极性只有一份：{@link ShanhaiReplayGate#frozen}（与服务端 11 处判据共用同一个函数）。
+     *
+     * <p>单机（用户的实际玩法）里集成服务端与客户端在<b>同一个 JVM</b>，所以额外读一次 {@code SERVER}
+     * 作为兜底；<b>多人</b>下仍然只认服务端下发的镜像（网络包没到时不能被本地状态带跑）。
+     */
+    public static boolean frozen() {
+        if (ShanhaiReplayGate.frozen(ShanhaiWorldClock.CLIENT.getMode())) {
             return true;
         }
         Minecraft mc = Minecraft.getInstance();
-        return mc != null && mc.hasSingleplayerServer() && ShanhaiWorldClock.SERVER.isPaused();
+        return mc != null && mc.hasSingleplayerServer()
+                && ShanhaiReplayGate.frozen(ShanhaiWorldClock.SERVER.getMode());
     }
 
     // ------------------------------------------------------------------ 钩子标志
@@ -93,6 +108,48 @@ public final class ShanhaiClientClock {
     public static volatile boolean hookOculusTimer;
     /** ③ 实体插值基准对齐（{@code setOldPosAndRot}）真的执行过。 */
     public static volatile boolean hookPosePinned;
+    /** ③b 冻结期间收到的 teleport 被立刻落位过几次（"猪倒着走"的最后一环）。 */
+    public static volatile boolean hookEntitySnap;
+    /** 冻结期间落位过多少次（判读用）。 */
+    private static long entitySnaps;
+    /** 单次落位的最大位移（整轮倒流的最大值；判据"最后一下被拉回"）。 */
+    private static double snapMaxDelta;
+    /** 收尾前最后一秒内单次落位的最大位移（{@code end_snap_max_delta=}）。 */
+    private static double endSnapMaxDelta;
+    /** 取证：落位成功 / 客户端没这个 id / 玩家被跳过 的次数。 */
+    private static long snapApplied;
+    private static long snapUnknownId;
+    private static long snapPlayerSkip;
+    /** 客户端收到/落位的是"方块状态为空气"的下落方块（= spawn data 丢了，画不出来）。 */
+    private static long snapAirState;
+    /** 是否在倒流里（客户端镜像 = REPLAY；单机额外认服务端）。 */
+    public static boolean replayNow() {
+        if (ShanhaiWorldClock.CLIENT.getMode() == ShanhaiClockMode.REPLAY) {
+            return true;
+        }
+        final Minecraft mc = Minecraft.getInstance();
+        return mc != null && mc.hasSingleplayerServer()
+                && ShanhaiWorldClock.SERVER.getMode() == ShanhaiClockMode.REPLAY;
+    }
+
+    /** 收尾时的落位判据读数（{@code end_snap_max_delta=}）。 */
+    public static String snapLine() {
+        return "snaps=" + entitySnaps
+                + " max_delta=" + String.format(java.util.Locale.ROOT, "%.3f", snapMaxDelta)
+                + " end_snap_max_delta=" + String.format(java.util.Locale.ROOT, "%.3f", endSnapMaxDelta);
+    }
+
+    /** 收尾（REPLAY → 别的模式）时清零，并打一行 {@code end_snap_max_delta=}。 */
+    private static void flushSnapLine() {
+        LOGGER.info("[SHANHAI-CLOCK] clock_entity_snap {} ok={} snap_applied={} snap_unknown_id={} "
+                        + "snap_player_skip={} snap_air_state={}",
+                snapLine(), endSnapMaxDelta <= 0.5D, snapApplied, snapUnknownId, snapPlayerSkip, snapAirState);
+        ShanhaiReplayClientFx.startPostUnfreeze();
+        snapMaxDelta = 0.0D;
+        endSnapMaxDelta = 0.0D;
+    }
+    /** 限流：上一次打 {@code clock_entity_snap} 的墙钟。 */
+    private static long snapLastLogMs;
     /** ④ 连续渲染时钟（gtlcore {@code GlobalRenderClock}）真的被冻住过。 */
     public static volatile boolean hookSmoothTick;
 
@@ -116,7 +173,7 @@ public final class ShanhaiClientClock {
 
     /** 世界动画时钟（{@code LevelRenderer#tick}）：冻结时整段跳过。 */
     public static boolean freezeLevelRendererTick() {
-        boolean p = paused();
+        boolean p = frozen();
         if (p) {
             hookLevelRendererTicks = true;
         }
@@ -125,7 +182,7 @@ public final class ShanhaiClientClock {
 
     /** 客户端世界时间（{@code ClientLevel#tickTime}）：冻结时整段跳过。 */
     public static boolean freezeClientTickTime() {
-        boolean p = paused();
+        boolean p = frozen();
         if (p) {
             hookClientTickTime = true;
         }
@@ -134,7 +191,7 @@ public final class ShanhaiClientClock {
 
     /** 贴图动画（水/岩浆/火/传送门）：冻结时不推进帧。 */
     public static boolean freezeTextureAnimation() {
-        boolean p = paused();
+        boolean p = frozen();
         if (p) {
             hookTextureAnim = true;
         }
@@ -143,7 +200,11 @@ public final class ShanhaiClientClock {
 
     /** 粒子：冻结时整段跳过 ⇒ 已经飘着的粒子停在原地（不是停止生成）。 */
     public static boolean freezeParticles() {
-        boolean p = paused();
+        // 🔴 2026-11-14：倒流期间<b>放行粒子引擎</b>。
+        //    否则我们逐格发的"碎块往回聚"和"向上雨"会停在 age=0，等到解冻那一帧才一起动
+        //    —— 那正是用户看到的「粒子是倒流结束那一瞬间出现的」。实体 AI 仍然冻结。
+        final boolean replay = replayNow();
+        final boolean p = frozen() && !replay;
         if (p) {
             hookParticles = true;
         }
@@ -152,7 +213,7 @@ public final class ShanhaiClientClock {
 
     /** 客户端方块实体 tick：冻结时跳过。 */
     public static boolean freezeBlockEntities() {
-        boolean p = paused();
+        boolean p = frozen();
         if (p) {
             hookBlockEntities = true;
         }
@@ -161,7 +222,7 @@ public final class ShanhaiClientClock {
 
     /** 客户端环境粒子生成（{@code ClientLevel#animateTick}）：冻结时不生成。 */
     public static boolean freezeAnimateTick() {
-        boolean p = paused();
+        boolean p = frozen();
         if (p) {
             hookBlockEntities = true;
         }
@@ -175,7 +236,7 @@ public final class ShanhaiClientClock {
      * 多人下别的玩家也是 {@code Player}，但他们属于"世界"，照样冻结。
      */
     public static boolean freezeEntity(Object entity) {
-        if (!paused()) {
+        if (!frozen()) {
             return false;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -209,7 +270,7 @@ public final class ShanhaiClientClock {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
-        if (!ShanhaiClockRules.pinEntityPose(paused(), mc != null && e == mc.player)) {
+        if (!ShanhaiClockRules.pinEntityPose(frozen(), mc != null && e == mc.player)) {
             return;
         }
         // 取证（缺陷 ③ 的"改前现象"就是这里的 before）：pin 之前的 |Δy|。
@@ -224,6 +285,109 @@ public final class ShanhaiClientClock {
         hookPosePinned = true;
         ++pinnedEntityCount;
         probe(e);
+    }
+
+    // ------------------------------------------------------------------ ③b 冻结期间的 teleport
+    /**
+     * 冻结期间把刚收到的 {@code ClientboundTeleportEntityPacket} <b>当场落位</b>
+     * （"猪倒着走"的最后一环，根因见 {@code ShanhaiClientTeleportClockMixin} 类注释）。
+     *
+     * <h2>🔴 为什么原版那条路在冻结时不成立</h2>
+     * <pre>
+     *   ClientPacketListener#handleTeleportEntity:528-544
+     *       entity.lerpTo(x, y, z, yRot, xRot, 3, true)       ← 对 LivingEntity 只是"记下目标"
+     *   LivingEntity#lerpTo:2759-2766
+     *       this.lerpX/lerpY/lerpZ = …; this.lerpSteps = 3;   ← 一个 setPos 都没有
+     *   LivingEntity#aiStep:2505-2514
+     *       if (lerpSteps &gt; 0) { … this.setPos(…); --lerpSteps; }   ← 真正落位，但 aiStep 被冻住了
+     * </pre>
+     * ⇒ 服务端每 tick 都写了位置也发了包，客户端却一格都没动。
+     *
+     * <h2>做法</h2>
+     * 冻结时直接 {@code absMoveTo(...)}（等价于"插值立即完成"）+ {@code setOldPosAndRot()}
+     * （把渲染插值基准也对齐到同一处，否则渲染会在旧/新之间来回锯齿）。
+     *
+     * <p>🔴 <b>玩家豁免</b>：本地玩家一律不动（他的位置由他自己那条链决定）。
+     * <p>🔴 <b>只在冻结时生效</b>：正常游戏走原版三步插值，手感一个字节都不改。
+     *
+     * @param packet 刚收到的 teleport 包（{@code null} ⇒ 什么都不做）
+     */
+    public static void snapFrozenTeleport(ClientboundTeleportEntityPacket packet) {
+        if (packet == null || !frozen()) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.level == null) {
+            return;
+        }
+        final Entity entity = mc.level.getEntity(packet.getId());
+        if (entity == null) {
+            // 取证①③：客户端根本没有这个 id 的实体（重建实体的 spawn 包被冻结的 ChunkMap 掐掉了，
+            // 或者实体 id 换过）⇒ 我们发的 teleport 包被客户端<b>静默丢弃</b>。
+            ++snapUnknownId;
+            return;
+        }
+        if (entity == mc.player || entity instanceof Player) {
+            ++snapPlayerSkip;
+            return;   // 玩家红线：一个坐标都不许搬
+        }
+        ++snapApplied;
+        try {
+            if (entity instanceof net.minecraft.world.entity.item.FallingBlockEntity fb
+                    && fb.getBlockState().isAir()) {
+                ++snapAirState;   // 负对照探针：spawn data=0 时这里必然在涨
+            }
+        } catch (Throwable ignored) {
+            // 读不到方块状态不算
+        }
+        final float yaw = (float) (packet.getyRot() * 360) / 256.0F;
+        final float pitch = (float) (packet.getxRot() * 360) / 256.0F;
+        // 🔴 A：先量这一跳多大（判据"结束那一刻不许有 >0.5 格的跳变"）
+        final double dx = packet.getX() - entity.getX();
+        final double dy = packet.getY() - entity.getY();
+        final double dz = packet.getZ() - entity.getZ();
+        final double delta = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (delta > snapMaxDelta) {
+            snapMaxDelta = delta;
+        }
+        // 🔴 ④ 原版动画也倒放（走路摆动 + idle/呼吸）：对我们驱动的实体每 tick 拨回一拍
+        try {
+            ShanhaiReplayClientFx.reverseAnim(entity);
+        } catch (Throwable ignored) {
+            // 动画倒放失败不影响位置
+        }
+        if (delta > endSnapMaxDelta) {
+            endSnapMaxDelta = delta;
+        }
+        entity.absMoveTo(packet.getX(), packet.getY(), packet.getZ(), yaw, pitch);
+        entity.setOldPosAndRot();
+        // 🔴 A："最后一下被拉回"的直接可疑动作 = 解冻时把还挂着的 lerp 目标瞬移落位。
+        //    这里把插值目标<b>清零</b>（LivingEntity#lerpTo 的 increments=0 ⇒ lerpSteps=0，
+        //    等价于"插值立即完成、没有待办"）⇒ 解冻那一帧不会再往任何旧目标滑。
+        try {
+            entity.lerpTo(packet.getX(), packet.getY(), packet.getZ(), yaw, pitch, 0, true);
+        } catch (Throwable ignored) {
+            // 清不掉最多是解冻时滑一下（已在 end_snap_max_delta 里可判）
+        }
+        hookEntitySnap = true;
+        ++entitySnaps;
+        // 🔴 ③ 解冻后 20 tick 内钉住"我们包的坐标"（不许 aiStep/位置同步拉回）
+        try {
+            ShanhaiReplayClientFx.hold(entity);
+        } catch (Throwable ignored) {
+            // 钉不住最多是解冻后滑一下
+        }
+        final long now = System.currentTimeMillis();
+        if (now - snapLastLogMs < 1_000L) {
+            return;
+        }
+        snapLastLogMs = now;
+        LOGGER.info("[SHANHAI-CLOCK] clock_entity_snap snaps={} sample={} pos={}/{}/{}",
+                entitySnaps,
+                net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()),
+                String.format(java.util.Locale.ROOT, "%.2f", entity.getX()),
+                String.format(java.util.Locale.ROOT, "%.2f", entity.getY()),
+                String.format(java.util.Locale.ROOT, "%.2f", entity.getZ()));
     }
 
     // ------------------------------------------------------------------ ③ 探针（限流采样）
@@ -291,7 +455,7 @@ public final class ShanhaiClientClock {
      * @return 暂停期间恒为"进入暂停那一刻的值"
      */
     public static float freezeSmoothTick(float live) {
-        if (!paused()) {
+        if (!frozen()) {
             frozenSmoothTick = Float.NaN;   // 恢复 ⇒ 立刻解冻（下一帧重新取真实值）
             return live;
         }
@@ -315,7 +479,7 @@ public final class ShanhaiClientClock {
      * 服务端拒绝后也不回滚（等下一次容器同步才跳回来）。
      */
     public static boolean denyLocalDrop() {
-        return ShanhaiClockRules.denyItemDrop(paused());
+        return ShanhaiClockRules.denyItemDrop(frozen());
     }
 
     /**
@@ -326,7 +490,7 @@ public final class ShanhaiClientClock {
      * @param timer {@code (Object) this}，运行期就是 {@link Timer}
      */
     public static void onTimerAdvance(Object timer) {
-        if (!pinPartialTick || !paused()) {
+        if (!pinPartialTick || !frozen()) {
             return;
         }
         if (!(timer instanceof Timer t)) {
@@ -339,7 +503,7 @@ public final class ShanhaiClientClock {
 
     /** Oculus 的 {@code beginFrame}：返回 true 表示"冻结，别推进帧时钟"。 */
     public static boolean shouldCancelOculusBeginFrame() {
-        boolean p = paused();
+        boolean p = frozen();
         if (p && !hookOculusTimer) {
             hookOculusTimer = true;
             LOGGER.info("[SHANHAI-CLOCK] Oculus/Sodium 时间 uniform 钩子已生效（frameTimeCounter 冻结）");
@@ -362,11 +526,19 @@ public final class ShanhaiClientClock {
         ShanhaiWorldClock.CLIENT.clientTick();
         syncSound();
         syncTransition();
+        // 🔴 2026-11-14：回放期间的反向雨 / 粒子推进 / 每 250ms 的 rain_phase+particles_live 读数。
+        //    挂在这里是因为 LevelRenderer#tick 在冻结时也会走到本方法（见 ShanhaiLevelRendererTickClockMixin）。
+        try {
+            ShanhaiReplayClientFx.tick();
+            ShanhaiReplayClientFx.postUnfreezeTick();
+        } catch (Throwable ignored) {
+            // 客户端特效坏了绝不许影响渲染循环
+        }
         if (--ackCooldown > 0) {
             return;
         }
         ackCooldown = 20;
-        if (paused()) {
+        if (frozen()) {
             ShanhaiClockNetwork.sendAckFromClient(ackMask(), ShanhaiWorldClock.CLIENT.getEpoch());
         }
     }
@@ -391,7 +563,7 @@ public final class ShanhaiClientClock {
      * </ol>
      */
     private static void syncTransition() {
-        boolean now = paused();
+        boolean now = frozen();
         if (lastPaused != null && lastPaused == now) {
             return;
         }
@@ -443,7 +615,7 @@ public final class ShanhaiClientClock {
      * 防止别的代码（其他 mod、窗口失焦）把声音引擎 resume 回去而状态没跟上。
      */
     private static void syncSound() {
-        boolean want = paused();
+        boolean want = frozen();
         if (want == soundPaused) {
             if (want && (++soundReassertCounter % 20) == 0) {
                 reassertSound(true);
@@ -473,13 +645,48 @@ public final class ShanhaiClientClock {
         }
     }
 
-    /** 收到服务端下发的状态：打一行日志（每换一次 epoch 一行，不刷屏）。 */
+    /**
+     * 收到服务端下发的状态：打一行日志（每换一次 epoch 一行，不刷屏）。
+     *
+     * <h2>🔴 {@code clock_resume}：收尾判据的第三行（2026-11-14 C 组）</h2>
+     * 用户原话：「倒放结束之后时间没有正常流动」—— 服务端（旧版）压根没跑收尾的 {@code setMode(LIVE)}，
+     * 客户端镜像也就永远停在 {@code REPLAY}。修好服务端之后，客户端还必须有一条<b>可 grep</b>的证据表明
+     * "我这边真的跟着回去了"。
+     *
+     * <p>边沿取的是<b>上一次采纳的镜像模式</b>（而不是 {@link #frozen()}）：单机下 {@code frozen()}
+     * 还会读服务端的 {@code SERVER} 兜底，那一份在 {@code stop()} 一开始就变成 LIVE 了
+     * ⇒ 用它会**把顺序打乱**（可能在 {@code stop_exit} 之前就打出来）。
+     * 镜像只由网络包写 ⇒ 这一行一定出现在"收尾那条状态包"到达之后，
+     * 于是 {@code stop_exit → ANCHORBAR anchor_tick=-1 → clock_resume mode=LIVE} 的顺序是确定的。
+     */
     public static void onStateApplied(ShanhaiWorldClock.Snapshot snapshot) {
-        if (snapshot != null && snapshot.epoch() != lastLoggedEpoch) {
+        if (snapshot == null) {
+            return;
+        }
+        final ShanhaiClockMode previous = lastAppliedMode;
+        lastAppliedMode = snapshot.mode();
+        // 🔴 A：倒流结束那一刻必须能判"有没有把实体拉回去" ⇒ 打一行 end_snap_max_delta=
+        if (previous == ShanhaiClockMode.REPLAY && snapshot.mode() != ShanhaiClockMode.REPLAY) {
+            flushSnapLine();
+        }
+        if (snapshot.epoch() != lastLoggedEpoch) {
             lastLoggedEpoch = snapshot.epoch();
             LOGGER.info("[SHANHAI-CLOCK] 客户端时钟状态 = {}", snapshot.toLine());
         }
+        if (previous != null && previous != snapshot.mode()
+                && (snapshot.mode() == ShanhaiClockMode.LIVE
+                        || snapshot.mode() == ShanhaiClockMode.PAUSED)) {
+            // 🔴 2026-11-14：倒流结束<b>回到暂停</b>时也必须有一条（否则"世界仍然冻着"没有客户端证据）
+            LOGGER.info("[SHANHAI-CLOCK] clock_resume mode={} epoch={}（{} → {}，{}）",
+                    snapshot.mode(), snapshot.epoch(), previous, snapshot.mode(),
+                    snapshot.mode() == ShanhaiClockMode.PAUSED
+                            ? "倒流结束，回到暂停：世界时间/贴图/粒子/实体动画仍然冻结"
+                            : "冻结 → 解冻，世界时间/贴图/粒子/实体动画全部恢复推进");
+        }
     }
+
+    /** 上一次被网络包写进镜像的模式（{@code null} = 还没收到过状态包）。 */
+    private static ShanhaiClockMode lastAppliedMode;
 
     private static long lastLoggedEpoch = Long.MIN_VALUE;
 
@@ -519,6 +726,9 @@ public final class ShanhaiClientClock {
         if (hookSmoothTick) {
             mask |= 1 << 10;
         }
+        if (hookEntitySnap) {
+            mask |= 1 << 11;
+        }
         return mask;
     }
 
@@ -537,7 +747,8 @@ public final class ShanhaiClientClock {
                 + ",partialTick:" + bit(mask, 6)
                 + ",oculus:" + bit(mask, 7)
                 + ",posePinned:" + bit(mask, 9)
-                + ",smoothTick:" + bit(mask, 10);
+                + ",smoothTick:" + bit(mask, 10)
+                + ",entitySnap:" + bit(mask, 11);
     }
 
     private static String bit(int mask, int i) {

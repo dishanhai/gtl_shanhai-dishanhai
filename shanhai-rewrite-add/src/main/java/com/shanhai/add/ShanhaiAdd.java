@@ -3,6 +3,7 @@ package com.shanhai.add;
 import com.mojang.logging.LogUtils;
 import com.shanhai.add.client.AddClockHook;
 import com.shanhai.add.config.ShanhaiAddConfig;
+import com.shanhai.add.guard.radar.ShanhaiStackRadar;
 import com.shanhai.add.time.ShanhaiClockInit;
 import com.shanhai.api.ShanhaiAddHolder;
 import net.minecraftforge.api.distmarker.Dist;
@@ -78,6 +79,8 @@ public final class ShanhaiAdd {
         final boolean gravity = declareGravity();
         // 逐级抹除（阶梯在 add\guard\ShanhaiPurge；这里同样只确认类可解析 + 阶梯通道表完整）
         final boolean purge = declarePurge();
+        // 常开栈雷达（装配点是 @Mod.EventBusSubscriber 事件驱动：ServerStartedEvent 起 daemon 线程／ServerStoppedEvent 停）
+        ShanhaiStackRadar.declare("mod_ctor");
         // 本体渲染器（机器环/恒星特效）的时钟闸门
         final boolean clockHook = installClockHook();
 
@@ -89,8 +92,11 @@ public final class ShanhaiAdd {
     private static void registerConfig() {
         try {
             ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, ShanhaiAddConfig.COMMON_SPEC);
-            LOGGER.info("[SHANHAI-ADD] config registered type=COMMON file=config/{} section=[gravity] key={}",
-                    ShanhaiAddConfig.FILE_NAME, "multiplier");
+            // 🆕 2026-11-08：多了一节 [guard_module]（momentum_guard / pos_guard / inv_guard）
+            LOGGER.info("[SHANHAI-ADD] config registered type=COMMON file=config/{} section=[gravity] key={}"
+                            + " section2=[guard_module] key2={}|{}|{}",
+                    ShanhaiAddConfig.FILE_NAME, "multiplier",
+                    "momentum_guard", "pos_guard", "inv_guard");
         } catch (Throwable t) {
             // 配置注册失败 ⇒ 重力倍率退化成"只在内存里生效"（指令仍可用），不影响启动
             LOGGER.error("[SHANHAI-ADD] config registered=false ⇒ 重力倍率不会落盘", t);

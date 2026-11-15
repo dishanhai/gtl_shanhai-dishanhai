@@ -151,6 +151,44 @@ public final class ShanhaiClockRules {
 
     // ------------------------------------------------------------------ ③ 实体插值
 
+    // ------------------------------------------------------------------ ⑥ 挨打（受害者侧）
+
+    /**
+     * 暂停期间是否拒绝这一下伤害 —— <b>只看挨打的是谁，不看是谁打的</b>。
+     *
+     * <h2>1. 为什么必须有一条"受害者侧"判据（用户 2026-10-19 实测的 bug）</h2>
+     * 暂停 = {@code ServerLevel#tick} 整段取消，事后只手工补跑<b>玩家自己</b>的
+     * {@code tickNonPassenger}。第三方 mod 的实体即使不 tick 也照样能把伤害打到玩家身上
+     * （它们的伤害驱动不走 level tick）。旧判据写的是<b>发起者</b>
+     * （{@code getSource().getEntity() instanceof Player}）⇒「怪物/第三方实体打玩家」这一整类
+     * 直接漏过（症状就是用户看到的：暂停中在掉血）。
+     *
+     * <h2>2. 为什么"受害者必须是玩家"这条限定不能再放宽（放宽就废掉 purge）</h2>
+     * {@code ShanhaiPurge#killOne} 抹实体走的是
+     * {@code living.hurt(level.damageSources().playerAttack(owner), damage)}
+     * —— <b>发起者是玩家、受害者是 mob</b>。所以：
+     * <ul>
+     *   <li>按"发起者"判（旧判据）⇒ 暂停期间 purge 一下都抹不掉；</li>
+     *   <li>放宽成"所有实体" ⇒ 暂停期间 purge 同样一只都抹不掉；</li>
+     *   <li>只有"受害者是玩家"这一种极性两边都对。</li>
+     * </ul>
+     *
+     * <h2>3. 调用点：只有 {@code ShanhaiClockGuard#onHurt}（{@code LivingHurtEvent}）</h2>
+     * 🔴 <b>为什么不用更早的 {@code LivingAttackEvent}</b>：Forge 的 {@code ForgeHooks#onLivingAttack}
+     * 写的是 {@code return entity instanceof Player || !EVENT_BUS.post(event)}
+     * ⇒ <b>受害者是玩家时直接短路返回 {@code true}、事件根本不发</b> ⇒ 它保护不了玩家。
+     * 真想挡在 {@code LivingEntity#hurt} 最前面，需要 HEAD mixin（另一个改动，本轮没做）。
+     * ⇒ 本判据的覆盖面 = 一切走 {@code LivingHurtEvent}（{@code actuallyHurt}）的伤害；
+     * 不走事件、直接写血量的路径（例如第三方直接 {@code setHealth} / 改字段）本判据管不到。
+     *
+     * @param paused         是否暂停
+     * @param victimIsPlayer 挨打的是不是玩家（事件侧取 {@code LivingHurtEvent#getEntity()}，
+     *                       也就是<b>事件主体</b>，不是 {@code getSource().getEntity()}）
+     */
+    public static boolean denyVictimDamage(boolean paused, boolean victimIsPlayer) {
+        return paused && victimIsPlayer;
+    }
+
     /**
      * 暂停期间要不要把实体的"上一 tick 位置/朝向"对齐到当前值。
      *

@@ -66,6 +66,13 @@ public abstract class ShanhaiServerPlayerDieGuardMixin {
             require = 1)
     private void shanhai$refuseServerPlayerDie(DamageSource source, CallbackInfo ci) {
         try {
+            // 🆕 2026-11-08（用户纠正）：「抓栈必须在原版被写的那一刻」——判死这一拍就是那一刻。
+            //   只对受保护玩家抓（判据与 1/s 限流在普通类里），不改控制流。
+            com.shanhai.add.guard.stack.ShanhaiViolationProbe.dieHead((Object) this, "ServerPlayer#die");
+        } catch (Throwable ignored) {
+            // 抓栈坏了不许影响死亡判定
+        }
+        try {
             if (ShanhaiGuardValueLayer.refuseDie((Object) this, "ServerPlayer#die")) {
                 ci.cancel();
             }

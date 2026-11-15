@@ -960,6 +960,229 @@ function shanhaiOvrDropRecipe(event, recipe, id, why) {
         + '进而让【整份数据包加载失败】= 世界进不去。宁可这一条不生效，也不许把世界带崩）');
 }
 
+// =============================================================================
+// 🆕 2026-11-08（修法 A）：`op=remove / op=disable` 要能删掉【本轮别的脚本新加】的配方
+//
+// 🔴 事实（javap 直读 jar，原始字节码留在 temp\remove-replay\api\）：
+//   ① `RecipesEventJS.remove(RecipeFilter)` 的 IDFilter 快路径 =
+//        `originalRecipes.get(id)` → 命中才 `RecipeJS.remove()`
+//      ⇒ **方法体 0 处碰 addedRecipes**（kubejs-forge-2001.6.5-build.26，
+//        sha256=1769312192FBF9D72F45054BA61130523BFB471B5F480A4BFF8C210EC09400BB）。
+//   ② `addedRecipes` 的声明类型是 `java.util.Collection<RecipeJS>`
+//      （运行时实例 `java.util.concurrent.ConcurrentLinkedQueue`，见本文件上方 IDPROBE 读数）
+//      ⇒ 能按【对象】删：`Collection.remove(Object)`；`RecipeJS` 没有 override equals
+//        ⇒ 等价于"按同一性删那一条"，不会误删同 id 的另一份。
+//   ③ `RecipeJS.getId()` = `getOrCreateId().toString()`（同 jar，RecipeJS.class）
+//      ⇒ 这才是取真 id 的口径；**不能**按属性读 `rj.id`：本机实测 `typeof(r.id)` 在
+//        KubeJS 自己的 schema 上是 'function'、在 GTRecipeJS 上是 'object'（见上方 855-857 行）。
+//   ④ **光调 `rj.remove()` 不够**：`post()` 建合并表那一段（`lambda$post$7`）只按
+//        RECIPE_NON_NULL 过滤，**不看 `removed`** ⇒ 只要还躺在 addedRecipes 里就会被 putAll
+//        进最终表。必须把它从集合里**物理摘掉**（= 日志里 `queue_removed=true` 的含义）。
+//
+// ⇒ 所以这一支的修法 = "先按对象从新增表里摘，再照旧走数据包通道"，两步都走、分开记账。
+// =============================================================================
+/**
+ * 从保存队列里的一条 RecipeJS 上取【真实 recipe id】。
+ * 主通道 `RecipeJS.getId()`；它抛了才退回与 `shanhaiOvrAddedIndex` **完全相同**的口径
+ * （`String(rj)` = `"<id>[<type>]"` 再切掉类型段）。
+ * @return 真实 id 字符串；`null` = 这条读不出 id（调用方计入 undecodable，**不当成"没命中"**）
+ */
+function shanhaiOvrQueueRecipeId(rj) {
+    try {
+        var g = rj.getId();
+        if (g !== null && g !== undefined) {
+            var gs = String(g);
+            if (gs.length > 0 && gs !== 'null') {
+                return gs;
+            }
+        }
+    } catch (e0) {
+        // 落到下面那条通道
+    }
+    try {
+        var s = String(rj);
+        var b = s.lastIndexOf('[');
+        if (b > 0) {
+            return s.substring(0, b);
+        }
+    } catch (e1) {
+        // 两条都读不出来 ⇒ 如实返回 null
+    }
+    return null;
+}
+
+/**
+ * 按【对象】把 `event.addedRecipes` 里 id 相符的条目摘掉。
+ *
+ * <p>形状照抄现成的 `shanhaiOvrDropRecipe`（同样的 `addedRecipes.remove(recipe)` + `recipe.remove()`），
+ * 只是把"已知那一条"换成"按 id 现扫一遍"（现扫 = 也覆盖本轮前面 op=add 刚加进去的那种）。
+ * ⚠️ 先收集、后摘除：不边迭代边改集合。
+ * @return {scanned, hits, queue_removed, undecodable, err}（调用方只读，不改）
+ */
+function shanhaiOvrQueueDropById(event, id) {
+    var res = { scanned: 0, hits: 0, queue_removed: false, queue_by: '', kept: 0, undecodable: 0, err: '' };
+    var q = null;
+    try {
+        q = event.addedRecipes;
+    } catch (e0) {
+        q = null;
+    }
+    if (q === null || q === undefined) {
+        res.err = 'addedRecipes 不可读';
+        return res;
+    }
+    var victims = [];
+    try {
+        var it = q.iterator();
+        while (it.hasNext()) {
+            var rj = it.next();
+            res.scanned++;
+            var rid = shanhaiOvrQueueRecipeId(rj);
+            if (rid === null) {
+                res.undecodable++;
+                continue;
+            }
+            if (rid === id) {
+                victims.push(rj);
+            }
+        }
+    } catch (e1) {
+        res.err = '遍历 addedRecipes 失败: ' + e1;
+        return res;
+    }
+    for (var i = 0; i < victims.length; i++) {
+        var v = victims[i];
+        res.hits++;
+        var ok = false;
+        var by = '';
+        try {
+            ok = q.remove(v);
+            if (ok) {
+                by = 'collection';
+            }
+        } catch (e2) {
+            res.err = shanhaiOvrJoinErr(res.err, '按对象 remove 抛了: ' + e2);
+        }
+        if (!ok) {
+            // 主路径没摘掉 ⇒ 兜底（见 shanhaiOvrQueueRemoveByIterator 的注释）
+            ok = shanhaiOvrQueueRemoveByIterator(q, id);
+            if (ok) {
+                by = 'iterator';
+            }
+        }
+        if (ok) {
+            res.queue_removed = true;
+            if (res.queue_by === '') {
+                res.queue_by = by;
+            } else if (res.queue_by !== by) {
+                res.queue_by = 'mixed';
+            }
+        } else {
+            res.kept++;
+            res.err = shanhaiOvrJoinErr(res.err, 'remove() 没摘掉');
+        }
+        try {
+            v.remove();
+        } catch (e3) {
+            res.err = shanhaiOvrJoinErr(res.err, 'rj.remove() 抛了: ' + e3);
+        }
+    }
+    return res;
+}
+
+/**
+ * "这一条 remove/disable 到底走没走到哪条通道" ⇒ 日志里的 `via=` 字段。
+ * addedHits = 这一轮真的从 addedRecipes 里摘掉了几条；dpHit = 数据包原表里有没有这条。
+ * 四种情况各自可判：both / addedRecipes / datapack / none
+ * （none = 两条通道都没命中 ⇒ 这条 entry 其实什么也没删，最需要被看见的那种）。
+ */
+function shanhaiOvrViaOf(addedHits, dpHit) {
+    var a = (addedHits > 0);
+    var d = (dpHit === true) || (dpHit > 0);
+    if (a && d) {
+        return 'both';
+    }
+    if (a) {
+        return 'addedRecipes';
+    }
+    if (d) {
+        return 'datapack';
+    }
+    return 'none';
+}
+
+/**
+ * 🔴 兜底：用【迭代器】把第一条同 id 的条目摘掉。
+ *
+ * <p>为什么要这一层：主路径是 `Collection.remove(Object)`（= 现成 `shanhaiOvrDropRecipe` 的写法）。
+ * 它在本包里**没有"已经跑成过"的历史读数**（生产日志里一条 `ADD ORPHAN REMOVED` 都没有），
+ * 万一 Rhino 侧的重载解析/返回值不如预期，那这一条就会静默不删 —— 正是这次事故的形态。
+ * 所以主路径没摘掉时再用 `Iterator.remove()` 兜一次；两条都不成就如实记账（`queue_by` 会空/带 err）。
+ * ⚠️ 这里不用 `it.next() === rj` 比同一性：Java 对象在 Rhino 里可能被包成不同的壳，
+ *    `===` 未必成立 ⇒ 仍然按 **id 逐字相等** 找，口径与主路径一致。
+ */
+function shanhaiOvrQueueRemoveByIterator(q, id) {
+    try {
+        var it = q.iterator();
+        while (it.hasNext()) {
+            var rj = it.next();
+            if (shanhaiOvrQueueRecipeId(rj) === id) {
+                it.remove();
+                return true;
+            }
+        }
+    } catch (e0) {
+        // 兜底也失败 ⇒ 返回 false，由调用方如实记账
+    }
+    return false;
+}
+
+/** 把两条错误读数拼成一行（空串不占位）。 */
+function shanhaiOvrJoinErr(a, b) {
+    if (a === '' || a === null || a === undefined) {
+        return String(b);
+    }
+    return String(a) + ' / ' + String(b);
+}
+
+/**
+ * `op=remove / op=disable` 真正干活的那一步（抽成函数 = 可以离线跑纯逻辑自检）。
+ *
+ * <p>顺序固定三步，每一步都单独记账：
+ * ① 按对象从 addedRecipes 里摘（`shanhaiOvrQueueDropById`）；
+ * ② 量数据包原表里本来有没有这条（`countRecipes({id})`，IDFilter 快路径，O(1)）；
+ * ③ 照旧 `event.remove({ id: id })`。
+ * @return {via, queue_removed, hits, scanned, undecodable, datapack_hits, err, remove_threw}
+ */
+function shanhaiOvrApplyRemove(event, id) {
+    var qdrop = shanhaiOvrQueueDropById(event, id);
+    var dpHit = 0;
+    try {
+        dpHit = event.countRecipes({ id: id });
+    } catch (eDp) {
+        // 量不出来就如实记账（-1）；此时 via 只会是 addedRecipes / none，别当成"原表没有"。
+        dpHit = -1;
+    }
+    var removeThrew = '';
+    try {
+        event.remove({ id: id });
+    } catch (eRm) {
+        removeThrew = String(eRm);
+    }
+    return {
+        via: shanhaiOvrViaOf(qdrop.hits, dpHit),
+        queue_removed: qdrop.queue_removed,
+        queue_by: qdrop.queue_by,
+        kept: qdrop.kept,
+        hits: qdrop.hits,
+        scanned: qdrop.scanned,
+        undecodable: qdrop.undecodable,
+        datapack_hits: dpHit,
+        err: qdrop.err,
+        remove_threw: removeThrew
+    };
+}
+
 /**
  * 一个 {@code JsonObject} 的**键名列表**。
  *
@@ -1697,8 +1920,24 @@ function shanhaiOvrRun(event) {
                                ' fields[' + appliedNames.join(',') + ']');
                 applied++;
             } else if (op === 'remove' || op === 'disable') {
-                event.remove({ id: id });
-                shanhaiOvrInfo(uid + ' APPLIED op=' + op + ' id=' + id + ' type=' + type);
+                // 🔴 2026-11-08（修法 A）：原来这里只有一句 `event.remove({ id: id });`，
+                //    而它只查 originalRecipes（javap 取证见本文件上方那一节）⇒ 本轮别的脚本用
+                //    `event.recipes.gtceu.*` 新加的配方【一条都删不掉】。三步（见 shanhaiOvrApplyRemove）：
+                //      ① 先按对象从 addedRecipes 里摘（并 rj.remove()）；
+                //      ② 量一下数据包原表里本来有没有这条（O(1)：IDFilter 走 originalRecipes.get）；
+                //      ③ 再照旧 `event.remove({ id: id })` —— 覆盖"原表里本来就有这条"的情形。
+                //    三件事各自记账，日志行给 via=addedRecipes|datapack|both|none + queue_removed=<bool>，
+                //    所以"走没走到新增表"这一件事永远能从日志上直接读出来。
+                var rm = shanhaiOvrApplyRemove(event, id);
+                shanhaiOvrInfo(uid + ' APPLIED op=' + op + ' id=' + id + ' type=' + type
+                    + ' via=' + rm.via + ' queue_removed=' + rm.queue_removed
+                    + ' queue_by=' + ((rm.queue_by === '') ? 'none' : rm.queue_by)
+                    + ' added_hits=' + rm.hits + ' added_scanned=' + rm.scanned
+                    + ' added_kept=' + rm.kept
+                    + ' added_undecodable=' + rm.undecodable
+                    + ' datapack_hits=' + rm.datapack_hits
+                    + ((rm.err === '') ? '' : (' queue_err=' + rm.err))
+                    + ((rm.remove_threw === '') ? '' : (' remove_threw=' + rm.remove_threw)));
                 applied++;
             } else {
                 shanhaiOvrError(uid + ' SKIPPED unknown op="' + op + '" id=' + id);

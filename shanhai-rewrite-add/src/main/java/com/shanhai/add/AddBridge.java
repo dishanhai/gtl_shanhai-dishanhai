@@ -30,7 +30,7 @@ import org.slf4j.Logger;
  *   has("clock")       装配过时钟（本 jar 里真的有那份代码）⇒ true
  *   has("gravity")     重力的装配点类真的在本 jar 里、可解析 ⇒ true
  *   has("purge")       逐级抹除阶梯类在本 jar 里、可解析 ⇒ true（阶段 3b 搬进来之后）
- *   purgeAll(actor)    真的跑 L1→L6 阶梯，返回抹除数（&gt;= 0）；拿不到服务端 / 抛异常 ⇒ -1 让本体回退
+ *   purgeAll(actor)    真的跑安全清场通道（HurtOnly：0.1 血 ＋ 原版 hurt），返回抹除数（&gt;= 0）；拿不到服务端 / 抛异常 ⇒ -1 让本体回退
  * </pre>
  * 🔴 {@link #has(String)} 的语义是"<b>这个功能真的能用</b>"，不是"这个键存在"。所以三个能力位都<b>不是</b>
  * 写死的 {@code true}，而是由 {@link ShanhaiAdd} 的构造器按实际装配结果灌进来的
@@ -124,7 +124,8 @@ public final class AddBridge implements com.shanhai.api.ShanhaiAdd {
     }
 
     /**
-     * 🔴 <b>逐级抹除</b>（{@code ShanhaiPurge} 阶梯 L1→L6）—— 阶段 3b 起<b>真的执行</b>。
+     * 🔴 <b>安全清场</b>（{@code ShanhaiPurge#purgeAll} = HurtOnly 通道）—— 阶段 3b 起<b>真的执行</b>。
+     * 旧阶梯（L1→L6）仍保留在 {@code ShanhaiPurge#purgeLegacy}，只有显式参数才走。
      *
      * <p>本体 {@code /shanhai purge} 拿到 {@code >= 0} 的返回值就<b>不再回退</b> {@code kill @e}；
      * 拿到 {@link #NOT_IMPLEMENTED}（{@code -1}）才回退（{@code com.shanhai.api.PurgeRoute} 的五条分支）。
@@ -150,7 +151,7 @@ public final class AddBridge implements com.shanhai.api.ShanhaiAdd {
                     : ServerLifecycleHooks.getCurrentServer();
             if (server == null) {
                 // 拿不到服务端 ⇒ 让本体回退（它自己会 warn）。绝不返回 0 假装"一只都没有"
-                LOGGER.warn("[SHANHAI-ADD] purge_via=ladder skipped reason=no_server actor={}",
+                LOGGER.warn("[SHANHAI-ADD] purge_via=hurt skipped reason=no_server actor={}",
                         actor == null ? "console" : actor.getName().getString());
                 return NOT_IMPLEMENTED;
             }
@@ -158,7 +159,7 @@ public final class AddBridge implements com.shanhai.api.ShanhaiAdd {
             return result.removed;
         } catch (Throwable t) {
             // 扩展坏了不许把本体那条命令弄失败（"装了扩展反而更弱"是最不该出现的行为）
-            LOGGER.error("[SHANHAI-ADD] purge_via=ladder threw ⇒ 本体回退 kill@e（这一次的抹除数以本体为准）", t);
+            LOGGER.error("[SHANHAI-ADD] purge_via=hurt threw ⇒ 本体回退 kill@e（这一次的抹除数以本体为准）", t);
             return NOT_IMPLEMENTED;
         }
     }

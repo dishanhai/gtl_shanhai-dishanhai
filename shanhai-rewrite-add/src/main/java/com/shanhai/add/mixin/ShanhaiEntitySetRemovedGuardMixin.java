@@ -59,6 +59,13 @@ public abstract class ShanhaiEntitySetRemovedGuardMixin {
             require = 1)
     private void shanhai$refuseSetRemoved(Entity.RemovalReason reason, CallbackInfo ci) {
         try {
+            // 🆕 2026-11-08（用户纠正）：「抓栈必须在原版被写的那一刻」——摘玩家这一拍就是那一刻。
+            //   只对受保护玩家抓（正常离开的放行判定仍在本体值层，这里不参与）。
+            com.shanhai.add.guard.stack.ShanhaiViolationProbe.setRemovedHead((Object) this, "Entity#setRemoved");
+        } catch (Throwable ignored) {
+            // 抓栈坏了不许影响移除判定
+        }
+        try {
             if (ShanhaiGuardEntityGuard.refuseSetRemoved((Object) this, (Object) reason)) {
                 ci.cancel();
             }

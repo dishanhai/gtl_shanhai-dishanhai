@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.add.time.replay.ShanhaiReplayGate;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -75,9 +76,46 @@ public final class ShanhaiClockHooks {
     private ShanhaiClockHooks() {
     }
 
+    /**
+     * 世界时钟是否处在<b>冻结态</b>（{@code PAUSED} <b>或</b> {@code REPLAY}）。
+     *
+     * <h2>🔴 为什么所有判据都必须走这一个函数（2026-11 时间倒流）</h2>
+     * 倒流期间世界 tick 也必须整段取消（否则方块一边回退、世界一边往前跑）。
+     * 而原来 11 处判据各自写死 {@code SERVER.isPaused()}（本类 8 处 + {@code ShanhaiClockGuard} 1 处
+     * + 客户端 2 处，设计稿附录 A 只列了 7 处、漏了本类后面 5 处），
+     * 任何一处漏改都会得到<b>半冻状态</b>：世界停住了但玩家还能挖、或者服务端冻了客户端还在流水。
+     * 极性只有一份（{@code ShanhaiReplayGate#frozen}），离线自检逐格断言那张三态表。
+     */
+    public static boolean frozen() {
+        return ShanhaiReplayGate.frozen(ShanhaiWorldClock.SERVER.getMode());
+    }
+
+    // ------------------------------------------------------------------ 回放专用写后门
+
+    /**
+     * 进入"替倒流自己写世界"的临界区（可重入；**只给回放用**）。
+     *
+     * <p>🔴 硬网 {@code ShanhaiLevelSetBlockClockMixin} 挂在 {@code Level#setBlock} 上，
+     * 而回退方块也走同一条路 ⇒ 没有这个后门的话倒流<b>一行都写不进去</b>
+     * （设计 §4.1 里唯一标 ❗ 的那条）。实现见 {@link ShanhaiReplayGate}：ThreadLocal 计数。
+     */
+    public static void beginReplayWrite() {
+        ShanhaiReplayGate.beginReplayWrite();
+    }
+
+    /** 退出临界区（与 {@link #beginReplayWrite()} 成对）。 */
+    public static void endReplayWrite() {
+        ShanhaiReplayGate.endReplayWrite();
+    }
+
+    /** 当前线程是否正在替回放写世界。 */
+    public static boolean inReplayWrite() {
+        return ShanhaiReplayGate.inReplayWrite();
+    }
+
     /** 服务端 {@code ServerLevel#tick} 是否应被跳过（= 世界是否冻结）。 */
     public static boolean freezeServerLevelTick() {
-        return ShanhaiWorldClock.SERVER.isPaused();
+        return frozen();
     }
 
     /**
@@ -91,7 +129,7 @@ public final class ShanhaiClockHooks {
      * @return {@code true} ⇒ 调用方应当取消原版 {@code ServerLevel#tick}
      */
     public static boolean freezeServerLevelTick(Object level, BooleanSupplier haveTime) {
-        if (!ShanhaiWorldClock.SERVER.isPaused()) {
+        if (!frozen()) {
             return false;
         }
         if (!(level instanceof ServerLevel serverLevel)) {
@@ -234,9 +272,13 @@ public final class ShanhaiClockHooks {
      *
      * <p>🔴 真正的拦截判定是 {@link #onLevelSetBlock(Object)}：它<b>按侧分流</b>
      * （服务端拦、客户端放行）。这个方法<b>不要</b>再挂到 mixin 上。
+     *
+     * <p>2026-11 起它同时反映"回放写后门"：倒流期间回放自己的写是放行的
+     * （{@link ShanhaiReplayGate#inReplayWrite()}），所以这个返回值在倒流中可能瞬时是 {@code false}
+     * —— status 里看到它 = 客户端此刻"能不能写"的真值，而不是"暂停了没有"。
      */
     public static boolean denyWorldWrite() {
-        return ShanhaiWorldClock.SERVER.isPaused();
+        return frozen() && !ShanhaiReplayGate.inReplayWrite();
     }
 
     /**
@@ -254,16 +296,20 @@ public final class ShanhaiClockHooks {
      * @return {@code true} ⇒ 调用方应当把 {@code setBlock} 的返回值改成 {@code false}
      */
     public static boolean onLevelSetBlock(Object level) {
-        if (!ShanhaiWorldClock.SERVER.isPaused()) {
+        if (!frozen()) {
             return false;
         }
         boolean clientSide = level instanceof Level l && l.isClientSide();
-        if (ShanhaiClockRules.denyWorldWrite(true, clientSide)) {
+        // 🔴 极性所有者仍是 ShanhaiClockRules（客户端写一律放行、服务端全拦）；
+        //    这里只叠加一个"回放自己"的豁免 —— 倒流回退方块也走 setBlock，不豁免就一行都写不进去。
+        if (ShanhaiClockRules.denyWorldWrite(true, clientSide) && !ShanhaiReplayGate.inReplayWrite()) {
             ShanhaiClockGuard.note(ShanhaiClockGuard.Category.WORLD_WRITE, null);
             return true;
         }
-        // 放行的是"客户端 cosmetic 写"：计一笔，供 status/日志证明按侧分流真的生效。
-        noteClientWriteAllowed();
+        if (clientSide) {
+            // 放行的是"客户端 cosmetic 写"：计一笔，供 status/日志证明按侧分流真的生效。
+            noteClientWriteAllowed();
+        }
         return false;
     }
 
@@ -315,7 +361,7 @@ public final class ShanhaiClockHooks {
      * @param player {@code (Object) this}，运行期是 {@link Player}
      */
     public static boolean denyItemDrop(Object player) {
-        if (!ShanhaiClockRules.denyItemDrop(ShanhaiWorldClock.SERVER.isPaused())) {
+        if (!ShanhaiClockRules.denyItemDrop(frozen())) {
             return false;
         }
         ShanhaiClockGuard.note(ShanhaiClockGuard.Category.DROP, player instanceof Entity e ? e : null);
@@ -339,7 +385,7 @@ public final class ShanhaiClockHooks {
      * @param slotId    槽位号（{@code -999} = 点 GUI 外面）
      */
     public static boolean denyContainerClick(Object menu, Object player, Object clickType, int slotId) {
-        if (!ShanhaiWorldClock.SERVER.isPaused()) {
+        if (!frozen()) {
             return false;
         }
         if (!(menu instanceof AbstractContainerMenu)) {
@@ -371,7 +417,7 @@ public final class ShanhaiClockHooks {
      * 整份状态回灌是最便宜的纠正手段（一次性、幂等）。
      */
     public static boolean denyContainerPacketClick(Object listener) {
-        if (!ShanhaiWorldClock.SERVER.isPaused()) {
+        if (!frozen()) {
             return false;
         }
         if (!(listener instanceof ServerGamePacketListenerImpl impl)) {
@@ -432,7 +478,7 @@ public final class ShanhaiClockHooks {
      * @return {@code true} ⇒ 调用方应当把这个包整包取消
      */
     public static boolean denyAeActionPacket(Object playerObj, String source) {
-        if (!ShanhaiWorldClock.SERVER.isPaused()) {
+        if (!frozen()) {
             return false;
         }
         if (!(playerObj instanceof ServerPlayer player)) {
@@ -478,7 +524,7 @@ public final class ShanhaiClockHooks {
      * @return {@code true} ⇒ 取消这一笔交互
      */
     public static boolean denyAeMenuInteraction(Object menuObj, String source) {
-        if (!ShanhaiWorldClock.SERVER.isPaused()) {
+        if (!frozen()) {
             return false;
         }
         if (!(menuObj instanceof AbstractContainerMenu menu)) {

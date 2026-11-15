@@ -64,7 +64,30 @@ public final class ShanhaiClockNetwork {
                 ClockAckMsg::encode, ClockAckMsg::decode, ClockAckMsg::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
 
+        // id 2：锚点进度条（S→C）。复用本通道而不是再开一条 —— 见 ShanhaiAnchorBarMsg 类注释 §3：
+        // 多一条通道就多一个握手失败点，而这两件事读的是同一次倒流的两个数。
+        channel.registerMessage(2, com.shanhai.add.time.anchor.ShanhaiAnchorBarMsg.class,
+                com.shanhai.add.time.anchor.ShanhaiAnchorBarMsg::encode,
+                com.shanhai.add.time.anchor.ShanhaiAnchorBarMsg::decode,
+                com.shanhai.add.time.anchor.ShanhaiAnchorBarMsg::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+
         ShanhaiMod.LOGGER.info("[SHANHAI-CLOCK] 网络通道已注册：{}（protocol {}）", CHANNEL_ID, PROTOCOL);
+    }
+
+    /**
+     * 服务端 → 单个玩家：发一条锚点条状态（id 2）。
+     *
+     * <p>为什么单独一个入口而不是复用 {@link #sendStateTo}：那条发的是世界时钟快照
+     * （{@code ClockStateMsg}），两种消息的字段与频率完全不同（时钟 20 tick 一次、锚点条 5 tick 一次），
+     * 合并会让"时钟变了一下就顺手发一次锚点条"这种耦合冒出来。
+     */
+    public static void sendAnchorBarTo(ServerPlayer player,
+                                       com.shanhai.add.time.anchor.ShanhaiAnchorBarMsg msg) {
+        if (channel == null || player == null || msg == null) {
+            return;
+        }
+        channel.send(PacketDistributor.PLAYER.with(() -> player), msg);
     }
 
     // ------------------------------------------------------------------ 服务端 → 客户端

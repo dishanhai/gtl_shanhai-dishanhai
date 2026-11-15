@@ -23,7 +23,7 @@ import net.minecraft.world.entity.player.Player;
  *
  * <h2>它接在哪</h2>
  * <pre>
- *   来源①  {@code ShanhaiPurge#purgeAll}   —— {@code /shanhai purge} 真抹掉的那一只的类型
+ *   来源①  {@code ShanhaiPurge#purgeLegacy} —— 旧阶梯（{@code /shanhai_add purge legacy}）真抹掉的那一只的类型
  *   来源②  {@code ShanhaiPurge#drainQueue} —— 「挨打反击」抹掉的那个攻击者的类型
  *   执行   {@code ShanhaiPurge#onServerTick} 每 5 tick 调一次 {@link #scanAndRemove}
  * </pre>
@@ -61,6 +61,9 @@ public final class ShanhaiGuardSuppression {
      * 自上次"落一行日志/播一句"以来，每种类型又被抹掉几只 ＋ 它的人话名字（第一只的名字）。
      * <p>为什么攒着：规格要"不要每 tick 刷"，而窗口内每 5 tick 就扫一次（= 每秒 4 次）
      * ⇒ 按 {@link ShanhaiGuardSuppressWindow#FLUSH_INTERVAL_MS} 合并成每秒一行/一句，数字是这一秒的总和。
+     * <p>⚠️ 2026-11-01 起：左下角那一句「已压制 X ×N」跟着 {@code ShanhaiPurge} 的
+     * <b>5 秒播报窗口</b>一起发（{@link ShanhaiGuardSuppressWindow#FLUSH_INTERVAL_MS} 仍管
+     * {@code suppress type=…} 这一行日志的合并）；日志 {@code purge_announce} 也是每 5 秒一行。
      */
     private static final Map<EntityType<?>, Stat> SINCE_FLUSH = new LinkedHashMap<>();
 
@@ -161,9 +164,15 @@ public final class ShanhaiGuardSuppression {
                 if (!TABLE.isActive(type, nowMillis)) {
                     continue;
                 }
+                // 🆕 每次抹除的条数上限：同一类型每 1 秒最多 4 只（超出由 ShanhaiPurge 的配额表记 capped）
+                //    与「挨打反击」那条路共用同一份配额 ⇒ 两条路加起来也不会"一眼清场"
+                if (!ShanhaiPurge.takeQuota(type, nowMillis)) {
+                    continue;
+                }
                 // 同一套 L1→L6 阶梯（最后一个 false = 别往左下角刷"已抹除 X"）
                 final String channel = ShanhaiPurge.ladder(level, entity, announceTo, false);
                 if (channel == null) {
+                    ShanhaiPurge.refundQuota(type, nowMillis);   // 没抹掉 ⇒ 额度退回（占额度的只算真抹掉的）
                     continue;   // 这一轮没解决（已进重申表 / L6 隔离）⇒ 不算"又抹掉一只"
                 }
                 removed++;
@@ -178,6 +187,16 @@ public final class ShanhaiGuardSuppression {
     /** 这一秒里攒下东西了吗（给"每秒最多落一行"那条闸门用；不消费）。 */
     public static boolean hasPending() {
         return !SINCE_FLUSH.isEmpty();
+    }
+
+    /**
+     * 🆕 这个类型现在是不是在压制窗口里（<b>只读</b>，不改窗口）。
+     *
+     * <p>给攻击端的去重用：同一次攻击已经进过排队、或者这个类型已经在压制窗口里 ⇒
+     * 不再重复排队（{@code ShanhaiPurgeAdmission.Reason#DUP}），由每 5 tick 的压制扫描统一处理。
+     */
+    public static boolean isSuppressed(EntityType<?> type, long nowMillis) {
+        return type != null && TABLE.isActive(type, nowMillis);
     }
 
     /** 取出并清空"自上次落盘以来"的统计（调用方负责打日志/播报）。 */

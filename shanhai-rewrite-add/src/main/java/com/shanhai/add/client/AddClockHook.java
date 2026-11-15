@@ -15,7 +15,7 @@ import org.slf4j.Logger;
  * 拆分前本体两个渲染器直接调：
  * <pre>
  *   ShanhaiClientClock.freezeSmoothTick(live)                                   // 环/恒星动画
- *   ShanhaiClockRules.renderPartialTick(ShanhaiClientClock.paused(), vanilla)   // 特效 α
+ *   ShanhaiClockRules.renderPartialTick(ShanhaiClientClock.frozen(), vanilla)    // 特效 α
  * </pre>
  * 拆分后这两个类整块搬进扩展（{@code com.shanhai.add.client.time} / {@code com.shanhai.add.time}），
  * 本体不再认它们 ⇒ 由本类把同样两个调用重新接回本体那个零 MC 依赖的接缝。
@@ -71,7 +71,7 @@ public final class AddClockHook implements ShanhaiClockHook.Impl {
     @Override
     public float partialTick(float vanilla) {
         try {
-            return ShanhaiClockRules.renderPartialTick(ShanhaiClientClock.paused(), vanilla);
+            return ShanhaiClockRules.renderPartialTick(ShanhaiClientClock.frozen(), vanilla);
         } catch (Throwable t) {
             return vanilla;
         }
