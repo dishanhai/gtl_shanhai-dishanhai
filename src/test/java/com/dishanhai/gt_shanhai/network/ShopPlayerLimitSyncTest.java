@@ -24,7 +24,7 @@ class ShopPlayerLimitSyncTest {
         ShopEntry entry = new ShopEntry(new ResourceLocation("minecraft:stone"), 1, "test", null,
                 ShopCost.singleCoin(new ResourceLocation("minecraft:diamond"), 1L), "", 20L);
         WalletAccountSyncPacket sent = new WalletAccountSyncPacket(Map.of(), BigInteger.ZERO,
-                Map.of(), Map.of(), BigInteger.ZERO, false, -1, Map.of(), Map.of(entry.getStableId(), 0L));
+                Map.of(), Map.of(), BigInteger.ZERO, false, -1, Map.of(), Map.of(entry.getStableId(), 0L), 912L, 60L);
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         try {
             sent.encode(buffer);
@@ -34,10 +34,14 @@ class ShopPlayerLimitSyncTest {
             apply.setAccessible(true);
             apply.invoke(null, decoded);
             assertTrue(ClientWalletAccount.isSynced());
+            assertEquals(912L, ClientWalletAccount.currencySaleLimit());
+            assertEquals(60L, ClientWalletAccount.currencySalePeriodSeconds());
             assertEquals(0L, ClientWalletAccount.getRemainingUses(entry));
             assertEquals(20L, entry.getRemainingUses());
             ClientWalletAccount.clear();
             assertFalse(ClientWalletAccount.isSynced());
+            assertEquals(com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit.DEFAULT_LIMIT,
+                    ClientWalletAccount.currencySaleLimit());
             ClientWalletAccount.apply(Map.of(), BigInteger.ZERO, Map.of(), Map.of(), BigInteger.ZERO,
                     false, -1, Map.of(), Map.of());
             assertEquals(20L, ClientWalletAccount.getRemainingUses(entry));

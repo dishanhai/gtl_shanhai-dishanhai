@@ -34,21 +34,42 @@ base {
 
 sourceSets.main.resources { setSrcDirs(['src/main/resources', 'src/generated/resources']) }
 
+// 山海：只从各自的 Forge 构建目录选正式产物，按数值版本排序。
+def latestForgeJar = { File dir, java.util.regex.Pattern namePattern ->
+    def candidates = dir.listFiles()?.findResults { jar ->
+        def name = jar.name =~ namePattern
+        if (!jar.isFile() || !name.matches()) return null
+        [jar: jar, version: org.gradle.util.internal.VersionNumber.parse(name.group(1))]
+    }
+    candidates ? candidates.max { it.version } : null
+}
+
+def shBetterUiDir = file('../SH-Better-UI/build/libs')
+def requestedUiJar = findProperty('shBetterUiJar')
+def shBetterUiJar = requestedUiJar ? file(requestedUiJar)
+        : latestForgeJar(shBetterUiDir, ~/^sh_better_ui-([0-9]+[.][0-9]+[.][0-9]+)-dev[.]jar$/)?.jar
+
+def shCommonLibName = 'sh-common-lib-forge-1.20.1'
+def shCommonLibDir = file('../SH-Common-Lib/forge-1.20.1/build/libs')
+def shCommonLib = latestForgeJar(shCommonLibDir, ~/^sh-common-lib-forge-1[.]20[.]1-([0-9]+[.][0-9]+[.][0-9]+)[.]jar$/)
+def shCommonLibGroup = 'local.shanhai'
+
 repositories {
     mavenCentral()
-    mavenLocal {
-        content { includeModule 'com.dishanhai', 'sh-common-lib-forge-1.20.1' }
+    if (shCommonLib) {
+        // 只暴露原始坐标，映射后的坐标交回 ForgeGradle 自己的仓库。
+        flatDir {
+            dirs shCommonLibDir
+            content { includeVersion shCommonLibGroup, shCommonLibName, shCommonLib.version.toString() }
+        }
     }
     // 山海：讓 ForgeGradle 對本機可選 API／測試依賴執行 SRG → 開發映射。
     flatDir { dirs 'libs' }
 }
 
-// 山海：独立 UI 库的开发产物；正式游戏需单独安装发行 jar。
-def shBetterUiJar = file(findProperty('shBetterUiJar') ?: "../SH-Better-UI/build/libs/sh_better_ui-${sh_better_ui_version}-dev.jar")
-
 dependencies {
-    implementation files(shBetterUiJar)
-    implementation fg.deobf("com.dishanhai:sh-common-lib-forge-1.20.1:${sh_common_lib_version}")
+    if (shBetterUiJar != null) implementation files(shBetterUiJar)
+    if (shCommonLib) implementation fg.deobf("${shCommonLibGroup}:${shCommonLibName}:${shCommonLib.version}")
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // 核心 Kotlin：只认这颗 jar（stdlib 2.2.21）。不要再依赖插件自带的 kotlin-stdlib。
@@ -58,7 +79,7 @@ dependencies {
     implementation kotlinForForge
 
     implementation fileTree(dir: 'libs', include: '*.jar',
-            excludes: ['sh_better_ui-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar', 'GTL-Enhancedcore-*.jar'])
+            excludes: ['sh_better_ui-*.jar', 'sh-common-lib-forge-1.20.1-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar', 'GTL-Enhancedcore-*.jar'])
     testImplementation(fg.deobf('local:appliedenergistics2-forge:15.4.10')) { transitive = false }
     implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
@@ -306,9 +327,14 @@ task convertTianjieSchematic(type: JavaExec) {
 // 山海：防止缺少独立库时产生误导性的下游编译错误。
 tasks.register('verifyShBetterUiDependency') {
     doLast {
-        if (!shBetterUiJar.isFile()) {
-            throw new GradleException('Build SH-Better-UI devJar first or pass -PshBetterUiJar=<dev-jar>.')
+        if (!shBetterUiJar?.isFile()) {
+            throw new GradleException("Build a compatible SH-Better-UI Forge devJar in ${shBetterUiDir} or pass -PshBetterUiJar=<dev-jar>.")
         }
+        logger.lifecycle('SH-Better-UI Forge dev JAR: {}', shBetterUiJar)
+        if (!shCommonLib) {
+            throw new GradleException("Build a SH-Common-Lib Forge 1.20.1 JAR in ${shCommonLibDir}.")
+        }
+        logger.lifecycle('SH-Common-Lib Forge JAR: {}', shCommonLib.jar)
         new java.util.zip.ZipFile(shBetterUiJar).withCloseable { jar ->
             def uiPackage = 'com/dishanhai/sh_better_ui/client'
             def required = ['gui/scaled/ThemeEffects', 'gui/scaled/ShapeWaves', 'gui/scaled/VisualReveal', 'gui/display/ElectricLogo',

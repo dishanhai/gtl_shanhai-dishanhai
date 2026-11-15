@@ -2,6 +2,8 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
+import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
+import com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit;
 import com.dishanhai.gt_shanhai.client.shop.ShopAppearance;
 import com.dishanhai.sh_better_ui.client.gui.display.GraphicIcon;
 import com.dishanhai.sh_better_ui.client.gui.scaled.UiButton;
@@ -98,6 +100,12 @@ public class ShopSettingsScreen extends ShopScaledScreen {
     private EditBox cardWidthBox;
     private EditBox cardHeightBox;
     private EditBox aeInjectMinBox;
+    private EditBox currencySaleLimitBox;
+    private EditBox currencySalePeriodBox;
+    private final long initialCurrencySaleLimit;
+    private final long initialCurrencySalePeriod;
+    private String currencySaleLimit;
+    private String currencySalePeriod;
     private int left, top, panelWidth, panelHeight;
     private int settingsScroll;
     private boolean scrollDrag;
@@ -122,6 +130,10 @@ public class ShopSettingsScreen extends ShopScaledScreen {
         this.cardHeight = Integer.toString(ClientShopUiSettings.cardHeight());
         this.aeDeliverDisabled = DShanhaiConfig.COMMON.shopAeDeliverDisabled.get();
         this.aeInjectMin = Long.toString(DShanhaiConfig.COMMON.shopAeInjectMin.get());
+        this.initialCurrencySaleLimit = ClientWalletAccount.currencySaleLimit();
+        this.initialCurrencySalePeriod = ClientWalletAccount.currencySalePeriodSeconds();
+        this.currencySaleLimit = Long.toString(initialCurrencySaleLimit);
+        this.currencySalePeriod = Long.toString(initialCurrencySalePeriod);
         this.sdaDirectDiskHatchInject = DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get();
         this.previewBar = ClientShopUiSettings.rewardPreviewBar();
         this.rememberShopView = ClientShopUiSettings.rememberShopView();
@@ -228,7 +240,22 @@ public class ShopSettingsScreen extends ShopScaledScreen {
             aeInjectMinBox.setResponder(s -> aeInjectMin = s);
             addRenderableWidget(aeInjectMinBox);
         }
+        if (showCurrencySaleSettings()) {
+            currencySaleLimitBox = addCurrencySaleInput("gt_shanhai.shop.currency_sale.limit", currencySaleLimit,
+                    value -> currencySaleLimit = value);
+            currencySalePeriodBox = addCurrencySaleInput("gt_shanhai.shop.currency_sale.period", currencySalePeriod,
+                    value -> currencySalePeriod = value);
+        }
         layoutInputs();
+    }
+
+    private EditBox addCurrencySaleInput(String label, String value, java.util.function.Consumer<String> responder) {
+        EditBox box = new EditBox(this.font, left + 12, viewTop(), fieldWidth(), 14, Component.translatable(label));
+        box.setMaxLength(19);
+        box.setFilter(text -> text.isEmpty() || text.matches("[0-9]+"));
+        box.setValue(value);
+        box.setResponder(responder);
+        return addRenderableWidget(box);
     }
 
     @Override
@@ -318,6 +345,12 @@ public class ShopSettingsScreen extends ShopScaledScreen {
                     Component.translatable("gt_shanhai.shop.theme.setting", themeName).getString(), mx, my);
         }
         drawWrappedContentLines(g, themeHint(), x, row(rowThemeHint()), textW);
+        if (showCurrencySaleSettings()) {
+            drawContentLine(g, Component.translatable("gt_shanhai.shop.currency_sale.limit").getString(),
+                    x, rowCurrencySale(), textW);
+            drawContentLine(g, Component.translatable("gt_shanhai.shop.currency_sale.period").getString(),
+                    x, rowCurrencySale() + 30, textW);
+        }
 
         g.disableScissor();
         drawScrollbar(g, mx, my);
@@ -405,6 +438,24 @@ public class ShopSettingsScreen extends ShopScaledScreen {
     }
 
     private void submit() {
+        long saleLimit = -1L;
+        long salePeriod = 0L;
+        if (showCurrencySaleSettings()) {
+            try {
+                saleLimit = Long.parseLong(currencySaleLimit);
+                salePeriod = Long.parseLong(currencySalePeriod);
+                if (saleLimit < 0L || salePeriod <= 0L || salePeriod > CurrencySaleLimit.MAX_SECONDS) {
+                    throw new NumberFormatException();
+                }
+            } catch (NumberFormatException e) {
+                saveError = Component.translatable("gt_shanhai.shop.currency_sale.invalid");
+                return;
+            }
+            if (saleLimit == initialCurrencySaleLimit && salePeriod == initialCurrencySalePeriod) {
+                saleLimit = -1L;
+                salePeriod = 0L;
+            }
+        }
         long roll;
         try { roll = rollCap == null || rollCap.isEmpty() ? 1L : Long.parseLong(rollCap); }
         catch (NumberFormatException e) { roll = 1L; }
@@ -431,7 +482,7 @@ public class ShopSettingsScreen extends ShopScaledScreen {
         parent.onRememberShopViewSaved(rememberShopView);
         if (serverRows) {
             ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
-                    aeDeliverDisabled, Math.max(1L, aeMin), sdaDirectDiskHatchInject));
+                    aeDeliverDisabled, Math.max(1L, aeMin), sdaDirectDiskHatchInject, saleLimit, salePeriod));
         }
         Minecraft.getInstance().setScreen(parent);
     }
@@ -470,7 +521,11 @@ public class ShopSettingsScreen extends ShopScaledScreen {
     private int rowThemeHint() { return rowTheme() + 18; }
 
     /** 选项区内容总高：最后一段说明换几行就长几行。 */
-    private int contentHeight() { return row(rowThemeHint()) + wrappedHeight(themeHint()) + 4; }
+    private int contentHeight() { return rowCurrencySale() + (showCurrencySaleSettings() ? 62 : 0); }
+
+    private int rowCurrencySale() { return row(rowThemeHint()) + wrappedHeight(themeHint()) + 4; }
+
+    private boolean showCurrencySaleSettings() { return serverRows && parent.isCatalogEditUnlocked(); }
 
     private int wrappedHeight(String text) {
         return Math.max(1, this.font.split(Component.literal(text), fieldWidth()).size()) * 10;
@@ -497,6 +552,13 @@ public class ShopSettingsScreen extends ShopScaledScreen {
         place(cardWidthBox, x, row(ROW_CARD_BOX), boxW);
         place(cardHeightBox, x + boxW + 6, row(ROW_CARD_BOX), boxW);
         place(aeInjectMinBox, x, ROW_AE_MIN_BOX, w);
+        if (showCurrencySaleSettings()) {
+            place(currencySaleLimitBox, x, rowCurrencySale() + 11, w);
+            place(currencySalePeriodBox, x, rowCurrencySale() + 41, w);
+        } else if (currencySaleLimitBox != null) {
+            currencySaleLimitBox.visible = false;
+            currencySalePeriodBox.visible = false;
+        }
     }
 
     /** 输入框用视觉坐标接收点击。滚出中间视口就隐藏，底栏和标题不会误触。 */

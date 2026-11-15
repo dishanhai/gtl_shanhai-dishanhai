@@ -1243,52 +1243,42 @@ public final class ShopPurchase {
         return ShopAeNetwork.availableForPlayer(player, key);
     }
 
-    /** 快速售出全部货币的结果：获得的星火、从 AE 抽入账户的币数、实际换算币种数、因阶段未提交而跳过的币种数。 */
-    public record QuickSellResult(BigInteger gained, BigInteger extracted, int convertedCurrencies, int skippedLocked) {
-        public static final QuickSellResult EMPTY = new QuickSellResult(BigInteger.ZERO, BigInteger.ZERO, 0, 0);
+    /** 快速售出结果，包含 AE 抽取量、阶段锁和限额反馈。 */
+    public record QuickSellResult(BigInteger gained, BigInteger extracted, int convertedCurrencies, int skippedLocked,
+                                  int limitedCurrencies) {
+        public static final QuickSellResult EMPTY = new QuickSellResult(BigInteger.ZERO, BigInteger.ZERO, 0, 0, 0);
     }
 
-    /** 单币转星火的精确结果，供 ATM 消息显示实际消耗量。 */
+    /** 单币转星火的精确结果。 */
     public record DigitalResult(BigInteger consumed, BigInteger gained) {
         public static final DigitalResult EMPTY = new DigitalResult(BigInteger.ZERO, BigInteger.ZERO);
     }
 
-    /**
-     * 快速售出全部可按币值结算的货币。
-     *
-     * <p>只处理 {@link CurrencyRateConfig#getValue(ResourceLocation)} 大于 0 的正常货币；
-     * 特殊货币仍保留在钱包/AE 中，继续走兑换中心的自定义兑换表。开启 AE 模式时，
-     * 每种货币会先把绑定网络中可抽取的同类实体币自动入账，再一次性按币值换成星火。</p>
-     */
+    private record CurrencySale(DigitalResult conversion, long extracted, boolean limited) {}
+
+    /** 快速售出各已解锁币种，钱包和 AE 共用限售额度。 */
     public static QuickSellResult quickSellAllCurrencies(ServerPlayer player, boolean includeAe) {
-        if (player == null) return QuickSellResult.EMPTY;
-        MinecraftServer server = player.getServer();
-        if (server == null) return QuickSellResult.EMPTY;
+        if (player == null || player.getServer() == null) return QuickSellResult.EMPTY;
         BigInteger gained = BigInteger.ZERO;
         BigInteger extracted = BigInteger.ZERO;
         int converted = 0;
         int skippedLocked = 0;
+        int limited = 0;
         for (ResourceLocation currency : CurrencyRateConfig.getCurrencies()) {
-            long value = CurrencyRateConfig.getValue(currency);
-            if (value <= 0L) continue;
+            if (CurrencyRateConfig.getValue(currency) <= 0L) continue;
             if (CurrencyStageConfig.missingStage(player, currency) != null) {
                 skippedLocked++;
                 continue;
             }
-            if (includeAe) {
-                long got = aeExtractCoin(player, currency, Long.MAX_VALUE);
-                if (got > 0L) extracted = extracted.add(BigInteger.valueOf(got));
-            }
-            BigInteger balance = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
-            if (balance.signum() <= 0) continue;
-            BigInteger one = WalletAccountAPI.convertCurrencyToDigital(
-                    server, player.getUUID(), currency, balance);
-            if (one.signum() > 0) {
-                gained = gained.add(one);
+            CurrencySale sale = settleCurrencySale(player, currency, null, includeAe);
+            if (sale.limited()) limited++;
+            if (sale.conversion().gained().signum() > 0) {
+                gained = gained.add(sale.conversion().gained());
+                extracted = extracted.add(BigInteger.valueOf(sale.extracted()));
                 converted++;
             }
         }
-        return new QuickSellResult(gained, extracted, converted, skippedLocked);
+        return new QuickSellResult(gained, extracted, converted, skippedLocked, limited);
     }
 
     /**
@@ -1307,26 +1297,40 @@ public final class ShopPurchase {
     }
 
     public static DigitalResult toDigitalResult(ServerPlayer player, ResourceLocation currency,
-                                                 long coins, boolean includeAe) {
+                                                long coins, boolean includeAe) {
         if (player == null || currency == null || coins <= 0L) return DigitalResult.EMPTY;
-        MinecraftServer server = player.getServer();
-        if (server == null) return DigitalResult.EMPTY;
-        if (CurrencyRateConfig.getValue(currency) <= 0L) return DigitalResult.EMPTY;
+        if (player.getServer() == null || CurrencyRateConfig.getValue(currency) <= 0L) return DigitalResult.EMPTY;
         if (CurrencyStageConfig.missingStage(player, currency) != null) return DigitalResult.EMPTY;
+        return settleCurrencySale(player, currency, BigInteger.valueOf(coins), includeAe).conversion();
+    }
+
+    /** requested 为 null 时出售全部可用余额。先限制成交量，再按缺口从 AE 补币。 */
+    private static CurrencySale settleCurrencySale(ServerPlayer player, ResourceLocation currency,
+                                                   BigInteger requested, boolean includeAe) {
+        MinecraftServer server = player.getServer();
+        UUID uuid = player.getUUID();
+        boolean limited = CurrencySaleLimit.isLimited(CurrencyRateConfig.getValue(currency));
+        long nowMs = System.currentTimeMillis();
+        BigInteger cap = limited ? BigInteger.valueOf(CurrencySaleLimit.remaining(player, currency, nowMs)) : requested;
+        if (limited && requested != null) cap = cap.min(requested);
+
+        BigInteger wallet = WalletAccountAPI.getCurrency(server, uuid, currency);
+        long extracted = 0L;
         if (includeAe) {
-            BigInteger requested = BigInteger.valueOf(coins);
-            BigInteger account = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
-            BigInteger missing = requested.subtract(account);
+            BigInteger missing = cap == null ? BigInteger.valueOf(Long.MAX_VALUE) : cap.subtract(wallet);
             if (missing.signum() > 0) {
-                long pull = missing.bitLength() < 63 ? missing.longValue() : Long.MAX_VALUE;
-                aeExtractCoin(player, currency, pull);
+                extracted = aeExtractCoin(player, currency, missing.min(BigInteger.valueOf(Long.MAX_VALUE)).longValueExact());
             }
         }
-        BigInteger available = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
-        BigInteger consumed = available.min(BigInteger.valueOf(coins));
-        if (consumed.signum() <= 0) return DigitalResult.EMPTY;
-        BigInteger gained = WalletAccountAPI.convertCurrencyToDigital(server, player.getUUID(), currency, consumed);
-        return gained.signum() > 0 ? new DigitalResult(consumed, gained) : DigitalResult.EMPTY;
+
+        BigInteger available = wallet.add(BigInteger.valueOf(extracted));
+        BigInteger consumed = cap == null ? available : available.min(cap);
+        BigInteger gained = WalletAccountAPI.convertCurrencyToDigital(server, uuid, currency, consumed);
+        boolean reachedLimit = limited && requested == null && cap.equals(consumed)
+                && (wallet.compareTo(consumed) > 0 || includeAe && aeAvailableCoin(player, currency) > 0L);
+        if (gained.signum() <= 0) return new CurrencySale(DigitalResult.EMPTY, extracted, reachedLimit);
+        if (limited) CurrencySaleLimit.consume(player, currency, consumed.longValueExact(), nowMs);
+        return new CurrencySale(new DigitalResult(consumed, gained), extracted, reachedLimit);
     }
 
     /**

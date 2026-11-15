@@ -99,7 +99,7 @@ public final class VirtualProviderSoftLocks {
                 == DShanhaiConfig.ConfigValues.VirtualProviderMode.AE_TARGET_CHECK;
     }
 
-    private static boolean usesSupplyMachineMode() {
+    public static boolean usesSupplyMachineMode() {
         return DShanhaiConfig.COMMON.virtualProviderMode.get()
                 == DShanhaiConfig.ConfigValues.VirtualProviderMode.SUPPLY_MACHINE;
     }

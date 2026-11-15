@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.client.shop;
 
+import com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit;
+
 import net.minecraft.resources.ResourceLocation;
 
 import java.math.BigInteger;
@@ -31,6 +33,10 @@ public final class ClientWalletAccount {
     private static boolean hasBoundAeNetwork = false; // 玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器，见 ShopAeNetwork）
     private static int memberTier = -1; // 付费会员档位（-1=未购买），永久买断，见 ShopMembership
     private static boolean synced = false;
+    private static long currencySaleLimit = CurrencySaleLimit.DEFAULT_LIMIT;
+    private static long currencySalePeriodSeconds = CurrencySaleLimit.DEFAULT_SECONDS;
+    private static long currencySaleServerTimeMs = System.currentTimeMillis();
+    private static long currencySaleSyncNanos = System.nanoTime();
 
     /** 山海：獨立保存確認值，本地樂觀預覽不能抹掉真正的交易差額。 */
     public record BalanceChange(ResourceLocation currency, BigInteger amount, long confirmedAtMs) {}
@@ -54,9 +60,44 @@ public final class ClientWalletAccount {
         hasBoundAeNetwork = false;
         memberTier = -1;
         synced = false;
+        applyCurrencySalePolicy(CurrencySaleLimit.DEFAULT_LIMIT, CurrencySaleLimit.DEFAULT_SECONDS, System.currentTimeMillis());
         confirmedCurrencies.clear();
         confirmedDigital = BigInteger.ZERO;
         balanceChanges.clear();
+    }
+
+    public static void applyCurrencySalePolicy(long limit, long periodSeconds, long serverTimeMs) {
+        currencySaleLimit = limit;
+        currencySalePeriodSeconds = periodSeconds;
+        currencySaleServerTimeMs = serverTimeMs;
+        currencySaleSyncNanos = System.nanoTime();
+    }
+
+    public static long currencySaleLimit() {
+        return currencySaleLimit;
+    }
+
+    public static long currencySalePeriodSeconds() {
+        return currencySalePeriodSeconds;
+    }
+
+    public static long currencySaleTimeMs() {
+        return currencySaleServerTimeMs + (System.nanoTime() - currencySaleSyncNanos) / 1_000_000L;
+    }
+
+    public static long currencySaleRefreshMillis(ResourceLocation currency, long nowMs) {
+        return CurrencySaleLimit.millisUntilRefresh(nowMs, getPeriodAnchor(CurrencySaleLimit.key(currency)),
+                currencySalePeriodSeconds);
+    }
+
+    public static long currencySaleLimitFor(long faceValue) {
+        return CurrencySaleLimit.tierLimit(faceValue, currencySaleLimit);
+    }
+
+    public static long remainingCurrencySale(ResourceLocation currency, long faceValue, long nowMs) {
+        long limit = currencySaleLimitFor(faceValue);
+        if (!CurrencySaleLimit.isLimited(faceValue) || currencySaleRefreshMillis(currency, nowMs) == 0L) return limit;
+        return Math.max(0L, limit - getPeriodUsed(CurrencySaleLimit.key(currency)));
     }
 
     /** 应用服务端全量快照（权威覆盖）。 */

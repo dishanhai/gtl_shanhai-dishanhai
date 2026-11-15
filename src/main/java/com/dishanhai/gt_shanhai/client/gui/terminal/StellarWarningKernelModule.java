@@ -80,7 +80,7 @@ public final class StellarWarningKernelModule implements UIModule {
                 session = module.engine().require(UIApis.SCREENS).session(module, SESSION);
             }
             notifications.publish(module, session, new NotificationService.Request(id, content,
-                    Priority.HIGH, Duration.ofSeconds(12), machine, NotificationService.Merge.REPLACE,
+                    Priority.HIGH, Duration.ofSeconds(30), machine, NotificationService.Merge.REPLACE,
                     action -> ShanhaiTerminalReportClient.openLatest(report)));
         } catch (IllegalStateException unavailable) {
             // 通知关闭、连接结束或队列满时，仍可通过聊天打开报告。

@@ -17,16 +17,22 @@ public class ShanhaiHubAbilityPredicateMixin {
     private static void gtShanhai$markIoAbilities(PartAbility[] abilities,
                                                  CallbackInfoReturnable<TraceabilityPredicate> cir) {
         if (abilities.length == 0) return;
+        boolean materialIo = true;
+        boolean hubAbility = true;
+        boolean parallel = true;
         for (PartAbility ability : abilities) {
-            if (!gtShanhai$isMaterialIo(ability)) return;
+            materialIo &= gtShanhai$isMaterialIo(ability);
+            hubAbility &= gtShanhai$isHubAbility(ability);
+            parallel &= ability == PartAbility.PARALLEL_HATCH;
         }
-        gtShanhai$markIoPredicates(cir.getReturnValue());
+        gtShanhai$markPredicates(cir.getReturnValue(), materialIo, hubAbility, parallel);
     }
 
     @Inject(method = "ability", at = @At("RETURN"), remap = false)
     private static void gtShanhai$markTieredIoAbility(PartAbility ability, int[] tiers,
                                                      CallbackInfoReturnable<TraceabilityPredicate> cir) {
-        if (gtShanhai$isMaterialIo(ability)) gtShanhai$markIoPredicates(cir.getReturnValue());
+        gtShanhai$markPredicates(cir.getReturnValue(), gtShanhai$isMaterialIo(ability),
+                gtShanhai$isHubAbility(ability), ability == PartAbility.PARALLEL_HATCH);
     }
 
     @Unique
@@ -36,12 +42,35 @@ public class ShanhaiHubAbilityPredicateMixin {
     }
 
     @Unique
-    private static void gtShanhai$markIoPredicates(TraceabilityPredicate predicate) {
+    private static boolean gtShanhai$isHubAbility(PartAbility ability) {
+        return ability == PartAbility.INPUT_ENERGY || ability == PartAbility.OUTPUT_ENERGY
+                || ability == PartAbility.SUBSTATION_INPUT_ENERGY || ability == PartAbility.SUBSTATION_OUTPUT_ENERGY
+                || ability == PartAbility.INPUT_LASER || ability == PartAbility.OUTPUT_LASER
+                || ability == PartAbility.PARALLEL_HATCH
+                || ability == PartAbility.COMPUTATION_DATA_RECEPTION
+                || ability == PartAbility.COMPUTATION_DATA_TRANSMISSION
+                || ability == PartAbility.OPTICAL_DATA_RECEPTION
+                || ability == PartAbility.OPTICAL_DATA_TRANSMISSION
+                || "thread_modifier".equals(ability.getName());
+    }
+
+    @Unique
+    private static void gtShanhai$markPredicates(TraceabilityPredicate predicate, boolean materialIo,
+                                               boolean hubAbility, boolean parallel) {
+        if (!materialIo && !hubAbility) return;
         for (var simple : predicate.common) {
-            ((ShanhaiHubIoPredicate) simple).gtShanhai$setIoAdmissionOnly(true);
+            gtShanhai$markPredicate((ShanhaiHubIoPredicate) simple, materialIo, hubAbility, parallel);
         }
         for (var simple : predicate.limited) {
-            ((ShanhaiHubIoPredicate) simple).gtShanhai$setIoAdmissionOnly(true);
+            gtShanhai$markPredicate((ShanhaiHubIoPredicate) simple, materialIo, hubAbility, parallel);
         }
+    }
+
+    @Unique
+    private static void gtShanhai$markPredicate(ShanhaiHubIoPredicate predicate, boolean materialIo,
+                                              boolean hubAbility, boolean parallel) {
+        if (materialIo) predicate.gtShanhai$setIoAdmissionOnly(true);
+        if (hubAbility) predicate.gtShanhai$markHubAbility();
+        if (parallel) predicate.gtShanhai$markParallelAbility();
     }
 }

@@ -1023,6 +1023,7 @@ public class DShanhaiCommands {
         for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
             if (player.getItemInHand(hand).getItem()
                     instanceof com.dishanhai.gt_shanhai.common.item.WalletItem) {
+                com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
                 com.dishanhai.gt_shanhai.network.ShopOpenPacket.sendTo(player);
                 com.dishanhai.gt_shanhai.network.ShopSubmissionSyncPacket.sync(player);
                 return 1;

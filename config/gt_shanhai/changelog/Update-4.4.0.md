@@ -104,7 +104,7 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 
 - 收藏判断认等价标签，可替代材料不再误收藏。
 - 排除规则只写物品 ID 时，不论 NBT 都排除。写成 `物品ID{SNBT}` 时，ID 相同且 NBT 包含这些键才排除。字符串 `*` 表示该键存在且非空。也接受 `Item.of(...)`。
-- 默认排除数据模块，以及带研究 id 的数据球、数据棒。
+- 默认排除数据模块，以及带研究 id 的数据球、闪存。
 
 ## 寰宇物品
 

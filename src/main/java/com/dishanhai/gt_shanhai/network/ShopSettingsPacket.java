@@ -1,6 +1,8 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit;
 import com.dishanhai.gt_shanhai.common.shop.ShopEditPermission;
+import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 
 import net.minecraft.network.FriendlyByteBuf;
@@ -24,14 +26,19 @@ public class ShopSettingsPacket {
     private final boolean aeDeliverDisabled;
     private final long aeInjectMin;
     private final boolean sdaDirectDiskHatchInject;
+    private final long currencySaleLimit;
+    private final long currencySalePeriodSeconds;
 
     public ShopSettingsPacket(long rewardRollCap, long sdaPackThreshold, boolean aeDeliverDisabled,
-                              long aeInjectMin, boolean sdaDirectDiskHatchInject) {
+                              long aeInjectMin, boolean sdaDirectDiskHatchInject,
+                              long currencySaleLimit, long currencySalePeriodSeconds) {
         this.rewardRollCap = Math.max(1L, rewardRollCap);
         this.sdaPackThreshold = Math.max(1L, sdaPackThreshold);
         this.aeDeliverDisabled = aeDeliverDisabled;
         this.aeInjectMin = Math.max(1L, aeInjectMin);
         this.sdaDirectDiskHatchInject = sdaDirectDiskHatchInject;
+        this.currencySaleLimit = currencySaleLimit;
+        this.currencySalePeriodSeconds = currencySalePeriodSeconds;
     }
 
     public ShopSettingsPacket(FriendlyByteBuf buf) {
@@ -40,6 +47,8 @@ public class ShopSettingsPacket {
         this.aeDeliverDisabled = buf.readBoolean();
         this.aeInjectMin = Math.max(1L, buf.readVarLong());
         this.sdaDirectDiskHatchInject = buf.readBoolean();
+        this.currencySaleLimit = buf.readVarLong();
+        this.currencySalePeriodSeconds = buf.readVarLong();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -48,6 +57,8 @@ public class ShopSettingsPacket {
         buf.writeBoolean(aeDeliverDisabled);
         buf.writeVarLong(aeInjectMin);
         buf.writeBoolean(sdaDirectDiskHatchInject);
+        buf.writeVarLong(currencySaleLimit);
+        buf.writeVarLong(currencySalePeriodSeconds);
     }
 
     public static void handle(ShopSettingsPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -65,6 +76,24 @@ public class ShopSettingsPacket {
         if (!ShopEditPermission.canEdit(player)) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
             return;
+        }
+        if (pkt.currencySaleLimit != -1L || pkt.currencySalePeriodSeconds != 0L) {
+            if (!ShopEditPermission.canEditCatalog(player)) {
+                player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.edit_required"));
+                return;
+            }
+            if (pkt.currencySaleLimit < 0L || pkt.currencySalePeriodSeconds <= 0L
+                    || pkt.currencySalePeriodSeconds > CurrencySaleLimit.MAX_SECONDS) {
+                player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.invalid"));
+                return;
+            }
+            DShanhaiConfig.COMMON.shopCurrencySaleLimit.set(pkt.currencySaleLimit);
+            DShanhaiConfig.COMMON.shopCurrencySalePeriodSeconds.set(pkt.currencySalePeriodSeconds);
+            DShanhaiConfig.COMMON.shopCurrencySaleLimit.save();
+            for (ServerPlayer online : player.server.getPlayerList().getPlayers()) {
+                WalletAccountAPI.sync(online);
+            }
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.saved"));
         }
         DShanhaiConfig.COMMON.shopRewardRollCap.set(pkt.rewardRollCap);
         DShanhaiConfig.COMMON.shopRewardRollCap.save();

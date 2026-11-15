@@ -30,6 +30,9 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import org.cgse.core.GraphRecipe;
 import org.cgse.core.CapturedRecipe;
 import org.cgse.core.PlanningBudget;
+import org.cgse.core.GraphCompiler;
+import org.cgse.core.GraphJobRuntime;
+import org.cgse.core.GraphPlanner;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -46,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class VirtualPatternBatchDispatchTest {
 
@@ -143,6 +147,135 @@ class VirtualPatternBatchDispatchTest {
         assertEquals(Map.of(product, 5L, key, 3L), recipe.outputs());
         assertEquals(Map.of(product, 5L, key, 1L), recipe.executionOutputs());
         assertEquals(key, input.getRemainingKey(key), "普通树仍得到虚拟自返");
+    }
+
+    @Test
+    void graphExternalPresenceLeavesBothModulesAvailableAcrossThreeOrders() throws Exception {
+        AEKey module = new TestKey("module_3");
+        AEKey material = new TestKey("material");
+        AEKey product = new TestKey("product");
+        IPatternDetails pattern = pattern(new GenericStack(product, 1L), presenceInput(module, 1L),
+                ingredient(1L, new GenericStack(material, 1L)));
+        GraphRecipe<AEKey> captured = new GraphRecipe<>("recipe", "binding", List.of(
+                new GraphRecipe.Slot<>(module, 1L, 0, true, true),
+                new GraphRecipe.Slot<>(material, 1L, 1)), Map.of(product, 1L, module, 1L));
+        GraphCompiler<AEKey> original = new GraphCompiler<>(List.of(captured));
+        Map<AEKey, Long> stock = new java.util.HashMap<>(Map.of(module, 2L, material, 12L));
+        for (int order = 0; order < 3; order++) {
+            GraphCompiler<AEKey> compiler = GraphVirtualPresence.externalize(original,
+                    Map.of("binding", pattern), key -> stock.getOrDefault(key, 0L));
+            var plan = new GraphPlanner<>(compiler).plan(product, 4L, stock, true, true,
+                    new PlanningBudget(0L, 100_000L, () -> false));
+            assertTrue(plan.feasible(), () -> plan.result() + " " + plan.missingExact());
+            assertEquals(Map.of(material, 4L), plan.initial());
+            plan.initial().forEach((key, amount) -> stock.merge(key, -amount, Long::sum));
+            var runtime = new GraphJobRuntime<>(plan, plan.initial(), Map.of());
+            assertEquals(0L, runtime.held(module));
+            var restored = new GraphJobRuntime<>(runtime.snapshot());
+            assertEquals(0L, restored.held(module));
+            restored.cancel();
+            assertEquals(Map.of(material, 4L), restored.detachCancelledInventory());
+            assertTrue(restored.detachCancelledInventory().isEmpty());
+        }
+        assertEquals(2L, stock.get(module));
+        assertEquals(Map.of(product, 1L, module, 1L), captured.outputs());
+        assertEquals(2, original.catalog().getFirst().slots().size());
+    }
+
+    @Test
+    void graphSupplyPresenceWorksWithNoModuleInOrdinaryStock() throws Exception {
+        AEKey module = new TestKey("module_3");
+        AEKey product = new TestKey("product");
+        IPatternDetails pattern = pattern(new GenericStack(product, 1L), presenceInput(module, 1L));
+        GraphRecipe<AEKey> captured = new GraphRecipe<>("recipe", "binding",
+                List.of(new GraphRecipe.Slot<>(module, 1L, 0, true, true)), Map.of(product, 1L, module, 1L));
+        var compiler = GraphVirtualPresence.externalize(new GraphCompiler<>(List.of(captured)),
+                Map.of("binding", pattern), key -> key == module ? 1L : 0L);
+        var plan = new GraphPlanner<>(compiler).plan(product, 16L, Map.of(), true, true,
+                new PlanningBudget(0L, 100_000L, () -> false));
+
+        assertTrue(plan.feasible(), () -> plan.result() + " " + plan.missingExact());
+        assertTrue(plan.initial().isEmpty());
+        assertTrue(GraphVirtualPresence.isExternalInput(pattern, compiler.catalog().getFirst(), 0));
+    }
+
+    @Test
+    void graphInsufficientPresenceKeepsTheOriginalRequirement() throws Exception {
+        AEKey module = new TestKey("module_3");
+        AEKey product = new TestKey("product");
+        IPatternDetails pattern = pattern(new GenericStack(product, 1L), presenceInput(module, 2L));
+        GraphRecipe<AEKey> recipe = new GraphRecipe<>("recipe", "binding",
+                List.of(new GraphRecipe.Slot<>(module, 2L, 0, true, true)), Map.of(product, 1L, module, 2L));
+        var compiler = new GraphCompiler<>(List.of(recipe));
+
+        assertSame(compiler, GraphVirtualPresence.externalize(compiler, Map.of("binding", pattern), key -> 1L));
+        assertFalse(GraphVirtualPresence.isExternalInput(pattern, recipe, 0));
+        var plan = new GraphPlanner<>(compiler).plan(product, 1L, Map.of(module, 1L), true, true,
+                new PlanningBudget(0L, 100_000L, () -> false));
+        assertFalse(plan.feasible());
+    }
+
+    @Test
+    void graphExternalPresencePreservesSameKeyConsumablesAndPhysicalOutputs() throws Exception {
+        AEKey key = new TestKey("shared");
+        AEKey product = new TestKey("product");
+        IPatternDetails pattern = pattern(new GenericStack(product, 1L), presenceInput(key, 1L),
+                ingredient(2L, new GenericStack(key, 1L)));
+        GraphRecipe<AEKey> recipe = new GraphRecipe<>("recipe", "binding", List.of(
+                new GraphRecipe.Slot<>(key, 1L, 0, true, true),
+                new GraphRecipe.Slot<>(key, 2L, 1)), Map.of(product, 1L, key, 4L));
+
+        GraphRecipe<AEKey> physical = GraphVirtualPresence.externalize(recipe, pattern, target -> 1L);
+
+        assertEquals(Map.of(key, 2L), physical.inputs());
+        assertEquals(Map.of(product, 1L, key, 3L), physical.executionOutputs());
+        assertEquals(1, physical.slots().getFirst().inputSlot());
+        assertTrue(GraphVirtualPresence.isExternalInput(pattern, physical, 0));
+        assertFalse(GraphVirtualPresence.isExternalInput(pattern, physical, 1));
+    }
+
+    @Test
+    void graphExternalPresenceRechecksLiveStockWithoutExtractingIt() throws Exception {
+        AEKey module = new TestKey("module_3");
+        AEKey product = new TestKey("product");
+        IPatternDetails pattern = pattern(new GenericStack(product, 1L), presenceInput(module, 1L));
+        GraphRecipe<AEKey> physical = new GraphRecipe<>("recipe", "binding", List.of(), Map.of(product, 1L));
+        KeyCounter stock = holder(module, 2L);
+        MEStorage storage = new MEStorage() {
+            @Override public Component getDescription() { return Component.empty(); }
+            @Override public long extract(AEKey key, long amount, Actionable mode, IActionSource source) {
+                assertSame(Actionable.SIMULATE, mode);
+                return Math.min(amount, stock.get(key));
+            }
+        };
+        IStorageService service = proxyFor(IStorageService.class, "getInventory", storage);
+        IGrid grid = proxyFor(IGrid.class, "getStorageService", service);
+        DShanhaiConfig.COMMON_SPEC.setConfig(CommentedConfig.inMemory());
+        try {
+            for (int order = 0; order < 3; order++) {
+                assertNull(GraphVirtualPresence.missingExternalPresence(pattern, physical, 1L, grid, IActionSource.empty()));
+            }
+            assertEquals(2L, stock.get(module));
+            stock.remove(module, 2L);
+            assertEquals(new GenericStack(module, 1L), GraphVirtualPresence.missingExternalPresence(
+                    pattern, physical, 1L, grid, IActionSource.empty()));
+
+            IPatternDetails mixed = pattern(new GenericStack(product, 1L), presenceInput(module, 1L),
+                    ingredient(2L, new GenericStack(module, 1L)));
+            GraphRecipe<AEKey> funded = new GraphRecipe<>("mixed", "binding",
+                    List.of(new GraphRecipe.Slot<>(module, 2L, 1)), Map.of(product, 1L));
+            assertNull(GraphVirtualPresence.missingExternalPresence(mixed, funded, 1L, grid, IActionSource.empty()),
+                    "同名真实消耗物已被作业取入时仍可提供在场证明");
+
+            stock.add(module, 2L);
+            DShanhaiConfig.COMMON.virtualProviderMode.set(DShanhaiConfig.ConfigValues.VirtualProviderMode.SUPPLY_MACHINE);
+            assertEquals(new GenericStack(module, 1L), GraphVirtualPresence.missingExternalPresence(
+                    pattern, physical, 1L, grid, IActionSource.empty()), "SU 模式仍需同网供应机提供证明");
+            assertEquals(new GenericStack(module, 1L), GraphVirtualPresence.missingExternalPresence(
+                    mixed, funded, 1L, grid, IActionSource.empty()));
+        } finally {
+            DShanhaiConfig.COMMON_SPEC.setConfig(null);
+        }
     }
 
     @Test
@@ -337,6 +470,7 @@ class VirtualPatternBatchDispatchTest {
                 (proxy, method, args) -> {
                     if (method.getName().equals(methodName)) return result;
                     if (type == IGrid.class && method.getName().equals("getPivot")) return null;
+                    if (type == IGrid.class && method.getName().equals("getMachines")) return java.util.Set.of();
                     throw new UnsupportedOperationException(method.getName());
                 }));
     }

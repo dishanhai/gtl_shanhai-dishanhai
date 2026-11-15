@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Only dishanhai shop calculations exclude stock reserved for earlier plans. */
+/** 山海商店的合成模拟使用可提取库存，并扣除前序方案的预留。 */
 @Mixin(value = NetworkCraftingSimulationState.class, priority = 1500, remap = false)
 public abstract class ShopCraftingSimulationInventoryMixin {
     @Unique
@@ -31,13 +31,12 @@ public abstract class ShopCraftingSimulationInventoryMixin {
 
     @Inject(method = "simulateExtractParent", at = @At("RETURN"), cancellable = true, remap = false)
     private void gtShanhai$limitReservedStock(AEKey key, long amount, CallbackInfoReturnable<Long> cir) {
-        if (gtShanhai$shopSource == null) return;
+        long simulated = cir.getReturnValue();
+        if (gtShanhai$shopSource == null || simulated <= 0L) return;
         long reserved = gtShanhai$shopSource.reserved().getOrDefault(key, 0L);
-        if (reserved <= 0L) return;
-        // GTLCore skips the native list; filter lazy reads without modifying its shared cache.
+        // AE2/GTLCore 可能使用缓存数量，确认方案时则按实际可提取量校验。
         long available = gtShanhai$storage.getInventory().extract(
                 key, Long.MAX_VALUE, Actionable.SIMULATE, gtShanhai$shopSource);
-        cir.setReturnValue(Math.min(cir.getReturnValue(),
-                ShopAutoCraftAmounts.remainingStock(available, reserved)));
+        cir.setReturnValue(Math.min(simulated, ShopAutoCraftAmounts.remainingStock(available, reserved)));
     }
 }

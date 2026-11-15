@@ -70,7 +70,7 @@ item_ids:
 如需要获得对当前机器的配方类型控制权：
 
 1. 使用合适的山海模块（如 <ItemLink id="gt_shanhai:primordial_causal_weaving_matrix" />）。
-2. 用数据棒或直接组合确保模块已激活。
+2. 用闪存或直接组合确保模块已激活。
 3. 界面按钮来微调耗时/并行参数，最后用界面确认纵深项。
 
 </Column>

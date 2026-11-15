@@ -175,6 +175,7 @@ class StellarPatternStuckReportSourceTest {
         assertTrue(module.contains(".session(module, SESSION)"));
         assertTrue(module.contains("Long.toUnsignedString(report.id())"));
         assertTrue(module.contains("NotificationService.Merge.REPLACE"));
+        assertTrue(module.contains("Duration.ofSeconds(30)"));
         assertTrue(module.contains("ShanhaiTerminalReportClient.openLatest(report)"));
         String modules = Files.readString(Path.of("src/main/resources/META-INF/sh_better_ui.modules"));
         assertTrue(modules.contains("com.dishanhai.gt_shanhai.client.gui.terminal.StellarWarningKernelModule"));

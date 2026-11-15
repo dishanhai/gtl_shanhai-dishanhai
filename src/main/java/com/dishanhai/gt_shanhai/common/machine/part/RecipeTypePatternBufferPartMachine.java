@@ -1133,7 +1133,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         configuration.remove("cloudExecutorId"); configuration.remove("gtShanhaiCloudSlots");
         boolean result = super.pasteFromTag(configuration);
         cloudExecutorId = executor; pendingCloudState = pending; cloudRestorePending = restoring;
-        // 数据棒可能从不同槽位配置的总成复制而来，同样存在尺寸错配。
+        // 闪存可能从不同槽位配置的总成复制而来，同样存在尺寸错配。
         gtShanhai$reconcilePatternInventorySize();
         rebuildConfiguredPatternSlots();
         refreshPatternRecipeTypes();

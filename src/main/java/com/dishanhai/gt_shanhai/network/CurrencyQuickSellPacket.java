@@ -15,7 +15,7 @@ import java.util.function.Supplier;
  * 貨幣中心「快速售出全部貨幣」請求（C→S）。
  *
  * <p>服務端以玩家 UUID 帳戶為權威；{@code includeAe} 為真時，會先自綁定在線 AE
- * 網路抽取各幣種，再按幣值全部轉成星火。</p>
+ * 網路按可出售量補充各幣種，再按幣值轉成星火。</p>
  */
 public class CurrencyQuickSellPacket {
 
@@ -44,20 +44,22 @@ public class CurrencyQuickSellPacket {
         if (!com.dishanhai.gt_shanhai.common.shop.ShopAvailability.requireEnabled(player)) return;
         ShopPurchase.QuickSellResult result = ShopPurchase.quickSellAllCurrencies(player, pkt.includeAe);
         if (result.gained().signum() > 0) {
-            String aeHint = pkt.includeAe && result.extracted().signum() > 0
-                    ? "（已自动抽取 AE " + ShopPurchase.formatCount(result.extracted()) + " 枚）"
-                    : "";
-            String skipHint = result.skippedLocked() > 0
-                    ? " §7跳过 " + result.skippedLocked() + " 种阶段未提交的货币"
-                    : "";
-            player.sendSystemMessage(Component.literal("§b[货币中心] §a已快速售出全部货币，获得 §e"
-                    + ShopPurchase.formatCount(result.gained()) + " 星火 §7" + aeHint + skipHint));
-        } else if (result.skippedLocked() > 0) {
-            player.sendSystemMessage(Component.literal(
-                    "§c[货币中心] 有币值的货币都还没提交对应阶段，和商店购买是同一份提交"));
-        } else {
-            player.sendSystemMessage(Component.literal(
-                    "§c[货币中心] 没有可按币值售出的货币（特殊货币请前往兑换中心）"));
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.quick_success",
+                    ShopPurchase.formatCount(result.gained())));
+            if (result.extracted().signum() > 0) {
+                player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.quick_ae",
+                        ShopPurchase.formatCount(result.extracted())));
+            }
+        }
+        if (result.limitedCurrencies() > 0) {
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.quick_limited",
+                    result.limitedCurrencies()));
+        }
+        if (result.skippedLocked() > 0) {
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.quick_locked",
+                    result.skippedLocked()));
+        } else if (result.gained().signum() == 0 && result.limitedCurrencies() == 0) {
+            player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.quick_empty"));
         }
         WalletAccountAPI.sync(player);
     }

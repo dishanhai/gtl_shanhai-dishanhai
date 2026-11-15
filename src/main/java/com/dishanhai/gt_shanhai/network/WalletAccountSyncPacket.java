@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit;
+
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
@@ -28,6 +30,9 @@ public class WalletAccountSyncPacket {
     private final Map<String, Long> personalRemainingUses; // 此玩家的永久額度，按商品 stableId
     private final BigInteger wirelessEu; // 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings，见 ShopWirelessEu）
     private final boolean hasBoundAeNetwork; // 玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器，见 ShopAeNetwork），供「AE模式」开关校验用
+    private final long currencySaleLimit;
+    private final long currencySalePeriodSeconds;
+    private final long currencySaleServerTimeMs;
     private final int memberTier; // 付费会员档位（-1=未购买，0/1/2=青铜/白银/黄金），永久买断，见 ShopMembership/WalletAccountAPI#buyMemberTier
 
     // ===== 兼容构造：无周期限购锚点（委托空表）=====
@@ -73,6 +78,18 @@ public class WalletAccountSyncPacket {
                                     Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors, BigInteger wirelessEu,
                                     boolean hasBoundAeNetwork, int memberTier, Map<String, Long> periodUsed,
                                     Map<String, Long> personalRemainingUses) {
+        this(currencies, digital, purchaseCounts, periodAnchors, wirelessEu, hasBoundAeNetwork, memberTier,
+                periodUsed, personalRemainingUses, CurrencySaleLimit.DEFAULT_LIMIT, CurrencySaleLimit.DEFAULT_SECONDS);
+    }
+
+    public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
+                                    Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors, BigInteger wirelessEu,
+                                    boolean hasBoundAeNetwork, int memberTier, Map<String, Long> periodUsed,
+                                    Map<String, Long> personalRemainingUses, long currencySaleLimit,
+                                    long currencySalePeriodSeconds) {
+        this.currencySaleLimit = currencySaleLimit;
+        this.currencySalePeriodSeconds = currencySalePeriodSeconds;
+        this.currencySaleServerTimeMs = System.currentTimeMillis();
         this.personalRemainingUses = personalRemainingUses != null
                 ? new LinkedHashMap<>(personalRemainingUses) : new LinkedHashMap<>();
         this.periodUsed = periodUsed != null ? periodUsed : new LinkedHashMap<>();
@@ -128,6 +145,9 @@ public class WalletAccountSyncPacket {
         Map<String, Long> personal = new LinkedHashMap<>();
         for (int i = 0; i < rn; i++) personal.put(buf.readUtf(), buf.readVarLong());
         this.personalRemainingUses = personal;
+        this.currencySaleLimit = buf.readVarLong();
+        this.currencySalePeriodSeconds = buf.readVarLong();
+        this.currencySaleServerTimeMs = buf.readVarLong();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -160,6 +180,9 @@ public class WalletAccountSyncPacket {
             buf.writeUtf(e.getKey());
             buf.writeVarLong(e.getValue());
         }
+        buf.writeVarLong(currencySaleLimit);
+        buf.writeVarLong(currencySalePeriodSeconds);
+        buf.writeVarLong(currencySaleServerTimeMs);
     }
 
     public static void handle(WalletAccountSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -175,5 +198,7 @@ public class WalletAccountSyncPacket {
         com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(
                 pkt.currencies, pkt.digital, pkt.purchaseCounts, pkt.periodAnchors, pkt.wirelessEu, pkt.hasBoundAeNetwork,
                 pkt.memberTier, pkt.periodUsed, pkt.personalRemainingUses);
+        com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.applyCurrencySalePolicy(
+                pkt.currencySaleLimit, pkt.currencySalePeriodSeconds, pkt.currencySaleServerTimeMs);
     }
 }

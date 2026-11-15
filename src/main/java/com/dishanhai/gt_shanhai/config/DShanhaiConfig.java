@@ -173,6 +173,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.LongValue shopSdaPackThreshold;
         /** 山海商店 — 奖励表模式（自选/随机/全部/FTBQ）单次购买最多独立随机抽取的次数 */
         public ForgeConfigSpec.LongValue shopRewardRollCap;
+        public ForgeConfigSpec.LongValue shopCurrencySaleLimit;
+        public ForgeConfigSpec.LongValue shopCurrencySalePeriodSeconds;
         /** 山海商店 — AE 模式下是否禁止把购买/兑换得到的物品注入 AE（只拉取/检索，不注入） */
         public ForgeConfigSpec.BooleanValue shopAeDeliverDisabled;
         /** 山海商店 — AE 模式下单种物品少于此数量时进背包，达到才注入 AE */
@@ -488,6 +490,14 @@ public final class DShanhaiConfig {
                              "开启后，兑换/购买得到的有内容 SDA、以及超限自动打包出的 SDA，会优先放入同一 AE 网络内可用的 ME 磁盘仓室并直接挂载存储",
                              "磁盘仓室必须与 FTBQ AE提交器或商店终端处在同一个 AE 网络；空 SDA 商品不会自动挂载")
                     .define("sdaDirectDiskHatchInject", true);
+            shopCurrencySaleLimit = builder
+                    .comment("低阶货币兑星火的基础限售枚数，面值每升一档限额翻倍，每位玩家每个币种独立计数，0 = 禁止出售")
+                    .defineInRange("currencySaleLimit", com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit.DEFAULT_LIMIT,
+                            0L, Long.MAX_VALUE);
+            shopCurrencySalePeriodSeconds = builder
+                    .comment("低阶货币限售刷新周期（现实秒），从首次成功出售起算")
+                    .defineInRange("currencySalePeriodSeconds", com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit.DEFAULT_SECONDS,
+                            1L, com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit.MAX_SECONDS);
             shopSellRatioPercent = builder
                     .comment("山海商店：出售商品能拿回买价的百分比（默认 70，即卖出价=买价×70%）",
                              "买卖价差防止「买了立刻卖回零损耗」的套利；100=无价差（等价旧行为）")

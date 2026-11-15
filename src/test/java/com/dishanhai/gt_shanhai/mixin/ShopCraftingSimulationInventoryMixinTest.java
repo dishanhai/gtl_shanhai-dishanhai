@@ -64,10 +64,24 @@ class ShopCraftingSimulationInventoryMixinTest {
     }
 
     @Test
-    void unreservedKeysKeepTheNativeResultWithoutAnExtraQuery() throws Exception {
+    void unreservedKeysUseExtractableStockWhenTheAeCacheOverstatesIt() throws Exception {
+        Fixture fixture = new Fixture(5L);
+        IActionSource source = new ShopAutoCraftActionSource(IActionSource.empty(), Map.of());
+        assertEquals(5L, fixture.available(source, 20L, 20L));
+        assertEquals(1, fixture.queries.get());
+    }
+
+    @Test
+    void laterPlansSubtractReservationsFromExtractableStockInsteadOfCachedStock() throws Exception {
+        Fixture fixture = new Fixture(80L);
+        assertEquals(10L, fixture.available(shopSource(70L), Long.MAX_VALUE, 100L));
+    }
+
+    @Test
+    void keysAbsentFromTheNativeSimulationDoNotQueryStorage() throws Exception {
         Fixture fixture = new Fixture(100L);
         IActionSource source = new ShopAutoCraftActionSource(IActionSource.empty(), Map.of());
-        assertEquals(20L, fixture.available(source, 20L, 20L));
+        assertEquals(0L, fixture.available(source, 20L, 0L));
         assertEquals(0, fixture.queries.get());
     }
 

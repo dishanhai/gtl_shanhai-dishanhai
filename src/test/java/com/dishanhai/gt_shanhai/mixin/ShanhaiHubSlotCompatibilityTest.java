@@ -26,7 +26,14 @@ public class ShanhaiHubSlotCompatibilityTest {
     private static int sequence;
 
     public enum IO { BOTH }
-    public enum Ability { IMPORT_ITEMS, EXPORT_ITEMS, IMPORT_FLUIDS, EXPORT_FLUIDS, INPUT_ENERGY, MAINTENANCE, SPECIAL }
+    public enum Ability { IMPORT_ITEMS, EXPORT_ITEMS, IMPORT_FLUIDS, EXPORT_FLUIDS,
+        INPUT_ENERGY, SUBSTATION_INPUT_ENERGY, INPUT_LASER,
+        OUTPUT_ENERGY, SUBSTATION_OUTPUT_ENERGY, OUTPUT_LASER, MAINTENANCE, SPECIAL,
+        PARALLEL_HATCH, COMPUTATION_DATA_RECEPTION, COMPUTATION_DATA_TRANSMISSION,
+        OPTICAL_DATA_RECEPTION, OPTICAL_DATA_TRANSMISSION, THREAD_MODIFIER;
+
+        public String getName() { return name().toLowerCase(Locale.ROOT); }
+    }
     public static class Error {}
     public static class SingleError extends Error {
         public SingleError(SimpleBase predicate, int type) {}
@@ -68,6 +75,11 @@ public class ShanhaiHubSlotCompatibilityTest {
     }
     public static class HubWorld {
         public static boolean isHub(State state) { return state != null && "hub".equals(state.block); }
+        public static boolean borrowsMaterialSlot(State state) {
+            return isHub(state) || isRecipeThreadHatch(state) || "cosmic".equals(state.block)
+                    || "overclock".equals(state.block);
+        }
+        public static boolean isRecipeThreadHatch(State state) { return "recipe-thread".equals(state.block); }
     }
     private static void invokeHook(Object target, String method, State state, CallbackInfoReturnable<Boolean> cir) {
         try {
@@ -214,6 +226,123 @@ public class ShanhaiHubSlotCompatibilityTest {
         assertFalse(match(List.of(slot("energy", 1, false)), "hub", "energy"));
         assertFalse(match(List.of(slot("explicit-block", 0, false)), "hub"));
     }
+    @Test void hubInMaintenanceSlotLeavesOptionalEnergyQuotaForRealHatches() throws Exception {
+        for (Ability ability : List.of(Ability.INPUT_ENERGY, Ability.SUBSTATION_INPUT_ENERGY, Ability.INPUT_LASER,
+                Ability.OUTPUT_ENERGY, Ability.SUBSTATION_OUTPUT_ENERGY, Ability.OUTPUT_LASER)) {
+            assertTrue(match(maintenanceAndEnergySlots(ability, 1, -1), "hub", "energy"));
+            assertTrue(match(maintenanceAndEnergySlots(ability, 1, -1), "energy", "hub"));
+            assertFalse(match(maintenanceAndEnergySlots(ability, 1, -1), "hub", "energy", "energy"));
+            assertTrue(match(maintenanceAndEnergySlots(ability, -1, 1), "hub", "energy"));
+        }
+    }
+
+    @Test void borrowedMaterialSlotsLeaveQuotaForRealInputs() throws Exception {
+        for (String block : List.of("cosmic", "overclock", "recipe-thread")) {
+            SimpleBase input = slot("item-in", 1, false);
+            input.minCount = 1;
+            input.predicate = state -> block.equals(state.block) || "item-in".equals(state.block);
+            markAbility(input, Ability.IMPORT_ITEMS);
+            assertTrue(match(List.of(input), block, "item-in"), block);
+            assertTrue(match(List.of(input), "item-in", block), block);
+            assertFalse(match(List.of(input), block), block);
+            input.maxCount = 0;
+            input.minCount = -1;
+            assertFalse(match(List.of(input), block), block);
+        }
+        for (String block : List.of("cosmic", "overclock")) {
+            SimpleBase fluid = slot("fluid-in", -1, false);
+            fluid.maxLayerCount = 1;
+            fluid.predicate = state -> block.equals(state.block) || "fluid-in".equals(state.block);
+            markAbility(fluid, Ability.IMPORT_FLUIDS);
+            assertTrue(match(List.of(fluid), block, "fluid-in"), block);
+        }
+    }
+
+    @Test void realDualInputStillContributesToBothMaterialCounts() throws Exception {
+        SimpleBase item = slot("item-in", 1, false);
+        SimpleBase fluid = slot("fluid-in", 1, false);
+        item.minCount = 1;
+        fluid.minCount = 1;
+        item.predicate = state -> "dual".equals(state.block) || "item-in".equals(state.block);
+        fluid.predicate = state -> "dual".equals(state.block) || "fluid-in".equals(state.block);
+        markAbility(item, Ability.IMPORT_ITEMS);
+        markAbility(fluid, Ability.IMPORT_FLUIDS);
+        assertTrue(match(List.of(item, fluid), "dual"));
+        assertFalse(match(List.of(item, fluid), "dual", "item-in"));
+    }
+
+    @Test void recipeThreadHatchDoesNotCountAsAParallelHatch() throws Exception {
+        SimpleBase parallel = slot("parallel", 1, false);
+        parallel.minCount = 1;
+        parallel.predicate = state -> "recipe-thread".equals(state.block) || "parallel".equals(state.block);
+        markAbility(parallel, Ability.PARALLEL_HATCH);
+        assertTrue(match(List.of(parallel), "recipe-thread", "parallel"));
+        assertTrue(match(List.of(parallel), "parallel", "recipe-thread"));
+        assertFalse(match(List.of(parallel), "recipe-thread"));
+    }
+
+    @Test void hubLeavesOptionalUtilityQuotaForRealHatches() throws Exception {
+        for (Ability ability : List.of(Ability.PARALLEL_HATCH, Ability.COMPUTATION_DATA_RECEPTION,
+                Ability.COMPUTATION_DATA_TRANSMISSION, Ability.OPTICAL_DATA_RECEPTION,
+                Ability.OPTICAL_DATA_TRANSMISSION, Ability.THREAD_MODIFIER)) {
+            assertTrue(match(maintenanceAndEnergySlots(ability, 1, -1), "hub", "energy"), ability.name());
+            assertTrue(match(maintenanceAndEnergySlots(ability, 1, -1), "energy", "hub"), ability.name());
+            SimpleBase required = slot("utility", 1, false);
+            required.minCount = 1;
+            markAbility(required, ability);
+            assertTrue(match(List.of(required), "hub"), ability.name());
+            assertFalse(match(List.of(required), "hub", "utility"), ability.name());
+        }
+    }
+
+    @Test void optionalEnergyOnlySlotStillAcceptsHubWithinItsQuota() throws Exception {
+        SimpleBase energy = slot("energy", 1, false);
+        markAbility(energy, Ability.INPUT_ENERGY);
+        assertTrue(match(List.of(energy), "hub"));
+        assertFalse(match(List.of(energy), "energy", "hub"));
+        assertFalse(match(List.of(energy), "hub", "energy"));
+
+        energy.maxCount = 0;
+        assertFalse(match(List.of(energy), "hub"));
+        energy.maxCount = 1;
+        energy.innerMatches = false;
+        assertFalse(match(List.of(energy), "hub"));
+    }
+
+    @Test void hubStillContributesToRequiredEnergyCounts() throws Exception {
+        SimpleBase global = slot("energy", 1, false);
+        markAbility(global, Ability.INPUT_ENERGY);
+        global.minCount = 1;
+        assertTrue(match(List.of(global), "hub"));
+        assertFalse(match(List.of(global), "hub", "energy"));
+
+        SimpleBase layer = slot("energy", -1, false);
+        markAbility(layer, Ability.INPUT_LASER);
+        layer.minLayerCount = 2;
+        layer.maxLayerCount = 2;
+        assertFalse(match(List.of(layer), "hub"));
+        assertTrue(match(List.of(layer), "hub", "energy"));
+    }
+
+    private static List<SimpleBase> maintenanceAndEnergySlots(Ability ability, int globalMax, int layerMax)
+            throws Exception {
+        SimpleBase maintenance = slot("maintenance", 1, false);
+        maintenance.minCount = 1;
+        SimpleBase energy = slot("energy", globalMax, false);
+        energy.maxLayerCount = layerMax;
+        markAbility(energy, ability);
+        return List.of(maintenance, energy);
+    }
+
+    private static void markAbility(SimpleBase simple, Ability ability) throws Exception {
+        TraceBase trace = (TraceBase) traceClass.getConstructor().newInstance();
+        trace.common.add(simple);
+        Method method = factoryClass.getDeclaredMethod("gtShanhai$markIoAbilities",
+                Ability[].class, CallbackInfoReturnable.class);
+        method.setAccessible(true);
+        method.invoke(null, new Ability[]{ability}, new CallbackInfoReturnable<>("abilities", false, trace));
+    }
+
     @Test void forbiddenOrNonMatchingOrInnerRejectedIoSlotsCannotAdmitHub() throws Exception {
         assertFalse(match(List.of(slot("item-in", 0, true)), "hub"));
         SimpleBase layerZero = slot("fluid-in", 2, true); layerZero.maxLayerCount = 0;

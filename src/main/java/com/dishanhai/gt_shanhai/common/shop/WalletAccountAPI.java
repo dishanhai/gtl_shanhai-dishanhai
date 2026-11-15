@@ -523,6 +523,8 @@ public final class WalletAccountAPI {
                         getAllPurchaseCounts(server, uuid), getAllPeriodAnchors(server, uuid),
                         ShopWirelessEu.getBalance(player), ShopAeNetwork.hasBoundNetwork(player),
                         getMemberTier(server, uuid), getAllPeriodUsed(server, uuid),
-                        ShopLimitSavedData.get(server).getPlayerRemaining(uuid)));
+                        ShopLimitSavedData.get(server).getPlayerRemaining(uuid),
+                         com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopCurrencySaleLimit.get(),
+                         com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopCurrencySalePeriodSeconds.get()));
     }
 }

@@ -5,6 +5,7 @@ import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
 import com.dishanhai.sh_better_ui.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
+import com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
@@ -543,7 +544,7 @@ public class CurrencyAtmScreen extends ShopScaledScreen {
             hints.add("兑换：按兑星火价换成左右箭头选的币");
             hints.add("白金及以下原价兑星火，更高的币会折损");
             hints.add("转成星火，或用星火按同一价格转回");
-            hints.add("快速售出：可计价的币全部换星火");
+            hints.add(Component.translatable("gt_shanhai.shop.currency_sale.quick_hint").getString());
         }
         hints.add("AE 模式在商店顶栏开关");
         return hints;
@@ -582,7 +583,7 @@ public class CurrencyAtmScreen extends ShopScaledScreen {
         lines.add("§e转成星火 / 星火转出");
         lines.add("§7白金及以下原价。更高的币面值每×4，星火只×2");
         lines.add("§e快速售出");
-        lines.add("§7所有配了币值的货币一次换成星火");
+        lines.add("§7" + Component.translatable("gt_shanhai.shop.currency_sale.quick_hint").getString());
         lines.add("§e特殊货币");
         lines.add("§7不能按比例换，请去兑换中心");
         lines.add("§eAE 模式");
@@ -683,9 +684,9 @@ public class CurrencyAtmScreen extends ShopScaledScreen {
         // 快速售出：服务端按币值处理全部内部余额；AE 模式开启时自动先吸入 AE 同类余额
         drawButton(g, cx, dy + 160, detailW() - 16, 14,
                 ShopScreen.isAeMode() ? "§d快速售出全部货币（含 AE）" : "§d快速售出全部货币（钱包）", mx, my,
-                "快速售出", ShopScreen.isAeMode()
-                        ? "把所有配了币值的货币按兑星火价换成星火。白金以上会折损。会先从绑定网络吸入，再连钱包余额一起换。特殊货币不动。"
-                        : "把钱包里所有配了币值的货币按兑星火价一次换成星火。白金以上会折损。特殊货币留在钱包里。");
+                "快速售出", Component.translatable(ShopScreen.isAeMode()
+                         ? "gt_shanhai.shop.currency_sale.quick_hint_ae"
+                         : "gt_shanhai.shop.currency_sale.quick_hint").getString());
 
         // 兑换区（特殊货币不参与币值兑换，改引导去兑换中心；下面这串固定 Y 坐标见 ShopScreen 同类注释的教训，
         // 插行/改行高必须连带下移 ey，不能只加行不挪 ey）
@@ -727,12 +728,17 @@ public class CurrencyAtmScreen extends ShopScaledScreen {
 
         // 币种 ↔ 星火（兑星火价，白金以上折损）
         long value = sparkRate;
-        BigInteger toSpark = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
+        boolean limitedSale = CurrencySaleLimit.isLimited(face);
+        long nowMs = ClientWalletAccount.currencySaleTimeMs();
+        long sellAmount = limitedSale
+                ? Math.min(amount, ClientWalletAccount.remainingCurrencySale(selected, face, nowMs)) : amount;
+        BigInteger toSpark = BigInteger.valueOf(sellAmount).multiply(BigInteger.valueOf(value));
         drawButton(g, cx, ey + 62, detailW() - 16, 14,
-                value > 0L ? "§d转成星火 " + (ShopScreen.isAeMode() ? "§7(钱包+AE)" : "§7(钱包)")
-                        + " §7(付 " + formatBig(BigInteger.valueOf(amount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
+                sellAmount == 0L ? "§8" + Component.translatable("gt_shanhai.shop.currency_sale.exhausted").getString()
+                        : value > 0L ? "§d转成星火 " + (ShopScreen.isAeMode() ? "§7(钱包+AE)" : "§7(钱包)")
+                        + " §7(付 " + formatBig(BigInteger.valueOf(sellAmount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
                         : "§8转成星火（币值未配置）", mx, my,
-                "转成星火", ShopScreen.isAeMode()
+                "转成星火", limitedSale ? currencySaleHint(face, nowMs) : ShopScreen.isAeMode()
                         ? "按兑星火价把数量换成星火。钱包不够时，会从绑定网络补这一种货币。白金以上会折损。"
                         : "按兑星火价把钱包里的数量换成星火。白金及以下等于面值，更高的币会折损。");
         // 星火转出：amount = 想要的目标币数量（非花的星火数），花费 = amount × 币值
@@ -871,8 +877,9 @@ public class CurrencyAtmScreen extends ShopScaledScreen {
         if (GuiRenderUtil.isHovering(mx, my, cx, ey + 62, fullW, 14)) {
             boolean includeAe = ShopScreen.isAeMode();
             send(CurrencyActionPacket.Op.TO_DIGITAL, selected, null, amount, includeAe);
-            // 乐观预览：AE 模式下按“钱包 + 已知 AE 缓存”封顶，服务端权威快照会校正。
-            if (value > 0L) {
+            if (includeAe) aeBalanceRequestedAtGameTime = Long.MIN_VALUE;
+            // 低阶币等待服务端结算和额度快照。高阶币仍可使用原有即时余额预览。
+            if (value > 0L && !CurrencySaleLimit.isLimited(CurrencyRateConfig.getValue(selected))) {
                 BigInteger walletBal = ClientWalletAccount.getCurrency(selected);
                 Long aeLong = includeAe ? ClientAeCurrencyBalance.get(selected) : null;
                 BigInteger aeBal = aeLong == null ? BigInteger.ZERO : BigInteger.valueOf(aeLong);
@@ -948,6 +955,17 @@ public class CurrencyAtmScreen extends ShopScaledScreen {
         if (now - lastMoneySendAtMs < 300L) return;
         lastMoneySendAtMs = now;
         ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyActionPacket(op, currency, target, amt, includeAe));
+    }
+
+    private String currencySaleHint(long faceValue, long nowMs) {
+        long remaining = ClientWalletAccount.remainingCurrencySale(selected, faceValue, nowMs);
+        long limit = ClientWalletAccount.currencySaleLimitFor(faceValue);
+        String quota = Component.translatable("gt_shanhai.shop.currency_sale.remaining",
+                ShopPurchase.formatCount(remaining), ShopPurchase.formatCount(limit)).getString();
+        long millis = ClientWalletAccount.currencySaleRefreshMillis(selected, nowMs);
+        if (millis == 0L || limit == 0L) return quota;
+        return quota + " · " + Component.translatable("gt_shanhai.shop.currency_sale.refresh",
+                ShopPurchase.formatCount((millis - 1L) / 1000L + 1L)).getString();
     }
 
     private void sendQuickSell() {

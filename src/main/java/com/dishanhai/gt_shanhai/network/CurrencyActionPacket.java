@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
+import com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 
@@ -108,6 +109,10 @@ public class CurrencyActionPacket {
                     player.sendSystemMessage(stageMessage(stage));
                     break;
                 }
+                if (CurrencySaleLimit.remaining(player, pkt.currency) == 0L) {
+                    player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.exhausted"));
+                    break;
+                }
                 // pkt.amount 语义 = 想要转出的源币数量；结果同时包含 AE 自动补足后的实际消耗量。
                 ShopPurchase.DigitalResult conversion =
                         ShopPurchase.toDigitalResult(player, pkt.currency, pkt.amount, pkt.includeAe);
@@ -118,6 +123,9 @@ public class CurrencyActionPacket {
                             ? conversion.gained().longValue() : Long.MAX_VALUE;
                     player.sendSystemMessage(Component.literal("§b[货币中心] §a已把 §f" + ShopPurchase.formatCount(consumed) + " "
                             + ShopPurchase.coinName(pkt.currency) + " §a转成 §e" + ShopPurchase.formatCount(gained) + " 星火"));
+                    if (consumed < pkt.amount && CurrencySaleLimit.remaining(player, pkt.currency) == 0L) {
+                        player.sendSystemMessage(Component.translatable("gt_shanhai.shop.currency_sale.exhausted"));
+                    }
                 } else {
                     player.sendSystemMessage(Component.literal("§c[货币中心] 转星火失败（余额不足 / 币值未配置）"));
                 }

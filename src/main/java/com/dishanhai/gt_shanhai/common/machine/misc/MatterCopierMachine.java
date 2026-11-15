@@ -545,7 +545,7 @@ public class MatterCopierMachine extends GTLAddWirelessWorkableElectricMultipleR
             tips.add(Component.literal("§7NXY Matter Copier 的 GTL 移植版"));
             tips.add(Component.literal("§7控制槽放入原型，设置数量后周期性复制到输出仓口"));
             tips.add(Component.literal("§7结构: 3x3x3 UV 机器外壳，可替换输入/输出总线与输入/输出仓"));
-            tips.add(Component.literal("§e使用数据棒绑定无线电网供能，不需要能源仓室"));
+            tips.add(Component.literal("§e使用闪存绑定无线电网供能，不需要能源仓室"));
         });
         return def;
     }

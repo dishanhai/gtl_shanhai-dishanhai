@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** 山海：枢纽的普通 I/O 映射仅供入场，不能占用或补足材料仓数量。 */
+/** 山海：借位仓不参与对应能力计数，枢纽的可选能力留给仓位匹配处理。 */
 @Mixin(value = SimplePredicate.class, remap = false)
 public class ShanhaiHubIoPredicateMixin implements ShanhaiHubIoPredicate {
     @Shadow public int minCount;
@@ -19,6 +19,8 @@ public class ShanhaiHubIoPredicateMixin implements ShanhaiHubIoPredicate {
     @Shadow public int minLayerCount;
     @Shadow public int maxLayerCount;
     @Unique private boolean gtShanhai$ioAdmissionOnly;
+    @Unique private boolean gtShanhai$hubAbility;
+    @Unique private boolean gtShanhai$parallelAbility;
 
     @Override
     public boolean gtShanhai$isIoAdmissionOnly() { return gtShanhai$ioAdmissionOnly; }
@@ -28,9 +30,32 @@ public class ShanhaiHubIoPredicateMixin implements ShanhaiHubIoPredicate {
         gtShanhai$ioAdmissionOnly = admissionOnly;
     }
 
+    @Override
+    public void gtShanhai$markHubAbility() {
+        gtShanhai$hubAbility = true;
+    }
+
+    @Override
+    public boolean gtShanhai$defersHubCount() {
+        return gtShanhai$hubAbility && minCount <= 0 && minLayerCount <= 0;
+    }
+
+    @Override
+    public void gtShanhai$markParallelAbility() {
+        gtShanhai$parallelAbility = true;
+    }
+
+    @Override
+    public boolean gtShanhai$isParallelAbility() {
+        return gtShanhai$parallelAbility;
+    }
+
     @Inject(method = "testLimited", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$skipHubIoCount(MultiblockState state, CallbackInfoReturnable<Boolean> cir) {
-        if (!gtShanhai$ioAdmissionOnly || !ShanhaiHubStructure.isHub(state)) return;
+        boolean skipMaterial = gtShanhai$ioAdmissionOnly && ShanhaiHubStructure.borrowsMaterialSlot(state);
+        boolean skipParallel = gtShanhai$parallelAbility && ShanhaiHubStructure.isRecipeThreadHatch(state);
+        boolean deferHub = gtShanhai$defersHubCount() && ShanhaiHubStructure.isHub(state);
+        if (!skipMaterial && !skipParallel && !deferHub) return;
         SimplePredicate self = (SimplePredicate) (Object) this;
         // 零贡献仍要登记，让 GTCEu/GTLCore 的整机与分层下限检查生效。
         if (minCount != -1 || maxCount != -1) state.getGlobalCount().putIfAbsent(self, 0);
