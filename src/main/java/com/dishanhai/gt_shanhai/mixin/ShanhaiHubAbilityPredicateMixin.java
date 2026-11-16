@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.machine.part.ShanhaiHubIoPredicate;
+import com.dishanhai.gt_shanhai.api.machine.part.ShanhaiAbilityPredicate;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 import com.gregtechceu.gtceu.api.pattern.Predicates;
 import com.gregtechceu.gtceu.api.pattern.TraceabilityPredicate;
@@ -57,7 +58,6 @@ public class ShanhaiHubAbilityPredicateMixin {
     @Unique
     private static void gtShanhai$markPredicates(TraceabilityPredicate predicate, boolean materialIo,
                                                boolean hubAbility, boolean parallel) {
-        if (!materialIo && !hubAbility) return;
         for (var simple : predicate.common) {
             gtShanhai$markPredicate((ShanhaiHubIoPredicate) simple, materialIo, hubAbility, parallel);
         }
@@ -69,6 +69,10 @@ public class ShanhaiHubAbilityPredicateMixin {
     @Unique
     private static void gtShanhai$markPredicate(ShanhaiHubIoPredicate predicate, boolean materialIo,
                                               boolean hubAbility, boolean parallel) {
+        // Protect the requested ability, not the incidental abilities of its candidates.
+        // This includes maintenance, custom abilities, and mixed material/non-material
+        // factory predicates. Do not change hub admission or count flags for these.
+        if (!materialIo) ((ShanhaiAbilityPredicate) predicate).gtShanhai$markNonMaterialAbility();
         if (materialIo) predicate.gtShanhai$setIoAdmissionOnly(true);
         if (hubAbility) predicate.gtShanhai$markHubAbility();
         if (parallel) predicate.gtShanhai$markParallelAbility();

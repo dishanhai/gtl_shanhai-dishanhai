@@ -139,7 +139,7 @@ public class ShanhaiHubSlotCompatibilityTest {
         boolean hasFix = ShanhaiHubSlotCompatibilityTest.class.getClassLoader()
                 .getResource(ROOT + "mixin/" + mixinName + ".class") != null;
         writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC, generated, null, Type.getInternalName(parent),
-                hasFix && parent == SimpleBase.class ? new String[]{marker} : null);
+                hasFix && parent == SimpleBase.class ? new String[]{marker, ROOT + "api/machine/part/ShanhaiAbilityPredicate"} : null);
         MethodVisitor init = writer.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
         init.visitCode(); init.visitVarInsn(Opcodes.ALOAD, 0);
         init.visitMethodInsn(Opcodes.INVOKESPECIAL, Type.getInternalName(parent), "<init>", "()V", false);
@@ -388,6 +388,7 @@ public class ShanhaiHubSlotCompatibilityTest {
             SimpleBase simple = slot("item-in", 1, false); trace.common.add(simple);
             abilities.invoke(null, group, new CallbackInfoReturnable<>("abilities", false, trace));
             assertEquals(true, simpleClass.getMethod("gtShanhai$isIoAdmissionOnly").invoke(simple));
+            assertEquals(false, simpleClass.getMethod("gtShanhai$hasNonMaterialAbility").invoke(simple));
         }
         for (Ability[] group : List.of(new Ability[]{}, new Ability[]{Ability.MAINTENANCE},
                 new Ability[]{Ability.IMPORT_ITEMS, Ability.INPUT_ENERGY}, new Ability[]{Ability.SPECIAL})) {
@@ -395,6 +396,7 @@ public class ShanhaiHubSlotCompatibilityTest {
             SimpleBase simple = slot("item-in", 1, false); trace.common.add(simple);
             abilities.invoke(null, group, new CallbackInfoReturnable<>("abilities", false, trace));
             assertEquals(false, simpleClass.getMethod("gtShanhai$isIoAdmissionOnly").invoke(simple));
+            assertEquals(group.length > 0, simpleClass.getMethod("gtShanhai$hasNonMaterialAbility").invoke(simple));
         }
         Method tiered = factoryClass.getDeclaredMethod("gtShanhai$markTieredIoAbility",
                 Ability.class, int[].class, CallbackInfoReturnable.class);
@@ -403,5 +405,12 @@ public class ShanhaiHubSlotCompatibilityTest {
         SimpleBase simple = slot("item-in", 1, false); trace.limited.add(simple);
         tiered.invoke(null, Ability.IMPORT_ITEMS, new int[]{1, 2}, new CallbackInfoReturnable<>("ability", false, trace));
         assertEquals(true, simpleClass.getMethod("gtShanhai$isIoAdmissionOnly").invoke(simple));
+        assertEquals(false, simpleClass.getMethod("gtShanhai$hasNonMaterialAbility").invoke(simple));
+        for (Ability ability : List.of(Ability.MAINTENANCE, Ability.INPUT_ENERGY, Ability.SPECIAL)) {
+            TraceBase nonMaterialTrace = (TraceBase) traceClass.getConstructor().newInstance();
+            SimpleBase nonMaterial = slot("non-material", 1, false); nonMaterialTrace.limited.add(nonMaterial);
+            tiered.invoke(null, ability, new int[]{1, 2}, new CallbackInfoReturnable<>("ability", false, nonMaterialTrace));
+            assertEquals(true, simpleClass.getMethod("gtShanhai$hasNonMaterialAbility").invoke(nonMaterial));
+        }
     }
 }
