@@ -45,7 +45,7 @@ import java.util.List;
  *       ⇒ 拿类型当键会把它们合并成一块，那是<b>丢数据</b>，比不去重严重得多。</li>
  *   <li><b>输出指纹</b>（星律 {@code shanhaiPatternIdentity} 那种写法）：两个不同输入产出同一物品
  *       是常见情形（如不同等级的同一产物），按输出合并同样会丢块。</li>
- *   <li><b>电路号</b>（第六刀加的 {@code circuit}）：它挂在机器槽上，<b>不是</b>样板身份的一部分。
+ *   <li><b>电路号</b>（第六刀加的 {@code circuit}）：它挂在机器母槽上，非零配置也是搬运去重身份的一部分。
  *       若把它算进键，「同一块样板从两个不同电路的母槽各读一次」就会变成两条，
  *       放回去时同一格被写两遍（第二遍还要再改一次电路）。现有语义是<b>新的覆盖旧的</b>
  *       ⇒ 同配方的两次读取只留一条（电路 = <b>后读到</b>的那个），这是与「同 id 覆盖」同一条口径。</li>
@@ -132,7 +132,7 @@ public final class HostPatternMoverEntry {
         final CompoundTag copy = patternNbt == null ? new CompoundTag() : patternNbt.copy();
         final String t = type == null ? "" : type.trim();
         final int c = HostPatternMoverCircuit.normalize(circuit);
-        final String key = keyOf(copy);
+        final String key = keyWithCircuit(keyOf(copy), c);
         final CompoundTag entryTag = new CompoundTag();
         entryTag.put(K_PATTERN, copy.copy());
         entryTag.putString(K_TYPE, t);
@@ -183,6 +183,12 @@ public final class HostPatternMoverEntry {
     }
 
     /** 去重键（见类注释 §二）。 */
+    /** Zero preserves legacy identity; configured variants must never overwrite one another. */
+    public static String keyWithCircuit(String key, int circuit) {
+        int value = HostPatternMoverCircuit.normalize(circuit);
+        return key == null || value == 0 ? key : key + "|circuit=" + value;
+    }
+
     public String dedupKey() {
         return this.dedupKey;
     }

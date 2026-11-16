@@ -120,7 +120,9 @@ public final class HostPatternMoverTakeout {
                     continue;
                 }
                 matched++;
-                if (handout == null) {
+                // A loose pattern item cannot represent machine-owned mother configuration.
+                // Keep configured entries in the mover; only direct machine placement is lossless.
+                if (handout == null || HostPatternMoverCircuit.normalize(unit.circuit()) != 0) {
                     kept.add(Integer.valueOf(i));
                     continue;
                 }

@@ -493,7 +493,7 @@ public final class HostPatternMoverPanel extends WidgetGroup {
                 this.setState("§c物品里这份数据已经超限，先别动它（一个字节都没改）");
             } else if (r.nothingChanged()) {
                 this.setState(r.wanted() == 0 ? "§7这一组已经没有样板了"
-                        : "§c一块都没交出去（背包与掉落都失败）⇒ 全部留在物品里");
+                        : "§e未取出：带独立电路的样板须直接放置；其余样板请检查背包空间");
             } else {
                 this.setState("§a已取出 " + r.removed() + " 块（背包 " + r.toInventory()
                         + " 块，掉落 " + r.dropped() + " 块）"

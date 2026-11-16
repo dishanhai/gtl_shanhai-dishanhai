@@ -278,6 +278,12 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private int pendingDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
     @Nullable
     private TickableSubscription outputMultiplierHostSyncSubscription;
+    private static final String MOTHER_CIRCUITS_TAG = "gtShanhaiWildcardMotherCircuits";
+    private static final String EXPANDED_CIRCUIT_TAG = "gtShanhaiWildcardMotherCircuitIdentity";
+    private final int[] wildcardMotherCircuits;
+    private final ItemStack[] wildcardMotherIdentities;
+    private boolean writingWildcardMother;
+    private boolean loadingWildcardMothers;
     private final List<IPatternDetails> wildcardPatterns;
     private final List<List<IPatternDetails>> wildcardPreviewByMother;
     private final List<ItemStack> wildcardPatternStacks;
@@ -352,6 +358,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         this.wildcardSlotsPerPage = Math.max(1, wildcardSlotsPerPage);
         this.wildcardMaxPages = Math.max(1, wildcardMaxPages);
         this.wildcardSlotCount = this.wildcardSlotsPerPage * this.wildcardMaxPages;
+        this.wildcardMotherCircuits = new int[this.wildcardSlotCount];
+        this.wildcardMotherIdentities = new ItemStack[this.wildcardSlotCount];
+        Arrays.fill(this.wildcardMotherIdentities, ItemStack.EMPTY);
         this.activeSlotsScratch =
                 new int[patternsPerRow * rowsPerPage * maxPages + this.wildcardSlotCount];
         this.activeUncachedSlotsScratch =
@@ -1083,6 +1092,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean forDrop) {
         super.saveCustomPersistedData(tag, forDrop);
         saveCloudSlots(tag);
+        tag.putIntArray(MOTHER_CIRCUITS_TAG, wildcardMotherCircuits);
         if (forDrop && cloudSlots.isEmpty() && buffer.isEmpty() && !cloudRestorePending) tag.remove("cloudExecutorId");
         if (!forDrop && stockItemCraftingTracker != null && stockFluidCraftingTracker != null) {
             CompoundTag itemTag = new CompoundTag();
@@ -1109,7 +1119,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public void loadCustomPersistedData(@NotNull CompoundTag tag) {
         // 先于 super：GTLCore 载入 cacheRecipeCount 时按存档长度 arraycopy，配置调小后会越界丢整台。
         RecipeTypePatternCacheCountGuard.clampToSlotCount(tag, maxPatternCount);
-        super.loadCustomPersistedData(tag);
+        loadingWildcardMothers = true;
+        try {
+            super.loadCustomPersistedData(tag);
+            int[] storedCircuits = tag.getIntArray(MOTHER_CIRCUITS_TAG);
+            for (int i = 0; i < wildcardMotherCircuits.length; i++) {
+                wildcardMotherCircuits[i] = i < storedCircuits.length ? normalizeMotherCircuit(storedCircuits[i]) : 0;
+            }
+            rememberMotherIdentities(false);
+        } finally {
+            loadingWildcardMothers = false;
+        }
         pendingCloudState = tag.getCompound("gtShanhaiCloudSlots").copy();
         cloudRestorePending = !pendingCloudState.isEmpty();
         wildcardPersistence.load(tag);
@@ -2487,7 +2507,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
         @Override
         public Widget createConfigurator() {
-            configuratorPage = new WidgetGroup(0, 0, wildcardPanelWidth(), 168);
+            configuratorPage = new WidgetGroup(0, 0, wildcardPanelWidth(), 192);
             fillConfigurator(configuratorPage);
             return configuratorPage;
         }
@@ -2506,10 +2526,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             group.addWidget(new LabelWidget(8, 73,
                     () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_expanded",
                             selectedWildcardPreviewPatterns().size()).getString()));
-            group.addWidget(new PatternCycleWidget(8, 85, width - 16, 36,
+            addMotherCircuitControls(group, selectedWildcardMotherSlot, width);
+            group.addWidget(new PatternCycleWidget(8, 109, width - 16, 36,
                     () -> selectedWildcardPreviewPatterns()));
 
-            recipeTypeList = new DraggableScrollableWidgetGroup(8, 123, width - 16, 42);
+            recipeTypeList = new DraggableScrollableWidgetGroup(8, 147, width - 16, 42);
             recipeTypeList.setBackground(StellarGlassTexture.display());
             recipeTypeList.setYScrollBarWidth(4).setYBarStyle(
                     new ColorRectTexture(0xFF3F4252),
@@ -2559,6 +2580,47 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
+    /** Only the local machine configuration can mutate circuits; remote terminal holders are read-only here. */
+    private void addMotherCircuitControls(WidgetGroup group, int motherSlot, int width) {
+        // Bind this rendered control to its displayed mother, not the machine-global selection.
+        ItemStack[] shownMother = {wildcardPatternInventory.getStackInSlot(motherSlot),
+                wildcardPatternInventory.getStackInSlot(motherSlot).copy()};
+        group.addWidget(new LabelWidget(8, 87, () -> {
+            int circuit = gtShanhai$getWildcardMotherCircuit(motherSlot);
+            return Component.translatable("gui.gt_shanhai.mother_circuit.value", motherSlot + 1,
+                    circuit == 0 ? Component.translatable("gui.gt_shanhai.mother_circuit.default").getString()
+                            : Integer.toString(circuit)).getString();
+        }));
+        int startX = width - 62;
+        for (int delta : new int[]{-1, 0, 1}) {
+            String text = delta < 0 ? "−" : delta > 0 ? "+" : "0";
+            group.addWidget(new ButtonWidget(startX, 85, 18, 18,
+                    glassButton(new TextTexture(text, -1)), click -> {
+                        if (click.isRemote || click.button != 0 || group.getGui() == null) return;
+                        Player player = group.getGui().entityPlayer;
+                        if (!(player instanceof ServerPlayer server) || server.isSpectator()
+                                || !server.getAbilities().mayBuild || !cloudUiDisabledReason(player).isEmpty()
+                                || MetaMachine.getMachine(server.serverLevel(), getPos()) != this
+                                || motherSlot < 0 || motherSlot >= wildcardSlotCount
+                                || (shownMother[0] != wildcardPatternInventory.getStackInSlot(motherSlot)
+                                || !ItemStack.isSameItemSameTags(shownMother[1], wildcardPatternInventory.getStackInSlot(motherSlot)))) {
+                            if (player instanceof ServerPlayer server) server.displayClientMessage(
+                                    Component.translatable("gui.gt_shanhai.mother_circuit.denied"), true);
+                            return;
+                        }
+                        int next = delta == 0 ? 0 : gtShanhai$getWildcardMotherCircuit(motherSlot) + delta;
+                        if (next < 0 || next > 32) return;
+                        if (!gtShanhai$setWildcardMotherCircuit(motherSlot, next)) {
+                            server.displayClientMessage(Component.translatable("gui.gt_shanhai.mother_circuit.busy"), true);
+                        } else {
+                            shownMother[0] = wildcardPatternInventory.getStackInSlot(motherSlot);
+                            shownMother[1] = shownMother[0].copy();
+                        }
+                    }).setHoverTooltips(Component.translatable("gui.gt_shanhai.mother_circuit.hint")));
+            startX += 20;
+        }
+    }
+
     private List<IPatternDetails> selectedWildcardPreviewPatterns() {
         int slot = selectedWildcardMotherSlot;
         if (slot < 0 || slot >= wildcardPreviewByMother.size()) return List.of();
@@ -2594,15 +2656,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (slot < 0 || slot >= wildcardSlotCount || type == null || type.registryName == null) return;
         ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
         if (stack.isEmpty()) return;
-        wildcardPatternInventory.setStackInSlot(slot,
-                WildcardPatternRecipeTypeBinding.assign(stack, type.registryName.toString()));
+        gtShanhai$setWildcardMotherPattern(slot,
+                WildcardPatternRecipeTypeBinding.assign(stack, type.registryName.toString()),
+                gtShanhai$getWildcardMotherCircuit(slot));
     }
 
     private void clearWildcardRecipeType(int slot) {
         if (slot < 0 || slot >= wildcardSlotCount) return;
         ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
         if (stack.isEmpty()) return;
-        wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.clear(stack));
+        gtShanhai$setWildcardMotherPattern(slot, WildcardPatternRecipeTypeBinding.clear(stack),
+                gtShanhai$getWildcardMotherCircuit(slot));
     }
 
     private static String wildcardRecipeTypeDisplayName(GTRecipeType type) {
@@ -2760,14 +2824,100 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         };
     }
 
+    private static int normalizeMotherCircuit(int value) {
+        return value >= 1 && value <= 32 ? value : 0;
+    }
+
+    /** Mother configuration, not runtime circuit: zero means preserve pre-feature behaviour. */
+    public int gtShanhai$getWildcardMotherCircuit(int motherSlot) {
+        return motherSlot >= 0 && motherSlot < wildcardMotherCircuits.length
+                ? wildcardMotherCircuits[motherSlot] : 0;
+    }
+
+    public boolean gtShanhai$setWildcardMotherCircuit(int motherSlot, int value) {
+        if (motherSlot < 0 || motherSlot >= wildcardSlotCount || value < 0 || value > 32) return false;
+        return gtShanhai$setWildcardMotherPattern(motherSlot,
+                wildcardPatternInventory.getStackInSlot(motherSlot), value);
+    }
+
+    /**
+     * Commit one mother and its configuration together. False guarantees no write.
+     * Once committed, rebuild failures are reported but do not turn success into a retry/duplication.
+     * Pending disk-restoration must complete before an editor may replace a mother.
+     */
+    public boolean gtShanhai$setWildcardMotherPattern(int motherSlot, ItemStack stack, int circuit) {
+        if (isRemote() || getLevel() == null || loadingWildcardMothers || writingWildcardMother
+                || rebuildingWildcardPatterns || wildcardPersistence.hasPending()
+                || motherSlot < 0 || motherSlot >= wildcardSlotCount || circuit < 0 || circuit > 32 || stack == null
+                || (!stack.isEmpty() && (!acceptsWildcardMother(stack) || stack.getCount() != 1))) return false;
+        ItemStack copy = stack.copy();
+        int normalized = copy.isEmpty() ? 0 : normalizeMotherCircuit(circuit);
+        writingWildcardMother = true;
+        try {
+            try {
+                wildcardPatternInventory.setStackInSlot(motherSlot, copy);
+            } catch (RuntimeException failure) {
+                // Some inventory implementations notify after mutation. Never report a committed
+                // item as unplaced, even if such a notification unexpectedly throws.
+                ItemStack stored = wildcardPatternInventory.getStackInSlot(motherSlot);
+                if (!ItemStack.isSameItemSameTags(stored, copy) || stored.getCount() != copy.getCount()) {
+                    throw failure;
+                }
+                GTDishanhaiMod.LOGGER.error("Mother inventory accepted pattern but notification failed at {}", getPos(), failure);
+            }
+            wildcardMotherCircuits[motherSlot] = normalized;
+            wildcardMotherIdentities[motherSlot] = copy.copy();
+        } finally {
+            writingWildcardMother = false;
+        }
+        // Inventory owns the item from here on, even if dependent AE publication fails.
+        try {
+            markDirty();
+            onWildcardPatternInventoryChanged();
+        } catch (RuntimeException failure) {
+            GTDishanhaiMod.LOGGER.error("Mother pattern committed but rebuild failed at {} slot {}",
+                    getPos(), motherSlot, failure);
+        }
+        return true;
+    }
+
+    private void rememberMotherIdentities(boolean clearChanged) {
+        if (wildcardMotherIdentities == null || wildcardPatternInventory == null) return;
+        for (int i = 0; i < wildcardMotherCircuits.length; i++) {
+            ItemStack current = wildcardPatternInventory.getStackInSlot(i);
+            if (current.isEmpty() || clearChanged
+                    && !ItemStack.isSameItemSameTags(current, wildcardMotherIdentities[i])) {
+                wildcardMotherCircuits[i] = 0;
+            }
+            wildcardMotherIdentities[i] = current.copy();
+        }
+    }
+
     private void onWildcardPatternInventoryChanged() {
+        if (loadingWildcardMothers || writingWildcardMother) return;
+        rememberMotherIdentities(true);
         cloudScannedRevision = Long.MIN_VALUE;
         if (rebuildingWildcardPatterns || isRemote() || getLevel() == null) return;
+        markDirty();
         rebuildingWildcardPatterns = true;
-        refundWildcardSlots();
-        clearWildcardPatternData(true);
-        rebuildingWildcardPatterns = false;
+        try {
+            refundWildcardSlots();
+            clearWildcardPatternData(true);
+        } finally {
+            rebuildingWildcardPatterns = false;
+        }
         refreshWildcardPatterns(false);
+    }
+
+    @Override
+    public ItemStack getCircuitForRecipe(int slot) {
+        int local = wildcardLocalIndex(slot);
+        if (local >= 0 && local < wildcardPatternStacks.size()) {
+            ItemStack pattern = wildcardPatternStacks.get(local);
+            int circuit = pattern.hasTag() ? normalizeMotherCircuit(pattern.getTag().getInt(EXPANDED_CIRCUIT_TAG)) : 0;
+            if (circuit != 0) return IntCircuitBehaviour.stack(circuit);
+        }
+        return super.getCircuitForRecipe(slot);
     }
 
     private static boolean acceptsWildcardMother(ItemStack stack) {
@@ -2776,7 +2926,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     @Nullable
     private IPatternDetails rememberWildcardPattern(Map<CompoundTag, ExpandedWildcardPattern> uniquePatterns,
-            IPatternDetails pattern, ItemStack patternStack, GTRecipe recipe, String assignedTypeId) {
+            IPatternDetails pattern, ItemStack patternStack, GTRecipe recipe, String assignedTypeId, int motherCircuit) {
         if (pattern == null || patternStack == null || patternStack.isEmpty()) return null;
         String storedRecipeId = PatternRecipeTypeHelper.readRecipeId(patternStack);
         if (recipe != null) {
@@ -2785,10 +2935,24 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 PatternRecipeTypeHelper.writeRecipeId(patternStack, storedRecipeId);
             }
         }
+        if (motherCircuit != 0) {
+            patternStack = patternStack.copy();
+            patternStack.getOrCreateTag().putInt(EXPANDED_CIRCUIT_TAG, motherCircuit);
+            // Stamp before output-multiplier wrapping: decoding a scaled view afterwards would
+            // discard outputs that are represented by the wrapper instead of its item definition.
+            pattern = PatternDetailsHelper.decodePattern(patternStack, getLevel());
+            if (pattern == null || !AEItemKey.of(patternStack).equals(pattern.getDefinition())) {
+                throw new IllegalStateException("Explicit mother circuit identity was not preserved by decoder");
+            }
+        }
         IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(pattern, patternStack);
         if (effectivePattern == null) return null;
         ItemStack effectiveStack = effectivePattern.getDefinition().toStack();
         if (effectiveStack.isEmpty()) return null;
+        if (motherCircuit != 0 && (!effectiveStack.hasTag()
+                || effectiveStack.getTag().getInt(EXPANDED_CIRCUIT_TAG) != motherCircuit)) {
+            throw new IllegalStateException("Output multiplier discarded mother circuit identity");
+        }
         if (recipe != null) {
             PatternRecipeTypeHelper.writeRecipeType(effectiveStack, recipe);
             if (!storedRecipeId.isEmpty()) {
@@ -2803,6 +2967,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private void refreshWildcardPatterns(boolean restorePersistedData) {
         if (isRemote() || getLevel() == null) return;
         rebuildingWildcardPatterns = true;
+        try {
         clearWildcardPatternData(false);
 
         Map<CompoundTag, ExpandedWildcardPattern> uniquePatterns = new LinkedHashMap<>();
@@ -2818,7 +2983,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                         continue;
                     }
                     addWildcardPreview(motherSlot, rememberWildcardPattern(uniquePatterns,
-                            expanded.pattern(), expanded.stack(), recipe, assignedTypeId));
+                            expanded.pattern(), expanded.stack(), recipe, assignedTypeId, gtShanhai$getWildcardMotherCircuit(motherSlot)));
                 }
                 continue;
             }
@@ -2828,7 +2993,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 GTRecipe recipe = WildcardPatternRecipeTypeBinding.findRecipe(pattern, assignedTypeId);
                 if (!assignedTypeId.isEmpty() && recipe == null) continue;
                 addWildcardPreview(motherSlot, rememberWildcardPattern(uniquePatterns,
-                        pattern, patternStack, recipe, assignedTypeId));
+                        pattern, patternStack, recipe, assignedTypeId, gtShanhai$getWildcardMotherCircuit(motherSlot)));
             }
         }
 
@@ -2856,9 +3021,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 wildcardRecipeCache.put(wildcardGlobalSlots.get(restored.getIntKey()).intValue(), restored.getValue());
             }
         }
-        rebuildingWildcardPatterns = false;
+        // Restoring InternalSlot NBT can reset its cache, so apply explicit configuration last.
+        for (int i = 0; i < wildcardPatternStacks.size(); i++) {
+            ItemStack stack = wildcardPatternStacks.get(i);
+            int circuit = stack.hasTag() ? normalizeMotherCircuit(stack.getTag().getInt(EXPANDED_CIRCUIT_TAG)) : 0;
+            if (circuit != 0) wildcardInternalSlots.get(i).getCacheManager().setCircuitCache(circuit);
+        }
         RecipeTypePatternSearchHelper.clearPatternState(this);
         needPatternSync = true;
+        } finally {
+            rebuildingWildcardPatterns = false;
+        }
     }
 
     private void refreshWildcardRecipeTypes() {

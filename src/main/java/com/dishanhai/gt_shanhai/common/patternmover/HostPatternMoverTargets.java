@@ -181,12 +181,14 @@ public final class HostPatternMoverTargets {
                 ? container.getTerminalPatternInventory().size() - normalSlotsOf(container) : -1;
     }
 
-    /**
-     * Master has no rewrite-style per-mother circuit API. Pattern ItemStack NBT is copied,
-     * but separate machine circuit configuration is neither read nor changed.
-     */
+    /** Read only the new explicit mother override, never a runtime/shared cache value. */
     public static HostPatternMoverCircuit.Source circuitSourceOf(PatternContainer container) {
-        // No equivalent public per-mother circuit state exists in master.
+        if (container instanceof RecipeTypePatternBufferPartMachine stellar) {
+            return HostPatternMoverCircuit.Source.mothers(HostPatternMoverCircuit.KIND_STELLAR,
+                normalSlotsOf(container), wildcardSlotsOf(container),
+                stellar::gtShanhai$getWildcardMotherCircuit,
+                stellar::gtShanhai$setWildcardMotherCircuit);
+        }
         return HostPatternMoverCircuit.Source.NONE;
     }
 
@@ -489,7 +491,6 @@ public final class HostPatternMoverTargets {
          * （没有电路 API 的总成 = {@link HostPatternMoverCircuit.Source#NONE}）。
          */
         private final HostPatternMoverCircuit.Source circuitSource;
-        private final String[] slotKeys;
         private final int size;
 
         InventoryTarget(HostPatternMoverReader.Assembly assembly) {
@@ -522,10 +523,6 @@ public final class HostPatternMoverTargets {
             this.wildcardSlots = wildcardSlotsOf(assembly.container());
             this.wildcardOnly = false;
             this.circuitSource = circuitSourceOf(assembly.container());
-            this.slotKeys = new String[this.size];
-            for (int i = 0; i < this.size; i++) {
-                this.slotKeys[i] = keyOfSlot(this.inventory, i);
-            }
         }
 
         public String moduleId() {
@@ -576,7 +573,9 @@ public final class HostPatternMoverTargets {
 
         @Override
         public String keyAt(int slot) {
-            return slot < 0 || slot >= this.size ? null : this.slotKeys[slot];
+            // Do not trust the plan-time snapshot: callbacks can replace a later slot.
+            return slot < 0 || slot >= this.size ? null : HostPatternMoverEntry.keyWithCircuit(
+                keyOfSlot(this.inventory, slot), this.circuitSource.circuitAt(slot));
         }
 
         @Override
@@ -661,6 +660,14 @@ public final class HostPatternMoverTargets {
          */
         @Override
         public void write(int slot, HostPatternMoverPlacer.Unit unit) {
+            if (!writeWithCircuit(slot, unit)) throw new IllegalStateException("电路不可安全写入；原条目保留");
+        }
+
+        @Override
+        public boolean writeWithCircuit(int slot, HostPatternMoverPlacer.Unit unit) {
+            final int override = HostPatternMoverCircuit.normalize(unit.circuit());
+            final int mother = this.circuitSource.indexAt(slot);
+            if (override != 0 && (mother < 0 || !(this.container instanceof RecipeTypePatternBufferPartMachine))) return false;
             if (!(unit instanceof Unit u) || u.stack().isEmpty()) {
                 throw new IllegalArgumentException("不是本 mod 的样板块 / 物品造不出来");
             }
@@ -706,7 +713,12 @@ public final class HostPatternMoverTargets {
                             Integer.valueOf(slot), stamp, Boolean.valueOf(wildcard), t.toString());
                 }
             }
+            if (mother >= 0 && this.container instanceof RecipeTypePatternBufferPartMachine stellar) {
+                // Zero explicitly clears a previous override when replacing a legacy/default variant.
+                return stellar.gtShanhai$setWildcardMotherPattern(mother, stack, override);
+            }
             this.inventory.setItemDirect(slot, stack);
+            return true;
         }
 
         /**

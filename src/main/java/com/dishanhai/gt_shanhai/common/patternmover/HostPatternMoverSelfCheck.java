@@ -701,20 +701,13 @@ public final class HostPatternMoverSelfCheck {
     }
 
     /**
-     * 第六刀 ＋ 第七刀：一台<b>有电路 API</b> 的假总成（{@code wildcardMotherAt} / {@code applyCircuit}）。
-     *
-     * <p>🔴 第七刀起它<b>不再是</b>"自己写一遍区间判断"：两个方法都转交给一台真的
-     * {@link HostPatternMoverCircuit.Source}（星律 = {@code mothers(...)}，超级通配符 = {@code selfIndexed(...)}）
-     * ⇒ 离线打的就是<b>生产那句</b>代码（索引算法只有一份），只是把"机器收到了什么"换成记账：
-     * <pre>
-     *   wildcardMotherAt(slot) → source.indexAt(slot)                    （纯算术）
-     *   applyCircuit(slot, c)  → source.applyAt(slot, c) → writer.set(i,c)（writer 记 appliedIndex/appliedCircuit）
-     * </pre>
-     * {@code throwOnCircuit} = 机器侧 API 炸了（用来验「样板不回滚 ＋ WARN 只一行」）。
+     * 原子搬运测试目标：先验证电路写入可成功，再一次提交样板与通知。
+     * Source 只负责槽号到电路索引的生产判据；拒绝或异常时不写样板。
+     * 旧 applyCircuit 路径显式抛错，防止回退到先写样板、后写电路。
      */
     static class FakeCircuitTarget extends FakeTarget {
 
-        /** 纯核调了几次 {@code applyCircuit}（= "它认为该写"的次数）。 */
+        /** 原子写入尝试了几次电路提交。 */
         int circuitCalls;
         /** 机器侧真的收到几次写入（由 writer 记账；与上一条分开是为了证明"该写≠真写"）。 */
         int writerCalls;
@@ -743,10 +736,10 @@ public final class HostPatternMoverSelfCheck {
         private HostPatternMoverCircuit.SlotCircuit recorder() {
             return (index, circuit) -> {
                 this.writerCalls++;
+                if (this.rejectCircuitWrites) return false;
                 this.appliedIndex = index;
                 this.appliedCircuit = circuit;
-                // 假机器默认"接受"；{@code rejectCircuitWrites} 模拟实机那种"值没变 ⇒ 回 false"
-                return !this.rejectCircuitWrites;
+                return true;
             };
         }
 
@@ -781,13 +774,23 @@ public final class HostPatternMoverSelfCheck {
         }
 
         @Override
-        public void applyCircuit(int slot, int circuit) {
-            if (this.throwOnCircuit) {
-                throw new IllegalStateException("假机器：写电路失败");
+        public boolean writeWithCircuit(int slot, HostPatternMoverPlacer.Unit unit) {
+            final int circuit = HostPatternMoverCircuit.normalize(unit.circuit());
+            if (circuit != HostPatternMoverCircuit.NONE) {
+                if (!this.source.writableAt(slot)) return false;
+                if (this.throwOnCircuit) throw new IllegalStateException("假机器：原子写入失败");
+                this.circuitCalls++;
+                if (!this.source.applyAt(slot, circuit)) return false;
             }
-            this.circuitCalls++;
-            this.source.applyAt(slot, circuit);
+            super.write(slot, unit);
+            return true;
         }
+
+        @Override
+        public void applyCircuit(int slot, int circuit) {
+            throw new AssertionError("禁止样板写入后再单独写电路");
+        }
+
     }
 
     // ================================================================ 9 · 分配（3 模块 / 6 样板）
@@ -1996,6 +1999,19 @@ public final class HostPatternMoverSelfCheck {
                 "atMother=" + atMother + " circuit=" + on.circuit() + " 往返=" + onBack.circuit()
                         + " 键=" + on.entryTag().getInt(HostPatternMoverEntry.K_CIRCUIT)));
 
+        final CompoundTag identityPattern = recipeIdPattern("gtceu:assembler/circuit_identity");
+        final HostPatternMoverEntry zeroIdentity = HostPatternMoverEntry.of(identityPattern, "gtceu:assembler");
+        final HostPatternMoverEntry fiveIdentity = HostPatternMoverEntry.of(identityPattern, "gtceu:assembler", 5);
+        final HostPatternMoverEntry sevenIdentity = HostPatternMoverEntry.of(identityPattern, "gtceu:assembler", 7);
+        cases.add(new Case("C31ID 同配方不同电路保留不同键，0沿用旧键",
+                zeroIdentity.dedupKey().equals("recipe:gtceu:assembler/circuit_identity")
+                        && fiveIdentity.dedupKey().equals(zeroIdentity.dedupKey() + "|circuit=5")
+                        && sevenIdentity.dedupKey().equals(zeroIdentity.dedupKey() + "|circuit=7")
+                        && !fiveIdentity.dedupKey().equals(sevenIdentity.dedupKey())
+                        && HostPatternMoverEntry.fromTag(fiveIdentity.entryTag()).dedupKey().equals(fiveIdentity.dedupKey()),
+                "旧键 / 旧键|circuit=5 / 旧键|circuit=7，往返不丢配置",
+                zeroIdentity.dedupKey() + " / " + fiveIdentity.dedupKey() + " / " + sevenIdentity.dedupKey()));
+
         // ── 普通槽：一个 0 都不记，条目里【没有】那个键（= 老数据的形状，一个字节都不多）
         final int atNormal = src.circuitAt(3);
         final HostPatternMoverEntry off = HostPatternMoverEntry.of(
@@ -2105,10 +2121,10 @@ public final class HostPatternMoverSelfCheck {
         final HostPatternMoverPlacer.Result rn = HostPatternMoverPlacer.apply(
                 HostPatternMoverPlacer.plan(normalUnits, List.of(starNormal)), normalUnits,
                 List.of(starNormal));
-        cases.add(new Case("C32d 星律总成上的【普通槽】⇒ 不写电路，计 circuitSkipped=1",
+        cases.add(new Case("C32d 无电路 API 的普通槽 ⇒ 整条保留，不写样板",
                 starNormal.circuitCalls == 0 && rn.circuitSkipped() == 1 && rn.circuits() == 0
-                        && rn.placed() == 1,
-                "calls=0 skipped=1 circuits=0 placed=1",
+                        && rn.placed() == 0 && rn.unplacedIndices().equals(List.of(0)) && starNormal.nonEmpty() == 0,
+                "calls=0 skipped=1 circuits=0 placed=0 retained=[0]",
                 "calls=" + starNormal.circuitCalls + " skipped=" + rn.circuitSkipped()
                         + " circuits=" + rn.circuits() + " placed=" + rn.placed()));
 
@@ -2119,7 +2135,7 @@ public final class HostPatternMoverSelfCheck {
     }
 
     /**
-     * 第六刀 ③：目标<b>不是</b>星律母槽 ⇒ 忽略 + {@code circuitSkipped} 计数（样板照放）。
+     * 目标没有匹配的电路 API ⇒ 跳过整条，保留原物品内的样板与电路配置。
      *
      * <p>自证 3（任务书）：目标不是星律 ⇒ {@code circuitSkipped} 计数 +1。
      * 这里用的是<b>没有</b> {@code wildcardMotherAt} / {@code applyCircuit} 覆写的
@@ -2136,16 +2152,16 @@ public final class HostPatternMoverSelfCheck {
                 "skipped=1 circuits=0 failed=0",
                 "skipped=" + r.circuitSkipped() + " circuits=" + r.circuits()
                         + " failed=" + r.circuitFailed()));
-        cases.add(new Case("C33b 电路被跳过不影响样板：placed=1 且槽 0 有样板",
-                r.placed() == 1 && "recipe:x1".equals(plainTarget.slots[0]),
-                "placed=1 槽0=recipe:x1", "placed=" + r.placed() + " 槽0=" + plainTarget.slots[0]));
+        cases.add(new Case("C33b 目标不支持电路 ⇒ 整条保留且目标不变",
+                r.placed() == 0 && plainTarget.slots[0] == null && r.unplacedIndices().equals(List.of(0)),
+                "placed=0 槽0=null retained=[0]", "placed=" + r.placed() + " 槽0=" + plainTarget.slots[0]));
         cases.add(new Case("C33c 一次 applyCircuit 都没调（默认实现是抛，真调了会变成 failed）",
                 r.circuitFailed() == 0, "failed=0（说明没调）", "failed=" + r.circuitFailed()));
         notes.add("C33 第六刀非星律目标：" + r.describe());
     }
 
     /**
-     * 第六刀 ④：写电路<b>失败不许回滚样板</b>，且同一批的 WARN <b>只打一行</b>。
+     * 原子写入失败时，目标不变且整条样板与电路配置留在搬运工具中。
      */
     private static void c34CircuitFailure(List<Case> cases, List<String> notes) {
         final FakeCircuitTarget broken = new FakeCircuitTarget("星律样板总成X", 1130, "gtceu:assembler")
@@ -2180,13 +2196,13 @@ public final class HostPatternMoverSelfCheck {
         cases.add(new Case("C34a 写电路失败 ⇒ circuitFailed=3、circuits=0",
                 r.circuitFailed() == 3 && r.circuits() == 0,
                 "failed=3 circuits=0", "failed=" + r.circuitFailed() + " circuits=" + r.circuits()));
-        cases.add(new Case("C34b 样板【不回滚】：三块都在槽里、placed=3",
-                r.placed() == 3 && broken.nonEmpty() == 3,
-                "placed=3 槽里 3 块", "placed=" + r.placed() + " 槽里 " + broken.nonEmpty() + " 块"));
-        cases.add(new Case("C34c 同一批 WARN 只打 1 行（3 次失败也只报 1 行）", warns[0] == 1,
-                "warn=1", "warn=" + warns[0]));
+        cases.add(new Case("C34b 原子写失败：三条都保留、目标不变",
+                r.placed() == 0 && broken.nonEmpty() == 0 && r.unplacedIndices().equals(List.of(0, 1, 2)),
+                "placed=0 槽里0块 retained=[0,1,2]", "placed=" + r.placed() + " 槽里 " + broken.nonEmpty() + " 块"));
+        cases.add(new Case("C34c 每次失败都计入未放置", r.skippedNoSlot() == 3,
+                "noSlot=3", "noSlot=" + r.skippedNoSlot()));
         notes.add("C34 第六刀写电路失败：" + r.describe() + " ｜ WARN 行数=" + warns[0]
-                + "（回滚负对照：placed 仍是 3）");
+                + "（原子失败：placed=0，条目保留）");
     }
 
     /**
@@ -2330,120 +2346,52 @@ public final class HostPatternMoverSelfCheck {
 
     // ================================================================ 第六刀 ② · 同配方合并时的电路
 
-    /**
-     * <b>用户 2026-11-06 拍板</b>：「同一条记录被合并两次时，{@code circuit} <b>取非 0 的那一个</b>」。
-     *
-     * <h2>为什么（真实丢数据风险）</h2>
-     * <pre>
-     *   第 1 次读：星律母槽上有这块样板，电路 = 5
-     *   第 2 次读：同一配方又出现在普通槽 / 另一台机器，那里没设电路 ⇒ 0
-     *   「新的覆盖旧的」⇒ 合并后 0 ⇒ 放置时一个电路都写不回去（用户报的"没复制黏贴"复发）
-     * </pre>
-     * 判据打在纯核 {@link HostPatternMoverCircuit#mergeForDedup} ＋ 生产 codec
-     * {@link HostPatternMoverCodec#merge}（走的就是读取时真正用的那条
-     * {@link HostPatternMoverData#add} 路径）。
-     *
-     * <table border="1">
-     *   <tr><th>#</th><th>现场（同 recipe id）</th><th>判据</th></tr>
-     *   <tr><td>a</td><td>先 5，后 0</td><td>合并后 <b>5</b>（aNEG：旧行为会得 0 ⇒ 必红）</td></tr>
-     *   <tr><td>b</td><td>先 0，后 5</td><td>5（对称性）</td></tr>
-     *   <tr><td>c</td><td>先 5，后 7（两边不同非 0）</td><td>保留后读到的 <b>7</b> ＋ 一行 {@code circuit_conflict}</td></tr>
-     *   <tr><td>d</td><td>同 key 连合并三次（5→7→9）</td><td>9，且 conflict <b>只 1 行</b>（不刷屏）</td></tr>
-     *   <tr><td>e</td><td>5 与 5 / 0 与 0</td><td>5 / 0，且<b>不</b>打 conflict</td></tr>
-     *   <tr><td>f</td><td>后读到的那条 type 不同</td><td>type 仍按"新的覆盖旧的"，电路仍是合并值</td></tr>
-     * </table>
-     */
+    /** 配方相同但电路不同必须共存；只有完整身份相同才按新值替换。 */
     private static void c37CircuitMerge(List<Case> cases, List<String> notes) {
         final String rid = "gtceu:assembler/c37";
         final String type = "gtceu:assembler";
-
-        // ── a：先 5，后 0（这就是丢电路的那个现场）
         final HostPatternMoverData<HostPatternMoverEntry> a = newMoverData();
         a.add(entryC(rid, type, 5));
         a.add(entryC(rid, type, 0));
-        final int aCircuit = a.size() == 1 ? a.entries().get(0).circuit() : -1;
-        cases.add(new Case("C37a ★先 5 后 0（同配方）⇒ 合并后仍是 5（不许被 0 覆盖）",
-                aCircuit == 5 && a.size() == 1, "circuit=5 size=1",
-                "circuit=" + aCircuit + " size=" + a.size()));
-        // 负对照：旧行为（后读覆盖）合并结果就是 0 ⇒ 上面那条必然红
-        final int oldBehavior = entryC(rid, type, 0).circuit();
-        cases.add(new Case("C37aNEG 旧行为（后读覆盖）会得 0 ⇒ C37a 必须红",
-                oldBehavior == 0 && oldBehavior != aCircuit,
-                "旧行为=0 ／ 现在=5", "旧行为=" + oldBehavior + " 现在=" + aCircuit));
-
-        // ── b：先 0，后 5（对称性：两种顺序都必须保住 5）
+        cases.add(new Case("C37a 5后0保留两种配置", a.size() == 2
+                && a.entries().get(0).circuit() == 5 && a.entries().get(1).circuit() == 0,
+                "[5,0]", a.entries().toString()));
         final HostPatternMoverData<HostPatternMoverEntry> b = newMoverData();
         b.add(entryC(rid, type, 0));
         b.add(entryC(rid, type, 5));
-        final int bCircuit = b.size() == 1 ? b.entries().get(0).circuit() : -1;
-        cases.add(new Case("C37b ★先 0 后 5（同配方）⇒ 合并后 5", bCircuit == 5 && b.size() == 1,
-                "circuit=5 size=1", "circuit=" + bCircuit + " size=" + b.size()));
-
-        // ── c：两边不同非 0 ⇒ 保留后读到的 ＋ 一行 circuit_conflict
-        final CountingSink cSink = new CountingSink();
-        final HostPatternMoverLog.Sink cPrev = HostPatternMoverLog.swap(cSink);
+        cases.add(new Case("C37b 0后5保留两种配置", b.size() == 2
+                && b.entries().get(0).circuit() == 0 && b.entries().get(1).circuit() == 5,
+                "[0,5]", b.entries().toString()));
+        final CountingSink sink = new CountingSink();
+        final HostPatternMoverLog.Sink prev = HostPatternMoverLog.swap(sink);
         final HostPatternMoverData<HostPatternMoverEntry> c = newMoverData();
         try {
             c.add(entryC(rid, type, 5));
             c.add(entryC(rid, type, 7));
+            c.add(entryC(rid, type, 9));
         } finally {
-            HostPatternMoverLog.swap(cPrev);
+            HostPatternMoverLog.swap(prev);
         }
-        final int cCircuit = c.size() == 1 ? c.entries().get(0).circuit() : -1;
-        cases.add(new Case("C37c 先 5 后 7（不同非 0）⇒ 保留后读到的 7 ＋ 一行 circuit_conflict",
-                cCircuit == 7 && cSink.conflicts == 1, "circuit=7 conflict=1",
-                "circuit=" + cCircuit + " conflict=" + cSink.conflicts));
-
-        // ── d：同一 key 连合并三次 ⇒ conflict 只 1 行（不刷屏），电路取最后一次的非 0
-        final CountingSink dSink = new CountingSink();
-        final HostPatternMoverLog.Sink dPrev = HostPatternMoverLog.swap(dSink);
-        final HostPatternMoverData<HostPatternMoverEntry> d = newMoverData();
-        try {
-            d.add(entryC(rid, type, 5));
-            d.add(entryC(rid, type, 7));
-            d.add(entryC(rid, type, 9));
-        } finally {
-            HostPatternMoverLog.swap(dPrev);
-        }
-        final int dCircuit = d.size() == 1 ? d.entries().get(0).circuit() : -1;
-        cases.add(new Case("C37d 同 key 连合并三次（5→7→9）⇒ 9，conflict 仍只 1 行（不刷屏）",
-                dCircuit == 9 && dSink.conflicts == 1, "circuit=9 conflict=1",
-                "circuit=" + dCircuit + " conflict=" + dSink.conflicts));
-
-        // ── e：同值合并 / 两边都 0 ⇒ 不许打 conflict
-        final CountingSink eSink = new CountingSink();
-        final HostPatternMoverLog.Sink ePrev = HostPatternMoverLog.swap(eSink);
-        final HostPatternMoverData<HostPatternMoverEntry> e5 = newMoverData();
-        final HostPatternMoverData<HostPatternMoverEntry> e0 = newMoverData();
-        try {
-            e5.add(entryC(rid, type, 5));
-            e5.add(entryC(rid, type, 5));
-            e0.add(entryC(rid, type, 0));
-            e0.add(entryC(rid, type, 0));
-        } finally {
-            HostPatternMoverLog.swap(ePrev);
-        }
-        cases.add(new Case("C37e 同值合并（5 与 5）与两边都 0 ⇒ 不打 circuit_conflict",
-                eSink.conflicts == 0 && e5.entries().get(0).circuit() == 5
-                        && e0.entries().get(0).circuit() == 0,
-                "conflict=0 / 5 / 0",
-                "conflict=" + eSink.conflicts + " / " + e5.entries().get(0).circuit()
-                        + " / " + e0.entries().get(0).circuit()));
-
-        // ── f：其余字段仍按"新的覆盖旧的"（后读到的那条 type 变了要跟着变），只有电路取合并值
+        cases.add(new Case("C37c 非0不同配置共存，不产生合并冲突", c.size() == 3
+                && c.entries().stream().map(HostPatternMoverEntry::circuit).toList().equals(List.of(5, 7, 9))
+                && sink.conflicts == 0, "[5,7,9], conflict=0", c.entries() + " conflict=" + sink.conflicts));
+        c.add(entryC(rid, "gtceu:centrifuge", 7));
+        cases.add(new Case("C37d 同配置只替换自己的条目", c.size() == 3
+                && c.entries().get(0).circuit() == 5 && c.entries().get(2).circuit() == 9
+                && "gtceu:centrifuge".equals(c.entries().get(1).type()),
+                "三条，只有7的type更新", c.entries().toString()));
+        final HostPatternMoverData<HostPatternMoverEntry> e = newMoverData();
+        e.add(entryC(rid, type, 0));
+        e.add(entryC(rid, type, 0));
+        cases.add(new Case("C37e 0仍按旧键去重", e.size() == 1 && e.entries().get(0).circuit() == 0,
+                "size=1,circuit=0", e.entries().toString()));
         final HostPatternMoverData<HostPatternMoverEntry> f = newMoverData();
         f.add(entryC(rid, "gtceu:centrifuge", 5));
-        f.add(entryC(rid, "gtceu:assembler", 0));
-        final HostPatternMoverEntry fEntry = f.entries().get(0);
-        cases.add(new Case("C37f 其余字段新的覆盖旧的：type=gtceu:assembler（新）＋ circuit=5（合并）",
-                "gtceu:assembler".equals(fEntry.type()) && fEntry.circuit() == 5,
-                "type=gtceu:assembler circuit=5",
-                "type=" + fEntry.type() + " circuit=" + fEntry.circuit()));
-
-        notes.add("C37 同配方合并电路：5→0 = " + aCircuit + " ／ 0→5 = " + bCircuit
-                + " ／ 5→7 = " + cCircuit + "（conflict " + cSink.conflicts + " 行）"
-                + " ／ 5→7→9 = " + dCircuit + "（conflict " + dSink.conflicts + " 行）"
-                + " ／ 5→5 与 0→0 conflict=" + eSink.conflicts);
+        f.add(entryC(rid, type, 0));
+        cases.add(new Case("C37f 跨配置不互相覆盖type", f.size() == 2
+                && "gtceu:centrifuge".equals(f.entries().get(0).type())
+                && type.equals(f.entries().get(1).type()), "两条保留各自type", f.entries().toString()));
+        notes.add("C37 身份包含非0电路：0/5/7/9互不覆盖，同电路才合并。");
     }
 
     // ================================================================ 第七刀 · 超级通配符总成的电路
@@ -2590,8 +2538,7 @@ public final class HostPatternMoverSelfCheck {
                         + " 索引=" + none.indexAt(0) + " 读=" + none.circuitAt(0)
                         + " kind=" + none.kind()));
 
-        // ── ⑨ 机器"拒绝"（= 超级通配符回 false：值没变 / 该格没通配符样板）：样板照放、不算失败，
-        //    只是日志走 circuit_rejected 那个用词 ⇒ 口径写清楚：circuits= 是"调了没抛"，不是"机器改了"
+        // ── ⑨ 机器拒绝原子写：样板、电路都不提交，工具保留整条。
         final FakeCircuitTarget superReject =
                 new FakeCircuitTarget("超级通配符总成R", slots, "gtceu:assembler")
                         .superSource(slots, circuitOn(3, 7));
@@ -2602,14 +2549,13 @@ public final class HostPatternMoverSelfCheck {
         final HostPatternMoverPlacer.Result rr = HostPatternMoverPlacer.apply(
                 HostPatternMoverPlacer.plan(rejectUnits, List.of(superReject)), rejectUnits,
                 List.of(superReject));
-        cases.add(new Case("C41j 机器拒绝（回 false）⇒ 样板照放、circuitFailed=0、不计 skipped",
-                rr.placed() == 1 && "recipe:rj".equals(superReject.slots[1])
-                        && rr.circuitFailed() == 0 && rr.circuitSkipped() == 0
-                        && superReject.writerCalls == 1 && rr.circuits() == 1,
-                "placed=1 槽1=recipe:rj failed=0 skipped=0 writer=1 circuits=1（调了没抛）",
-                "placed=" + rr.placed() + " 槽1=" + superReject.slots[1]
-                        + " failed=" + rr.circuitFailed() + " skipped=" + rr.circuitSkipped()
-                        + " writer=" + superReject.writerCalls + " circuits=" + rr.circuits()));
+        cases.add(new Case("C41j 机器拒绝原子写 ⇒ 保留条目，目标不变",
+                rr.placed() == 0 && superReject.slots[1] == null
+                        && rr.circuitFailed() == 0 && rr.circuitSkipped() == 1
+                        && rr.unplacedIndices().equals(List.of(0))
+                        && superReject.writerCalls == 1 && rr.circuits() == 0,
+                "placed=0 槽1=null skipped=1 retained=[0] circuits=0",
+                rr.describe() + " 槽1=" + superReject.slots[1]));
 
         // ── ⑩ 读取汇总那一行的来源片段（用户这次"读侧一个都没抓到"要靠它判）
         final Map<String, Integer> kinds = new LinkedHashMap<>();

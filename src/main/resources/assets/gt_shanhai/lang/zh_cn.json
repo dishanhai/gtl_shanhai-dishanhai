@@ -1834,13 +1834,19 @@
   "shanhai.mover.place_host_gone": "目标主机不在了（被拆掉 / 换了维度）",
   "shanhai.mover.place_done": "已放置 %s 块（覆盖 %s / 新填 %s）；放不下：未识别类型 %s / 无对应模块或当前类型不符 %s / 无空槽 %s；剩余 %s / %s 字节",
   "shanhai.mover.place_store_failed": "写回物品失败（物品保持原样；机器上已写的那几块不回滚 —— 看日志 [SHANHAI-MOVER]）",
-  "shanhai.mover.place_circuit_lost": "通配符编程电路：%s 块因目标不是星律通配符母槽而没写回，%s 块写入失败（样板本身已放置，未回滚）",
+  "shanhai.mover.place_circuit_lost": "独立电路：%s 块目标不支持，%s 块写入失败；样板及配置均保留在搬运工具中",
   "shanhai.mover.take_done": "已取出 %s 块（背包 %s 块，掉落 %s 块）；留在物品里 %s 块，剩余 %s 字节",
   "shanhai.mover.take_blocked": "物品里这份数据已经超限，先别动它（一个字节都没改）",
   "shanhai.mover.read_wildcard": "通配符样板自动识别：写入 %s 块 · 多义未写 %s 块 · 识别不到 %s 块",
   "shanhai.mover.clear_item_done": "已清空物品里的 %s 块样板（剩余 %s / %s 字节）",
   "shanhai.mover.clear_item_none": "物品里本来就没有样板",
   "shanhai.mover.clear_host_done": "已清空主机上的 %s 块样板",
-  "shanhai.mover.clear_host_partial": "已清空 %s 块，另有 %s 格没清掉（看日志 [SHANHAI-MOVER]）"
+  "shanhai.mover.clear_host_partial": "已清空 %s 块，另有 %s 格没清掉（看日志 [SHANHAI-MOVER]）",
+  "shanhai.mover.take_circuit_kept": "带独立电路的样板已保留在工具中，请直接放置到支持的母槽，避免取出时丢失配置。",
+  "gui.gt_shanhai.mother_circuit.value": "槽 %s 电路：%s",
+  "gui.gt_shanhai.mother_circuit.default": "默认",
+  "gui.gt_shanhai.mother_circuit.denied": "无法修改：请在本机附近打开配置页并确认交互权限。",
+  "gui.gt_shanhai.mother_circuit.busy": "母样板正在恢复或重建，请稍后再试。",
+  "gui.gt_shanhai.mother_circuit.hint": "为所选母槽设置 1–32；0 恢复默认，不独立覆盖电路。"
 }
 

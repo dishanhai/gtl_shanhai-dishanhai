@@ -140,6 +140,13 @@ public final class HostPatternMoverPlacer {
          */
         void write(int slot, Unit unit);
 
+        /** Commit pattern and circuit together. False/throw MUST mean no committed write. */
+        default boolean writeWithCircuit(int slot, Unit unit) {
+            if (HostPatternMoverCircuit.normalize(unit.circuit()) != HostPatternMoverCircuit.NONE) return false;
+            write(slot, unit);
+            return true;
+        }
+
         /**
          * 🔴 第六刀：这一格的<b>电路索引</b>（星律 = 母槽号 {@code 0..49}；
          * 超级通配符 = 它自己的槽号 {@code 0..9}；第七刀）。
@@ -410,7 +417,7 @@ public final class HostPatternMoverPlacer {
         int circuitSkipped = 0;
         int circuitFailed = 0;
         // 🔴 第六刀：写电路的 WARN 同一批最多 1 行（否则 1168 格全失败时日志会被刷爆）
-        boolean circuitWarned = false;
+
         final List<Integer> unplaced = new ArrayList<>();
         final List<Write> written = new ArrayList<>();
 
@@ -446,11 +453,17 @@ public final class HostPatternMoverPlacer {
                 continue;
             }
             try {
-                tg.write(slot, u);
+                if (!tg.writeWithCircuit(slot, u)) {
+                    noSlot++;
+                    if (HostPatternMoverCircuit.normalize(u.circuit()) != 0) circuitSkipped++;
+                    unplaced.add(i);
+                    continue;
+                }
             } catch (Throwable t) {
                 HostPatternMoverLog.warn("{} 写入失败（跳过这一块）target={} slot={} err={}",
                         HostPatternMoverLog.PREFIX, tg.label(), slot, t.toString());
                 noSlot++;
+                if (HostPatternMoverCircuit.normalize(u.circuit()) != 0) circuitFailed++;
                 unplaced.add(i);
                 continue;
             }
@@ -461,31 +474,8 @@ public final class HostPatternMoverPlacer {
                 added++;
             }
 
-            // ── 🔴 第六刀 C：**样板已经放成功之后**才写电路。
-            //    顺序是刻意的：槽校验/类型分配/真写入全部走完，这里才碰机器的另一份状态。
-            //    写电路失败→只记一行 WARN，**绝不回滚样板**（样板已经在槽里了，回滚等于把它弄丢）。
-            //    circuit == 0（源那边没设置）⇒ 一次都不调：0 是"不设置"，不是"清除目标"。
-            final int circuit = HostPatternMoverCircuit.normalize(u.circuit());
-            if (circuit != HostPatternMoverCircuit.NONE) {
-                final int circuitIndex = tg.wildcardMotherAt(slot);
-                if (circuitIndex < 0) {
-                    circuitSkipped++; // 目标那一格没有电路 API / 不在它的电路区 ⇒ 忽略（汇总里看得见）
-                } else {
-                    try {
-                        tg.applyCircuit(slot, circuit);
-                        circuits++;
-                    } catch (Throwable t) {
-                        circuitFailed++;
-                        if (!circuitWarned) {
-                            circuitWarned = true;
-                            HostPatternMoverLog.warn("{} 写通配符电路失败（样板不回滚，继续放置；"
-                                            + "本批只报这一行）target={} slot={} circuit={} err={}",
-                                    HostPatternMoverLog.PREFIX, tg.label(), Integer.valueOf(slot),
-                                    Integer.valueOf(circuit), t.toString());
-                        }
-                    }
-                }
-            }
+            if (HostPatternMoverCircuit.normalize(u.circuit()) != 0) circuits++;
+
         }
         return new Result(added + replaced, added, replaced,
                 plan.count(Decision.SKIP_UNKNOWN_TYPE), plan.count(Decision.SKIP_NO_MODULE), noSlot,

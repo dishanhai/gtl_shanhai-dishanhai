@@ -140,6 +140,12 @@ public final class HostPatternMoverActions {
             player.displayClientMessage(Component.translatable("shanhai.mover.place_empty_item"), false);
             return false;
         }
+        // Validate the original envelope before committing any destination write.
+        // Every possible remainder is a subset; oversized legacy/corrupt tools must not duplicate on save failure.
+        if (HostPatternMoverNbt.toTag(entries, fromHost, HostPatternMoverData.LIMIT_BYTES) == null) {
+            player.displayClientMessage(Component.translatable("shanhai.mover.place_store_failed"), false);
+            return false;
+        }
         final List<HostPatternMoverReader.Assembly> assemblies = HostPatternMoverTargets.collect(clicked);
         final HostPatternMoverTargets.Compiled compiled = HostPatternMoverTargets.compile(assemblies);
         final List<HostPatternMoverPlacer.Unit> units = HostPatternMoverTargets.units(entries);
@@ -216,6 +222,9 @@ public final class HostPatternMoverActions {
         final String fromHost = HostPatternMoverNbt.readFromHost(mover);
         final List<HostPatternMoverEntry> entries = HostPatternMoverNbt.readEntries(mover);
         final String target = norm(type);
+        if (entries.stream().anyMatch(e -> norm(e.type()).equals(target) && e.hasCircuit())) {
+            player.displayClientMessage(Component.translatable("shanhai.mover.take_circuit_kept"), false);
+        }
 
         // ① 乐观预检（见类注释）
         final List<HostPatternMoverEntry> optimistic = new ArrayList<>(entries.size());

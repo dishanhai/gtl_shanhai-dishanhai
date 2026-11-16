@@ -1842,13 +1842,19 @@
   "shanhai.mover.place_host_gone": "Target host is gone (removed / different dimension)",
   "shanhai.mover.place_done": "Placed %s (overwritten %s / new %s); not placed: unknown type %s / no module or not the current type %s / no slot %s; remaining %s / %s bytes",
   "shanhai.mover.place_store_failed": "Failed to write back to the item (item unchanged; slots already written are NOT rolled back - see [SHANHAI-MOVER] log)",
-  "shanhai.mover.place_circuit_lost": "Wildcard programming circuit: %s not written back (target is not a Stellar wildcard mother slot), %s failed (patterns were still placed, not rolled back)",
+  "shanhai.mover.place_circuit_lost": "Circuit override: %s unsupported targets, %s failed writes; patterns and settings remain in the mover.",
   "shanhai.mover.take_done": "Took out %s (inventory %s, dropped %s); %s still in the item, %s bytes remaining",
   "shanhai.mover.take_blocked": "The item's stored data is already over the limit - nothing was changed",
   "shanhai.mover.read_wildcard": "Wildcard pattern type detection: %s written / %s left untyped (ambiguous) / %s unidentified",
   "shanhai.mover.clear_item_done": "Cleared %s patterns from the item (%s / %s bytes remaining)",
   "shanhai.mover.clear_item_none": "The item holds no patterns",
   "shanhai.mover.clear_host_done": "Cleared %s patterns on the host",
-  "shanhai.mover.clear_host_partial": "Cleared %s, but %s slot(s) failed (see [SHANHAI-MOVER] log)"
+  "shanhai.mover.clear_host_partial": "Cleared %s, but %s slot(s) failed (see [SHANHAI-MOVER] log)",
+  "shanhai.mover.take_circuit_kept": "Patterns with circuit overrides remain in the mover. Place them directly into supported mother slots to preserve their settings.",
+  "gui.gt_shanhai.mother_circuit.value": "Slot %s: %s",
+  "gui.gt_shanhai.mother_circuit.default": "Default",
+  "gui.gt_shanhai.mother_circuit.denied": "Open this machine locally with interaction permission to change its circuit.",
+  "gui.gt_shanhai.mother_circuit.busy": "Mother pattern is restoring or rebuilding; try again shortly.",
+  "gui.gt_shanhai.mother_circuit.hint": "Set 1–32 for this mother slot; 0 restores default behaviour without a circuit override."
 }
 
