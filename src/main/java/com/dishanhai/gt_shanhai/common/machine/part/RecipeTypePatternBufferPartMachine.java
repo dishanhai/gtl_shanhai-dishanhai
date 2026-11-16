@@ -2831,11 +2831,13 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     /** Mother configuration, not runtime circuit: zero means preserve pre-feature behaviour. */
     public int gtShanhai$getWildcardMotherCircuit(int motherSlot) {
         return motherSlot >= 0 && motherSlot < wildcardMotherCircuits.length
+                && wildcardPatternInventory != null && motherSlot < wildcardPatternInventory.getSlots()
                 ? wildcardMotherCircuits[motherSlot] : 0;
     }
 
     public boolean gtShanhai$setWildcardMotherCircuit(int motherSlot, int value) {
-        if (motherSlot < 0 || motherSlot >= wildcardSlotCount || value < 0 || value > 32) return false;
+        if (motherSlot < 0 || motherSlot >= wildcardSlotCount || value < 0 || value > 32
+                || wildcardPatternInventory == null || motherSlot >= wildcardPatternInventory.getSlots()) return false;
         return gtShanhai$setWildcardMotherPattern(motherSlot,
                 wildcardPatternInventory.getStackInSlot(motherSlot), value);
     }
@@ -2849,6 +2851,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (isRemote() || getLevel() == null || loadingWildcardMothers || writingWildcardMother
                 || rebuildingWildcardPatterns || wildcardPersistence.hasPending()
                 || motherSlot < 0 || motherSlot >= wildcardSlotCount || circuit < 0 || circuit > 32 || stack == null
+                || wildcardPatternInventory == null || motherSlot >= wildcardPatternInventory.getSlots()
                 || (!stack.isEmpty() && (!acceptsWildcardMother(stack) || stack.getCount() != 1))) return false;
         ItemStack copy = stack.copy();
         int normalized = copy.isEmpty() ? 0 : normalizeMotherCircuit(circuit);
@@ -2884,7 +2887,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private void rememberMotherIdentities(boolean clearChanged) {
         if (wildcardMotherIdentities == null || wildcardPatternInventory == null) return;
         for (int i = 0; i < wildcardMotherCircuits.length; i++) {
-            ItemStack current = wildcardPatternInventory.getStackInSlot(i);
+            ItemStack current = i < wildcardPatternInventory.getSlots()
+                    ? wildcardPatternInventory.getStackInSlot(i) : ItemStack.EMPTY;
             if (current.isEmpty() || clearChanged
                     && !ItemStack.isSameItemSameTags(current, wildcardMotherIdentities[i])) {
                 wildcardMotherCircuits[i] = 0;
