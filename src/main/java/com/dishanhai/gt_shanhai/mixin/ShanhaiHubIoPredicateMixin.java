@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.machine.part.ShanhaiHubIoPredicate;
+import com.dishanhai.gt_shanhai.api.machine.part.ShanhaiAbilityPredicate;
 import com.dishanhai.gt_shanhai.common.machine.part.ShanhaiHubStructure;
 import com.gregtechceu.gtceu.api.pattern.MultiblockState;
 import com.gregtechceu.gtceu.api.pattern.predicates.SimplePredicate;
@@ -13,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** 山海：借位仓不参与对应能力计数，枢纽的可选能力留给仓位匹配处理。 */
 @Mixin(value = SimplePredicate.class, remap = false)
-public class ShanhaiHubIoPredicateMixin implements ShanhaiHubIoPredicate {
+public class ShanhaiHubIoPredicateMixin implements ShanhaiHubIoPredicate, ShanhaiAbilityPredicate {
     @Shadow public int minCount;
     @Shadow public int maxCount;
     @Shadow public int minLayerCount;
@@ -21,6 +22,18 @@ public class ShanhaiHubIoPredicateMixin implements ShanhaiHubIoPredicate {
     @Unique private boolean gtShanhai$ioAdmissionOnly;
     @Unique private boolean gtShanhai$hubAbility;
     @Unique private boolean gtShanhai$parallelAbility;
+    // TraceabilityPredicate copies and ORs retain the same SimplePredicate objects.
+    @Unique private boolean gtShanhai$nonMaterialAbility;
+
+    @Override
+    public boolean gtShanhai$hasNonMaterialAbility() {
+        return gtShanhai$nonMaterialAbility;
+    }
+
+    @Override
+    public void gtShanhai$markNonMaterialAbility() {
+        gtShanhai$nonMaterialAbility = true;
+    }
 
     @Override
     public boolean gtShanhai$isIoAdmissionOnly() { return gtShanhai$ioAdmissionOnly; }
