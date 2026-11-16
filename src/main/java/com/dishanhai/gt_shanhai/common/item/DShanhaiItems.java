@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item;
 
 import com.gregtechceu.gtceu.api.item.ComponentItem;
-import com.dishanhai.gt_shanhai.common.patternmover.HostPatternMoverItem;
 import com.gregtechceu.gtceu.common.data.GTItems;
 import com.tterrag.registrate.util.entry.ItemEntry;
 import com.tterrag.registrate.util.nullness.NonNullBiConsumer;
@@ -23,8 +22,6 @@ public final class DShanhaiItems {
     public static ItemEntry<ComponentItem> MIRACLE_MATTER;
     public static ItemEntry<SelectedRecipePatternItem> SELECTED_RECIPE_PATTERN;
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
-
-    public static ItemEntry<HostPatternMoverItem> HOST_PATTERN_MOVER;
 
     public static void init() {
         MIRACLE_MATTER = REGISTRATE.item("miracle_matter", ComponentItem::create)
@@ -72,10 +69,6 @@ public final class DShanhaiItems {
                 .item("wireless_pattern_management_terminal",
                         properties -> new ShanhaiWirelessPatternManagementTerminalItem())
                 .onRegister(ShanhaiPatternTerminalIntegration::onItemRegistered)
-                .model(NonNullBiConsumer.noop())
-                .register();
-        HOST_PATTERN_MOVER = REGISTRATE.item("host_pattern_mover",
-                        properties -> new HostPatternMoverItem(properties.stacksTo(1)))
                 .model(NonNullBiConsumer.noop())
                 .register();
     }
