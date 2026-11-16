@@ -63,13 +63,18 @@ public final class HubMachineHelper {
      */
     public static GTRecipe forceFullOutputChance(GTRecipe recipe) {
         GTRecipe copy = recipe.copy();
-        forceFullChance(copy.outputs);
-        forceFullChance(copy.tickOutputs);
+        applyFullOutputChance(copy);
         copy.ocTier = recipe.ocTier;
         if (recipe instanceof IGTRecipe source && copy instanceof IGTRecipe target) {
             target.setRealParallels(source.getRealParallels());
         }
         return copy;
+    }
+
+    /** Only output probabilities are upgraded; input and catalyst semantics must remain unchanged. */
+    public static void applyFullOutputChance(GTRecipe recipe) {
+        forceFullChance(recipe.outputs);
+        forceFullChance(recipe.tickOutputs);
     }
 
     static void forceFullChance(Map<?, List<Content>> contents) {

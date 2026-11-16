@@ -608,19 +608,8 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
             if (recipe.data.contains("blastFurnaceTemp")) recipe.data.putInt("blastFurnaceTemp", 0);
         }
         if (isChanceBypassEnabled()) {
-            // 产出概率强制 100%（必定产出），输入概率强制 0%（永不消耗）
-            recipe.outputs.values().forEach(list -> {
-                if (list != null) for (var c : list) if (c != null && c.chance != c.maxChance) c.chance = c.maxChance;
-            });
-            recipe.tickOutputs.values().forEach(list -> {
-                if (list != null) for (var c : list) if (c != null && c.chance != c.maxChance) c.chance = c.maxChance;
-            });
-            recipe.inputs.values().forEach(list -> {
-                if (list != null) for (var c : list) if (c != null && c.chance != 0) c.chance = 0;
-            });
-            recipe.tickInputs.values().forEach(list -> {
-                if (list != null) for (var c : list) if (c != null && c.chance != 0) c.chance = 0;
-            });
+            // 只提升产出概率。输入 chance=0 表示不消耗催化剂，不能把正常耗材也改成 0。
+            com.dishanhai.gt_shanhai.common.util.HubMachineHelper.applyFullOutputChance(recipe);
         }
         return recipe;
     }

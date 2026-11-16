@@ -26,8 +26,9 @@ class HubMachineHelperTest {
         assertFalse(mixin.contains("@ModifyVariable"));
         assertTrue(mixinConfig.contains("\"ParallelOutputChanceBypassMixin\""));
         assertTrue(helper.contains("GTRecipe copy = recipe.copy();"));
-        assertTrue(helper.contains("forceFullChance(copy.outputs);"));
-        assertTrue(helper.contains("forceFullChance(copy.tickOutputs);"));
+        assertTrue(helper.contains("applyFullOutputChance(copy);"));
+        assertTrue(helper.contains("forceFullChance(recipe.outputs);"));
+        assertTrue(helper.contains("forceFullChance(recipe.tickOutputs);"));
         assertTrue(helper.contains("content.chance = content.maxChance;"));
     }
 }
