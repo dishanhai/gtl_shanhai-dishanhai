@@ -34,7 +34,7 @@ class WildcardTypeCircuitPreservation(unittest.TestCase):
             self.skipTest('JDK compiler required')
         actual = SOURCE.read_text(encoding='utf-8')
         methods = '\n'.join(method(actual, name) for name in
-                            ['assignWildcardRecipeType', 'clearWildcardRecipeType'])
+                            ['assignWildcardRecipeType', 'clearWildcardRecipeType', 'assignWildcardRecipeTypeId'])
         harness = r'''
 public class TypeCircuitProbe {
     static class ItemStack {
@@ -86,11 +86,18 @@ __METHODS__
             clear.clearWildcardRecipeType(0);
             check(clear.item.type.isEmpty() && clear.circuit == value, "clear preserves " + value);
             check(clear.writes == 1 && clear.rawWrites == 0, "clear uses one atomic write");
+            var byId = machine(value);
+            byId.assignWildcardRecipeTypeId(0, "new:id");
+            check(byId.item.type.equals("new:id") && byId.circuit == value, "assign by id preserves " + value);
+            check(byId.writes == 1 && byId.rawWrites == 0, "assign by id uses one atomic write");
             var invalid = machine(value);
             for (int slot : new int[]{-1, 1, Integer.MAX_VALUE}) {
                 invalid.assignWildcardRecipeType(slot, new GTRecipeType("new"));
                 invalid.clearWildcardRecipeType(slot);
+                invalid.assignWildcardRecipeTypeId(slot, "new:id");
             }
+            invalid.assignWildcardRecipeTypeId(0, null);
+            invalid.assignWildcardRecipeTypeId(0, "");
             invalid.assignWildcardRecipeType(0, null);
             invalid.assignWildcardRecipeType(0, new GTRecipeType(null));
             check(invalid.writes == 0 && invalid.rawWrites == 0 && invalid.circuit == value,
@@ -98,10 +105,11 @@ __METHODS__
             invalid.item = new ItemStack(true, "");
             invalid.assignWildcardRecipeType(0, new GTRecipeType("new"));
             invalid.clearWildcardRecipeType(0);
+            invalid.assignWildcardRecipeTypeId(0, "new:id");
             check(invalid.writes == 0 && invalid.rawWrites == 0 && invalid.circuit == value,
                     "empty mother never writes");
         }
-        System.out.println("PASS: real type setters preserve 0/5/32; invalid slot/type/empty do not write");
+        System.out.println("PASS: all three real type setters preserve 0/5/32; invalid slot/type/empty do not write");
     }
 }
 '''.replace('__METHODS__', methods)

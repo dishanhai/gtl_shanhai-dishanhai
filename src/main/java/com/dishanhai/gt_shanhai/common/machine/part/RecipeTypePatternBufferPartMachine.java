@@ -3996,7 +3996,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (slot < 0 || slot >= wildcardSlotCount || typeId == null || typeId.isEmpty()) return;
         ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
         if (stack.isEmpty()) return;
-        wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.assign(stack, typeId));
+        gtShanhai$setWildcardMotherPattern(slot, WildcardPatternRecipeTypeBinding.assign(stack, typeId),
+                gtShanhai$getWildcardMotherCircuit(slot));
     }
 
     private String remoteWildcardTypeText(int mother) {
