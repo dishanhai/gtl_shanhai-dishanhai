@@ -135,6 +135,8 @@ public final class RecipeTypePatternSearchHelper {
             MARKED_RECIPE_CACHE = Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<IRecipeLogicMachine, ActiveMarkedRecipeCacheEntry> ACTIVE_MARKED_RECIPE_CACHE =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<IRecipeLogicMachine, ActiveMarkedRecipeCacheEntry> ACTIVE_LOOKUP_MARKED_RECIPE_CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static long patternStateRevision;
 
     private static final class MarkedRecipeCacheEntry {
@@ -259,6 +261,9 @@ public final class RecipeTypePatternSearchHelper {
         synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
             ACTIVE_MARKED_RECIPE_CACHE.clear();
         }
+        synchronized (ACTIVE_LOOKUP_MARKED_RECIPE_CACHE) {
+            ACTIVE_LOOKUP_MARKED_RECIPE_CACHE.clear();
+        }
     }
 
     public static Iterator<GTRecipe> searchRecipe(IRecipeLogicMachine machine) {
@@ -285,14 +290,27 @@ public final class RecipeTypePatternSearchHelper {
 
     /** 仅收集 AE 已真实激活的样板槽，不扫描未下单槽位，也不主动从网络预填原料。 */
     public static Set<GTRecipe> collectActiveMarkedPatternRecipes(IRecipeLogicMachine machine) {
+        return collectActiveMarkedPatternRecipes(machine, true);
+    }
+
+    /** 原生查找入口：修复电路的虚拟在场状态，但绝不从 ME 网络提取消耗性原料。 */
+    public static Set<GTRecipe> collectActiveMarkedPatternRecipesForLookup(IRecipeLogicMachine machine) {
+        return collectActiveMarkedPatternRecipes(machine, false);
+    }
+
+    private static Set<GTRecipe> collectActiveMarkedPatternRecipes(IRecipeLogicMachine machine,
+            boolean allowConsumableTopUp) {
         if (!(machine instanceof MetaMachine metaMachine)) {
-            return collectMarkedPatternRecipes(machine, false);
+            return collectMarkedPatternRecipes(machine, false, allowConsumableTopUp);
         }
+        // 查找与原有主动执行路径分开缓存，避免同 tick 的调用顺序改变修复/补料行为。
+        Map<IRecipeLogicMachine, ActiveMarkedRecipeCacheEntry> cache = allowConsumableTopUp
+                ? ACTIVE_MARKED_RECIPE_CACHE : ACTIVE_LOOKUP_MARKED_RECIPE_CACHE;
         long tick = metaMachine.getOffsetTimer();
         long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         long currentPatternRevision = patternStateRevision;
-        synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
-            ActiveMarkedRecipeCacheEntry cached = ACTIVE_MARKED_RECIPE_CACHE.get(machine);
+        synchronized (cache) {
+            ActiveMarkedRecipeCacheEntry cached = cache.get(machine);
             if (cached != null
                     && cached.tick == tick
                     && cached.patternRevision == currentPatternRevision
@@ -300,21 +318,26 @@ public final class RecipeTypePatternSearchHelper {
                 return cached.recipes;
             }
         }
-        Set<GTRecipe> recipes = collectMarkedPatternRecipes(machine, false);
-        synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
+        Set<GTRecipe> recipes = collectMarkedPatternRecipes(machine, false, allowConsumableTopUp);
+        synchronized (cache) {
             // 实例稳定化：重建结果与上一轮内容相同时复用旧实例——下游 merged 缓存按实例身份
             // 判断"输入没变"，实例稳定才能让它跨 tick 命中，消除每 tick 的合并复制。
-            ActiveMarkedRecipeCacheEntry prev = ACTIVE_MARKED_RECIPE_CACHE.get(machine);
+            ActiveMarkedRecipeCacheEntry prev = cache.get(machine);
             if (prev != null && recipes.equals(prev.recipes)) {
                 recipes = prev.recipes;
             }
-            ACTIVE_MARKED_RECIPE_CACHE.put(machine, new ActiveMarkedRecipeCacheEntry(
+            cache.put(machine, new ActiveMarkedRecipeCacheEntry(
                     tick, currentPatternRevision, recipeRevision, recipes));
         }
         return recipes;
     }
 
     private static Set<GTRecipe> collectMarkedPatternRecipes(IRecipeLogicMachine machine, boolean includeFirstSpark) {
+        return collectMarkedPatternRecipes(machine, includeFirstSpark, true);
+    }
+
+    private static Set<GTRecipe> collectMarkedPatternRecipes(IRecipeLogicMachine machine, boolean includeFirstSpark,
+            boolean allowConsumableTopUp) {
         LinkedHashSet<GTRecipe> result = new LinkedHashSet<>();
         if (!(machine instanceof IRecipeCapabilityMachine capabilityMachine)) return result;
 
@@ -327,14 +350,15 @@ public final class RecipeTypePatternSearchHelper {
                 if (handlers == null) continue;
                 for (Object handler : handlers) {
                     scannedRecipeHandlers = true;
-                    collectMarkedPatternRecipesFromHandler(machine, capabilityMachine, handler, result, includeFirstSpark);
+                    collectMarkedPatternRecipesFromHandler(machine, capabilityMachine, handler, result,
+                            includeFirstSpark, allowConsumableTopUp);
                 }
             }
         }
         if (!includeFirstSpark && scannedRecipeHandlers) {
             return applyRecipeTypeSwitch(machine, result);
         }
-        collectMarkedPatternRecipesFromParts(machine, capabilityMachine, result, includeFirstSpark);
+        collectMarkedPatternRecipesFromParts(machine, capabilityMachine, result, includeFirstSpark, allowConsumableTopUp);
         return applyRecipeTypeSwitch(machine, result);
     }
 
@@ -352,7 +376,7 @@ public final class RecipeTypePatternSearchHelper {
             Object patternMachine = resolvePatternBuffer(part);
             if (patternMachine == null) continue;
             collectMarkedPatternRecipesFromMachine(machine, null, part, patternMachine,
-                    readActiveSlots(patternMachine, patternMachine), result, true);
+                    readActiveSlots(patternMachine, patternMachine), result, true, true);
         }
         appendInactiveHostCachedRecipes(machine, result);
         return applyRecipeTypeSwitch(machine, result);
@@ -389,7 +413,7 @@ public final class RecipeTypePatternSearchHelper {
                 ? (IRecipeCapabilityMachine) machine
                 : null;
         collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, buffer, buffer,
-                readActiveSlots(buffer, buffer), result, true);
+                readActiveSlots(buffer, buffer), result, true, true);
         return applyRecipeTypeSwitch(machine, result);
     }
 
@@ -413,22 +437,23 @@ public final class RecipeTypePatternSearchHelper {
 
     private static void collectMarkedPatternRecipesFromHandler(IRecipeLogicMachine machine,
             IRecipeCapabilityMachine capabilityMachine, Object handler, Set<GTRecipe> result,
-            boolean includeFirstSpark) {
+            boolean includeFirstSpark, boolean allowConsumableTopUp) {
         Object ownerMachine = findHandlerMachine(handler);
         Object patternMachine = resolvePatternBuffer(ownerMachine);
         collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, ownerMachine,
-                patternMachine, readActiveSlots(handler, patternMachine), result, includeFirstSpark);
+                patternMachine, readActiveSlots(handler, patternMachine), result, includeFirstSpark, allowConsumableTopUp);
     }
 
     private static void collectMarkedPatternRecipesFromParts(IRecipeLogicMachine machine,
-            IRecipeCapabilityMachine capabilityMachine, Set<GTRecipe> result, boolean includeFirstSpark) {
+            IRecipeCapabilityMachine capabilityMachine, Set<GTRecipe> result, boolean includeFirstSpark,
+            boolean allowConsumableTopUp) {
         if (!(machine instanceof IMultiController controller)) return;
         for (IMultiPart part : controller.getParts()) {
             if (part == null) continue;
             Object patternMachine = resolvePatternBuffer(part);
             Object slotSource = patternMachine == null ? part : patternMachine;
             collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, part, patternMachine,
-                    readActiveSlots(slotSource, patternMachine), result, includeFirstSpark);
+                    readActiveSlots(slotSource, patternMachine), result, includeFirstSpark, allowConsumableTopUp);
             if (includeFirstSpark) {
                 collectPlainPatternRecipesFromPart(machine, capabilityMachine, part, result);
             }
@@ -493,7 +518,7 @@ public final class RecipeTypePatternSearchHelper {
 
     private static void collectMarkedPatternRecipesFromMachine(IRecipeLogicMachine machine,
             IRecipeCapabilityMachine capabilityMachine, Object ownerMachine, Object patternMachine,
-            int[] activeSlots, Set<GTRecipe> result, boolean includeFirstSpark) {
+            int[] activeSlots, Set<GTRecipe> result, boolean includeFirstSpark, boolean allowConsumableTopUp) {
         if (!(patternMachine instanceof RecipeTypePatternSlotAccess access)
                 || !(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) {
             return;
@@ -526,7 +551,11 @@ public final class RecipeTypePatternSearchHelper {
                 Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
                 if (activeSlotNeedsCircuitRepair(internalSlot, recipe)) {
                     ItemStack patternStack = access.gtShanhai$getPatternStack(slot);
-                    topUpVirtualSupply(machine, buffer, slot, patternStack, recipe);
+                    if (allowConsumableTopUp) {
+                        topUpVirtualSupply(machine, buffer, slot, patternStack, recipe);
+                    } else {
+                        topUpVirtualSupply(machine, buffer, slot, patternStack, recipe, false);
+                    }
                 }
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
@@ -594,6 +623,11 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static void topUpVirtualSupply(IRecipeLogicMachine machine, MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
             GTRecipe recipe) {
+        topUpVirtualSupply(machine, buffer, slot, patternStack, recipe, true);
+    }
+
+    private static void topUpVirtualSupply(IRecipeLogicMachine machine, MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
+            GTRecipe recipe, boolean allowConsumableTopUp) {
         if (patternStack == null || patternStack.isEmpty()) return;
         Level level = buffer.getLevel();
         if (level == null) return;
@@ -623,7 +657,9 @@ public final class RecipeTypePatternSearchHelper {
                     || inventoryHasConsumable(fluidInventory, recipe);
         }
         long remainingBudget = getRemainingBudget(buffer, slot);
-        if (!consumableStockPresent && remainingBudget <= 0) return;
+        if (allowConsumableTopUp) {
+            if (!consumableStockPresent && remainingBudget <= 0) return;
+        }
 
         IPatternDetails details;
         try {
@@ -662,6 +698,7 @@ public final class RecipeTypePatternSearchHelper {
         if (consumableStockPresent) {
             return;
         }
+        if (!allowConsumableTopUp) return;
 
         long hostParallelLimit = resolveHostParallelLimit(machine);
         IGrid grid = buffer.getGrid();

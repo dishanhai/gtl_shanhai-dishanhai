@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
+import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -29,6 +31,8 @@ import java.util.function.Predicate;
  * GTLCore 改写 getRecipeIterator 后，只把样板缓存里
  * {@code recipe.recipeType == 当前查找类型} 的配方并进候选。
  * 单配方切换机器的查找类型就是当前选中项，未选中的类型（切割机模式下的车床）会被丢掉。
+ * 合金冶炼炉等 MultipleRecipesLogic 宿主还绕过了 RecipeLogic 上的星律搜索入口，
+ * 因此必须先解析 AE 已下单的样板，不能只等当前模式命中后才有的配方缓存。
  * priority 高于 GTLCore 的 @Overwrite，注入落在改写后的方法上。
  */
 @Mixin(value = GTRecipeLookup.class, priority = 1500, remap = false)
@@ -49,28 +53,35 @@ public class InactiveHostRecipeTypeLookupMixin {
         List<MEPatternRecipeHandlePart> parts = capabilityMachine.getMEPatternRecipeHandleParts();
         if (parts == null || parts.isEmpty()) return;
 
-        LinkedHashSet<GTRecipe> extras = null;
+        // 只解析真实激活槽，不主动下单或补入网络原料；复用按 tick 缓存的星律搜索。
+        LinkedHashSet<GTRecipe> candidates = new LinkedHashSet<>();
+        if (DShanhaiConfig.COMMON.recipeTypePatternSwitchMode.get()
+                == DShanhaiConfig.ConfigValues.RecipeTypePatternSwitchMode.VIRTUAL_ACTIVE_TYPE
+                && ProgrammableHatchPartMachine.getSelectedRecipeTypeFor(machine) == null) {
+            candidates.addAll(RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipesForLookup(machine));
+        }
         for (int i = 0; i < parts.size(); i++) {
             MEPatternRecipeHandlePart part = parts.get(i);
             if (part == null) continue;
             Set<GTRecipe> cached = part.getCachedGTRecipe();
             if (cached == null || cached.isEmpty()) continue;
-            for (GTRecipe recipe : cached) {
-                if (recipe == null || recipe.recipeType == null) continue;
-                if (gtShanhai$sameRecipeType(this.recipeType, recipe.recipeType)) continue;
-                if (!gtShanhai$hostAllows(machine, recipe.recipeType)) continue;
-                if (extras == null) extras = new LinkedHashSet<>();
-                extras.add(recipe);
-            }
+            candidates.addAll(cached);
         }
-        if (extras == null || extras.isEmpty()) return;
+        LinkedHashSet<GTRecipe> extras = new LinkedHashSet<>();
+        for (GTRecipe recipe : candidates) {
+            if (recipe == null || recipe.recipeType == null) continue;
+            if (gtShanhai$sameRecipeType(this.recipeType, recipe.recipeType)) continue;
+            if (!gtShanhai$hostAllows(machine, recipe.recipeType)) continue;
+            extras.add(recipe);
+        }
+        if (extras.isEmpty()) return;
 
         List<GTRecipe> existing = additional.getAdditionalRecipes();
-        List<GTRecipe> merged = new ArrayList<>(
-                (existing == null ? 0 : existing.size()) + extras.size());
+        LinkedHashSet<GTRecipe> merged = new LinkedHashSet<>();
         if (existing != null) merged.addAll(existing);
         merged.addAll(extras);
-        additional.setAdditionalRecipes(merged);
+        // 原生 RecipeIterator 在迭代时继续执行 canHandle，保留材料、电压、温度等检查。
+        additional.setAdditionalRecipes(new ArrayList<>(merged));
     }
 
     private static boolean gtShanhai$hostAllows(IRecipeLogicMachine machine, GTRecipeType recipeType) {
