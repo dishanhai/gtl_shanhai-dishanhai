@@ -3,6 +3,7 @@ package com.shanhai.machine.host;
 import com.gregtechceu.gtceu.GTCEu;
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
+import com.shanhai.ShanhaiMod;
 import com.shanhai.common.recipe.ShanhaiRecipeTypes;
 import com.shanhai.registry.ShanhaiRegistration;
 
@@ -122,6 +123,11 @@ public final class GuixuVisionCoreMachines {
         GuixuHostGeometry.verify();
         // 字段落盘/同步自检：本类两个新字段必须在 LDLib 的 holder 里（父 holder 跳级会整段静默丢失）
         GuixuVisionCoreMachine.assertFieldHolderComplete();
+        // 🔴 2026-11-14：零点能发电（视界能流抽取）的算式自检 —— 判据本身就是代码，红了在这里炸
+        //    （正向对照：2^47 × p=1 与 p=64 两组逐位；负对照：去掉类型判断后必须变红、
+        //      long 路必须饱和到 Long.MAX_VALUE、p=Long.MAX 时不许出现负数/饱和值）
+        ShanhaiMod.LOGGER.info("{} 归墟·零点能自检：\n{}", GuixuZeroPointGeneration.TAG,
+                GuixuZeroPointGeneration.selfTest());
 
         definition = ShanhaiRegistration.REGISTRATE
                 .multiblock(ID, GuixuVisionCoreMachine::new)

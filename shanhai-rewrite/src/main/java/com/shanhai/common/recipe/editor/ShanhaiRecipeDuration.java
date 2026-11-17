@@ -295,7 +295,9 @@ public final class ShanhaiRecipeDuration {
     }
 
     /**
-     * <b>反射读 gtlcore 的乘数本身</b>（{@code org.gtlcore.gtlcore.config.ConfigHolder.durationMultiplier}）。
+     * <b>反射读 gtlcore 的乘数本身</b>
+     * （gtlcore ≥ 1.2.3.2-fix5：{@code org.gtlcore.gtlcore.config.ConfigHolder.INSTANCE.content.durationMultiplier}；
+     * gtlcore ≤ 1.2.3.2-fix4 是 {@code ConfigHolder.INSTANCE.durationMultiplier} 顶层扁平字段）。
      *
      * <h4>🔴 为什么必须读它，而不是"从数据里拟合一个 k"</h4>
      * 2026-10-05 第 7 局实测到的现场：
@@ -313,35 +315,80 @@ public final class ShanhaiRecipeDuration {
      * （{@code live == clamp(orig*k)} 就乘了、{@code live == orig} 就没乘）。
      * 验证比拟合强：它不需要样本数下限，也不会把"一条配方自己的差异"当成乘数。
      *
-     * <p>读不到（gtlcore 不在 / 字段改名）⇒ 返回 1.0 ⇒ 全表按恒等处理
-     * = <b>与改动之前逐字节相同</b>（宁可不动手，也不猜一个乘数）。
+     * <p>读不到（gtlcore 不在 / 字段又被搬家）⇒ <b>打一行 WARN（带试过的路径清单）</b>后返回 1.0
+     * ⇒ 全表按恒等处理 = <b>与改动之前逐字节相同</b>（宁可不动手，也不猜一个乘数）。
+     * <b>不许静默</b>：静默回 1.0 会让配方编辑器显示的耗时全错而没人发现。
      */
     private static double readConfigMultiplier() {
+        final java.util.List<String> tried = new java.util.ArrayList<>();
         for (String cls : new String[]{
                 "org.gtlcore.gtlcore.config.ConfigHolder",
                 "org.gtlcore.gtlcore.config.GTLConfigHolder"}) {
             try {
                 final Class<?> ch = Class.forName(cls);
                 final Object inst = ch.getField("INSTANCE").get(null);
-                java.lang.reflect.Field f = null;
+
+                // ── 1) 新路径（gtlcore ≥ 1.2.3.3-fix2）：INSTANCE.content.durationMultiplier ──
+                //    javap 实证（libs\gtlcore-1.2.3.3-fix2.jar，9DD89C602B804AD6）：
+                //      ConfigHolder.content            : LConfigHolder$ContentOptions;   （public）
+                //      ConfigHolder$ContentOptions.durationMultiplier : D               （public，默认 dconst_1）
                 try {
-                    f = ch.getField("durationMultiplier");
+                    final Object content = shanhai$readField(ch, inst, "content");
+                    if (content != null) {
+                        final Number v = (Number) shanhai$readField(
+                                content.getClass(), content, "durationMultiplier");
+                        final double d = v.doubleValue();
+                        ShanhaiMod.LOGGER.info("{} duration_scale_config class={} path=content.durationMultiplier "
+                                        + "durationMultiplier={}（反射读自 gtlcore 自己的配置；本类不依赖 gtlcore 编译期符号）",
+                                PREFIX, cls, String.format(java.util.Locale.ROOT, "%.9f", d));
+                        return d;
+                    }
                 } catch (NoSuchFieldException nsf) {
-                    f = ch.getDeclaredField("durationMultiplier");
-                    f.setAccessible(true);
+                    tried.add(cls + "#content.durationMultiplier(new)");
                 }
-                final double v = f.getDouble(inst);
-                ShanhaiMod.LOGGER.info("{} duration_scale_config class={} durationMultiplier={} "
-                                + "（反射读自 gtlcore 自己的配置；本类不依赖 gtlcore 编译期符号）",
-                        PREFIX, cls, String.format(java.util.Locale.ROOT, "%.9f", v));
-                return v;
-            } catch (Throwable ignored) {
-                // 试下一个候选
+
+                // ── 2) 旧路径（gtlcore ≤ 1.2.3.2-fix3）：INSTANCE.durationMultiplier 顶层扁平字段 ──
+                //    留它是为了"libs 换回旧 jar"时行为不变（回滚不必改代码）。
+                try {
+                    final Number v = (Number) shanhai$readField(ch, inst, "durationMultiplier");
+                    final double d = v.doubleValue();
+                    ShanhaiMod.LOGGER.warn("{} duration_scale_config class={} path=durationMultiplier(OLD-FLAT) "
+                                    + "durationMultiplier={} ⇒ 旧版 gtlcore 的扁平字段；"
+                                    + "说明 libs 里仍是 1.2.3.2 或更早，新路径不存在（不是错误，只是环境较旧）",
+                            PREFIX, cls, String.format(java.util.Locale.ROOT, "%.9f", d));
+                    return d;
+                } catch (NoSuchFieldException nsf) {
+                    tried.add(cls + "#durationMultiplier(old-flat)");
+                }
+            } catch (Throwable t) {
+                tried.add(cls + " ⇒ " + t);
             }
         }
-        ShanhaiMod.LOGGER.warn("{} duration_scale_config UNAVAILABLE reason=reflection_failed "
-                + "⇒ 按 k=1.0 处理（读写都用原值，与改动前行为相同）", PREFIX);
+        // 走到这里 = 新旧两条路径都没解析到。🔴 不许静默：必须留一行 WARN（带试过的清单），否则
+        // 乘数悄悄变成 1.0，配方编辑器显示的耗时全错而没人发现。
+        ShanhaiMod.LOGGER.warn("{} duration_scale_config UNAVAILABLE reason=reflection_failed tried={} "
+                + "⇒ 按 k=1.0 处理（读写都用原值，与改动前行为相同）。"
+                + "分组布局（gtlcore ≥1.2.3.2-fix5）= org.gtlcore.gtlcore.config.ConfigHolder.INSTANCE"
+                + ".content.durationMultiplier；扁平布局（≤1.2.3.2-fix4）= .INSTANCE.durationMultiplier。"
+                + "若 gtlcore 再次重构配置，改 readConfigMultiplier() 即可。",
+                PREFIX, tried);
         return 1.0;
+    }
+
+    /**
+     * 读一个字段：先 {@code getField}（public），失败再 {@code getDeclaredField}+{@code setAccessible}。
+     * <p>两种都要，是因为配置对象的内嵌类将来可能收紧可见性；这里不依赖编译期符号。
+     */
+    private static Object shanhai$readField(Class<?> owner, Object target, String name)
+            throws NoSuchFieldException, IllegalAccessException {
+        java.lang.reflect.Field f;
+        try {
+            f = owner.getField(name);
+        } catch (NoSuchFieldException nsf) {
+            f = owner.getDeclaredField(name);
+            f.setAccessible(true);
+        }
+        return f.get(target);
     }
 
     private static double CONFIG_K = Double.NaN;

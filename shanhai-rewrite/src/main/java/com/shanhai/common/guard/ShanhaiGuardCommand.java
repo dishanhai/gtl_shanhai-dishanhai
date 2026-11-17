@@ -33,6 +33,9 @@ import net.minecraftforge.fml.common.Mod;
  *   /shanhai guard attack on|off        攻击端（默认开）
  *   /shanhai guard death on|off         死而无损（默认开）
  *   /shanhai guard knockback on|off     🆕 反击退 / 反挤压（默认开；关掉后完全不动玩家）
+ *   /shanhai guard triage [on|off]      🆕 T 件：分诊读数（默认开；<b>只记录不反制</b>，运行时开关不落配置）
+ *   /shanhai guard scan                 🆕 T 件：关键类扫描一次（谁改过 LivingEntity/Entity/事件总线）
+ *   /shanhai guard selftest             🆕 T 件：纯逻辑自检（tier1Solved 真值表 ／ 栈过滤 ／ 名字解析 ／ 限流）
  * </pre>
  *
  * <h2>🔴 本类只保留【本体那一半】（阶段 3b 拆命令）</h2>
@@ -69,8 +72,10 @@ public final class ShanhaiGuardCommand {
         return Commands.literal(COMMAND_PURGE)
                 .executes(ctx -> purge(ctx, false))
                 .then(Commands.literal("count").executes(ctx -> purge(ctx, true)))
-                .then(Commands.literal("selfcheck").executes(ShanhaiGuardCommand::selfcheck))
-                .then(guardBranch());
+                .then(Commands.literal("selfcheck").executes(ShanhaiGuardCommand::selfcheck));
+        // 🔴 2026-11-07 修：以前这里写 `.then(guardBranch())`，那会把 guard 挂成 **purge 的子节点**
+        //    ⇒ 真实路径是 `/shanhai purge guard …`，`/shanhai guard` 根本不存在（日志那一行却在报"已注册 guard"，
+        //    因为它只打印"打算注册什么"、不校验）。现在改为在 register 那一层把两棵子树并排挂在 /shanhai 下。
     }
 
     /** {@code /shanhai guard …}。 */
@@ -93,14 +98,25 @@ public final class ShanhaiGuardCommand {
                 .then(Commands.literal(ShanhaiGuardSwitches.Switch.KNOCKBACK.arg)
                         .executes(ctx -> status(ctx))
                         .then(Commands.literal("on").executes(ctx -> setSwitch(ctx, ShanhaiGuardSwitches.Switch.KNOCKBACK, true)))
-                        .then(Commands.literal("off").executes(ctx -> setSwitch(ctx, ShanhaiGuardSwitches.Switch.KNOCKBACK, false))));
+                        .then(Commands.literal("off").executes(ctx -> setSwitch(ctx, ShanhaiGuardSwitches.Switch.KNOCKBACK, false))))
+                // 🆕 T 件（分诊）：triage on|off ／ scan ／ selftest
+                //    与上面四个开关【同一套写法】，但它是"只记录不反制"的取证开关（运行时开关，不落配置）。
+                .then(Commands.literal("triage")
+                        .executes(ShanhaiGuardCommand::triageStatus)
+                        .then(Commands.literal("on").executes(ctx -> setTriage(ctx, true)))
+                        .then(Commands.literal("off").executes(ctx -> setTriage(ctx, false))))
+                .then(Commands.literal("scan").executes(ShanhaiGuardCommand::keyClassScan))
+                .then(Commands.literal("selftest").executes(ShanhaiGuardCommand::triageSelftest));
     }
 
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         // ⚠️ 与 ShanhaiRecipeStats / ShanhaiRecipeEditorCommand / ShanhaiCreativeItemsCommand 各 register 一次
         //    literal("shanhai")：Brigadier 会合并同名子节点（既有命令的 children 一个都不会丢）。
-        event.getDispatcher().register(Commands.literal("shanhai").then(commandBranch()));
+        // 🔴 purge 与 guard 必须是【兄弟】：两棵子树都直接挂在 /shanhai 下。
+        event.getDispatcher().register(Commands.literal("shanhai")
+                .then(commandBranch())
+                .then(guardBranch()));
         final var shanhaiNode = event.getDispatcher().getRoot().getChild("shanhai");
         final StringBuilder kids = new StringBuilder();
         if (shanhaiNode != null) {
@@ -108,8 +124,13 @@ public final class ShanhaiGuardCommand {
                 kids.append(c.getName()).append(' ');
             }
         }
-        ShanhaiMod.LOGGER.info("{} command_registered /shanhai {} + /shanhai {} ; shanhai_children=[{}]",
-                PREFIX, COMMAND_PURGE, COMMAND_GUARD, kids.toString().trim());
+        // 🔴 2026-11-07：这一行以前只打印"打算注册什么"，guard 被挂到 purge 底下也照样报"已注册"。
+        //    现在回读命令树，逐个给 present=，**没挂上就是 false**（机器可判）。
+        final boolean purgePresent = shanhaiNode != null && shanhaiNode.getChild(COMMAND_PURGE) != null;
+        final boolean guardPresent = shanhaiNode != null && shanhaiNode.getChild(COMMAND_GUARD) != null;
+        final boolean scanPresent = guardPresent && shanhaiNode.getChild(COMMAND_GUARD).getChild("scan") != null;
+        ShanhaiMod.LOGGER.info("{} command_registered /shanhai {} present={} + /shanhai {} present={} scan_present={} ; shanhai_children=[{}]",
+                PREFIX, COMMAND_PURGE, purgePresent, COMMAND_GUARD, guardPresent, scanPresent, kids.toString().trim());
     }
 
     // ═══════════════════════════════ 门槛 ═══════════════════════════════
@@ -268,5 +289,76 @@ public final class ShanhaiGuardCommand {
                     + " 只（只碰带 shanhai_frozen 标记的）"), false);
         }
         return ok ? 1 : 0;
+    }
+
+    // ═══════════════════════════════ /shanhai guard triage|scan|selftest（T 件） ═══════════════════════════════
+    //
+    // 🔴 这三条都【只读、只记录】：不写世界、不改任何免死判定、不动任何开关的持久化。
+    //    · triage on|off  → 内存里的一个 volatile 布尔（默认开；重启回默认，不落 shanhai-common.toml）
+    //    · scan           → 关键类扫描一次（Class.forName(initialize=false) + getDeclaredMethods）
+    //    · selftest       → 跑 ②③④ 的纯逻辑自检（与离线 javac 自检同一份代码）
+
+    /** {@code /shanhai guard triage} —— 分诊现在什么状态。 */
+    private static int triageStatus(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        final String denied = gate(source);
+        if (denied != null) {
+            source.sendFailure(Component.literal(denied));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("§7" + ShanhaiGuardTriageBridge.statusLine()), false);
+        source.sendSuccess(() -> Component.literal(
+                "§8triage on|off 开关 ／ scan 关键类扫描一次 ／ selftest 纯逻辑自检"), false);
+        return 1;
+    }
+
+    /** {@code /shanhai guard triage on|off} —— 只切"要不要记录"，不切任何免死手段。 */
+    private static int setTriage(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
+                                 boolean on) {
+        final CommandSourceStack source = ctx.getSource();
+        final String denied = gate(source);
+        if (denied != null) {
+            source.sendFailure(Component.literal(denied));
+            return 0;
+        }
+        final boolean now = ShanhaiGuardTriageBridge.setEnabled(on);
+        source.sendSuccess(() -> Component.literal((now == on ? "§a" : "§c")
+                + "分诊 triage = " + now
+                + " §8（只记录不反制；运行时开关，不写配置文件，重启回默认 "
+                + ShanhaiGuardTriageBridge.DEFAULT_ENABLED + "）"), true);
+        return now == on ? 1 : 0;
+    }
+
+    /** {@code /shanhai guard scan} —— 关键类扫描一次（被动、只读）。 */
+    private static int keyClassScan(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        final String denied = gate(source);
+        if (denied != null) {
+            source.sendFailure(Component.literal(denied));
+            return 0;
+        }
+        final java.util.List<String> lines = ShanhaiGuardTriageBridge.scanAndLog(null);
+        for (final String line : lines) {
+            source.sendSuccess(() -> Component.literal("§7" + line), false);
+        }
+        source.sendSuccess(() -> Component.literal("§a关键类扫描 " + lines.size()
+                + " 个类（明细逐行在日志里，grep §f[SHANHAI-KEYCLASS]§a）"), false);
+        return lines.size();
+    }
+
+    /** {@code /shanhai guard selftest} —— 跑 ②③④ 的纯逻辑自检（不碰世界）。 */
+    private static int triageSelftest(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        final String denied = gate(source);
+        if (denied != null) {
+            source.sendFailure(Component.literal(denied));
+            return 0;
+        }
+        final ShanhaiGuardTriageBridge.SelftestOutcome r = ShanhaiGuardTriageBridge.selftest();
+        source.sendSuccess(() -> Component.literal((r.green() ? "§a" : "§c")
+                + "triage selftest 合计 " + r.checks + " 条，红 " + r.reds + " 条 ⇒ "
+                + (r.green() ? "全绿 PASS" : "有红 FAIL")
+                + " §8（明细逐行在日志里，grep " + ShanhaiGuardTriageBridge.PREFIX + "selftest）"), false);
+        return r.green() ? 1 : 0;
     }
 }

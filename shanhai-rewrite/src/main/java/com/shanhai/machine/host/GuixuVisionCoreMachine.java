@@ -18,6 +18,7 @@ import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.logic.OCParams;
 import com.gregtechceu.gtceu.api.recipe.logic.OCResult;
+import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
@@ -29,7 +30,10 @@ import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedKey;
 import com.mojang.logging.LogUtils;
+import com.hepdd.gtmthings.api.misc.WirelessEnergyManager;
+import com.shanhai.ShanhaiMod;
 import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
+import com.shanhai.common.machine.ShanhaiSelfWirelessEnergyHandler;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
 import com.shanhai.machine.module.PrimordialModuleMachine;
 
@@ -125,6 +129,59 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     @Override
     public ManagedFieldHolder getFieldHolder() {
         return MANAGED_FIELD_HOLDER;
+    }
+
+    // ═══════════ 🔴 发电配方的「EU 输出」必须可 void ═══════════
+
+    /**
+     * 🔴 <b>把 {@code EURecipeCapability.CAP} 标记为「可 void」—— 归墟能跑发电配方的前提。</b>
+     *
+     * <h2>为什么必须有它</h2>
+     * 归墟布局里<b>没有输出仓 / 动力仓</b>（{@code layout = [EnergyHatchPartMachine×2,
+     * MEDualHatchStockPartMachine×1, StellarSampleAssemblerPartMachine×1]}），而发电配方
+     * <b>唯一的输出</b>就是 {@code tickOutputs} 里的 EU。上游 {@code ParallelLogic#limitByOutputMerging}
+     * 会逐个 cap 做输出钳制（gtlcore {@code ParallelLogicMixin} @Overwrite 了实现），字节码：
+     * <pre>
+     *   59: aload_3 / 60: aload 6 / 62: invokeinterface Predicate.test
+     *   67: ifne 37                  ← test 为 true ⇒ continue（整个 cap 被跳过）
+     *   95..100: cap.limitParallel(recipe, holder, iload_2)
+     *  105: istore 7 / 107: ifne 112
+     *  110: iconst_0 / 111: ireturn  ← ★ 钳制得 0 ⇒ 【这个方法直接返回 0】
+     * </pre>
+     * 没有输出仓 ⇒ {@code EURecipeCapability#limitParallel} 得 0 ⇒ 方法返回 0
+     * ⇒ {@code combineInOut(in, 0) = 0} ⇒ {@code calculateParallels = 0} ⇒ {@code getRecipe()} 直接 null，
+     * 于是 {@code buildFinalNormalRecipe} / {@code setupRecipe} <b>一次都不会被调用</b>
+     * （症状：{@code [SHANHAI-INFPAR] … out=0 pick=0 why=out}，而 {@code [SHANHAI-DUR]} 一条没有）。
+     *
+     * <h2>为什么「void 掉 EU」对归墟是正解，不是绕过</h2>
+     * 归墟的发电<b>直接进无线电网池</b>（{@link com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler}
+     * / {@link com.hepdd.gtmthings.api.misc.WirelessEnergyManager}），<b>本来就不走动力仓</b>。
+     * ⇒「EU 输出被 void」与它的物理语义一致；反过来要求它「用输出仓接住 EU」才是错的。
+     *
+     * <h2>与上游同族实现的关系：同一处比较，极性相反</h2>
+     * {@code SimpleGeneratorMachine#canVoidRecipeOutputs} 字节码：
+     * <pre>
+     *   1: getstatic EURecipeCapability.CAP / 4: if_acmpeq 11
+     *   7: iconst_1 / 11: iconst_0     ← 非 EU ⇒ true；EU ⇒ false
+     * </pre>
+     * 即：<b>普通发电机必须「接住」自己发的 EU</b>，故 EU 返回 false；
+     * 归墟的电不进仓、进网池 ⇒ <b>极性正好相反</b>。比较写法（{@code == EURecipeCapability.CAP}）照抄上游。
+     *
+     * <p>其余 cap（物品 / 流体副产）<b>原样交给 super</b>（= {@code MachineDefinition#getRecipeOutputLimits}
+     * 里声明过的才可 void）⇒ 副产不会被静默吞掉。
+     *
+     * <p>⚠️ 只在 {@code calculateParallel} 那条路上被问「会不会 void」（调用点
+     * {@code PrimordialEngineRecipeLogic.java:922/928} 的 {@code machine::canVoidRecipeOutputs}）。
+     *
+     * @param cap 被 {@code ParallelLogic#limitByOutputMerging} 逐个询问的配方能力
+     * @return {@code cap == EURecipeCapability.CAP} ⇒ {@code true}；其余 ⇒ 上游默认判据
+     */
+    @Override
+    public boolean canVoidRecipeOutputs(com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability<?> cap) {
+        if (cap == EURecipeCapability.CAP) {
+            return true;
+        }
+        return super.canVoidRecipeOutputs(cap);
     }
 
     /**
@@ -572,6 +629,48 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     @DescSynced
     private long hostEnergyOutCapacity = -1L;
 
+    // ── 🔴 2026-11-17 显示用「大整数通道」（用户 bug：「能源仓好像到 long 上限了」＋「jade/AR 没显示发电功率」）──
+    //
+    //  为什么必须新开一条通道（不是"再加个 long 字段"就能解决）：
+    //   ① 无线电网终端（{@code NetworkEnergyContainer}）的 {@code getEnergyStored()}
+    //      = {@code NumberUtils.getLongValue(WirelessEnergyManager.getUserEU(uuid))}
+    //      ⇒ 池子（BigInteger）被<b>静默压平到 Long.MAX_VALUE = 9.22e18</b>，
+    //      面板上那个 `9.22E` 就是这么来的 —— <b>它是假读数，不是"仓里有 9.22e18"</b>。
+    //   ② 创造模式能源仓（{@code InfinityEnergyContainer}）的容量<b>本来就是</b> {@code Long.MAX_VALUE}，
+    //      那是上游的"无限"哨兵，也不是真容量。
+    //   ③ 归墟的发电<b>直接进无线池</b>（{@code GuixuZeroPointGeneration} 那条线），
+    //      <b>不经过动力仓</b> ⇒ 仓侧的 {@code hostTotalEuGenPerTick}（动力仓吞吐）对归墟<b>恒 0</b>，
+    //      拿它当"发电功率"就是印一个假的 0。
+    //  ⇒ 真值只在池子里（{@code WirelessEnergyManager.getUserEU} 返回 BigInteger），只能服务端读、
+    //    按 {@code byte[]} 同步（LDLib syncdata 没有 BigInteger，{@code byte[]} 是受支持类型 ——
+    //    与 {@link #hostModReason} 同款；见类内 §"数组走 ARRAY_ACCESSOR_FACTORY" 那段实证）。
+    //  ⚠️ 这三个字段**只喂显示**：不参与任何配方 / 发电 / 并行 / 电学判断（一个字节都不影响机器行为）。
+    /** 每 tick 入池的发电量（{@code BigInteger.toByteArray()}；<b>长度 0 = 读不到</b>）。 */
+    @DescSynced
+    private byte[] hostGenPerTickBytes = EMPTY_BYTES;
+    /**
+     * 能源仓（{@code IO.IN}）已存的 <b>BigInteger 真值</b>
+     * （池子记账时 = 池子余额；<b>长度 0 = 读不到 ⇒ 回落到 {@link #hostEnergyInStored} 的 long 读数</b>）。
+     */
+    @DescSynced
+    private byte[] hostEnergyInStoredBytes = EMPTY_BYTES;
+    /** 两侧能量仓的显示口径标志（每侧 4 位；取值 {@link #E_FLAG_UNREADABLE} / {@link #E_FLAG_INFINITE} / {@link #E_FLAG_POOL}）。 */
+    @DescSynced
+    private int hostEnergyFlags = 0;
+
+    /** 标志位：这一侧的能力代理读取抛异常 ⇒ 面板写 {@code --（读不到）}，<b>不写 0</b>。 */
+    public static final int E_FLAG_UNREADABLE = 1;
+    /** 标志位：这一侧容量 = {@code Long.MAX_VALUE}（上游"无限"哨兵）⇒ 面板写 {@code ∞}，<b>不写 9.22E</b>。 */
+    public static final int E_FLAG_INFINITE = 2;
+    /** 标志位：这一侧已存来自<b>无线池</b>（仓侧读数会被压平 ⇒ 只信池子的 BigInteger）。 */
+    public static final int E_FLAG_POOL = 4;
+    /** 标志位：这一侧<b>真的装了仓</b>（{@code 0} = 没装 ⇒ 写"无仓"，而不是编一个 {@code 0 / 0}）。 */
+    public static final int E_FLAG_HAS_HATCH = 8;
+    /** 动力仓（{@code IO.OUT}）的标志位起点；能源仓（{@code IO.IN}）从第 0 位开始。 */
+    public static final int E_FLAG_SHIFT_OUT = 4;
+    /** 空 {@code byte[]} = "读不到"（{@code BigInteger.ZERO.toByteArray()} 是 {@code [0]}，长 1 ⇒ 不会与它混）。 */
+    static final byte[] EMPTY_BYTES = new byte[0];
+
     // ── 非同步：本机自己的采样器与 tick 订阅句柄（不需要过网络，也不需要落盘）──────────────
     /** 机器级 tick 钩子的句柄（{@code ensureSnapshotTick()} 订阅、{@code onUnload()} 退订）。 */
     private com.gregtechceu.gtceu.api.machine.TickableSubscription snapTick;
@@ -965,6 +1064,43 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         return hostEnergyOutCapacity;
     }
 
+    /**
+     * <b>每 tick 入池的发电量</b>（{@code EU/t}，BigInteger 真值；{@code null} = 读不到）。
+     *
+     * <p>🔴 这就是「发电功率」那一格的<b>唯一取数点</b>（Jade 与 AR 面板共用这一个方法）：
+     * 它取的是<b>归墟写进无线池的量</b>（{@code GuixuZeroPointGeneration.Readings#product}，
+     * 与真正入池<b>同一条纯函数、同一组输入</b>），<b>不是</b>动力仓的 IO
+     * （归墟的电不经动力仓 ⇒ 那条恒 0，见 {@link #hostTotalEuGenPerTick} 的注释）。
+     *
+     * <p>三种语义必须分开（用户口径：「不要 0 伪装 --，也不要 -- 伪装 0」）：
+     * <pre>
+     *   null        ⇒ 服务端还没算出 / 客户端还没收到快照 ⇒ 面板写 `--`
+     *   ZERO        ⇒ 这一刻<b>确实</b>没有入池（没在跑视界能流抽取 / 池子没绑定）⇒ 写 `0`
+     *   >0          ⇒ 本 tick 入池这么多（= 入池那条算式的结果）
+     * </pre>
+     */
+    @Nullable
+    public java.math.BigInteger hostGenPerTickBig() {
+        return com.shanhai.common.text.ShanhaiBigNumberText.decode(hostGenPerTickBytes);
+    }
+
+    /** 能源仓已存的 <b>BigInteger 真值</b>（{@code null} = 读不到 ⇒ 回落到 {@link #hostEnergyInStored()}）。 */
+    @Nullable
+    public java.math.BigInteger hostEnergyInStoredBig() {
+        return com.shanhai.common.text.ShanhaiBigNumberText.decode(hostEnergyInStoredBytes);
+    }
+
+    /**
+     * 两侧能量仓的显示口径标志（低 4 位 = 能源仓 {@code IO.IN}，高 4 位 = 动力仓 {@code IO.OUT}）。
+     *
+     * <p>取值见 {@link #E_FLAG_UNREADABLE} / {@link #E_FLAG_INFINITE} / {@link #E_FLAG_POOL}；
+     * <b>与 {@code HostFxGlassArModel.E_FLAG_*} 逐值相同</b>（两处必须同步改，同一套纪律见
+     * {@code REASON_*} 那张表）。
+     */
+    public int hostEnergyFlags() {
+        return hostEnergyFlags;
+    }
+
     /** 上一次打 {@code [SHANHAI-HOSTBONUS]} 的那组读数（只在变化时打）。 */
     private String bonusLoggedKey = "";
 
@@ -1088,12 +1224,24 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         //   progress#  = 每 tick 的进度推送（只算"真的变了"的那些 ⇒ 机器在跑时 ≈20/秒）
         //   tick#      = tick 钩子活着没有（≈20/秒；不涨 = 订阅没挂上）
         if (snapLogCount <= 3 || snapLogCount % 40 == 0) {
+            // 🆕 2026-11-18：「发电功率=0/t」那个 bug 的**判据行** —— 一行里同时给出
+            //   ① 这次真正**推给客户端**的发电读数（= 客户端那一格的原样来源）；
+            //   ② 这个读数是走哪一支算出来的（readings / sticky / idle(=0) / unknown(--)）。
+            //   ⇒ 下次一看就知道"0 是哪一环变的"，不必再靠猜。
             LOGGER.info("[SHANHAI-HOSTSNAP] seq={} refresh#{} progress#{} tick#{} formed={} modules={}"
-                            + " (installed={}) energyIn={} EU/t energyOut={} EU/t failed={}{}",
+                            + " (installed={}) energyIn={} EU/t energyOut={} EU/t"
+                            + " 发电读数={} 取自={} failed={}{}"
+                            // 🆕 2026-11-19：产能行的**原文**（不盯屏幕也能判它印了什么）。
+                            //   服务端 getString() 解的是 en_us ⇒ 词是 "Producing"，数字/档名/括号逐字相同。
+                            + " 产能行=[{}] 档={} 档电压={}",
                     hostSnapSeq, snapRefreshCalls, snapProgressPushes, snapTickCalls, isFormed(),
                     getFormedModuleCount(), hostInstalledModules,
-                    hostTotalEuUsedPerTick, hostTotalEuGenPerTick, failed,
-                    failed ? (" err=" + (failure == null ? "?" : failure.getClass().getSimpleName())) : "");
+                    hostTotalEuUsedPerTick, hostTotalEuGenPerTick,
+                    shanhai$genPushedForLog(), shanhai$genDisplayBranch, failed,
+                    failed ? (" err=" + (failure == null ? "?" : failure.getClass().getSimpleName())) : "",
+                    shanhai$generationPowerLineText(),
+                    Integer.valueOf(shanhai$generationDisplayTier()),
+                    Long.valueOf(shanhai$generationDisplayVoltage()));
         }
     }
 
@@ -1209,8 +1357,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         final long euGenPower = averagePerTick(powerOutRing, powerRingFill);
 
         // ── 主机级：能源仓 / 动力仓（与 addDisplayText 同一个方法）────────────────────────
-        final long[] in = energyTotals(IO.IN);
-        final long[] out = energyTotals(IO.OUT);
+        final SideEnergy inSide = shanhai$readSideEnergy(IO.IN);
+        final SideEnergy outSide = shanhai$readSideEnergy(IO.OUT);
+        final long[] in = {inSide.stored, inSide.capacity};
+        final long[] out = {outSide.stored, outSide.capacity};
+        // 🆕 2026-11-17：显示用大整数通道（发电功率 / 池子余额）；只喂 Jade 与 AR，不参与任何判断
+        final DisplayBig displayBig = shanhai$readDisplayBig(inSide, outSide);
 
         // ── 主机级：当前产出（最多 3 条）────────────────────────────────────────────────
         final int[] hostOutIds = sentinelInts(HOST_OUT_MAX);
@@ -1238,6 +1390,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                         || euGenPower != hostTotalEuGenPerTick
                         || in[0] != hostEnergyInStored || in[1] != hostEnergyInCapacity
                         || out[0] != hostEnergyOutStored || out[1] != hostEnergyOutCapacity
+                        || !java.util.Arrays.equals(displayBig.genBytes, hostGenPerTickBytes)
+                        || !java.util.Arrays.equals(displayBig.inStoredBytes, hostEnergyInStoredBytes)
+                        || displayBig.flags != hostEnergyFlags
                         || !java.util.Arrays.equals(pct, hostModProgressPct)
                         || !java.util.Arrays.equals(eu, hostModEuPerTick)
                         || !java.util.Arrays.equals(par, hostModParallel)
@@ -1269,6 +1424,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         hostEnergyInCapacity = in[1];
         hostEnergyOutStored = out[0];
         hostEnergyOutCapacity = out[1];
+        hostGenPerTickBytes = displayBig.genBytes;
+        hostEnergyInStoredBytes = displayBig.inStoredBytes;
+        hostEnergyFlags = displayBig.flags;
         hostModProgressPct = pct;
         hostModEuPerTick = eu;
         hostModParallel = par;
@@ -1952,6 +2110,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
 
     public GuixuVisionCoreMachine(IMachineBlockEntity holder, Object... args) {
         super(holder, args);
+        // 🔴 2026-11-14：自持无线网 handler —— **构造时 new**（照伪神
+        // GTLAddWirelessWorkableElectricMultipleRecipesMachine 的 selfWirelessNetworkTrait 同形）。
+        // 它在 super(...) 之后才建：基类构造器里只会 new 配方逻辑，不读这个接缝（已核）。
+        // ⚠️ uuid 此刻还读不到（NBT 在构造之后才 load）⇒ 绑定见 onMachinePlaced 与 getter 的懒同步。
+        this.shanhai$selfWirelessEnergyHandler = new ShanhaiSelfWirelessEnergyHandler(this);
         // 覆写 onContentsChanged ⇒ "槽一变就重算并推同步"，不等任何 tick 订阅。
         // 客户端也会收到这个回调（GUI 槽的本地交互），所以必须挡住 isRemote() 那一侧。
         this.levelOverrideSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.NONE) {
@@ -2225,18 +2388,75 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
      * @throws IllegalStateException 缺字段 / 注解没生效（说明 holder 的父链写错了，通常是"跳级"）
      */
     public static void assertFieldHolderComplete() {
+        shanhai$assertFieldHolderComplete(null);
+    }
+
+    /**
+     * {@link #assertFieldHolderComplete()} 的<b>可注入版</b>（负对照用：把某个字段从"登记了什么"里拿掉）。
+     *
+     * @param registeredIfStubbed {@code null} = 读真实 holder（生产路径）；
+     *                            非 {@code null} = 用这份名字集合冒充"实际登记了什么" ⇒
+     *                            缺的那个字段会像真的一样<b>抛 IllegalStateException</b>
+     */
+    static void shanhai$assertFieldHolderComplete(@Nullable java.util.Set<String> registeredIfStubbed) {
+        final ManagedKey[] keys = MANAGED_FIELD_HOLDER.getFields();
         final java.util.Set<String> names = new java.util.HashSet<>();
-        boolean overrideSlotPersisted = false;
-        boolean overrideLevelSynced = false;
-        for (final ManagedKey key : MANAGED_FIELD_HOLDER.getFields()) {
+        for (final ManagedKey key : keys) {
             names.add(key.getName());
-            if ("levelOverrideSlot".equals(key.getName())) {
-                overrideSlotPersisted = key.isPersist();
-            }
-            if ("hostMatterLevelOverride".equals(key.getName())) {
-                overrideLevelSynced = key.isDestSync();
-            }
         }
+        final java.util.List<String> problems = shanhai$holderProblems(keys, registeredIfStubbed);
+        if (!problems.isEmpty()) {
+            throw new IllegalStateException("[SHANHAI-HOST] 字段 holder 自检失败：" + problems
+                    + " —— 这会导致「编译通过、游戏不报错、字段永不落盘也永不同步」。"
+                    + "最常见原因是 MANAGED_FIELD_HOLDER 的父 holder 写成了跳级"
+                    + "（必须 PrimordialOmegaEngineMachine.managedFieldHolder()，不能直接用"
+                    + " WorkableElectricMultiblockMachine.MANAGED_FIELD_HOLDER）。"
+                    + (registeredIfStubbed != null
+                            ? "【负对照注入】假装登记了这些 = " + registeredIfStubbed
+                            : "实际登记的字段 = " + names));
+        }
+        if (registeredIfStubbed == null) {
+            LOGGER.info("[SHANHAI-HOST] 字段 holder 自检通过：{} 个字段（含本类 levelOverrideSlot/hostMatterLevelOverride"
+                    + "/6 个视界参数 hostFxEnabled/hostRingDegPerSec/hostShipUpDegPerSec/hostShipDownDegPerSec/"
+                    + "hostBlackHoleRadiusTenths/hostLensEnabled 与父类 matterBonusSlot/limitedDuration/matterBonusLevel"
+                    + "；🔴 2026-11-14 新增无线网归属字段 " + FIELD_VISION_POOL_UUID + "）",
+                    names.size());
+        }
+    }
+
+    /**
+     * 🔴 <b>「零点能发电」的无线网归属字段名</b> —— 全工程<b>唯一一份字面量</b>
+     * （自检的 required 表与离线探针都读它，避免两处各写一遍字符串而悄悄分叉）。
+     */
+    static final String FIELD_VISION_POOL_UUID = "shanhai$visionPoolUuid";
+
+    /** 真实 holder 的字段表（给 {@link GuixuZeroPointGeneration#holderSelfTest()} 的离线负对照用）。 */
+    static ManagedKey[] shanhai$managedFieldKeys() {
+        return MANAGED_FIELD_HOLDER.getFields();
+    }
+
+    /** 生产路径：真实 holder 自检（空表 = 绿）。 */
+    static java.util.List<String> shanhai$holderProblems(ManagedKey[] keys) {
+        return shanhai$holderProblems(keys, null);
+    }
+
+    /**
+     * <b>字段 holder 的纯判定</b>（把"读 holder"与"判缺什么"拆开，好让负对照能在不破坏真实 holder 的前提下跑）。
+     *
+     * @param keys          真实 holder 的字段表
+     * @param registeredIfStubbed {@code null} = 用 {@code keys} 的名字（生产路径）；
+     *                      非 {@code null} = <b>用这份名字集合冒充"实际登记了什么"</b>
+     *                      ⇒ 这就是「把某字段从 holder 里拿掉」这条负对照的注入点
+     */
+    static java.util.List<String> shanhai$holderProblems(ManagedKey[] keys,
+                                                         @Nullable java.util.Set<String> registeredIfStubbed) {
+        final java.util.Map<String, ManagedKey> byName = new java.util.HashMap<>();
+        final java.util.Set<String> names = new java.util.HashSet<>();
+        for (final ManagedKey key : keys) {
+            byName.put(key.getName(), key);
+            names.add(key.getName());
+        }
+        final java.util.Set<String> registered = registeredIfStubbed != null ? registeredIfStubbed : names;
         final java.util.List<String> problems = new java.util.ArrayList<>();
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride",
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
@@ -2262,29 +2482,31 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 //    关掉 GUI 再打开就回到空"，且完全静默 ⇒ 必须逐个登记。
                 // 🔴 2026-10-25 T4：字段上移到基类（键名 hostExtraMountSlots）＋ 旧键 extraMountSlots
                 //    仍然登记（它是老存档迁移的读口，丢了就等于丢老挡的 3 件东西）＋ 迁移标记。
-                "extraMountSlots", "hostExtraMountSlots", "extraMountLegacyMigrated"}) {
-            if (!names.contains(required)) {
+                "extraMountSlots", "hostExtraMountSlots", "extraMountLegacyMigrated",
+                // 🔴 2026-11-14：零点能发电的无线网归属（UUID）。
+                //    漏登记 = 入池调用永远拿不到 uuid ⇒ 发电【整条静默不生效】：
+                //    配方电已被清零、玩家看到的却是"有配方在跑、池子一动不动"。
+                FIELD_VISION_POOL_UUID}) {
+            if (!registered.contains(required)) {
                 problems.add("缺字段 " + required);
             }
         }
-        if (!overrideSlotPersisted) {
+        final ManagedKey overrideSlot = byName.get("levelOverrideSlot");
+        if (overrideSlot != null && !overrideSlot.isPersist()) {
             problems.add("levelOverrideSlot 没有落盘（@Persisted 未登记）");
         }
-        if (!overrideLevelSynced) {
+        final ManagedKey overrideLevel = byName.get("hostMatterLevelOverride");
+        if (overrideLevel != null && !overrideLevel.isDestSync()) {
             problems.add("hostMatterLevelOverride 没有同步（@DescSynced 未登记）");
         }
-        if (!problems.isEmpty()) {
-            throw new IllegalStateException("[SHANHAI-HOST] 字段 holder 自检失败：" + problems
-                    + " —— 这会导致「编译通过、游戏不报错、字段永不落盘也永不同步」。"
-                    + "最常见原因是 MANAGED_FIELD_HOLDER 的父 holder 写成了跳级"
-                    + "（必须 PrimordialOmegaEngineMachine.managedFieldHolder()，不能直接用"
-                    + " WorkableElectricMultiblockMachine.MANAGED_FIELD_HOLDER）。实际登记的字段 = " + names);
+        final ManagedKey visionUuid = byName.get(FIELD_VISION_POOL_UUID);
+        if (visionUuid != null && !visionUuid.isPersist()) {
+            problems.add(FIELD_VISION_POOL_UUID + " 没有落盘（@Persisted 未登记）"
+                    + " ⇒ 拆装/重载后发电会静默停摆");
         }
-        LOGGER.info("[SHANHAI-HOST] 字段 holder 自检通过：{} 个字段（含本类 levelOverrideSlot/hostMatterLevelOverride"
-                + "/6 个视界参数 hostFxEnabled/hostRingDegPerSec/hostShipUpDegPerSec/hostShipDownDegPerSec/"
-                + "hostBlackHoleRadiusTenths/hostLensEnabled 与父类 matterBonusSlot/limitedDuration/matterBonusLevel）",
-                names.size());
+        return problems;
     }
+
 
     /**
      * 覆写基类的「模块等级复写」出口：模块侧 {@code getHostMatterLevelOverride()} 读的就是这个值。
@@ -2779,22 +3001,292 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
      * <p>纯读：任何异常都退回 {@code (0,0)}，绝不打断抬头渲染。
      */
     private long[] energyTotals(IO io) {
-        long stored = 0L;
-        long capacity = 0L;
+        final SideEnergy side = shanhai$readSideEnergy(io);
+        return new long[]{side.stored, side.capacity};
+    }
+
+    /**
+     * 一侧能量仓的<b>显示读数</b>（2026-11-17 新增：在 {@link #energyTotals} 原有两项之外，
+     * 再带上"<b>有没有仓</b>"「<b>读异常</b>」「<b>是不是池子记账</b>」三种语义）。
+     *
+     * <p>为什么必须分开：{@link #energyTotals} 把"没装仓"和"代理抛异常"<b>都折成 {@code 0}</b>
+     * ⇒ 面板上就分不出「这台真没装仓」和「读不到」。用户这次点名的正是这一类
+     * （「<b>不许把"读不到"显示成 0</b>」）⇒ 显示层改读本类。
+     *
+     * <p>纯读：任何异常只置 {@link #failed}，绝不打断抬头渲染 / 面板渲染。
+     */
+    private static final class SideEnergy {
+        /** 存量之和（{@code long}；池子记账时这<b>不是</b>真值，见 {@link #poolBacked}）。 */
+        long stored;
+        /** 容量之和。 */
+        long capacity;
+        /** 这一侧到底有没有 {@link IEnergyContainer}（{@code false} = 真的没装仓，写"无仓"而不是 0）。 */
+        boolean any;
+        /** 代理读取抛过异常 ⇒ 面板写 {@code --（读不到）}。 */
+        boolean failed;
+        /** 有「无线电网终端」这一类仓 ⇒ 仓侧存量是池子的 long 投影（会被压平），真值在池子里。 */
+        boolean poolBacked;
+        /** 池子余额（BigInteger 真值；{@code null} = 没读 / 读不到）。 */
+        java.math.BigInteger poolStored;
+        /**
+         * 这一侧<b>有没有</b>任何一个仓把自己报成"无限容量"（{@code getEnergyCapacity() == Long.MAX_VALUE}）。
+         *
+         * <p>🔴 为什么按<b>单仓</b>判、不看求和结果：多个仓相加会溢出（{@code Long.MAX + 4996} 回绕成负数），
+         * 求和后 {@code == Long.MAX_VALUE} 这个判据统计上不可靠 ⇒ 把"无限"记在读到它的那一刻。
+         */
+        boolean capacityInfinite;
+    }
+
+    /**
+     * 读一侧能量仓（<b>唯一的实现</b>：{@link #energyTotals} 与显示层共用这一个循环）。
+     *
+     * <p>"池子记账"的判型<b>复用</b> {@code ParallelPowerBudget.knownKindByName} 那张唯一类名表
+     * （沿超类链走，与客户端 {@code HostFxGlassArtText#kindOf} 同一条判据）——
+     * 不在这里另抄一份类名。
+     */
+    private SideEnergy shanhai$readSideEnergy(IO io) {
+        final SideEnergy side = new SideEnergy();
         try {
             final List<IRecipeHandler<?>> handlers = getCapabilitiesProxy().get(io, EURecipeCapability.CAP);
             if (handlers != null) {
                 for (IRecipeHandler<?> handler : handlers) {
                     if (handler instanceof IEnergyContainer container) {
-                        stored += container.getEnergyStored();
-                        capacity += container.getEnergyCapacity();
+                        side.any = true;
+                        // 🔴 饱和加（不溢出、不回绕成负数）：创造仓 / 终端的容量本身就有 Long.MAX_VALUE，
+                        //    把"无限"直接相加会得到负数 —— 那会让面板印出一个负容量。
+                        side.stored = shanhai$saturatedAdd(side.stored, container.getEnergyStored());
+                        final long capacity = container.getEnergyCapacity();
+                        if (capacity == Long.MAX_VALUE) {
+                            side.capacityInfinite = true;
+                        }
+                        side.capacity = shanhai$saturatedAdd(side.capacity, capacity);
+                        if (!side.poolBacked && shanhai$isPoolBacked(handler)) {
+                            side.poolBacked = true;
+                        }
                     }
                 }
             }
-        } catch (Throwable ignored) {
-            // 纯读：显示用，异常 ⇒ 当作"没有仓"
+        } catch (Throwable t) {
+            side.failed = true;
         }
-        return new long[]{stored, capacity};
+        if (side.poolBacked) {
+            side.poolStored = shanhai$poolBalanceOrNull();
+        }
+        return side;
+    }
+
+    /**
+     * 饱和加（溢出就停在 {@code Long.MAX_VALUE}，<b>不回绕成负数</b>）。
+     *
+     * <p>为什么必须：创造模式能源仓 / 无线电网终端的容量/存量本身就是 {@code Long.MAX_VALUE}
+     * （"无限"哨兵），两个这样的仓相加会回绕成负数 —— 面板上就会印出一个负的容量。
+     * 与 {@code NumberUtils.saturatedAdd} 同义（这里自己写 3 行，免得为一个加法多一处跨模组依赖）。
+     */
+    private static long shanhai$saturatedAdd(long a, long b) {
+        final long r = a + b;
+        if (((a ^ r) & (b ^ r)) < 0L) {
+            return a > 0L ? Long.MAX_VALUE : Long.MIN_VALUE;
+        }
+        return r;
+    }
+
+    /** 这个容器是不是「无线电网终端」那一路（池子记账、存量会被压平到 long）。 */
+    private static boolean shanhai$isPoolBacked(@NotNull IRecipeHandler<?> handler) {        for (Class<?> k = handler.getClass(); k != null && k != Object.class; k = k.getSuperclass()) {
+            final com.shanhai.common.machine.ParallelPowerBudget.HatchKind kind =
+                    com.shanhai.common.machine.ParallelPowerBudget.knownKindByName(k.getName());
+            if (kind == com.shanhai.common.machine.ParallelPowerBudget.HatchKind.NET_TERMINAL) {
+                return true;
+            }
+            if (kind != null) {
+                return false;                       // 认得出但【不是】池子终端 ⇒ 停（从具体到一般）
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 池子余额（BigInteger 真值）—— <b>只给显示用</b>：读不到 / 未绑定 / 客户端 ⇒ {@code null}。
+     *
+     * <p>为什么不复用 {@code shanhai$visionPoolAfter}：那个字段只在<b>入池那一刻</b>写；
+     * 而面板要的是"现在的余额"（别的机器也在取电）。这里现读一次，成本与入池那侧同一个调用。
+     */
+    @Nullable
+    private java.math.BigInteger shanhai$poolBalanceOrNull() {
+        if (isRemote()) {
+            return null;
+        }
+        try {
+            final java.util.UUID uuid = shanhai$visionPoolUuid();
+            return uuid == null ? null : WirelessEnergyManager.getUserEU(uuid);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * <b>发电功率的取数点</b>（显示层唯一入口）。
+     *
+     * <h2>🔴 2026-11-18 改过（原来这一格会印 {@code 0/t}，而机器其实在发电）</h2>
+     * 旧实现<b>只有</b>一个来源：{@code GuixuZeroPointGeneration.Readings#product}
+     * （即 {@code GuixuVisionCoreRecipeLogic#shanhai$visionReadings()}）。那个字段每轮装配
+     * 开头被清成 {@code null}，只有"这一轮正好含发电配方"时才重新赋值 ⇒ <b>它是闪烁的</b>；
+     * 而快照 10 tick 采一次 ⇒ 会踩到 null ⇒ 旧代码把它当 {@code ZERO} ⇒ 面板印 {@code 0/t}。
+     * <p>现在的取值优先级（三支都在 {@code 取自=} 那一栏里可见）：
+     * <pre>
+     *   ① readings  即时读数在场（本 tick 刚好算过）⇒ 用它（= 真正入池的那个数，不另算第二遍）
+     *   ② sticky    读数不在 ⇒ 用"最近一个完整 tick 真的进了池子多少"（≤ {@link #GEN_STICKY_TICKS} tick）
+     *   ③ idle(=0)  机器确实没在跑 ⇒ 这才是真的 0
+     *   ④ 过期(=0)  在跑、以前入过池，但超过 {@link #GEN_STICKY_TICKS} tick 没再入池 ⇒ 0（入池是**每 tick** 的）
+     *   ⑤ unknown   在跑、但本会话一次都没拿到过入池记账 ⇒ null（面板画 `--（读不到…）`，绝不印 0）
+     * </pre>
+     * ⚠️ 诚实边界：②读到的是"最近一个 tick 真的入池的量"，与 {@code [SHANHAI-GEN-LIMIT]} 那行的
+     * {@code Δ池=} <b>同源</b>（都来自入池那一刻）；机器停下来之后最多还会显示 {@link #GEN_STICKY_TICKS}
+     * tick，之后按 ③ 归 0。
+     */
+    @Nullable
+    private java.math.BigInteger shanhai$displayGenerationPerTick() {
+        if (isRemote()) {
+            shanhai$genDisplayBranch = "client";    // 客户端不算这一格（读的是同步过来的 byte[]）
+            return null;
+        }
+        final long now = getOffsetTimer();
+        try {
+            if (!(getRecipeLogic() instanceof GuixuVisionCoreRecipeLogic guixuLogic)) {
+                shanhai$genDisplayBranch = "no-guixu-logic";
+                return null;                        // 配方逻辑还没装 ⇒ 读不到（不是 0）
+            }
+            // ① 即时读数在场（本 tick 刚好算过）⇒ 直接用它（最准）
+            if (guixuLogic.isWorking()) {
+                final GuixuZeroPointGeneration.Readings r = guixuLogic.shanhai$visionReadings();
+                if (r != null && r.product.signum() > 0 && shanhai$visionPoolUuid() != null) {
+                    shanhai$genDisplayBranch = "readings";
+                    return r.product;
+                }
+            }
+            // ② 读数不在（那个字段每轮装配都会被清空 / 这一轮不含发电配方）⇒ 用"最近真的进了池子"的量
+            //    ⚠️ 这一支就是本次 bug 的修法：显示值与 Δ池 同源，不可能"池子在涨而显示 0"。
+            java.math.BigInteger fresh = null;
+            long freshTick = -1L;
+            if (shanhai$genLastTickTotal != null && shanhai$genLastTick > freshTick) {
+                fresh = shanhai$genLastTickTotal;
+                freshTick = shanhai$genLastTick;
+            }
+            if (shanhai$genSumThisTick != null && shanhai$genSumTick > freshTick) {
+                fresh = shanhai$genSumThisTick;
+                freshTick = shanhai$genSumTick;
+            }
+            if (fresh != null && freshTick >= 0L && now - freshTick <= GEN_STICKY_TICKS) {
+                shanhai$genDisplayBranch = "sticky(最近入池 t=" + freshTick + "，差 " + (now - freshTick) + " tick)";
+                return fresh;
+            }
+            // ③ 机器确实没在跑，而且近期也没有入池 ⇒ 这才是真的 0
+            if (!guixuLogic.isWorking()) {
+                shanhai$genDisplayBranch = "idle(=0)";
+                return java.math.BigInteger.ZERO;
+            }
+            // ④ 在跑、以前入过池、但已经超过新鲜期 ⇒ 这一窗真的没在入池（入池是**每 tick** 的）⇒ 0
+            if (shanhai$genLastTick >= 0L || shanhai$genSumTick >= 0L) {
+                shanhai$genDisplayBranch = "过期(=0)";
+                return java.math.BigInteger.ZERO;
+            }
+            // ⑤ 在跑、但本会话**一次都没拿到入池记账** ⇒ 读不到，**不许**印 0
+            shanhai$genDisplayBranch = "unknown(--)从未入池";
+            return null;
+        } catch (Throwable t) {
+            shanhai$genDisplayBranch = "throw(--) " + t.getClass().getSimpleName();
+            return null;                            // 纯显示：异常 ⇒ `--`，绝不影响机器
+        }
+    }
+
+    /**
+     * 🆕 2026-11-18：入池成功那一刻把「这一 tick 真的进了多少」记下来（显示专用）。
+     *
+     * <p>为什么必须记"整 tick 合计"而不是"最后一笔"：同一 tick 可能有多个配方线程各入一笔
+     * （实测池审计窗口里 20 tick 有 6~39 笔）⇒ 只取最后会低估。
+     * <p>为什么"最近一笔"也要留：日志对账要用（{@code 本次=}）。
+     * <p>🔴 纯显示记账：任何异常都吞掉，绝不影响入池/配方。
+     */
+    private void shanhai$noteGenerationDeposited(@NotNull java.math.BigInteger amount) {
+        try {
+            final long now = getOffsetTimer();
+            if (shanhai$genSumTick != now || shanhai$genSumThisTick == null) {
+                // 跨到新 tick：把上一 tick 的合计定格成"最近一个完整 tick 的读数"
+                if (shanhai$genSumThisTick != null && shanhai$genSumThisTick.signum() > 0) {
+                    shanhai$genLastTickTotal = shanhai$genSumThisTick;
+                    shanhai$genLastTick = shanhai$genSumTick;
+                }
+                shanhai$genSumTick = now;
+                shanhai$genSumThisTick = java.math.BigInteger.ZERO;
+            }
+            shanhai$genSumThisTick = shanhai$genSumThisTick.add(amount);
+            shanhai$genLastAmount = amount;
+        } catch (Throwable ignored) {
+            // 显示记账坏了不许连坐机器（与入池那条探针同纪律）
+        }
+    }
+
+    /**
+     * 最近一次<b>推给客户端</b>的发电读数（只给 {@code [SHANHAI-HOSTSNAP]} 判据行用）。
+     *
+     * <p>⚠️ 读的是同步字段本身（{@code hostGenPerTickBytes}）⇒ 这一行印出来的就是客户端那一格的原样来源；
+     * 空数组 = 读不到（{@code BigInteger.ZERO} 的 byte[] 是 {@code [0]}，长 1，不会与它混）。
+     */
+    @NotNull
+    private String shanhai$genPushedForLog() {
+        try {
+            final java.math.BigInteger v =
+                    com.shanhai.common.text.ShanhaiBigNumberText.decode(hostGenPerTickBytes);
+            return v == null ? "读不到" : v.toString();
+        } catch (Throwable t) {
+            return "读不到(" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** 一次算好"显示用大整数通道"的三项（{@link #refreshHostRuntimeSnapshot} 只调一次）。 */
+    private static final class DisplayBig {
+        byte[] genBytes = EMPTY_BYTES;
+        byte[] inStoredBytes = EMPTY_BYTES;
+        int flags = 0;
+    }
+
+    /** 组装显示用大整数通道（<b>只读</b>；任何异常都退化成"读不到"，绝不编数）。 */
+    private DisplayBig shanhai$readDisplayBig(@NotNull SideEnergy in, @NotNull SideEnergy out) {
+        final DisplayBig out3 = new DisplayBig();
+        try {
+            final java.math.BigInteger gen = shanhai$displayGenerationPerTick();
+            if (gen != null) {
+                out3.genBytes = gen.toByteArray();
+            }
+        } catch (Throwable ignored) {
+            // ⇒ 留空 = 读不到
+        }
+        int flags = 0;
+        if (in.any) {
+            flags |= E_FLAG_HAS_HATCH;
+        }
+        if (in.failed) {
+            flags |= E_FLAG_UNREADABLE;
+        }
+        if (in.capacity == Long.MAX_VALUE || in.capacityInfinite) {
+            flags |= E_FLAG_INFINITE;
+        }
+        if (in.poolBacked) {
+            flags |= E_FLAG_POOL;
+            if (in.poolStored != null) {
+                out3.inStoredBytes = in.poolStored.toByteArray();
+            }
+        }
+        if (out.any) {
+            flags |= E_FLAG_HAS_HATCH << E_FLAG_SHIFT_OUT;
+        }
+        if (out.failed) {
+            flags |= E_FLAG_UNREADABLE << E_FLAG_SHIFT_OUT;
+        }
+        if (out.capacity == Long.MAX_VALUE || out.capacityInfinite) {
+            flags |= E_FLAG_INFINITE << E_FLAG_SHIFT_OUT;
+        }
+        out3.flags = flags;
+        return out3;
     }
 
     // ------------------------------------------------------------------ 显示文案（别放假数据）
@@ -2826,12 +3318,30 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 .withStyle(ChatFormatting.GRAY));
 
         // ── 能量双仓：两行分别显示（默认那条已被本覆写挡掉，不重复）──
-        final long[] input = energyTotals(IO.IN);
-        final long[] output = energyTotals(IO.OUT);
-        textList.add(Component.literal("能源仓 (IN)：" + input[0] + " / " + input[1] + " EU")
+        //  🆕 2026-11-17（用户原话：「AR 它这个能源仓好像到 long 上限了，这个改成大整数的科学计数法吧」）：
+        //   ① 池子记账的仓（无线电网终端）⇒ 存量取【池子的 BigInteger】（仓侧那个数是池子的 long 投影，
+        //      >Long.MAX 会被 getLongValue 静默压平成 9.22e18 —— 面板上那个 `9.22E` 就是假读数）；
+        //   ② 容量 = Long.MAX_VALUE 是上游的"无限"哨兵（创造仓 / 终端容器都这么报）⇒ 印 `∞`，不再印 9.22E；
+        //   ③ "没装仓" 与 "读不到" 分开写（以前两者都折成 `0 / 0`）。
+        textList.add(Component.literal("能源仓 (IN)：" + shanhai$energyCellText(IO.IN) + " EU")
                 .withStyle(ChatFormatting.AQUA));
-        textList.add(Component.literal("动力仓 (OUT)：" + output[0] + " / " + output[1] + " EU")
+        //  🔴 2026-11-15（用户：动力仓还是 0，是不是直连无线电网导致的？——对，就是它）：
+        //    归墟**没有动力仓**，电走 GuixuZeroPointGeneration 直连无线池 ⇒ OUT 侧恒 `0 / 0（这一侧没装仓）`。
+        //    那是设计使然，不是故障；但把 `0 / 0（这一侧没装仓） EU` 摆在抬头里，每次都要重新想一遍是不是坏了
+        //    ⇒ 这一侧没装仓时直接写清楚"本机不走动力仓"，省掉那个会让人误会的 0。
+        final String outCell = shanhai$energyCellText(IO.OUT);
+        textList.add(Component.literal(outCell.startsWith("0 / 0")
+                ? "动力仓：无（发电直连无线电网）"
+                : "动力仓 (OUT)：" + outCell + " EU")
                 .withStyle(ChatFormatting.AQUA));
+        // ── 🆕 发电功率（用户 2026-11-17：「jade 没有显示发电功率」）────────────────────────
+        //    取数 = 归墟写进无线池的速率（GuixuZeroPointGeneration.Readings#product），
+        //    **不是**动力仓 IO —— 归墟的电直接进池、不经过动力仓 ⇒ 那条恒 0（见 hostGenPerTickBig 的注释）。
+        //  🔴 2026-11-19（用户：「把归墟那行改成图1 那种产能显示」）：文字 / 括号 / 单位 / 档名
+        //     逐字照 gtladditions 的 GT 原生产能行（证据与 javap 偏移见 shanhai$generationPowerLine）。
+        //     ⚠️ 取数一行没变（仍是本 tick 入池量，BigInteger）—— 只把
+        //     「发电功率：40.56N EU/t（无线池入池速率）」换成「产能 40.56Q EU/t (4398046511104A MAX+16)」。
+        textList.add(shanhai$generationPowerLine());
 
         // ── 物质模块槽门控 ⇒ 增产 / 减免（生效了就必须看得见）──
         final int bonus = moduleSlotBonus();
@@ -2872,5 +3382,705 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                     .append(Component.literal("（跨配方种类并行：挂在本机上的模块按全部配方类型轮转取配方）")
                             .withStyle(ChatFormatting.GRAY)));
         }
+    }
+
+    // ── 🆕 2026-11-17：能量双仓 / 发电功率两格的显示实现（**只读**）────────────────────────
+
+    /**
+     * 一侧能量仓的「已存 / 容量」文案（{@code BigInteger} 安全；{@code ∞} 哨兵；无仓 / 读不到分开）。
+     *
+     * <p>两条来源（口径必须一致，否则 Jade 与 AR 会对不上）：
+     * <ul>
+     *   <li><b>服务端</b>（Jade 的服务端那一跳 / GUI）⇒ {@link #shanhai$readSideEnergy} 现读；</li>
+     *   <li><b>客户端</b>（单机 GUI 的客户端那一跳）⇒ 读同步镜像 {@code hostEnergy*} + {@code hostEnergyFlags}
+     *       —— 仓的 {@code energyContainer} 是 {@code @Persisted} 而不是 {@code @DescSynced}
+     *       ⇒ 客户端自己读恒 0，那就是假数（本类 §"能量双仓的存量"那段已写明）。
+     * </ul>
+     */
+    @NotNull
+    private String shanhai$energyCellText(@NotNull IO io) {
+        final boolean outSide = io == IO.OUT;
+        final int flags = (hostEnergyFlags >>> (outSide ? E_FLAG_SHIFT_OUT : 0)) & 0xF;
+        long stored;
+        long capacity;
+        boolean any;
+        boolean failed;
+        boolean poolBacked;
+        boolean infiniteCap;
+        java.math.BigInteger poolStored;
+        if (isRemote()) {
+            stored = outSide ? hostEnergyOutStored : hostEnergyInStored;
+            capacity = outSide ? hostEnergyOutCapacity : hostEnergyInCapacity;
+            // 快照还没到 ⇒ 三个数都是 -1 哨兵 ⇒ 一律"读不到"，别写 0
+            if (stored < 0L && capacity < 0L) {
+                return "--（读不到：服务端能量快照还没到）";
+            }
+            any = (flags & E_FLAG_HAS_HATCH) != 0 || stored != 0L || capacity != 0L;
+            failed = (flags & E_FLAG_UNREADABLE) != 0;
+            poolBacked = (flags & E_FLAG_POOL) != 0;
+            infiniteCap = (flags & E_FLAG_INFINITE) != 0;
+            poolStored = outSide ? null : hostEnergyInStoredBig();
+        } else {
+            final SideEnergy side = shanhai$readSideEnergy(io);
+            stored = side.stored;
+            capacity = side.capacity;
+            any = side.any;
+            failed = side.failed;
+            poolBacked = side.poolBacked;
+            infiniteCap = side.capacityInfinite;
+            poolStored = side.poolStored;
+        }
+        if (failed) {
+            return "--（读不到：能量能力代理抛异常）";
+        }
+        if (!any) {
+            return "0 / 0（这一侧没装仓）";
+        }
+        final boolean infinite = infiniteCap || capacity == Long.MAX_VALUE;
+        final String storedText;
+        if (poolBacked) {
+            storedText = com.shanhai.common.text.ShanhaiBigNumberText.compact(poolStored) + "（无线池余额）";
+        } else if (infinite && stored == Long.MAX_VALUE) {
+            storedText = "∞";                       // 创造模式能源仓：存量=容量=Long.MAX 是"无限"，不是"装满 9.22e18"
+        } else {
+            storedText = com.shanhai.common.text.ShanhaiBigNumberText.compactLong(stored);
+        }
+        return storedText + " / " + com.shanhai.common.text.ShanhaiBigNumberText.capacity(capacity, infinite);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🆕 2026-11-19：产能行改「GT 原生格式」（用户原话：「把归墟那行改成图1 那种产能显示」）
+    //
+    //  图1（他要的样子）  : 产能 19.81Y EU/t（2147483.65A MAX+16）
+    //  图2（现在归墟）    : 发电功率：40.56N EU/t（无线池入池速率）      ← 他不要这一种
+    //
+    //  🔴 图1 那行到底是谁画的（实证，不是推测）：**不是 GTCEu**。
+    //     - GTCEu 的 {@code ElectricContainerBlockProvider#addTooltip}（javap 偏移 33-85）只画
+    //       {@code gtceu.jade.energy_stored}「存量 / 容量」那条进度条，整条依赖里没有「产能 …A …」这种串；
+    //     - 真正的实现在 gtladditions 的 @Overwrite：
+    //       {@code com.gtladd.gtladditions.mixin.gtceu.recipe.RecipeLogicProviderMixin#addTooltip}
+    //       里 {@code EUt == 0L} 之后那一支（javap 偏移 323-567，读 NBT 键 {@code wirelessTickInputs}
+    //       = TAG_Byte_Array，与本工程 ShanhaiGeneratorWirelessEnergyJadeMixin 写的是同一个键）：
+    // <pre>
+    //   356-361  long longEu = NumberUtils.getLongValue(abs)          ← > Long.MAX 静默饱和
+    //   363-382  int tier = (longEu == Long.MAX_VALUE) ? 30
+    //                                                 : NumberUtils.getFakeVoltageTier(longEu)
+    //   384-392  power = CommonUtils.formatDouble(abs.doubleValue())  ← 红字
+    //   401-409  + " EU/t"                     （RESET）
+    //   412-420  + " ("                         （GREEN，半角括号）
+    //   423-465  + Component.translatable("gtceu.top.electricity", 安培, NewGTValues.VNF[tier])
+    //             安培 = FormattingUtil.DECIMAL_FORMAT_2F.format(          ← pattern = "#.##"
+    //                        new BigDecimal(abs).divide(
+    //                            BigDecimal.valueOf(GTValues.VEX[tier]), 3, RoundingMode.DOWN)
+    //                        .doubleValue())                               ← 上游这一步会掉精度，见下
+    //             VEX[i] = 8 × 4^i（javap 静态初始化逐项：0:8 … 22:140737488355328(2^47) … 30:Long.MAX）
+    //   491-499  + ")"                         （GREEN）
+    //   513-562  wirelessEut.signum() < 0 ⇒ gtceu.top.energy_consumption（耗能）
+    //                                  ≥ 0 ⇒ gtceu.top.energy_production （产能）
+    // </pre>
+    //  语言键原文（两条都在 assets/gtceu/lang/zh_cn.json）：
+    //    {@code gtceu.top.energy_production} = 「产能」（en_us: "Producing"）← gtceu 的 lang
+    //    {@code gtceu.top.electricity}       = "%sA %s"                ← gtlcore 的 lang（覆盖进 gtceu 命名空间）
+    //  ⇒ 拼出来逐字是 {@code 产能␣40.56Q␣EU/t␣(4398046511104A␣MAX+16)}：括号【半角】、EU/t 前一个空格、
+    //    "产能" 后面那一个空格是上游 {@code .append(" ")} 加进去的（lang 串里没有空格）。
+    //
+    //  🔴 2026-11-15 用户给了新的参照物（无线能源监视器对归墟显示 {@code +49.60 EU/t (4.4E12A MAX+16)}）后，
+    //     **电压档与功率都改成"上游原样"**，先前那两处自研写法已作废：
+    //    ① 电压档 = 从【产量】反推，与上游 :356-382 同一条规则：
+    //       {@code |产量| 饱和到 Long.MAX} ⇒ {@code getFakeVoltageTier(Long.MAX) = 30} ⇒ {@code VNF[30] = MAX+16}；
+    //       安培 = {@code |产量| ÷ GTValues.VEX[30] = ÷ Long.MAX}。
+    //       ⇒ 与 图1 那台、无线能源监视器三处同款（它们也都是 MAX+16）。
+    //       ⚠️ 作废的旧写法（别再改回来）：按配方基准 {@code RECIPE_BASE_EUT = 2^47} 取 MAX+8、
+    //          安培 ÷2^47 = 并行份数 ≈2.88e17 —— 那是"配方电压"，不是上游这条显示口径。
+    //    ② 功率 = 直接调上游那一个函数 {@code CommonUtils.formatDouble(double)}（单位表 {@code …Z,Y,R,Q,e33}）
+    //       ⇒ 4.06e31 印 {@code 40.56Q}。调不到才退回 {@code ShanhaiBigNumberText#compact}
+    //       （表 {@code …Y,B,N,D} ⇒ 会印 {@code 40.56N}）；回落时 helper 里打一行限流 WARN，不静默。
+    //
+    //  ⚠️ 仍**故意**与上游不同的一处：安培整段走 BigDecimal（scale 3 DOWN 后交给上游同一个
+    //     {@code FormattingUtil.DECIMAL_FORMAT_2F}），不经过上游那个 {@code .doubleValue()} ——
+    //     ÷Long.MAX 这一档两条路刚好都印 {@code 4398046511104}，但换成小电压档时上游会印出假尾数
+    //     （double 只有 ~15 位有效数字，18 位整数必掉位）。
+    //
+    //  🔴 三种状态（上游是"整行不画"，本项目按既有红线"0 与 -- 必须能分辨"保留一行）：
+    //    真在发电  产能 40.56Q EU/t (4398046511104A MAX+16)
+    //    没在发电  产能 0 EU/t (0A ULV)                   ← 0 是合法真读数（0 自然落到 0 档）
+    //    读不到    产能 --（读不到：服务端发电读数还没结算）  ← 绝不印成 0
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 产能行的<b>电压档索引</b>：{@code getFakeVoltageTier(产量)} —— <b>和上游逐字同一条规则</b>。
+     *
+     * <p>🔴 2026-11-15 用户给了参照物后改成"按产量反推"（原先按配方基准 {@code 2^47} 取 MAX+8）：
+     * 无线能源监视器对归墟显示的是 {@code 4.4E12A MAX+16}、图1 那台也是 {@code MAX+16}
+     * ⇒ 三处必须同款。产量 4e31 远超 {@code Long.MAX} ⇒ 饱和成 30 = {@code MAX+16}。
+     *
+     * <p>🔴🔴 <b>必须照抄上游那个三目，不能拿 {@code getFakeVoltageTier(Long.MAX_VALUE)} 顶</b>：
+     * {@code Long.MAX_VALUE >>> 5 = 2^58-1} ⇒ {@code numberOfLeadingZeros = 6} ⇒
+     * {@code 1 + ((63-6)>>1) = 1+28 = 29 = MAX+15}（javap {@code NumberUtils} 偏移 135-153 的算式实算）。
+     * 而 {@code getFakeVoltageTier} 用 {@code long} 参数<b>根本到不了 30</b> ⇒ 上游才单独写了
+     * {@code longEu == Long.MAX_VALUE ? 30 : …} 这一支。少了它，归墟会印 {@code MAX+15}、
+     * 安培变 {@code ÷VEX[29]=2^61}（≈1.76e13）—— 与监视器那个 {@code 4.4E12A} 对不上。
+     */
+    private static int shanhai$generationVoltageTier(@NotNull java.math.BigInteger gen) {
+        // 上游 :356-382 逐字：getLongValue 在 > Long.MAX 时饱和（javap 偏移 123-133），再走三目。
+        final long longEu = org.gtlcore.gtlcore.utils.NumberUtils.getLongValue(gen.abs());
+        final int t = longEu == Long.MAX_VALUE ? 30
+                : org.gtlcore.gtlcore.utils.NumberUtils.getFakeVoltageTier(longEu);
+        final int max = Math.min(com.gregtechceu.gtceu.api.GTValues.VEX.length,
+                org.gtlcore.gtlcore.integration.gtmt.NewGTValues.VNF.length) - 1;
+        return Math.max(0, Math.min(max, t));
+    }
+
+    /** 产能行的<b>档电压</b>（{@code EU/t} 每安）—— 上游除的就是 {@code GTValues.VEX[tier]}。 */
+    private static long shanhai$generationVoltage(@NotNull java.math.BigInteger gen) {
+        return com.gregtechceu.gtceu.api.GTValues.VEX[shanhai$generationVoltageTier(gen)];
+    }
+
+    /** 日志用：按"这一刻要显示的那个产量"取档（与抬头同一口径，见 {@link #shanhai$generationPowerLine()}）。 */
+    private int shanhai$generationDisplayTier() {
+        final java.math.BigInteger gen = isRemote() ? hostGenPerTickBig() : shanhai$displayGenerationPerTick();
+        return shanhai$generationVoltageTier(gen == null ? java.math.BigInteger.ZERO : gen);
+    }
+
+    /** 日志用：与 {@link #shanhai$generationDisplayTier()} 同档的档电压。 */
+    private long shanhai$generationDisplayVoltage() {
+        return com.gregtechceu.gtceu.api.GTValues.VEX[shanhai$generationDisplayTier()];
+    }
+
+    /**
+     * 功率那一格的正文：<b>直接调上游那一个函数</b> {@code CommonUtils#formatDouble(double)}
+     * （图1 的 {@code 19.81Y} 就是它印的，单位表 {@code …Z,Y,R,Q,e33}）。
+     *
+     * <p>实现在 {@link com.shanhai.common.text.ShanhaiBigNumberText#upstream(java.math.BigInteger)} ——
+     * <b>AR 面板那一格用的也是它</b>（同一个函数、同一个回退），两处数字不可能对不上。
+     * 为什么在那边：它是 gtladditions 的 Kotlin object（`formatDouble` 是 `@JvmStatic`），类初始化要
+     * kotlin stdlib；运行时一定在，但**绝不让显示层把机器带崩** ⇒ 那边 try/catch 后回退到
+     * {@code ShanhaiBigNumberText#compact}（两表在 ≤1e24 逐字相同），并打一行限流 WARN，不静默。
+     */
+    @NotNull
+    private static String shanhai$generationPowerText(@NotNull java.math.BigInteger gen) {
+        return com.shanhai.common.text.ShanhaiBigNumberText.upstream(gen);
+    }
+
+    /**
+     * 安培一格的正文：{@code |产量| ÷ 档电压}，<b>整段 BigInteger/BigDecimal —— 不落 double、不落 long</b>。
+     *
+     * <p>为什么必须先降精度再除：{@code product} 是 {@code baseEut × p ÷ 系数}（BigInteger），而除数是
+     * {@code GTValues.VEX[30] = Long.MAX}（tier 30 那一档）⇒ 一般除不尽（现在是 {@code …103 + 0.9999999852}）；
+     * 上游那一步的 {@code .doubleValue()} 会把 18 位整数截到 ~15 位有效数字 ⇒ 换到小电压档时末几位就是假的。
+     * 格式仍交给上游同一个 {@code FormattingUtil.DECIMAL_FORMAT_2F}（pattern {@code "#.##"}：最多 2 位小数、
+     * 去尾零、无千分位）⇒ 现在这个数印成 {@code 4398046511104}（.999 进到 .00 后再去尾零）。
+     */
+    @NotNull
+    private static String shanhai$generationAmpsText(@NotNull java.math.BigInteger gen) {
+        final long volts = Math.max(1L, shanhai$generationVoltage(gen));
+        final java.math.BigDecimal q = new java.math.BigDecimal(gen.abs())
+                .divide(java.math.BigDecimal.valueOf(volts), 3, java.math.RoundingMode.DOWN);
+        try {
+            return com.gregtechceu.gtceu.utils.FormattingUtil.DECIMAL_FORMAT_2F.format(q);
+        } catch (Throwable t) {
+            // 共用 DecimalFormat 被别处并发用到（它不是线程安全的）⇒ 退到同 pattern 的本地格式化，绝不抛
+            return q.setScale(2, java.math.RoundingMode.HALF_EVEN).toPlainString();
+        }
+    }
+
+    /**
+     * 「产能」那一行（GT 原生格式，见本节头注释）：{@code 产能 <功率> EU/t (<安培>A <电压档>)}。
+     *
+     * <p>三种语义：真在发电 ⇒ 原生行；{@code 0} ⇒ 原生行但读数为 0；读不到 ⇒ {@code --}（不冒充 0）。
+     * <p>⚠️ 整行是 {@link Component} 拼的（不是 format 串）：{@code gtceu.top.energy_production} /
+     * {@code gtceu.top.electricity} 两个语言键 + 上游同款颜色，客户端按自己语言渲染 ⇒ 中文「产能」、
+     * 英文 "Producing"，与图1 逐字同源。
+     */
+    @NotNull
+    private Component shanhai$generationPowerLine() {
+        final java.math.BigInteger gen = isRemote() ? hostGenPerTickBig() : shanhai$displayGenerationPerTick();
+        if (gen == null) {
+            return Component.literal("产能 --（读不到：服务端发电读数还没结算）").withStyle(ChatFormatting.GRAY);
+        }
+        final int tier = shanhai$generationVoltageTier(gen);
+        final String amps = shanhai$generationAmpsText(gen);
+        final String tierName = org.gtlcore.gtlcore.integration.gtmt.NewGTValues.VNF[tier];
+        final Component power = Component.literal(shanhai$generationPowerText(gen))
+                .withStyle(ChatFormatting.RED)                       // 上游 :384-398 红字
+                .append(Component.literal(" EU/t").withStyle(ChatFormatting.RESET))   // 上游 :401-409
+                .append(Component.literal(" (").withStyle(ChatFormatting.GREEN))      // 上游 :412-420
+                .append(Component.translatable("gtceu.top.electricity", amps, tierName)
+                        .withStyle(ChatFormatting.GREEN))                              // 上游 :423-465
+                .append(Component.literal(")").withStyle(ChatFormatting.GREEN));      // 上游 :491-499
+        return Component.translatable("gtceu.top.energy_production")      // 上游 :545-562「产能」
+                .append(Component.literal(" "))                           // 上游 :552 那个空格
+                .append(power);
+    }
+
+    /**
+     * 产能行的<b>纯文本</b>（只给 {@code [SHANHAI-HOSTSNAP]} 判据行用；异常 ⇒ 说明串，绝不抛）。
+     *
+     * <p>⚠️ 服务端 {@code getString()} 解的是<b>服务端</b>那份 Language（en_us）⇒ 日志里是
+     * {@code Producing 40.56Q EU/t (…A §c§lM…)}，抬头里是「产能 …」。<b>对账看数字与档名，不看那个词</b>。
+     */
+    @NotNull
+    private String shanhai$generationPowerLineText() {
+        try {
+            return shanhai$generationPowerLine().getString();
+        } catch (Throwable t) {
+            return "读不到(" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🔴 2026-11-14：归墟 ·「零点能发生器」那套产电逻辑（用户原话）
+    //
+    //  「那我们当归墟视界枢核运行视界能流抽取的配方时执行零点能发生器的逻辑」
+    //
+    //  两半，刻意分开：
+    //    ① 配方那一半（清零）在 {@link GuixuVisionCoreRecipeLogic#buildFinalNormalRecipe}：
+    //       copy() 后 setOutputEUt(0)，原配方对象一个字节不动 ⇒ 那度电不会再从动力仓走，
+    //       也不会被多配方引擎当成"负耗电"记账。
+    //    ② 产量那一半（入池）在本类：onWorking 逐 tick 读【配方逻辑那一轮算好的读数】
+    //       （基准 EUt × 真实并行，在 buildFinalNormalRecipe 里从 ParallelData 取）⇒ BigInteger ⇒ 走无线池。
+    //
+    //  🔴 为什么不在本类里改 isGenerator：那是【机器定义】上的静态标志，而本机同时跑几十种
+    //     耗电配方 ⇒ 标成发电机会改变整台机器的电学语义。判"这一条配方是不是发电型"在运行期
+    //     就能判（tickOutputs.eu > 0），比标志更准，且只影响这一条。
+    //  🔴 为什么【不】让 getWirelessNetworkEnergyHandler() 返回自持 handler
+    //     （2026-11-16 起它有一条**恒 return null** 的覆写，见下方锁死条款 ✅ 那一条）：
+    //     那会让 gtladditions MutableRecipesLogic#getRecipe() 整体改走 buildFinalWirelessRecipe
+    //     ⇒ N3/N5/N6 + 批处理 + 影子对账【一行都不执行】（静默失效）。硬约束，见
+    //     PrimordialModuleMachine 同名字段的长注释。
+    //
+    //  ═══════════════════════════════════════════════════════════════════════════════════
+    //  🔒🔒🔒 锁死条款（2026-11-14 加"自持 handler"这一轮写下来，以后谁改都得先读这段）
+    //
+    //  ⛔【不许】给本类（以及 PrimordialModuleMachine / PrimordialOmegaEngineMachine）
+    //          的 `getWirelessNetworkEnergyHandler()` 覆写【改成返回任何非 null 值】；
+    //  ✅【必须】这三台各自保留一条 `getWirelessNetworkEnergyHandler()` 覆写并【恒 return null】
+    //          （2026-11-16 加固：在此之前这条不变式只是"恰好没覆写"，靠的是"上游那个
+    //            mixin 字段没人写"。现在它钉死在每台机器自己的字节码里 ⇒
+    //            判据 = javap -c 该机器类里只有 aconst_null/areturn）；
+    //  ⛔【不许】删掉 / 改签名 现有的 `setWirelessNetworkEnergyHandler(...)` 覆写；
+    //  ✅ 自持 handler 只能经**另一个名字**的接缝 `shanhaiWirelessEnergyHandler()` 出去。
+    //
+    //  为什么（判据是字节码，不是口味）：gtladditions 3.3.1Custom 的
+    //  `MutableRecipesLogic#getRecipe()`（javap -c 原文，偏移见括号）：
+    //      21: invokevirtual getMachine()
+    //      25: checkcast     IWirelessElectricMultiblockMachine
+    //      28: invokeinterface getWirelessNetworkEnergyHandler()      ← 读的就是这个接口 getter
+    //      33: astore_2
+    //      34: aload_2
+    //      35: ifnull        50                                      ← 【开关就在这两条】
+    //      38-41: invokevirtual buildFinalWirelessRecipe(ParallelData, handler)   ← 非 null 走这支
+    //      50-52: invokevirtual buildFinalNormalRecipe(ParallelData)              ← null 走这支
+    //  ⇒ getter 返回非 null 的那一刻，整台机器就从 Normal 支翻到 Wireless 支：
+    //     本工程的 N3 增产 / N5 减免 / N6 定时长 / 批处理 / 影子对账 / 归墟的零点能清零
+    //     **全部**挂在 Normal 支（`buildFinalNormalRecipe` 及其下游）⇒ 一行都不执行，
+    //     而且**不报错**（机器照跑、产出照出，只是所有倍率和账目都回退成"没有"）。
+    //
+    //  为什么"删掉 setWirelessNetworkEnergyHandler 覆写"也不行：gtladditions 有
+    //     `@Mixin(WorkableElectricMultiblockMachine) + @Implements(IWirelessElectricMultiblockMachine,
+    //      prefix="gtladditions$")` ⇒ 那个接口方法**在基类上一直存在**（字段也在），
+    //     终端部件 `addedToController` 就是往里"推"的。我们靠**不写 getter** 让它的返回值为 null，
+    //     而不是靠"没有这个方法"。删掉 setter 覆写 = 终端再也推不进来（终端优先那半边静默失效）。
+    //
+    //  🔴 负对照（改了就是红的判据）：把 getter 改成 `return shanhai$selfWirelessEnergyHandler;`
+    //     ⇒ `MutableRecipesLogic#getRecipe()` 的第 35 条 `ifnull 50` 变 `ifnonnull`/被绕过
+    //     ⇒ 走 38-41 那条 buildFinalWirelessRecipe ⇒ **红**。
+    //     离线判据 `temp\wireless-direct\run-offline.ps1` 的判据①/④ 就是扫这一条（源码级）。
+    //  ═══════════════════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 本机的<b>无线网归属</b>（gtmthings 全局能源池的键）—— 放置者自动绑定，拆装/重载后保持。
+     *
+     * <p>为什么需要它：{@code WirelessEnergyManager.addEUToGlobalEnergyMap(uuid, …)} 的 <b>第一个参数就是池子的键</b>
+     * （gtmthings 内部再按 {@code TeamUtil.getTeamUUID(uuid)} 换成"队伍"这一层）。
+     * 归墟原来<b>没有</b>这个字段 ⇒ 必须新增。
+     * <p>取法照 {@code PrimordialModuleMachine:2281-2327}（发电模块那台）：
+     * ① 放置者（{@code onMachinePlaced}）→ ② 结构里已绑定的「无线电网终端」部件 → null（未绑定，只打一次 WARN）。
+     * <p>⚠️ 名字必须同时进 {@link #assertFieldHolderComplete()} 的 required 表
+     * （{@link #FIELD_VISION_POOL_UUID}）—— 漏了就是"编译通过、游戏不报错、入池永远拿不到 uuid"。
+     */
+    @Persisted
+    @Nullable
+    private java.util.UUID shanhai$visionPoolUuid;
+
+    /**
+     * 🔴 <b>自持无线网 handler</b>（2026-11-14）：让本机<b>不需要结构里装「无线电网终端」部件</b>
+     * 也能把"电超过 {@code long}"那一档直接挂到无线网池上（= 用户原话「做成直接链接无线电网
+     * （就像伪神之锻炉）」）。
+     *
+     * <h2>三个口径（每条都有出处，不是设计）</h2>
+     * <ol>
+     *   <li><b>它<b>不是</b> {@code getWirelessNetworkEnergyHandler()} 的返回值</b> —— 那个接口 getter
+     *       必须保持 {@code null}（硬约束，见下方那段长注释）；它只经<b>另一个名字</b>的接缝
+     *       {@link #shanhaiWirelessEnergyHandler()} 暴露。</li>
+     *   <li><b>终端优先、自持兜底</b>：结构里真装了终端部件时，那条上游的「推」缓存
+     *       （基类 {@code shanhai$wirelessEnergyHandler}）非 null ⇒ 直接返回它
+     *       ⇒ <b>装了终端时行为与今天逐字相同</b>；只有没有终端时才轮到本字段。</li>
+     *   <li><b>键只有一个</b>：{@link #shanhai$visionPoolUuid}（放置者 / 终端部件的 uuid）。
+     *       发电入池（{@link #shanhai$depositGeneration}）与耗电扣池用<b>同一个键</b>
+     *       ⇒ 不是两个池子，也不会"发的电进 A 池、用的电从 B 池扣"。</li>
+     * </ol>
+     *
+     * <p>⚠️ 要落盘的只有 uuid（在 {@link #shanhai$visionPoolUuid} 上，已登记进
+     * {@link #FIELD_VISION_POOL_UUID}）；本字段本身是<b>无状态门面</b>，不登记任何字段。
+     */
+    private final ShanhaiSelfWirelessEnergyHandler shanhai$selfWirelessEnergyHandler;
+
+    /** 「未绑定无线网归属」只响亮报一次（否则每 tick 一行）。 */
+    private boolean shanhai$visionPoolUnboundLogged;
+
+    /** 池子条目还没建起来这件事只报一次（不是错误：第一笔入池就是建池）。 */
+    private boolean shanhai$visionPoolColdLogged;
+
+    /** 同一个（配方 / 并行 / 乘积）只打一行，避免 20 行/秒刷屏。 */
+    @Nullable
+    private String shanhai$visionGenLogKey;
+
+    /** 最近一笔入池的池子读数（给日志行与验收判据用；{@code null} = 读不到）。 */
+    @Nullable
+    private java.math.BigInteger shanhai$visionPoolAfter;
+
+    /** 最近一笔入池对池子的实际净增（= after − before；含同队别的写者，日志里与 product 并排给）。 */
+    @Nullable
+    private java.math.BigInteger shanhai$visionPoolDelta;
+
+    /** 「工作配方上还挂着电 ⇒ 本 tick 不入池」这条只响亮报一次。 */
+    private boolean shanhai$visionDoubleCountLogged;
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🔴🆕 2026-11-18 —— 「发电功率=0/t」那个 bug 的修法（只喂显示；不参与任何机器行为）
+    //
+    //  <h2>用户给的硬证据（本次会话日志，同一台机器、同一时刻）</h2>
+    //  <pre>
+    //  [SHANHAI-GEN-LIMIT] 归墟零点能发电 … 乘积=4056481920730330707157014216704
+    //      池子: 入池后=… Δ池=4056481920730330707157014216704 接受=true pos=1754,101,212
+    //  [SHANHAI-HOSTSNAP] client seq=1 … | 发电功率=0/t | 能源仓=357109.07D EU / ∞ EU | 动力仓=0 EU / ∞ EU
+    //  </pre>
+    //  ⇒ 「能源仓」那一格是对的（= 池子余额），只有「发电功率」印 0 ⇒ 不是同步链路、不是解码。
+    //
+    //  <h2>0 是在哪一环变成 0 的（文件:行）</h2>
+    //  {@code GuixuVisionCoreMachine#shanhai$displayGenerationPerTick}（原 :3133-3155）
+    //  只读<b>一个瞬时字段</b> {@code GuixuVisionCoreRecipeLogic#shanhai$visionReadings}，而那个字段：
+    //  <ul>
+    //    <li>在 {@code GuixuVisionCoreRecipeLogic#buildFinalNormalRecipe} <b>第一句就被清成 null</b>
+    //        （原文注释：「每一轮装配先清空读数」）；</li>
+    //    <li>只有"这一轮 ParallelData 里正好含发电那条配方"时才被重新赋值
+    //        （{@code buildFinalNormalRecipe} 的两条返回路径各一处）。</li>
+    //  </ul>
+    //  ⇒ 它在"一轮装配 → 下一轮装配"之间是<b>闪烁的</b>，不是常值；而本类的快照是
+    //  {@code SNAPSHOT_INTERVAL_TICKS = 10} tick 采一次 ⇒ 必然踩到 null 的那些 tick ⇒
+    //  原 :3145 {@code if (r == null || r.product.signum() <= 0) return BigInteger.ZERO;}
+    //  把「读不到」写成了 {@link java.math.BigInteger#ZERO} ⇒ 再经 {@code toByteArray()} = {@code [0]}
+    //  ⇒ 客户端 {@code decode} 得到 0 ⇒ 面板印 {@code 0/t}。
+    //
+    //  <h2>修法：显示改读「**真的进了池子**的那一笔」</h2>
+    //  入池那一刻（{@code shanhai$visionGenerationTick} 里 {@code accepted == true}）记下**这一 tick
+    //  真正入池的合计**；显示优先用"最近一个完整 tick 的合计"，读数在场时仍用即时读数。
+    //  ⇒ 显示值的语义变成"最近一次真的进了池子的速率"，与 {@code Δ池} 同源，不可能出现"池子在涨但显示 0"。
+    //  <p>🔴 三种语义仍然分开（用户口径：不许 0 冒充 --，不许 -- 冒充 0）：
+    //  <pre>
+    //    null  ⇒ 在跑但既没有即时读数、也没有近期入池记录 ⇒ 面板写 `--（读不到…）`
+    //    ZERO  ⇒ 机器确实没在跑（isWorking() == false）且近期没有入池 ⇒ 写 `0`
+    //    >0    ⇒ 最近一个 tick 真的入池这么多
+    //  </pre>
+    /** 本 tick 已入池合计（{@code null} = 这一 tick 还没入过池）。 */
+    @Nullable
+    private java.math.BigInteger shanhai$genSumThisTick;
+    /** {@link #shanhai$genSumThisTick} 属于哪一个 offset tick。 */
+    private long shanhai$genSumTick = -1L;
+    /** 最近一个<b>完整</b>的"有入池"的 tick 的合计（显示的主读数）。 */
+    @Nullable
+    private java.math.BigInteger shanhai$genLastTickTotal;
+    /** 最近一次真的入池发生在哪一个 offset tick（{@code -1} = 还没发生过）。 */
+    private long shanhai$genLastTick = -1L;
+    /** 最近一次入池的单笔量（= {@code Readings#product}；日志对账用）。 */
+    @Nullable
+    private java.math.BigInteger shanhai$genLastAmount;
+    /** 显示取数走的是哪一支（只进那行 {@code [SHANHAI-HOSTSNAP]} 日志，判据可读）。 */
+    private String shanhai$genDisplayBranch = "init";
+    /** 显示读数的"新鲜期"（tick）：超过它就<b>不再</b>拿旧值充现值。2 秒。 */
+    public static final int GEN_STICKY_TICKS = 40;
+
+    /**
+     * 本机的无线网归属：<b>① 自己（放置者）</b> → <b>② 结构里已绑定的「无线电网终端」部件</b> → {@code null}。
+     * <p>与发电模块 {@code shanhai$wirelessPoolUuid()} 逐字同形（同一条理由：终端部件的 uuid 就是
+     * "数据棍右键绑定/变更所有者"的产物，且它自己写池子时用同一个键 ⇒ 停在同一个池子里）。
+     */
+    @Nullable
+    private java.util.UUID shanhai$visionPoolUuid() {
+        if (shanhai$visionPoolUuid != null) {
+            return shanhai$visionPoolUuid;
+        }
+        try {
+            for (final com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart part : getParts()) {
+                final MetaMachine self = part.self();
+                if (self instanceof com.gtladd.gtladditions.common.machine.multiblock.part.WirelessEnergyNetworkTerminalPartMachineBase terminal) {
+                    final java.util.UUID bound = terminal.getUUID();
+                    if (bound != null) {
+                        return bound;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // 结构正在重扫 / 部件还没装好 ⇒ 当作未绑定（下一次 onWorking 再试）
+        }
+        return null;
+    }
+
+    /**
+     * 🔴 <b>耗电方向的接缝：终端优先、自持兜底</b>（2026-11-14）。
+     *
+     * <h2>为什么覆写的是<b>这个名字</b>、而不是 {@code getWirelessNetworkEnergyHandler()}</h2>
+     * 见下一段长注释（那个 getter 只能返回 {@code null}）。{@code shanhaiWirelessEnergyHandler()}
+     * 是本工程自己开的、<b>名字不同</b>的接缝：只有"要给电做 BigInteger 路由"的地方读它
+     * （{@code ParallelOverrideMachine#perRecipeParallelBudget} /
+     * {@code PrimordialEngineRecipeLogic#shanhai$routeInfiniteEnergy} /
+     * {@code ShanhaiWirelessWrap#consume}），每一个调用点都<b>自带 {@code isOnline()} 判据</b>
+     * ⇒ 返回一个"未绑定因而离线"的 handler 与返回 {@code null} <b>逐位等价</b>（见离线判据的负对照）。
+     *
+     * <h2>三条语义</h2>
+     * <ol>
+     *   <li>{@code super} 那条（= 基类缓存的"终端部件推过来的 handler"）<b>非 null 就原样返回</b>
+     *       ⇒ <b>装了无线终端时，本机行为与今天逐字相同</b>（终端仍然优先，自持 handler 一个字节都不参与）；</li>
+     *   <li>没有终端 ⇒ 返回自持 handler；它的 uuid 与"零点能发电入池"<b>同一个键</b>；</li>
+     *   <li>uuid 还是空（老存档 / 非玩家放置）⇒ 从 {@link #shanhai$visionPoolUuid} 那次<b>懒同步</b>一次；
+     *       仍为空就返回一个离线的自持 handler（等价于 null，机器按今天的样子走能源仓）。</li>
+     * </ol>
+     *
+     * <p>⚠️ 懒同步<b>只读字段</b>（不扫部件）：{@code shanhai$visionPoolUuid} 是 {@code @Persisted} 的，
+     * 放置 / 读档后就在那儿，读它零成本；而"扫部件的回落"只属于发电方向（{@link #shanhai$visionPoolUuid()}），
+     * 这里绝不重复扫，避免每 tick 多次扫 {@code getParts()}。
+     */
+    /**
+     * 🔴 <b>恒返回 {@code null}</b> —— 本机「永远走 {@code buildFinalNormalRecipe}」的显式断言。
+     *
+     * <p>基类 {@link PrimordialOmegaEngineMachine} 已经覆写了同一个方法（返回 {@code null}）；
+     * 本类<b>再写一遍不是多余</b>：本轮的判据是"<b>按类</b>在字节码里核"——
+     * 这样 {@code javap -c com/shanhai/machine/host/GuixuVisionCoreMachine} 就能直接读到
+     * {@code aconst_null / areturn}，不必去追继承链（追继承链正是这个 bug 当初藏身的方式）。
+     *
+     * <p>⛔ 不许删、不许改成返回 {@link #shanhai$selfWirelessEnergyHandler}：
+     * 见上一节 🔒 锁死条款。自持 handler 只能经<b>另一个名字</b>的接缝
+     * {@link #shanhaiWirelessEnergyHandler()} 出去。
+     */
+    @Override
+    public @Nullable IWirelessNetworkEnergyHandler getWirelessNetworkEnergyHandler() {
+        return null;
+    }
+
+    @Override
+    public @Nullable IWirelessNetworkEnergyHandler shanhaiWirelessEnergyHandler() {
+        final IWirelessNetworkEnergyHandler terminal = super.shanhaiWirelessEnergyHandler();
+        if (terminal != null) {
+            return terminal; // ① 终端优先：与今天逐字相同
+        }
+        if (shanhai$selfWirelessEnergyHandler.shanhai$uuid() == null && shanhai$visionPoolUuid != null) {
+            // ② 自持兜底：与入池同一个键（老存档 / 读档后第一次进来时补绑）
+            shanhai$selfWirelessEnergyHandler.shanhai$setUuid(shanhai$visionPoolUuid);
+        }
+        return shanhai$selfWirelessEnergyHandler; // ③ uuid 仍空 ⇒ isOnline()==false（与 null 等价）
+    }
+
+    /**
+     * 基类钩子的实现（{@code PrimordialOmegaEngineMachine#shanhaiHostWirelessPoolUuid()}）：
+     * 模块侧在"自己没绑定、结构里也没有终端"时会问这一句 ⇒ 挂在归墟上的零点能发生器
+     * <b>不必拆下重放</b>也能直连本机这个池子。
+     *
+     * <p>返回值与发电入池 / 耗电扣池用的是<b>同一个</b> {@link #shanhai$visionPoolUuid()}（含终端回落那一层）。
+     */
+    @Override
+    public @Nullable java.util.UUID shanhaiHostWirelessPoolUuid() {
+        return shanhai$visionPoolUuid();
+    }
+
+    /**
+     * 放置即绑定（照发电模块 {@code PrimordialModuleMachine#onMachinePlaced} 同形）。
+     * <p>只写新字段，不碰任何其它状态；玩家为 {@code null}（自然生成/复制）时什么都不做。
+     */
+    @Override
+    public void onMachinePlaced(@Nullable net.minecraft.world.entity.LivingEntity player,
+                                @NotNull ItemStack stack) {
+        // 不调 super：本类不是直接实现 IMachineLife 的（父类才是）⇒ `IMachineLife.super` 在这里不合法；
+        // 而该接口 default 方法体就一句 `return`（javap -c：Code: 0: return），父类也没有覆写它
+        // ⇒ "不调 super"与"调了"逐位等价（这条是核过的，不是省事）。
+        if (player != null && shanhai$visionPoolUuid == null) {
+            shanhai$visionPoolUuid = player.getUUID();
+            LOGGER.info("{} 归墟已绑定无线网归属（放置者）：uuid={} pos={}",
+                    GuixuZeroPointGeneration.TAG, shanhai$visionPoolUuid, getPos());
+        }
+        // 🔴 2026-11-14：同一个 uuid 立刻交给【耗电方向】的自持 handler（伪神也是 onMachinePlaced 里
+        //    直接把 player.getUUID() 写进 handler 的 uuid）。发电方向仍在上面那个 @Persisted 字段上。
+        if (shanhai$visionPoolUuid != null) {
+            shanhai$selfWirelessEnergyHandler.shanhai$setUuid(shanhai$visionPoolUuid);
+        }
+    }
+
+    /**
+     * 每个工作 tick 看一眼：<b>当前跑的配方是不是 {@code gtceu:vision_energy_extraction} 的发电配方</b>
+     * ⇒ 是就按「基础 EUt × 真实并行 ÷ 主机耗能系数」送进无线池
+     * （系数 = 零点能模块同一个 {@code generationDivisor(moduleSlotBonus())}，
+     * 见 {@link GuixuZeroPointGeneration#coefficient(int)}；门控 0 ⇒ 1.0 ⇒ 与"不除系数"逐位相同）。
+     *
+     * <p>为什么挂在 {@code onWorking()}：GTCEu {@code handleRecipeWorking} 处理成功后逐 tick 调
+     * {@code IRecipeLogicMachine.onWorking()}，这与发电模块、私货那台 {@code PrimordialOmegaVoidInductionArmature}
+     * 取的是<b>同一个点</b>（零点能发生器那套产电逻辑的落点）。
+     * <p>⚠️ 只有目标类型才会往下走；其它类型<b>一个字段都不写、一行日志都不打</b>。
+     */
+    @Override
+    public boolean onWorking() {
+        final boolean working = super.onWorking();
+        if (working) {
+            shanhai$visionGenerationTick();
+        }
+        return working;
+    }
+
+    /**
+     * 读当前这一轮的发电读数 → 入池。
+     *
+     * <h2>🔴 读数只有一个来源：配方逻辑在"接管那一刻"算好的 {@link GuixuVisionCoreRecipeLogic#shanhai$visionReadings()}</h2>
+     * 不是这里现算的，原因是<b>算不出来</b>（已用字节码核实，见该方法的长注释）：
+     * 归墟走 {@code MutableRecipesLogic#findAndHandleMultipleRecipe}，那条链<b>从不写</b>
+     * {@code RecipeLogic#lastOriginRecipe}（全类只有 {@code checkMatchedRecipeAvailable} 写它，而那只属于原生链）
+     * ⇒ 在归墟上 {@code getLastOriginRecipe()} 拿不到这条配方。
+     * 所以基础 EUt 与并行都在 {@code buildFinalNormalRecipe} 里从 {@code ParallelData} 取（引擎自己的读数）。
+     *
+     * <h2>🔴 顺带的一条防双计</h2>
+     * 入池前再读一次"工作配方上的电"：若它不是 0（说明清零被别处复原了），
+     * <b>本 tick 不入池</b>并发一次 WARN —— 宁可少发，也绝不让同一度电出两次。
+     */
+    private void shanhai$visionGenerationTick() {
+        if (isRemote()) {
+            return;
+        }
+        try {
+            final com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic = getRecipeLogic();
+            if (!(logic instanceof GuixuVisionCoreRecipeLogic guixuLogic)) {
+                return;
+            }
+            final GuixuZeroPointGeneration.Readings r = guixuLogic.shanhai$visionReadings();
+            if (r == null || r.product.signum() <= 0) {
+                return;                         // 这一轮不是"发电型视界能流抽取" ⇒ 一个字节都不动
+            }
+            final GTRecipe last = logic.getLastRecipe();
+            if (last != null) {
+                final long stillThere = com.gregtechceu.gtceu.api.recipe.RecipeHelper.getOutputEUt(last);
+                if (stillThere != 0L) {
+                    if (!shanhai$visionDoubleCountLogged) {
+                        shanhai$visionDoubleCountLogged = true;
+                        ShanhaiMod.LOGGER.warn("{} 归墟的工作配方上还挂着输出电={}（应为 0）⇒ 本 tick 不入池"
+                                        + "（同一度电不许出两次；这通常意味着有人把配方重新装配回来了）pos={}",
+                                GuixuZeroPointGeneration.TAG, stillThere, getPos());
+                    }
+                    return;
+                }
+            }
+            final boolean accepted = shanhai$depositGeneration(r.product);
+            if (accepted) {
+                // 🆕 2026-11-18：「发电功率」那一格改成读"真的进了池子多少"（见 shanhai$noteGenerationDeposited）
+                shanhai$noteGenerationDeposited(r.product);
+            }
+            shanhai$logVisionGeneration(last, r, accepted);
+        } catch (Throwable t) {
+            final String key = "err|" + t;
+            if (!key.equals(shanhai$visionGenLogKey)) {
+                shanhai$visionGenLogKey = key;
+                ShanhaiMod.LOGGER.error("{} 归墟零点能发电的读数/入池出问题（已忽略，配方不受影响）：{}",
+                        GuixuZeroPointGeneration.TAG, t.toString());
+            }
+        }
+    }
+
+    /**
+     * 🔴🔴 <b>唯一的入池入口</b>（用户 2026-11-14 新方向："要让这两台机器像伪神那样直接连无线电网"）。
+     *
+     * <h2>这就是将来要换掉的那一处 —— 整个工程只有这一个方法把电写进池子</h2>
+     * 现在的方法体是 <b>gtmthings 全局能源池</b>（{@code WirelessEnergyManager.addEUToGlobalEnergyMap}），
+     * 也就是发电模块用的那条通路。将来若改成"经无线网终端 handler 直连"或别的通道，
+     * <b>只改本方法体</b>：调用者只认"传一个 BigInteger 进来、返回是否被接受"这个契约。
+     *
+     * <h2>守卫顺序（照 {@code PrimordialModuleMachine#shanhai$depositGenerationToWirelessPool}）</h2>
+     * <ol>
+     *   <li>{@code isRemote()} ⇒ 直接返回（客户端不写池子）；</li>
+     *   <li>归属 uuid 为 {@code null} ⇒ <b>只打一次 WARN</b>，不抛（未绑定 ≠ 崩溃）；</li>
+     *   <li>池子条目还不存在（{@code getUserEU == null}）⇒ 只记一次"冷池"，<b>仍然入账</b>：
+     *       {@code addEUToGlobalEnergyMap} 内部就是 {@code getOrDefault(0).add(…)}
+     *       ⇒ 第一笔入池<b>就是建池</b>；若在这里 return，"队伍从来没有无线网活动"的玩家会永远不发电；</li>
+     *   <li>真正写入 + 读回；任何异常只打日志（不连坐配方）。</li>
+     * </ol>
+     *
+     * @return 池子是否接受了这一笔（{@code false} = 未绑定 / 异常 / 上游拒绝）
+     */
+    private boolean shanhai$depositGeneration(@NotNull java.math.BigInteger amount) {
+        if (isRemote() || amount.signum() <= 0) {
+            return false;
+        }
+        final java.util.UUID uuid = shanhai$visionPoolUuid();
+        if (uuid == null) {
+            if (!shanhai$visionPoolUnboundLogged) {
+                shanhai$visionPoolUnboundLogged = true;
+                ShanhaiMod.LOGGER.warn("{} 归墟【未绑定无线网归属】⇒ 视界能流抽取那条配方的电不会进池子"
+                                + "（配方自带的电已被清零 ⇒ 等于不发）。绑定方式：① 拆下重放本控制器（放置者自动绑定）；"
+                                + "② 或在结构里装「无线电网终端」部件并用数据棍右键绑定。pos={}",
+                        GuixuZeroPointGeneration.TAG, getPos());
+            }
+            return false;
+        }
+        try {
+            final java.math.BigInteger before = WirelessEnergyManager.getUserEU(uuid);
+            if (before == null && !shanhai$visionPoolColdLogged) {
+                shanhai$visionPoolColdLogged = true;
+                ShanhaiMod.LOGGER.info("{} 归墟的无线网归属 uuid={} 在池子里还没有条目（第一笔入池就是建池，"
+                        + "上游 addEUToGlobalEnergyMap 内部即 getOrDefault(0).add）pos={}",
+                        GuixuZeroPointGeneration.TAG, uuid, getPos());
+            }
+            final boolean accepted = WirelessEnergyManager.addEUToGlobalEnergyMap(uuid, amount, this);
+            final java.math.BigInteger after = WirelessEnergyManager.getUserEU(uuid);
+            // 🔴🆕 2026-11-18（用户报「池审计差额报红」的根因那一半）：
+            //   把**我们自己的**这一笔登进同一本池账 —— 池审计在 {@code PrimordialModuleMachine#shanhai$auditPool}
+            //   里用 {@code Δ池 − Σ(我们全部)} 求"读不到名字的第三方写入"；此前 Σ 只记发电模块那一台，
+            //   于是归墟写进同一个池子的量全部被当成"别人"（实测 2.4e32 级 ⇒ 每 5 秒一条 WARN，池子其实没漏）。
+            //   ⚠️ 纯记账：金额 / 顺序 / 返回值一个字节都没改；只在上游真的接受时记。
+            if (accepted) {
+                com.shanhai.machine.module.ShanhaiPoolLedger.note(uuid, amount, "归墟" + getPos());
+            }
+            shanhai$visionPoolAfter = after;
+            shanhai$visionPoolDelta = (before != null && after != null) ? after.subtract(before) : null;
+            return accepted;
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} 归墟入池异常（已忽略，配方不受影响）：{}",
+                    GuixuZeroPointGeneration.TAG, t.toString());
+            return false;
+        }
+    }
+
+    /**
+     * 那一行可 grep 的读数（同 key 只打一次 —— 20 行/秒会把日志淹掉）。
+     *
+     * <p>🔴 四个读数全在这行里：{@code 基础EUt} / {@code 并行} / {@code 乘积}（BigInteger 全文，不截断）/ {@code 系数}；
+     * 外加池子侧 {@code Δ池}（本笔前后差；<b>可能含同队别的写者</b>，所以与乘积并排给、由人对比）。
+     */
+    /**
+     * 那一行可 grep 的读数（同 key 只打一次 —— 20 行/秒会把日志淹掉）。
+     *
+     * <p>🔴 四个读数全在这行里：{@code 基础EUt} / {@code 并行} / {@code 乘积}（BigInteger 全文，不截断）/ {@code 系数}
+     * （外加"并行是从哪个读数来的"与池子侧的 {@code Δ池}）。
+     * <p>⚠️ {@code Δ池} 是"本笔入池前后池子的差"，<b>可能含同队别的写者</b>（gtmthings 池子按队伍共享）
+     * ⇒ 与 {@code 乘积} 并排给，由人对比；两者相等才说明这一笔没被别的机器搅进去。
+     */
+    private void shanhai$logVisionGeneration(@Nullable GTRecipe recipe,
+                                             @NotNull GuixuZeroPointGeneration.Readings r,
+                                             boolean accepted) {
+        final String recipeId = recipe == null || recipe.id == null ? "?" : recipe.id.toString();
+        final String key = recipeId + "|" + r.parallel + "|" + r.product + "|" + accepted;
+        if (key.equals(shanhai$visionGenLogKey)) {
+            return;
+        }
+        shanhai$visionGenLogKey = key;
+        ShanhaiMod.LOGGER.info(r.line(recipeId,
+                "池子: 入池后=" + (shanhai$visionPoolAfter == null ? "?" : shanhai$visionPoolAfter)
+                        + " Δ池=" + (shanhai$visionPoolDelta == null ? "?" : shanhai$visionPoolDelta)
+                        + " 接受=" + accepted + " pos=" + getPos()));
     }
 }

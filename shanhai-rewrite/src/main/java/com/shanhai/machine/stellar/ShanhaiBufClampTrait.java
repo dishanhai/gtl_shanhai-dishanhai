@@ -15,6 +15,7 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.IntProviderIngredient;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -23,6 +24,7 @@ import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPart
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTraitBase;
+import org.gtlcore.gtlcore.utils.datastructure.Int128;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -73,6 +75,24 @@ import java.util.List;
  * </pre>
  * 触发在 {@code update()} 里（{@link ShanhaiBufferFlush#cadenceTicks()} = <b>每 tick 一轮</b>、
  * 一轮最多 64 条），实现见 {@code StellarSampleAssemblerPartMachine#shanhaiTickFreeFlush()}。
+ *
+ * <h2>四-0、🔴 二级缓存（L2）：夹掉的那部分不再进虚空</h2>
+ * {@code buffer}（L1）的值域只有 {@code long}，顶到 {@code Long.MAX_VALUE} 之后再写就回绕；
+ * 夹住的余量<b>以前就是直接丢</b>。现在余量进 {@link ShanhaiBufferOverflow}（Int128 表，L2）：
+ * <pre>
+ *   写：{夹} write=min(want, MAX-existing) → {写 L1} commit(write) → {转存 L2} addTo(want-write)
+ *   退：常规轮 **先推 L2 再搬 L1**（都是免电直插）；L2 里的量 → longValue()（饱和）→ poweredInsert
+ *       → 成功多少 subtract 多少 → 减到 &lt;= 0 才 remove（搬不动就留着，下轮再试）
+ * </pre>
+ * 🔴 <b>两条硬纪律</b>（离线可断言）：
+ * <ol>
+ *   <li><b>早退闸必须看两层</b>：判据只有 {@link ShanhaiBufferOverflow#nothingToFlush}。
+ *       上游 {@code Ticker} 会把 L1 搬空，那一刻若"L1 空就 return"，L2 会<b>永久卡死、无日志</b>；</li>
+ *   <li><b>转存成功不算丢</b>：{@code dropped} 要扣掉 {@code parked} 才是真丢
+ *       （{@link ShanhaiBufferFlush.ChaseWrite#lostAmount()}）——WARN 仍然只留"真丢"。</li>
+ * </ol>
+ * ⚠️ {@code Int128} <b>可变</b>（{@code add/subtract} 原地改并 {@code return this}）⇒ 写 L2 只许用
+ * <b>新造的实例</b>，往外交只许交<b>副本</b>（见 {@link ShanhaiBufferOverflow} 类注释 §二）。
  *
  * <h2>四-1、🔴 「追着写」（2026-11-01 实机日志驱动）</h2>
  * 实机读数：{@code bufclamp key=gtceu:lazurite_dust existing=9223372036854775807 want=1104
@@ -287,6 +307,18 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
      * （{@code poweredInsert} 按可用电砍额度），9.22e18 件在结构上退不完 ⇒ 换成
      * {@link #sweepFree} 的免电搬运。
      *
+     * <h2>四-2、🔴 夹掉的那部分去哪了：进二级缓存（L2），不进虚空</h2>
+     * 有 L2 之前 {@code write < want} 就等于"真的丢了"。现在多了一步：
+     * <pre>
+     *   {夹}   write = min(want, MAX - existing)     ← 与老版【逐位相同】
+     *   {写}   commit(buffer, key, want, write)       ← L1，与老版【逐位相同】
+     *   {转存} left = want - write &gt; 0 ⇒ L2.addTo(key, left)（Int128）
+     * </pre>
+     * 🔴 <b>两步不许重复计数</b>：进 L1 的是 {@code write}、进 L2 的是 {@code want - write}，
+     * 两者相加<b>恒等于 {@code want}</b>（离线自证第 1 组就是这条断言：同一份物料不能两层各记一次）。
+     * 转存成功后这一单<b>一条 WARN 都不打</b>（量没丢，只是换了个地方排队，见
+     * {@link ShanhaiBufferFlush.ChaseWrite#parked}）。
+     *
      * @param machine 本机（追写要网格库存 + actionSource）；{@code null} ⇒ 只夹不追
      */
     static void writeClamped(@Nullable MEPatternBufferPartMachineBase machine,
@@ -297,7 +329,14 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
                 // 🔴 reporter 传 null：它拿到的是**追写之前**的读数，正是本版要消掉的误导源
                 null,
                 () -> chaseFor(machine, buffer, key));
-        emitWriteEvents(machine, key, done);
+        // ---- {转存}：夹不进去的那部分（今天会丢的量）记进 L2，等下一轮免电搬运
+        //      判据在纯核 ShanhaiBufferOverflow#parkRemainder（进 L1 的 write ＋ 进 L2 的 want-write ≡ want）
+        //      ⚠️ 只有真被夹（write < want）才去取 L2 表：99.99% 的产出走"没被夹"这条，这里一次都不碰 L2
+        long parked = 0L;
+        if (done.write < want) {
+            parked = ShanhaiBufferOverflow.parkRemainder(overflowOf(machine), key, want, done.write);
+        }
+        emitWriteEvents(machine, key, parked > 0L ? done.withParked(parked) : done);
     }
 
     /**
@@ -341,7 +380,8 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
      * 可 {@code lazurite_dust} 的 {@code existing} 一直停在 MAX ⇒ 它<b>根本没进过那 64 条窗口</b>。
      * 只把节奏调快（每 5 tick → 每 tick）治不了这个 —— 顺序不变，它还是第 65 名之后。
      *
-     * @return 这一轮真正入网的总量（{@code 0} = 什么都没搬动 ⇒ 纯核不重算 write）
+     * @return 这一轮真正入网的总量（{@code 0} = 什么都没搬动 ⇒ 纯核不重算 write）。
+     *         ⚠️ 追写轮 {@code L2} 预算是 0 ⇒ 这个量<b>只可能来自 L1</b>，与"救卡住的那个键"这个目的自洽。
      */
     private static long chaseFor(@Nullable MEPatternBufferPartMachineBase machine,
                                  @NotNull Object2LongOpenHashMap<AEKey> buffer,
@@ -352,9 +392,9 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
         }
         IN_CHASE = true;
         try {
-            final ShanhaiBufferFlush.Sweep sweep =
+            final ShanhaiBufferOverflow.Round round =
                     sweepFreeFor(machine, buffer, key, ShanhaiBufferFlush.CHASE_ENTRIES);
-            return sweep == null ? 0L : sweep.moved;
+            return round == null ? 0L : round.moved();
         } catch (Throwable t) {
             return 0L;
         } finally {
@@ -410,11 +450,11 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
      * <b>免电搬一轮 buffer → 网络</b>（生产侧常规调用点：
      * {@code StellarSampleAssemblerPartMachine#shanhaiTickFreeFlush()}）。
      *
-     * @return 本轮读数；{@code null} = 这一轮没搬（前置不满足）
+     * @return 本轮读数（两层合并）；{@code null} = 这一轮没搬（前置不满足）
      */
     @Nullable
-    static ShanhaiBufferFlush.Sweep sweepFree(@Nullable MEPatternBufferPartMachineBase machine,
-                                              @Nullable Object2LongOpenHashMap<AEKey> buffer) {
+    static ShanhaiBufferOverflow.Round sweepFree(@Nullable MEPatternBufferPartMachineBase machine,
+                                                 @Nullable Object2LongOpenHashMap<AEKey> buffer) {
         return sweepFreeFor(machine, buffer, null, ShanhaiBufferFlush.MAX_ENTRIES);
     }
 
@@ -425,27 +465,42 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
      *   <li>追写路径（写不进去时）：{@code priority = 卡住的那个键}、{@code maxEntries = 8}。</li>
      * </ul>
      *
+     * <h2>🔴 顺序：L2 先、L1 后（只有常规那一轮）</h2>
+     * L2 里的量代表"已经顶满 {@code Long.MAX}、再攒就会丢"的那批
+     * （{@link ShanhaiBufferOverflow} 类注释 §一）⇒ 常规轮先推 L2 再搬 L1。这个顺序<b>本身就是一条断言</b>
+     * （离线自证第 3 组：两层都非空且预算只够一条时，先动的是 L2 那条）。
+     *
+     * <p>⚠️ <b>追写轮（{@code priority != null}）不给 L2 预算</b>（{@code wideBudget = 0}）：追写只为把
+     * <b>卡住的那个 L1 键</b>挪走（8 条预算），把预算花在 L2 上救不了这一单；L2 有每 tick 的常规轮兜着，
+     * 晚一条 tick 也不会丢。
+     *
      * <p>三件事：拿网格库存 → 用 {@link FreeEnergySource} 走
      * {@code StorageHelper.poweredInsert(…, MODULATE)} → 把"搬了多少"交给
-     * {@link ShanhaiBufferFlush#sweep} 记账（搬多少减多少，减到 0 才移除）。
+     * {@link ShanhaiBufferFlush#sweep}（L1）/ {@link ShanhaiBufferOverflow#sweep}（L2）记账
+     * （搬多少减多少，减到 0 才移除）。
      *
      * <p>🔴 <b>{@code ≤0} 的量一次都到不了 {@code poweredInsert}</b>：入库动作被
      * {@link ShanhaiBufferFlush#guarded} 包了一层闸门（{@link ShanhaiBufferFlush#moveIfPositive}）。
      * 纯核那一层的 {@code amount <= 0 ⇒ continue} 是第一道，这里是<b>贴着入库动作</b>的第二道 ——
      * 两道各有各的离线断言（见 {@code FreeFlushSelfTest2} 第 1/1b 组）。
      *
-     * <p>⚠️ 前置条件任一不满足（没机器 / 没 buffer / 离线没网格 / 取不到 actionSource）
+     * <p>⚠️ 前置条件任一不满足（没机器 / 两层都空 / 离线没网格 / 取不到 actionSource）
      * ⇒ <b>返回 null 且一个字节都不动</b>（调用方据此不打日志），绝不抛异常进 tick。
      *
      * @param priority   优先搬的键（{@code null} = 不指定；追写路径传"卡住的那个键"）
      * @param maxEntries 本轮条目预算（{@code <= 0} ⇒ 纯核用 64）
      */
     @Nullable
-    static ShanhaiBufferFlush.Sweep sweepFreeFor(@Nullable MEPatternBufferPartMachineBase machine,
-                                                 @Nullable Object2LongOpenHashMap<AEKey> buffer,
-                                                 @Nullable AEKey priority,
-                                                 int maxEntries) {
-        if (machine == null || buffer == null || buffer.isEmpty()) {
+    static ShanhaiBufferOverflow.Round sweepFreeFor(@Nullable MEPatternBufferPartMachineBase machine,
+                                                    @Nullable Object2LongOpenHashMap<AEKey> buffer,
+                                                    @Nullable AEKey priority,
+                                                    int maxEntries) {
+        if (machine == null) {
+            return null;
+        }
+        final Object2ObjectOpenHashMap<AEKey, Int128> overflow = overflowOf(machine);
+        // 🔴 早退闸：**L1 空不等于没活干**（L2 可能压着整批量，见类注释 §二-1）
+        if (ShanhaiBufferOverflow.nothingToFlush(buffer, overflow)) {
             return null;
         }
         final IGrid grid;
@@ -479,7 +534,27 @@ public class ShanhaiBufClampTrait extends MEPatternBufferRecipeHandlerTrait {
         final ShanhaiBufferFlush.Mover<AEKey> insert = ShanhaiBufferFlush.guarded(
                 (key, amount) -> StorageHelper.poweredInsert(
                         FREE_ENERGY, storage, key, amount, source, Actionable.MODULATE));
-        return ShanhaiBufferFlush.sweep(buffer, insert, maxEntries, priority);
+        // 🔴 两层一轮的顺序（L2 先 / 追写轮不给 L2 预算）在纯核里，见 ShanhaiBufferOverflow#sweepBoth
+        return ShanhaiBufferOverflow.sweepBoth(overflow, buffer, insert, maxEntries, priority);
+    }
+
+    /**
+     * <b>取本机的 L2 表</b>（二级缓存）—— 只有我们自己的机器有；别的机器（理论上不会走到这里）
+     * ⇒ {@code null}，此时"转存"直接不成、L2 那一轮是空读数 ⇒ 行为与加 L2 之前<b>逐位相同</b>。
+     *
+     * <p>写法与 {@link #actionSourceOf} 同款：{@code instanceof} + 异常兜底，绝不抛进产出链。
+     * ⚠️ 构造期不许调（那时本机字段还没赋值）—— 只在 tick 里调。
+     */
+    @Nullable
+    static Object2ObjectOpenHashMap<AEKey, Int128> overflowOf(@Nullable MEPatternBufferPartMachineBase machine) {
+        if (machine instanceof StellarSampleAssemblerPartMachine ours) {
+            try {
+                return ours.shanhaiBufferOverflow();
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

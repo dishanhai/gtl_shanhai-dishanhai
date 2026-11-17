@@ -63,6 +63,7 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 青铜神锻（原始终焉引擎）主机控制器。
@@ -1893,6 +1894,28 @@ public class PrimordialOmegaEngineMachine
     }
 
     /**
+     * 🔴 <b>本主机的「无线网池子键」</b>（gtmthings 全局能源池的 key，
+     * {@code WirelessEnergyManager.addEUToGlobalEnergyMap} 的第一个实参）；
+     * {@code null} = <b>本主机没有无线网归属</b>（默认）。
+     *
+     * <h2>谁读它</h2>
+     * 模块侧 {@code PrimordialModuleMachine#shanhai$wirelessPoolUuid()} 在"模块自己没绑定、
+     * 结构里也没有终端部件"时向宿主问一次 ⇒ 发电模块（零点能发生器）不必拆下重放也能直连本机的池子。
+     *
+     * <h2>🔴 为什么默认必须返回 {@code null}</h2>
+     * 老主机（原始终焉引擎）没有无线网归属 ⇒ 模块侧那条回落<b>直接跳过</b>
+     * ⇒ 23 台耗电模块 + 老主机上的发电模块，行为与加这个钩子之前<b>逐位相同</b>。
+     * 这是"可 fail-open"的结构性保证，不是"恰好没影响"。
+     *
+     * <p>归墟视界枢核覆写它，返回它自己那个 {@code @Persisted} 的放置者/终端 uuid
+     * （{@code GuixuVisionCoreMachine#shanhaiVisionWirelessPoolUuid()}）——
+     * 与它的"零点能发电入池"用的是<b>同一个键</b>，不是两个池子。
+     */
+    public @Nullable UUID shanhaiHostWirelessPoolUuid() {
+        return null;
+    }
+
+    /**
      * <b>本主机是否给它挂载的模块授予「跨配方种类并行」</b>：{@code true} = 授予。
      *
      * <h2>授予之后模块变成什么样（口径 = 用户 2026-10-23 原话，逐字）</h2>
@@ -2750,12 +2773,43 @@ public class PrimordialOmegaEngineMachine
      * 来源是终端部件 {@code addedToController} 里的「推」（覆写 {@link #setWirelessNetworkEnergyHandler}
      * 存下来），扫描只是兜底（对上游那个终端<b>结构性扫不到</b>，理由见模块侧那段 javadoc）。
      *
-     * <p>🔴 <b>不覆写 {@code getWirelessNetworkEnergyHandler()}</b>：那会让
-     * {@code MutableRecipesLogic#getRecipe()} 整体改走 {@code buildFinalWirelessRecipe}，
+     * <p>🔴 <b>不让 {@code getWirelessNetworkEnergyHandler()} 返回任何非 null 值</b>
+     * （2026-11-16 起本类对它写了一条<b>恒 {@code return null}</b> 的覆写，见上面那个方法；理由见那里的 javadoc）：
+     * 那会让 {@code MutableRecipesLogic#getRecipe()} 整体改走 {@code buildFinalWirelessRecipe}，
      * 而本工程的效果全挂在 Normal 支 ⇒ 一行都不执行（静默失效）。
      */
     @Nullable
     private IWirelessNetworkEnergyHandler shanhai$wirelessEnergyHandler;
+
+    /**
+     * 🔴 <b>恒返回 {@code null}</b> —— 本机「永远走 {@code buildFinalNormalRecipe}」的<b>显式断言</b>。
+     *
+     * <h2>为什么必须由本类亲手写这一行（不能靠"恰好没覆写"）</h2>
+     * gtladditions 用 {@code @Mixin(WorkableElectricMultiblockMachine) +
+     * @Implements(IWirelessElectricMultiblockMachine, prefix="gtladditions$")} 给<b>所有</b>多块机器的
+     * 基类织进了一个 handler 字段和它的 getter/setter（{@code javap} 实证：
+     * {@code WorkableElectricMultiblockMachineMixin} 里有
+     * {@code private IWirelessNetworkEnergyHandler gtladditions$wirelessNetworkEnergyHandler} ＋
+     * {@code gtladditions$getWirelessNetworkEnergyHandler()} / {@code gtladditions$setWirelessNetworkEnergyHandler(...)}）。
+     * ⇒「接口返回 null」在今天只是<b>副作用</b>（我们覆写了 setter ⇒ 上游那个字段没人写），
+     * 不是<b>保证</b>。任何人往那条链上多接一只手、或上游换一种实现，整台机器就会翻到 Wireless 支，
+     * 而本工程的 N3/N5/N6 ＋ 批处理 ＋ 影子对账 ＋ 归墟零点能<b>全挂在 Normal 支</b>
+     * ⇒ 一行都不执行、<b>且不报错</b>（本项目最忌讳的失败模式）。
+     * <p>⇒ 本覆写把那条不变式<b>钉死在本类自己身上</b>：不管继承链上发生了什么，这个接口方法只可能返回
+     * {@code null}。判据是字节码级的 —— {@code javap -c} 里它只能是 {@code aconst_null / areturn} 两条。
+     *
+     * <h2>⚠️ 它<b>不是</b>"把自持 handler 藏起来"</h2>
+     * 自持 handler 走的是<b>另一个名字</b>的接缝 {@link #shanhaiWirelessEnergyHandler()}
+     * （见下一段 javadoc），与这一行无关；本行不改变任何供电行为，只把分流开关钉住。
+     *
+     * <h2>⛔ 不要删、不要改成返回字段</h2>
+     * 见 {@code GuixuVisionCoreMachine} 里那份最全的 🔒 锁死条款（它管三台机器）。
+     * 负对照：把它改成 {@code return shanhai$wirelessEnergyHandler;} ⇒ 整条效果链静默失效（红）。
+     */
+    @Override
+    public @Nullable IWirelessNetworkEnergyHandler getWirelessNetworkEnergyHandler() {
+        return null;
+    }
 
     @Override
     public void setWirelessNetworkEnergyHandler(@Nullable IWirelessNetworkEnergyHandler trait) {

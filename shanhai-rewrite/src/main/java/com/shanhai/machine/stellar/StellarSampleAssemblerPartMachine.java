@@ -48,6 +48,8 @@ import com.shanhai.api.machine.ShanhaiSupplyOnlyFluidHandler;
 import com.shanhai.api.machine.ShanhaiSupplyOnlyItemHandler;
 import com.shanhai.common.locate.ShanhaiLocateCore;
 import com.shanhai.common.locate.ShanhaiLocateRegistry;
+// 🔴 第四刀 ①：搬运工具「批量写入」时**只置脏、不重建**的记账核（纯核，见那边的类注释看实机证据）。
+import com.shanhai.common.patternmover.HostPatternMoverBatch;
 import com.shanhai.machine.wildcard.AutoForgeMultiplierHost;
 import com.shanhai.machine.wildcard.AutoForgeMultiplierPanel;
 import com.shanhai.machine.wildcard.ShanhaiAutoForgeMultiplier;
@@ -57,6 +59,7 @@ import com.shanhai.machine.wildcard.ShanhaiSlotCircuit;
 import com.shanhai.machine.wildcard.ShanhaiWildcardCompat;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -76,6 +79,8 @@ import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferReci
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.handler.SlotCacheManager;
 import org.gtlcore.gtlcore.integration.ae2.widget.AEPatternViewExtendSlotWidget;
+// 二级缓存（L2）：Int128 是 gtlcore 的 128 位整数（可变！见 ShanhaiBufferOverflow 类注释 §二）
+import org.gtlcore.gtlcore.utils.datastructure.Int128;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -780,6 +785,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * 机器侧只在三个事件点 + {@code update()} 跳消费本策略的脏标记。
      */
     private final ShanhaiPatternRebuildPolicy shanhaiRebuildPolicy = new ShanhaiPatternRebuildPolicy();
+
+    /**
+     * 🔴 第四刀 ①：批量写入收尾时"重建一次"的回调（懒建，见 {@link #shanhaiBatchRebuilder()}）。
+     *
+     * <p>它<b>不是</b>同步字段、不落盘：批量只在同一个服务端 tick 里存在
+     * （{@code HostPatternMoverBatch} 的 {@link ThreadLocal} 那一份才是真相）。
+     */
+    private HostPatternMoverBatch.Rebuilder shanhaiBatchRebuilder;
 
     /**
      * <b>C3：通配符展开槽号的动态分配器</b>（原版无上限；K=128 截断已删除）。
@@ -1907,10 +1920,12 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
                     .limit(WILDCARD_CATALYST_FLUID_TANKS)
                     .toList());
         }
-        // TODO(阶段五)：产物 buffer（MEPatternBufferPartMachineBase#buffer）不落盘 ——
-        //  断线 / 区块卸载 / 拆机器时里面还没退款的产物会消失。修法见交付报告「分刀计划」第五刀。
-        //  本轮【刻意不做】：它要动 saveCustomPersistedData/loadCustomPersistedData 的成对读写，
-        //  做歪了会把库存输入一起写坏。
+        // ✅ 产物 buffer 是【落盘】的（2026-11-07 字节码复核，旧注释写反了）：
+        //    gtlcore `MEPatternBufferPartMachineBase#saveCustomPersistedData`（偏移 12/15/27）
+        //    自己就把 buffer 写进 NBT key "buffer"（条目 key "real"），`MEPatternBufferPartMachine`
+        //    的 save 调 super 之后才存自己的 recipe 缓存（偏移 3 `invokespecial`）⇒ 断线 / 区块卸载 / 拆机器
+        //    都不会丢。我们【只加不减】：L2（二级缓存）另存一个键 "shanhaiBufferOverflow"，
+        //    L1 的键一个字节都不碰（见 #saveCustomPersistedData / #loadCustomPersistedData）。
     }
 
     /**
@@ -4993,8 +5008,78 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         if (!this.expandCacheDirty && !this.forgeCacheDirty) {
             return;
         }
+        // 🔴🔴 第四刀 ①：**批量写入期间只置脏、不重建**（唯一抑制点；不在批量里时这一句直接返回 false，
+        //    ⇒ 编辑器 / AE / 玩家手动放那几条路的行为与改前逐位相同）。
+        //    实机证据（latest.log 2026-11）：搬运工具 1168 格 ⇒ 1168 次 PATREBUILD（每次 expanded=1733＋神锻 1733）
+        //    ⇒ 单 tick 40001 ms 被 ModernFix 看门狗抓出来。批量里把 N 次并成 1 次。
+        //    ⚠️ 这里【不清】两张脏标记（expandCacheDirty / forgeCacheDirty）—— 收尾那次重建才清，
+        //    否则"置脏→清脏"之间就没有"欠一次重建"这回事了（模板：HostPatternMoverBatch 的类注释 §二）。
+        if (HostPatternMoverBatch.suppress(this.shanhaiBatchRebuilder())) {
+            return;
+        }
         this.shanhaiRebuildPatternTables(reason);
         this.shanhaiRequestAePatternSync("rebuild:" + reason);
+    }
+
+    // ================================================================ 第四刀 ①：批量写入（抑制重建）
+
+    /**
+     * 批量写入的<b>静态开关</b>（搬运工具用；<b>可重入</b>，必须 {@code try}/{@code finally} 配对）。
+     *
+     * <pre>
+     *   StellarSampleAssemblerPartMachine.shanhaiBeginBatchWrite();
+     *   try { ...逐格 setItemDirect... } finally { StellarSampleAssemblerPartMachine.shanhaiEndBatchWrite(); }
+     * </pre>
+     * 批量期间 {@link #shanhaiBuildPatternTablesIfDirty(String)} 只记账不重建；
+     * 最外层 {@link #shanhaiEndBatchWrite()} 让<b>每台被置脏的机器各建一次</b>，并打一行
+     * {@code PATREBUILD_BATCH writes=N rebuilds=M}（<b>M 必须是 1</b>，这就是判据）。
+     *
+     * <p>⚠️ 记账在 {@link HostPatternMoverBatch} 的 {@link ThreadLocal} 里 ⇒ 客户端线程开面板
+     * 绝不会把服务端 tick 带进批量态。
+     */
+    public static void shanhaiBeginBatchWrite() {
+        HostPatternMoverBatch.begin();
+    }
+
+    /**
+     * 结束一层批量（见 {@link #shanhaiBeginBatchWrite()}）。
+     *
+     * @return <b>最外层</b>收尾 ⇒ 读数；内层 / 不平衡的 end ⇒ {@code null}
+     */
+    public static HostPatternMoverBatch.Report shanhaiEndBatchWrite() {
+        final HostPatternMoverBatch.Report report = HostPatternMoverBatch.end();
+        if (report != null) {
+            // 🔴 判据行：writes = 批量里被抑制的重建请求数（= 写了几格），rebuilds 必须 = 1。
+            ShanhaiStellarLog.info("PATREBUILD_BATCH writes={} rebuilds={} failed={}"
+                            + " ⇒ 批量期间只置脏、结束时统一重建一次（rebuilds 必须 = 1）",
+                    Integer.valueOf(report.writes()), Integer.valueOf(report.rebuilds()),
+                    Integer.valueOf(report.failed()));
+        }
+        return report;
+    }
+
+    /**
+     * 「批量收尾时重建一次」的那个回调（<b>懒建</b>，与 {@code shanhaiSlotMap} 同款理由：
+     * 字段初始化器会在构造期就被求值）。
+     *
+     * <p>收尾时<b>重新判一次</b>脏标记：批量里被置脏、收尾前又被别的路径清掉的（理论上没有）不再白建一次；
+     * 客户端 / 没 level 的也不建（与 {@code shanhaiBuildPatternTablesIfDirty} 前置判据同一口径）。
+     */
+    private HostPatternMoverBatch.Rebuilder shanhaiBatchRebuilder() {
+        if (this.shanhaiBatchRebuilder == null) {
+            this.shanhaiBatchRebuilder = () -> {
+                if (this.isRemote() || this.getLevel() == null) {
+                    return false;
+                }
+                if (!this.expandCacheDirty && !this.forgeCacheDirty) {
+                    return false;
+                }
+                this.shanhaiRebuildPatternTables("batch");
+                this.shanhaiRequestAePatternSync("rebuild:batch");
+                return true;
+            };
+        }
+        return this.shanhaiBatchRebuilder;
     }
 
     /**
@@ -6983,6 +7068,30 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
                 ShanhaiWildcardRecipeBinding.describe(bound),
                 execType.isEmpty() ? "none" : execType,
                 this.shanhaiHostKind(), Boolean.valueOf(claimOk), verdict);
+        // 🆕 2026-11 只读取证：这条样板<b>读不出类型</b>（slotType=none）⇒ 把它 NBT 的键名与原始值打一行。
+        //    目的：一眼看出类型到底存在哪个键、值是中文名还是 id（本轮实机就卡在"只有 none、没有原文"）。
+        //    只读：不写 NBT、不改任何判定；限流与格式见 ShanhaiStellarLog#logXrecipeNbtIfUnresolved。
+        if (slotType.isEmpty()) {
+            ShanhaiStellarLog.logXrecipeNbtIfUnresolved(slot, shanhaiPatternStack(pattern));
+        }
+    }
+
+    /**
+     * 从 AE 的样板详情取回<b>那块样板本身的物品栈</b>（拿不到 ⇒ {@code null}）。<b>只读</b>。
+     *
+     * <p>只给 {@code XRECIPE} / {@code XRECIPE_NBT} 这两条诊断行用；任何异常都吞成 {@code null}
+     * （诊断路径不许成为新的故障点）。
+     */
+    private static @Nullable ItemStack shanhaiPatternStack(@Nullable IPatternDetails pattern) {
+        try {
+            if (pattern == null) {
+                return null;
+            }
+            final AEItemKey definition = pattern.getDefinition();
+            return definition == null ? null : definition.getReadOnlyStack();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /**
@@ -9529,6 +9638,66 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     /** 5 秒窗口里<b>最后一轮</b>结束时的剩余量（窗口末的存量快照）。 */
     private long shanhaiFreeFlushWinRemaining = 0L;
 
+    // ---------------------------------------------------------------- 二级缓存（L2）
+
+    /**
+     * <b>产物 buffer 的二级缓存（L2）</b>：{@code AEKey → Int128}。
+     *
+     * <h2>它装的是什么</h2>
+     * L1（{@code MEPatternBufferPartMachineBase.buffer}，{@code long}）顶到 {@code Long.MAX_VALUE} 之后
+     * <b>再也写不进去</b>，而那时上游 {@code addTo} 一加就回绕成负数（{@code reFunds} 再静默删掉）。
+     * 我们夹住之后<b>余量就落在这里</b>（{@code want - write}），下一轮免电搬运原额送进网络
+     * ⇒ <b>今天会丢的量有了去处</b>。判据与账目全在纯核 {@link ShanhaiBufferOverflow}（可离线断言）。
+     *
+     * <h2>🔴 为什么是"惰性建"而不是字段初始化 {@code = new …}</h2>
+     * 本类的字段初始化在<b>超类构造器跑完之后</b>才执行，而 {@code createRecipeHandler} 是<b>在超类构造器里</b>
+     * 被调的（{@code MEPatternBufferPartMachine} ctor 偏移 211）⇒ 那条链上拿到的 {@code this}，
+     * 其字段<b>还全是 null</b>（见 {@link ShanhaiBufClampTrait} 类注释 §六）。
+     * 若写成字段初始化式，任何"构造期就顺手读一下 L2"的调用都会 NPE；惰性建把这条时间差彻底抹平
+     * （第一次真用到时必然已经构造完）。非 final 只是这一条的代价，访问口只有 {@link #shanhaiBufferOverflow()}。
+     *
+     * <h2>⚠️ {@code Int128} 可变</h2>
+     * 写只经 {@link ShanhaiBufferOverflow#addValue}（新实例才进表），往外交只交副本
+     * （{@link ShanhaiBufferOverflow#entries}）—— 见那边类注释 §二的三条纪律。
+     */
+    private Object2ObjectOpenHashMap<AEKey, Int128> shanhaiBufferOverflow;
+
+    /**
+     * <b>取 L2 表（惰性建，永不返回 null）</b>。
+     *
+     * <p>三个消费者：① {@code ShanhaiBufClampTrait}（转存 / 刷写 / 早退闸）；② 本类 tick 里的读数与日志；
+     * ③ 存档读写。全部经这一个口，避免"某处 new 了一份新的"那种永久丢账。
+     */
+    @NotNull
+    public Object2ObjectOpenHashMap<AEKey, Int128> shanhaiBufferOverflow() {
+        Object2ObjectOpenHashMap<AEKey, Int128> map = this.shanhaiBufferOverflow;
+        if (map == null) {
+            map = new Object2ObjectOpenHashMap<>();
+            this.shanhaiBufferOverflow = map;
+        }
+        return map;
+    }
+
+    /** <b>Jade / 日志口径：L2 的条目数</b>（二级缓存里压着几种东西）。 */
+    public int shanhaiBufferOverflowCount() {
+        return ShanhaiBufferOverflow.size(this.shanhaiBufferOverflow());
+    }
+
+    /** <b>Jade / 日志口径：L2 的正值合计</b>（饱和；负值不算在内）。 */
+    public long shanhaiBufferOverflowTotal() {
+        return ShanhaiBufferOverflow.total(this.shanhaiBufferOverflow());
+    }
+
+    /**
+     * <b>Jade / 日志口径：两层合计待退量</b>（{@code L1 正值和 + L2 正值和}，饱和）。
+     *
+     * <p>🔴 抬头/面板上显示的必须是<b>这个</b>数：L1 单独那一列（gtlcore 自己那几行）只说了"其中 L1 有多少"，
+     * 机器真正的待退量是两层之和 —— 少了 L2 那一半，面板就是在说谎。
+     */
+    public long shanhaiBufferPendingTotal() {
+        return ShanhaiBufferOverflow.mergedTotal(this.buffer, this.shanhaiBufferOverflow());
+    }
+
     /**
      * 给 {@code ShanhaiBufClampTrait} 的 {@code bufflush CHASE} 行用的位置串。
      *
@@ -9541,11 +9710,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     }
 
     /**
-     * 上游的搬运节奏（tick）—— 读 {@code ConfigHolder.MEPatternOutputMin}。
+     * 上游的搬运节奏（tick）—— 读 {@code ConfigHolder.MEPatternOutputMin}
+     * （布局两代：≤1.2.3.2-fix4 顶层扁平 / ≥1.2.3.2-fix5 在 {@code machines} 组里，经
+     * {@code GtlConfigCompat} 两种都试）。
      *
-     * <p>javap 实证（{@code libs\gtlcore-1.2.3.2-fix3.jar}，{@code 32D3B630D1D1EA28}）：
+     * <p>javap 实证（分组布局的两份 jar 同形：{@code gtlcore-1.2.3.2-fix5.jar}
+     * {@code A33380CE3A6B7E90}、{@code gtlcore-1.2.3.3-fix2.jar} {@code 9DD89C602B804AD6}）：
      * {@code MEExtendedOutputPartMachineBase} 的静态初始化把
-     * {@code ConfigHolder.INSTANCE.MEPatternOutputMin} 赋给 {@code MIN_FREQUENCY}，
+     * {@code ConfigHolder.INSTANCE.machines.MEPatternOutputMin} 赋给 {@code MIN_FREQUENCY}
+     * （{@code getfield ConfigHolder.machines:ConfigHolder$MachineOptions}
+     * → {@code getfield ConfigHolder$MachineOptions.MEPatternOutputMin:I}；旧版是顶层字段，
+     * 1.2.3.3 起搬到 {@code MachineOptions}），
      * 而 {@code MEPatternBufferPartMachine$Ticker#getTickingRequest} 就是
      * {@code new TickingRequest(MIN_FREQUENCY, MAX_FREQUENCY, …)} ⇒ 上游"每多少 tick 退一次"就是它，
      * <b>默认值 {@code iconst_5} = 5</b>（{@code MEPatternOutputMax} 默认 80）。
@@ -9558,12 +9733,13 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * <p>读不到（配置没加载 / 反射面变了）⇒ 退回 {@link ShanhaiBufClampTrait#INTERVAL_FALLBACK_TICKS}。
      */
     private static int shanhaiFreeFlushInterval() {
-        try {
-            final int v = org.gtlcore.gtlcore.config.ConfigHolder.INSTANCE.MEPatternOutputMin;
-            return v > 0 ? v : ShanhaiBufClampTrait.INTERVAL_FALLBACK_TICKS;
-        } catch (Throwable t) {
-            return ShanhaiBufClampTrait.INTERVAL_FALLBACK_TICKS;
-        }
+        // gtlcore 的 ConfigHolder 有两种布局（实测：fix4=顶层扁平，1.2.3.3=分组），
+        // 取值统一走 GtlConfigCompat（分组优先 → 扁平兜底 → 都没有则一行 WARN + 默认值），
+        // ⇒ 同一份 jar 对两种布局都能编、都能跑。
+        //   扁平（≤1.2.3.2-fix4）：ConfigHolder.INSTANCE.MEPatternOutputMin
+        //   分组（≥1.2.3.2-fix5）：ConfigHolder.INSTANCE.machines.MEPatternOutputMin
+        final int v = com.shanhai.common.compat.GtlConfigCompat.machineInt("MEPatternOutputMin", -1);
+        return v > 0 ? v : ShanhaiBufClampTrait.INTERVAL_FALLBACK_TICKS;
     }
 
     /**
@@ -9602,7 +9778,11 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * {@link ShanhaiBufferFlush#statusWarns()}，这里只派发 —— 别把级别写死在调用点。
      */
     private void shanhaiTickFreeFlush() {
-        if (this.isRemote() || this.getLevel() == null || this.buffer == null || this.buffer.isEmpty()) {
+        // 🔴 早退闸必须看【两层】：L1 被上游 Ticker#reFunds 搬空之后，L2 里可能还压着整批量
+        //    （顶满 Long.MAX 之后多出来的那部分）。只看 L1 就会让 L2 永久卡死、无日志、面板看着是空的。
+        //    判据只有一份：ShanhaiBufferOverflow#nothingToFlush（L1 空 且 L2 空 才允许早退）。
+        if (this.isRemote() || this.getLevel() == null || this.buffer == null
+                || ShanhaiBufferOverflow.nothingToFlush(this.buffer, this.shanhaiBufferOverflow())) {
             return;
         }
         final long now = this.getLevel().getGameTime();
@@ -9612,11 +9792,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         // 记账**先**推进：搬不动（没网格 / 没 source）也不该每 tick 重试一次
         this.shanhaiFreeFlushTick = now;
         this.shanhaiWakeFreeFlushDevice();
-        final ShanhaiBufferFlush.Sweep sweep = ShanhaiBufClampTrait.sweepFree(this, this.buffer);
-        if (sweep == null) {
+        final ShanhaiBufferOverflow.Round round = ShanhaiBufClampTrait.sweepFree(this, this.buffer);
+        if (round == null) {
             // 离线 / 没 source ⇒ 这一轮什么都没动（一个字节都没改），也不出声
             return;
         }
+        // 🔴 合并读数（L1 ＋ L2）：日志里的 条数/成功/失败/本次入网量/剩余 全是两层之和。
+        //    只报 L1 会在"L1 空了、L2 还压着量"时显示 剩余=0 —— 那正是"面板说谎"。
+        final ShanhaiBufferFlush.Sweep sweep = round.merged();
         // ---- 5 秒窗口的累计（cadence 那行用；饱和累加，读数永远非负）
         this.shanhaiFreeFlushRounds++;
         this.shanhaiFreeFlushWinEntries += sweep.entries;
@@ -9629,16 +9812,30 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             this.shanhaiFreeFlushNegLogTick = now;
             ShanhaiStellarLog.warn("{}", negLine);
         }
+        // 🔴 L2 里的负值（理论上不该有：只转存正量、只减已入网量）—— 有就是真异常，与 L1 那条同级
+        if (round.wide.negatives > 0
+                && (this.shanhaiFreeFlushNegLogTick == Long.MIN_VALUE
+                        || now - this.shanhaiFreeFlushNegLogTick >= 100L)) {
+            this.shanhaiFreeFlushNegLogTick = now;
+            ShanhaiStellarLog.warn("bufflush BUFNEG 宽 pos={} dim={} key={} value={} neg={} action=skip",
+                    this.shanhaiPos(), this.shanhaiDim(),
+                    this.shanhaiOverflowKeyId(round.wide.negKey),
+                    Long.valueOf(round.wide.negValue), Integer.valueOf(round.wide.negatives));
+        }
         if (this.shanhaiFreeFlushLogTick == Long.MIN_VALUE || now - this.shanhaiFreeFlushLogTick >= 100L) {
             this.shanhaiFreeFlushLogTick = now;
             // 🔴 心跳两行的级别由纯核 statusWarns() 定（默认 INFO）——
             //    用户 2026-11-01 拍板：「节拍不是丢料」「整份日志里 WARN 只剩真丢料 / 真异常」。
             //    级别不许在这里写死：离线自证要能数、负对照要能改红（见 ShanhaiBufferFlush#heartbeatEvents）。
+            // 🔴 L2 的那一档单独打一个计数（"别让面板说谎"：合计里有它多少，必须能一眼看出来）。
+            //    拼串也在纯核（ShanhaiBufferOverflow#wideSuffix）⇒ 格式可离线断言；这里只把结果交下去。
+            final String wideSuffix = ShanhaiBufferOverflow.wideSuffix(round.wide,
+                    ShanhaiBufferOverflow.size(this.shanhaiBufferOverflow()), round.l1.remaining);
             final java.util.List<ShanhaiBufferFlush.Event> events = ShanhaiBufferFlush.heartbeatEvents(
                     this.shanhaiPos(), this.shanhaiDim(), sweep, ShanhaiBufferFlush.cadenceTicks(),
                     this.shanhaiFreeFlushRounds, this.shanhaiFreeFlushWinEntries,
                     this.shanhaiFreeFlushWinMoved, this.shanhaiFreeFlushWinRemaining,
-                    shanhaiFreeFlushInterval());
+                    shanhaiFreeFlushInterval(), wideSuffix);
             for (int i = 0; i < events.size(); i++) {
                 final ShanhaiBufferFlush.Event event = events.get(i);
                 if (event == null) {
@@ -9654,6 +9851,19 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             this.shanhaiFreeFlushWinEntries = 0L;
             this.shanhaiFreeFlushWinMoved = 0L;
         }
+    }
+
+    /** L2 日志里的 {@code key=<id>}（取不到就 {@code ?}；绝不抛）。 */
+    @NotNull
+    private String shanhaiOverflowKeyId(@Nullable Object key) {
+        try {
+            if (key instanceof AEKey aeKey) {
+                return ShanhaiBufClampTrait.keyId(aeKey);
+            }
+        } catch (Throwable ignored) {
+            // 取不到 id 也要把那行打出来（value 才是关键信息）
+        }
+        return "?";
     }
 
     /**
@@ -9760,28 +9970,38 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * <p>格式（字段名固定，便于 grep 与断言）：
      * <pre>
      *   TICKER pos=uselessdim@1887,90,225 buffer=0 pushed=46 refunded=0 pushedTotal=46 busyTicks=0 ⇒ 判读
+     *   TICKER pos=… buffer=2 pushed=… … busyTicks=… ⇒ … l1=0 wide=2 wideTotal=1234      ← 有二级缓存时追加
      * </pre>
-     * 字段含义：{@code buffer} = 当前 buffer 条目数；{@code pushed} = <b>本次窗口</b>内 pushPattern 成功次数；
-     * {@code refunded} = 累计「buffer 非空→空」跃变次数（= AEUtils.reFunds 成功次数，口径见字段注释）；
-     * {@code pushedTotal} = 累计成功次数；{@code busyTicks} = buffer 已连续非空几 tick。
+     * 字段含义：{@code buffer} = 当前 buffer 条目数（🔴 <b>L1 ＋ L2 的合计</b> —— 面板不许说谎：
+     * L1 被上游 Ticker 搬空、L2 还压着量时，写成 0 就是假读数）；{@code pushed} = <b>本次窗口</b>内
+     * pushPattern 成功次数；{@code refunded} = 累计「L1 非空→空」跃变次数（= AEUtils.reFunds 成功次数，
+     * 口径见字段注释）；{@code pushedTotal} = 累计成功次数；{@code busyTicks} = buffer 已连续非空几 tick（两层都算）；
+     * 行尾 {@code l1=} / {@code wide=} / {@code wideTotal=} 是<b>拆开后的明细</b>（只在 L2 非空时出现，
+     * 所以常规机器的这一行与加 L2 之前<b>逐字相同</b>）。
      */
     private void shanhaiTickTickerProbe() {
         if (this.isRemote() || this.getLevel() == null) {
             return;
         }
         final int n = this.buffer == null ? -1 : this.buffer.size();
+        // 🔴 L1 的"非空→空"跃变仍然只数 L1（它代表上游 reFunds 真的搬走了一批）；L2 只参与显示
         if (this.shanhaiTickerLastBufferSize > 0 && n == 0) {
             this.shanhaiTickerRefundDrains++;
         }
         this.shanhaiTickerLastBufferSize = n;
-        if (n > 0) {
+        // 🔴 显示/判读用【两层合计】：L1 空而 L2 有量时，文案绝不能说"一件都没回"
+        final int wide = ShanhaiBufferOverflow.size(this.shanhaiBufferOverflow());
+        final long wideTotal = ShanhaiBufferOverflow.total(this.shanhaiBufferOverflow());
+        final int shown = n < 0 ? n : n + wide;
+        if (shown > 0) {
             this.shanhaiTickerBusyTicks++;
         } else {
             this.shanhaiTickerBusyTicks = 0L;
         }
         final long now = this.getLevel().getGameTime();
-        final String state = n + "|" + this.shanhaiTickerPushOkTotal + "|" + this.shanhaiTickerRefundDrains
-                + "|" + (this.shanhaiTickerBusyTicks >= 60L ? 1 : 0);
+        // 指纹里带上 wide：L2 的增减也是"状态变了"，必须能打出来（否则 L2 增长时日志一片安静）
+        final String state = shown + "|" + this.shanhaiTickerPushOkTotal + "|" + this.shanhaiTickerRefundDrains
+                + "|" + (this.shanhaiTickerBusyTicks >= 60L ? 1 : 0) + "|" + wide;
         // 硬下限 20 tick：46 件的单会在几十 tick 内连续 pushPattern，每次 push 都算"变化"，
         // 不设下限就会刷 46 行。被压下的变化不会丢 —— 指纹只在**打印时**写，下次一定还"不一样"。
         if (this.shanhaiTickerFirstLogged
@@ -9802,11 +10022,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         final long pushed = this.shanhaiTickerPushOkSinceLog;
         this.shanhaiTickerPushOkSinceLog = 0L;
         final String verdict;
-        if (n > 0) {
-            verdict = this.shanhaiTickerBusyTicks >= 60L
-                    ? "产物压在 buffer 里已经 " + this.shanhaiTickerBusyTicks
-                    + " tick 没退 ⇒ Ticker 没在跑（grid 掉线 / io 不是 IO.BOTH / CPU 不接）"
-                    : "产物刚写进 buffer（下一 tick 应被 Ticker 退掉；连续几次都 >0 就是退不掉）";
+        if (shown > 0) {
+            if (n == 0 && wide > 0) {
+                // 🔴 这条分支是加 L2 之后才可能出现的：L1 空、L2 有量 ⇒ 绝不能说"没产物"
+                verdict = "L1 已被搬空，但二级缓存还压着 " + wide + " 条（合计 " + wideTotal
+                        + "）⇒ 看 bufflush 那行的 宽条数=/宽入网量=（退不动就是网络不收这个键）";
+            } else {
+                verdict = this.shanhaiTickerBusyTicks >= 60L
+                        ? "产物压在 buffer 里已经 " + this.shanhaiTickerBusyTicks
+                        + " tick 没退 ⇒ Ticker 没在跑（grid 掉线 / io 不是 IO.BOTH / CPU 不接）"
+                        : "产物刚写进 buffer（下一 tick 应被 Ticker 退掉；连续几次都 >0 就是退不掉）";
+            }
         } else if (this.shanhaiTickerPushOkTotal > 0L) {
             verdict = "AE 已把单派给本机（累计 pushPattern ok=" + this.shanhaiTickerPushOkTotal
                     + " 次）但 buffer 一次都没非空过 ⇒ 产物没走到 meHandleRecipeOutputInner"
@@ -9815,10 +10041,15 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             verdict = "本机还没被 AE 派过单（pushPattern 一次没成功）⇒ 这台的卡点不在产物返还，"
                     + "看 RECIPE claim 的 reason 与 STOCKWHO 的 own=";
         }
-        ShanhaiStellarLog.info("TICKER pos={} buffer={} pushed={} refunded={} pushedTotal={} busyTicks={} ⇒ {}",
-                this.shanhaiPos(), Integer.valueOf(n), Long.valueOf(pushed),
+        // 🔴 buffer= 报【两层合计】（L1 被搬空而 L2 有量时，写 0 就是假读数）；
+        //    拆开的明细只在 L2 非空时追加，常规机器那行与旧版逐字相同。
+        final String wideDetail = wide > 0
+                ? " l1=" + Math.max(n, 0) + " wide=" + wide + " wideTotal=" + wideTotal
+                : "";
+        ShanhaiStellarLog.info("TICKER pos={} buffer={} pushed={} refunded={} pushedTotal={} busyTicks={} ⇒ {}{}",
+                this.shanhaiPos(), Integer.valueOf(shown), Long.valueOf(pushed),
                 Long.valueOf(this.shanhaiTickerRefundDrains), Long.valueOf(this.shanhaiTickerPushOkTotal),
-                Long.valueOf(this.shanhaiTickerBusyTicks), verdict);
+                Long.valueOf(this.shanhaiTickerBusyTicks), verdict, wideDetail);
     }
 
     /**
@@ -10061,12 +10292,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      *                                       ⇒ 派单落在别的机器上（对照 RECIPE claim 的 pos）
      * </pre>
      * <p>节流 300 tick（5 秒），且只在 {@code buffer} 为空或第一次时打 —— 就是为"卡住"这个场景服务的。
+     * <p>🔴 {@code buffer=} 报的是 <b>L1 ＋ L2 的合计</b>（"别让面板说谎"）：L1 被上游 Ticker 搬空、
+     * L2 还压着量时，这一行若写 0，判读会指向"这台根本没在跑配方"—— 完全是反的。
+     * 拆开的明细（{@code l1=}/{@code wide=}）只在 L2 非空时追加。
      */
     private void shanhaiLogBufferGate(@NotNull String where) {
         if (this.isRemote() || this.getLevel() == null) {
             return;
         }
-        final int bufferSize = this.buffer == null ? -1 : this.buffer.size();
+        final int l1Size = this.buffer == null ? -1 : this.buffer.size();
+        final int wide = ShanhaiBufferOverflow.size(this.shanhaiBufferOverflow());
+        final int bufferSize = l1Size < 0 ? l1Size : l1Size + wide;
         final long now = this.getLevel().getGameTime();
         final boolean first = this.shanhaiBufferGateTick == Long.MIN_VALUE;
         if (!first && bufferSize <= 0 && this.shanhaiBufferGateTick != Long.MIN_VALUE
@@ -10112,7 +10348,10 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         final String verdict;
         if (bufferSize > 0) {
-            verdict = "产物在 buffer 里等着退（下一秒应看到 TICKER 的 refunded 增加）";
+            verdict = wide > 0
+                    ? "产物在 buffer 里等着退（L1=" + Math.max(l1Size, 0) + " 条 / 二级缓存=" + wide
+                    + " 条；L1 该被 Ticker 退掉，二级缓存由 bufflush 每 tick 免电送走）"
+                    : "产物在 buffer 里等着退（下一秒应看到 TICKER 的 refunded 增加）";
         } else if (slotsWithItems > 0 || slotsWithFluids > 0) {
             verdict = "本机槽里压着料（物品格 " + slotsWithItems + " / 流体格 " + slotsWithFluids
                     + "）却零产物 ⇒ 配方没跑到「完成」那一步，**不是**产物返还的问题";
@@ -10120,11 +10359,12 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             verdict = "本机既没料也没产物 ⇒ 这一台根本没在跑配方（派单落在别的机器上，"
                     + "对照 RECIPE claim 的 pos= 与 STOCKWHO 的 own=）";
         }
+        final String wideDetail = wide > 0 ? " l1=" + Math.max(l1Size, 0) + " wide=" + wide : "";
         ShanhaiStellarLog.info("BUFFERGATE pos={} where={} buffer={} slotsWithItems={} slotsWithFluids={} "
-                        + "recipeHandler={} meOut=[item={}, fluid={}] ⇒ {}",
+                        + "recipeHandler={} meOut=[item={}, fluid={}] ⇒ {}{}",
                 this.shanhaiPos(), where, Integer.valueOf(bufferSize),
                 Integer.valueOf(slotsWithItems), Integer.valueOf(slotsWithFluids),
-                recipeHandler, meItem, meFluid, verdict);
+                recipeHandler, meItem, meFluid, verdict, wideDetail);
     }
 
     /**
@@ -10783,9 +11023,29 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         for (AEItemKey key : this.shanhaiConfiguredItemKeys()) {
             final long available = this.shanhaiAvailableItem(key);
             if (available > 0L) {
-                map.addTo(key.toStack(), available);
+                // 🔴 super 已经把"父类那批 160 格"的可用量裸加进同一张 map；我们又对同一个键再 addTo。
+                //    AE2 的 KeyCounter 与 fastutil 的 addTo 都是裸 long 加（ladd），而超级AE无限元件的上限
+                //    就是 Long.MAX_VALUE ⇒ 两块来源相加会绕回负数 ⇒ 这里必须自己饱和，绝不翻负。
+                final ItemStack stack = key.toStack();
+                final long prev = map.getLong(stack);
+                map.put(stack, shanhaiSatAddStock(prev, available));
             }
         }
+    }
+
+    /**
+     * 饱和 long 加（星律库存链路专用）：越界夹在 {@link Long#MAX_VALUE} / {@link Long#MIN_VALUE}，绝不绕回。
+     * <p>为什么需要：AE2 侧是裸加，而单键上限是 {@code Long.MAX_VALUE} ⇒ 两个来源就翻负；
+     * 翻负后再参与"够不够料"的判断会把"够"读成"不够"。
+     */
+    private static long shanhaiSatAddStock(long a, long b) {
+        if (b > 0L && a > Long.MAX_VALUE - b) {
+            return Long.MAX_VALUE;
+        }
+        if (b < 0L && a < Long.MIN_VALUE - b) {
+            return Long.MIN_VALUE;
+        }
+        return a + b;
     }
 
     /** 配置变了 ⇒ 重建键缓存（父类的 {@code onStockInputConfigChanged} 会先跑它自己那套）。 */
@@ -11050,18 +11310,181 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     }
 
     /**
-     * 载入存档的最后一跳：先让 LDLib 把两份 handler 都还原，再做一次性迁移。
+     * 载入存档的最后一跳：先让 LDLib 把两份 handler 都还原，再做一次性迁移，然后还原 L2。
      *
-     * <p>⚠️ 父类<b>没有</b>覆写本方法（{@code javap -p} 实证：MEStocking / MEPatternBufferPartMachine /
-     * Base 三个类里都没有 {@code saveCustomPersistedData} / {@code loadCustomPersistedData}）⇒
-     * {@code super} 走的是 {@code MetaMachine} 的实现，不会把任何东西写坏。
+     * <p>⚠️ 旧注释写"父类没有覆写这两个方法"是<b>错的</b>（2026-11-07 字节码复核）：
+     * {@code MEPatternBufferPartMachineBase} 与 {@code MEPatternBufferPartMachine} <b>都覆写了</b>
+     * {@code saveCustomPersistedData}/{@code loadCustomPersistedData}，且都 <b>调 super</b>
+     * （{@code MEPatternBufferPartMachine#saveCustomPersistedData} 偏移 3 {@code invokespecial Base}）。
+     * {@code super} 走的就是这条链：Base 把 L1 的 {@code "buffer"} 读出来，Machine 再读自己的 recipe 缓存。
+     * ⇒ 我们的 {@code super} 调用<b>必须留着</b>（少了它 L1 直接掉档），加的东西只能<b>另起键</b>。
      */
     @Override
     public void loadCustomPersistedData(CompoundTag tag) {
         super.loadCustomPersistedData(tag);
+        // L2（二级缓存）：新键 "shanhaiBufferOverflow"（🔴 绝不复用 gtlcore 的 "buffer"）
+        this.shanhaiLoadBufferOverflow(tag);
         this.shanhaiMigrateLegacyStockConfigs("loadCustomPersistedData");
         // 流体侧同一支：父类那 32 格流体配置 ⇒ 我们的 160 格（两侧都读对象，不碰 raw tag）
         this.shanhaiMigrateLegacyStockFluidConfigs("loadCustomPersistedData");
+    }
+
+    /**
+     * <b>存档：L2 写进新键 {@code "shanhaiBufferOverflow"}</b>。
+     *
+     * <pre>
+     *   { &lt;AEKey generic tag，含 "#c"&gt;, "quantity": [high, low] }   ← 与 gtladditions WideBufferTools 同形
+     * </pre>
+     *
+     * <h2>🔴 为什么必须有它</h2>
+     * L2 里的量是"L1 顶满之后多出来的"——<b>不存盘就等于断线即丢</b>（L1 那份 gtlcore 自己会存，
+     * 但 L2 是我们的字段，不写就没人写）。旧版注释说"buffer 不落盘"是错的，而 L2 是<b>真的</b>不会落盘。
+     *
+     * <h2>为什么另起一个键</h2>
+     * {@code "buffer"} 是 gtlcore 存 L1 用的键（条目键 {@code "real"}）。复用它会<b>覆盖上游那份 L1</b>
+     * ⇒ 新档退回旧 build 时直接清零（{@code 取证.md} §R2，本方案最大的存档风险）。
+     *
+     * <h2>空表不写键</h2>
+     * L2 空（99.99% 的机器）连这个键都不产生 ⇒ 存档形态与加 L2 之前<b>逐字节相同</b>，
+     * 也不给"新档退回旧 build"制造任何多余差异。
+     */
+    @Override
+    public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean clientSide) {
+        super.saveCustomPersistedData(tag, clientSide);
+        try {
+            final java.util.List<ShanhaiBufferOverflow.Entry<AEKey>> entries =
+                    ShanhaiBufferOverflow.entries(this.shanhaiBufferOverflow());
+            if (entries.isEmpty()) {
+                return;
+            }
+            final net.minecraft.nbt.ListTag list = new net.minecraft.nbt.ListTag();
+            for (int i = 0; i < entries.size(); i++) {
+                final ShanhaiBufferOverflow.Entry<AEKey> entry = entries.get(i);
+                // 每个 key 一个**独立**的 tag（toTagGeneric 每次 new；我们只往里加一个 "quantity"）
+                final CompoundTag one = entry.key.toTagGeneric();
+                one.putLongArray(ShanhaiBufferOverflow.TAG_QUANTITY,
+                        new long[]{entry.value.getHigh(), entry.value.getLow()});
+                list.add(one);
+            }
+            tag.put(ShanhaiBufferOverflow.TAG_OVERFLOW, list);
+        } catch (Throwable t) {
+            // 存档出错绝不许把保存链带崩：宁可这一份 L2 没写进去（下一份存档会重写），也要保住整台机器的存档
+            ShanhaiStellarLog.warn("二级缓存存档失败（L2 {} 条未写入，本份存档里它们只能靠内存撑着）：{}",
+                    Integer.valueOf(ShanhaiBufferOverflow.size(this.shanhaiBufferOverflow())),
+                    String.valueOf(t));
+        }
+    }
+
+    /**
+     * <b>读档：把 {@code "shanhaiBufferOverflow"} 还原成 L2</b>（判据全在纯核
+     * {@link ShanhaiBufferOverflow#restore}，这里只做 NBT ↔ 窄接口的搬运）。
+     *
+     * <p>三条：① 没有这个键 ⇒ L2 清空、<b>静默</b>（旧档天然如此，不是异常）；
+     * ② 有旧格式（{@code "real"}，没有 {@code "quantity"}）⇒ 走迁移并留一行 INFO；
+     * ③ 读出的量里有被剔掉的（0/负/键读不出）⇒ 留一行 WARN（**不许静默吞掉**）。
+     */
+    private void shanhaiLoadBufferOverflow(@NotNull CompoundTag tag) {
+        final Object2ObjectOpenHashMap<AEKey, Int128> overflow = this.shanhaiBufferOverflow();
+        final net.minecraft.nbt.ListTag list;
+        try {
+            list = tag.getList(ShanhaiBufferOverflow.TAG_OVERFLOW, net.minecraft.nbt.Tag.TAG_COMPOUND);
+        } catch (Throwable t) {
+            overflow.clear();
+            return;
+        }
+        final int raw = list.size();
+        final boolean[] legacy = new boolean[1];
+        final int accepted;
+        try {
+            accepted = ShanhaiBufferOverflow.restore(new ShanhaiOverflowNbtSource(list), overflow,
+                    () -> legacy[0] = true);
+        } catch (Throwable t) {
+            overflow.clear();
+            ShanhaiStellarLog.warn("二级缓存读档失败（本次 L2 为空，那批量只能等重新产出）：{}", String.valueOf(t));
+            return;
+        }
+        if (accepted > 0) {
+            ShanhaiStellarLog.info("二级缓存读档：存档 {} 条 ⇒ 收下 {} 条，合计 {}（键 {}）",
+                    Integer.valueOf(raw), Integer.valueOf(accepted),
+                    Long.valueOf(ShanhaiBufferOverflow.total(overflow)), ShanhaiBufferOverflow.TAG_OVERFLOW);
+        }
+        if (legacy[0]) {
+            ShanhaiStellarLog.info("二级缓存读档：读到旧格式（{}），已按 long 迁移", ShanhaiBufferOverflow.TAG_LEGACY_REAL);
+        }
+        if (raw > accepted) {
+            ShanhaiStellarLog.warn("二级缓存读档：{} 条被剔掉（键读不出 / 值不是正的）—— 存档可能有坏条目",
+                    Integer.valueOf(raw - accepted));
+        }
+    }
+
+    /**
+     * {@code "shanhaiBufferOverflow"} 表 → {@link ShanhaiBufferOverflow.Source}（NBT 侧的窄实现）。
+     *
+     * <p>为什么把它做成一个薄薄的适配器而不是把 NBT 判断写进纯核：判据（哪种格式优先、收不收、
+     * 同键多条怎么算）必须<b>只有一份</b>且能离线断言 ⇒ 全在 {@link ShanhaiBufferOverflow#restore}；
+     * 这里只回答四个"这一条字段长什么样"的问题。
+     */
+    private static final class ShanhaiOverflowNbtSource implements ShanhaiBufferOverflow.Source<AEKey> {
+
+        private final net.minecraft.nbt.ListTag list;
+
+        ShanhaiOverflowNbtSource(@NotNull net.minecraft.nbt.ListTag list) {
+            this.list = list;
+        }
+
+        @Override
+        public int count() {
+            return this.list.size();
+        }
+
+        @Override
+        public @Nullable AEKey key(int i) {
+            try {
+                return AEKey.fromTagGeneric(this.list.getCompound(i));
+            } catch (Throwable t) {
+                // 单条读不出 ⇒ 交 null 让纯核跳过它（不许把 null 塞进表）
+                return null;
+            }
+        }
+
+        @Override
+        public boolean hasQuantity(int i) {
+            try {
+                return this.list.getCompound(i)
+                        .contains(ShanhaiBufferOverflow.TAG_QUANTITY, net.minecraft.nbt.Tag.TAG_LONG_ARRAY);
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+
+        @Override
+        public long high(int i) {
+            return shanhaiQuantityAt(i, 0);
+        }
+
+        @Override
+        public long low(int i) {
+            return shanhaiQuantityAt(i, 1);
+        }
+
+        @Override
+        public long legacyReal(int i) {
+            try {
+                return this.list.getCompound(i).getLong(ShanhaiBufferOverflow.TAG_LEGACY_REAL);
+            } catch (Throwable t) {
+                return 0L;
+            }
+        }
+
+        /** {@code "quantity"} 的第 {@code idx} 个 long（数组长度不够 ⇒ 0 ⇒ 纯核会当成非正值剔掉）。 */
+        private long shanhaiQuantityAt(int i, int idx) {
+            try {
+                final long[] q = this.list.getCompound(i).getLongArray(ShanhaiBufferOverflow.TAG_QUANTITY);
+                return q.length > idx ? q[idx] : 0L;
+            } catch (Throwable t) {
+                return 0L;
+            }
+        }
     }
 
     // ---------------------------------------------------------------- ⑦ 页面 + 取证接口

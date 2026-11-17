@@ -111,13 +111,39 @@ public final class ShanhaiGuardClientEvents {
     //
     // 🔴 判据仍在纯逻辑核里（deathFlowResetDecision：isDeadOrDying ／ deathTime&gt;0 ／ 字段真值&lt;=0）——
     //    客户端不写第二份判据。
+    //
+    // ═════════ 🔴 2026-11-08 补缺口：「客户端血量」那一环 ＋ 「创造 / 旁观」门 ＋ 规格日志 ═════════
+    //
+    // 用户原话（这是本次改动的全部动因）：
+    //   「因为每当我把猫清除的时候，都会左下角有一句自动把血补满的话」
+    //   「我感觉我把猫放出来时，玩家可能已经死了，又或者没有血了，所以才打不开」
+    // 服务端日志（2026-11-08 test2）已经证明：血被反复写成 -Infinity、客户端确实进过死态 ——
+    //   [SHANHAI-GUARD] setHealth_guard value_was=-Infinity -> 20.0
+    //   [SHANHAI-GUARD] 拦截 客户端死亡态复位 + 死亡界面
+    // ⇒ 这次<b>只补三处缺口，复位动作一个字都没改</b>（还是 resetDeathFlow ＋ 关死亡界面）：
+    //   ① 判据补「客户端血量」这一环：原来的入口只有 deathFlowResetDecision（字段真值 ／ deathTime ／
+    //      isDeadOrDying ／ 对手桥）⇒ `getHealth() <= 0` 与「血读到 NaN」这两条<b>没有参与</b>。
+    //      现在改由 {@link ShanhaiClientDeathUnlock#decide} 组合：它把「交叉校验表」（hp&lt;=0 ／ NaN ／
+    //      isDeadOrDying ／ deathTime&gt;0）与上面那条<b>原样委托</b>给纯逻辑核 ⇒ 依旧没有第二份判据。
+    //   ② 补「创造 / 旁观」门（原来<b>没有</b>这一道 ⇒ 创造模式也会被我们改本地血量）。
+    //   ③ 日志按规格换成一行 {@code client_death_unlock}（hp_before ／ hp_after ／ dead_before ／
+    //      dead_after ／ death_time ／ screen ／ via）；既有那行「拦截 客户端死亡态复位（同类合并 N 次）」
+    //      与 heal_channel 细节<b>原样并进这一行的尾巴</b> ⇒ 每次动作仍然只打一行、每秒仍然最多一行。
+    //
+    // 🔴 另一处只在「会不会与服务端打架」上的收紧（字节码实证，见 {@link #onClientTick} 里 setScreen 那段）：
+    //    死亡界面只在<b>真的脱离死态</b>（isDeadOrDying()=false）后才关 —— 否则 1.20.1 的
+    //    {@code Minecraft#setScreen(null)} 会当场重建一个 DeathScreen，未开死亡界面时还会发 respawn 包。
 
     /** 客户端这一路的日志类别（诊断类：只进日志，不进聊天栏 —— 聊天栏那一路在服务端）。 */
     private static final String KIND_CLIENT_RESET = ShanhaiGuardCore.KIND_CLIENT_RESET;
 
     /**
-     * 客户端 tick 末：受保护 ＋ 本地玩家处于死亡态 ⇒ 清掉死亡态（{@code deathTime}/{@code hurtTime} 归零、
-     * 两条腿补满血），当前屏幕是死亡界面就关掉。
+     * 客户端 tick 末：受保护 ＋ 不是创造/旁观 ＋ 本地玩家处于死亡态
+     * ⇒ 清掉死亡态（{@code deathTime}/{@code hurtTime} 归零、两条腿补满血），
+     * 已经脱离死态且当前屏幕是死亡界面就关掉。
+     *
+     * <p>🔴 2026-11-08：判据换成 {@link ShanhaiClientDeathUnlock#decide}（多补「hp &lt;= 0 / hp = NaN」与
+     * 「创造/旁观」两道门）；日志换成规格那一行 {@code client_death_unlock}（每次动作一行、每秒最多一行）。
      *
      * <p>为什么必须关屏幕：{@code DeathScreen} 一旦开着，本地输入会被它吃掉（人不能动）；
      * 服务端那半边的 {@code ScreenEvent.Opening} 只能拦"正要打开"的那一次，
@@ -137,30 +163,70 @@ public final class ShanhaiGuardClientEvents {
             return;   // 还没进世界 / 正在切维度
         }
         // 🔴 只处理受保护玩家（客户端这边靠【背包里的模块】判；单机时也会命中服务端登记过的 REMEMBERED）
-        if (!ShanhaiGuardEvents.isGuarded(player)) {
-            return;
+        final boolean guarded = ShanhaiGuardEvents.isGuarded(player);
+        if (!guarded) {
+            return;   // 不是受保护玩家 ⇒ 后头的反射读数都不用做（与改动前同一条便宜闸门）
         }
+        // ── 动作【前】的读数：日志里要对账的就是这几个（screen 也取这一拍）──
+        final float hpBefore = player.getHealth();
+        final boolean deadBefore = player.isDeadOrDying();
+        final int deathTimeBefore = player.deathTime;
         final float fieldHealth = ShanhaiGuardValueLayer.readHealthField(player);
-        // ⑤ 对手桥：它自己的 checkEntityDead 也并进判据（客户端这边它的偏移同样生效，所以这一层也要问）
-        final boolean omniSaysDead = ShanhaiGuardValueLayer.omnimobsSaysDead(player);
-        final ShanhaiGuardCore.Decision decision = ShanhaiGuardCore.deathFlowResetDecision(
-                player.isDeadOrDying(), player.deathTime, fieldHealth, omniSaysDead, ShanhaiGuardCore.enabled);
+        final String screenBefore = minecraft.screen == null ? null : minecraft.screen.getClass().getName();
+        // 🔴 判据：既有那两条（交叉校验 ＋ 字段真值）原样委托给核，另补两道门
+        //    ——「hp <= 0 / hp = NaN」这一环（本次缺口）与「创造 / 旁观 ⇒ 不动」。
+        final ShanhaiGuardCore.Decision decision = ShanhaiClientDeathUnlock.decide(
+                hpBefore, deadBefore, deathTimeBefore, player.hurtTime, fieldHealth,
+                guarded,
+                player.isCreative() || player.isSpectator(),
+                ShanhaiGuardCore.enabled);
         if (!decision.yes) {
             return;
         }
-        // 与服务端 ②/④ 同一份复位动作：两条腿补血 ＋ deathTime = 0 ＋ hurtTime = 0
-        final ShanhaiGuardValueLayer.HealOutcome outcome = ShanhaiGuardValueLayer.resetDeathFlow(player);
-        // ⑤-3 对手桥：把它的 getHealth() 偏移清零（客户端这边同样带偏移 ⇒ 不清就还在"假死"）
-        final String omniDelta = ShanhaiGuardValueLayer.clearOmnimobsDelta(player);
-        if (minecraft.screen instanceof DeathScreen) {
+        // ── 动作：与服务端 ②/④ 同一份复位动作（两条腿补血 ＋ deathTime = 0 ＋ hurtTime = 0）──
+        //    ⚠ getMaxHealth() 不可用（NaN / ±∞ / 非正）时【一步都不写】：硬写会把血量字段写成 NaN，
+        //      比 0 更糟 ⇒ 只记 via=failed，留给下一 tick / 服务端那条腿。
+        final float max = player.getMaxHealth();
+        ShanhaiGuardValueLayer.HealOutcome outcome = null;
+        if (ShanhaiClientDeathUnlock.maxUsable(max)) {
+            outcome = ShanhaiGuardValueLayer.resetDeathFlow(player);
+        }
+        // ── 动作【后】的读数（=「客户端血到底回来了没有」的对账）──
+        final float hpAfter = player.getHealth();
+        final boolean deadAfter = player.isDeadOrDying();
+        final String via = ShanhaiClientDeathUnlock.viaOf(
+                outcome == null ? ShanhaiGuardCore.HealChannel.FAILED : outcome.channel);
+        // ── 死亡界面：只有【真的脱离死态】才关 ──
+        //    🔴 1.20.1 {@code Minecraft#setScreen(null)} 的字节码（javap -c 实证，不是推测）：
+        //        screen == null && level != null && player.isDeadOrDying()
+        //          ⇒ player.shouldShowDeathScreen() ? new DeathScreen(...) : player.respawn()
+        //        （后者给服务端发 ServerboundClientCommandPacket(PERFORM_RESPAWN)）
+        //    ⇒ 还判死的时候关屏 = 每 tick 重建一个死亡界面、甚至每 tick 发一次 respawn 包
+        //      （那就是「与服务端打架」）⇒ 条件里带上 !deadAfter；没关的原因写进日志尾巴。
+        final boolean screenWasDeath = minecraft.screen instanceof DeathScreen;
+        final boolean closed = screenWasDeath && !deadAfter;
+        if (closed) {
             minecraft.setScreen(null);   // 死亡界面已开着 ⇒ 直接关掉（否则人一直卡在"死但没死透"）
         }
-        // 日志一行（合并计数 ＋ 每秒最多一行，别刷屏）；带上是哪条腿补的血 ＋ ⑤ 桥有没有动
-        final String line = LOG.admit(KIND_CLIENT_RESET, System.currentTimeMillis());
-        if (line != null) {
-            ShanhaiMod.LOGGER.info(line + " ｜ " + outcome.detail
-                    + (omniDelta == null ? "" : " ／ " + omniDelta)
-                    + " ｜ " + decision.reason);
+        // ── 日志：每次动作一行 ＋ 每秒最多一行（走既有 LogGate ⇒ 与原来同一份「同类合并」计数）──
+        final ShanhaiGuardCore.LogGate.Batch batch = LOG.admitBatch(KIND_CLIENT_RESET, System.currentTimeMillis());
+        if (batch == null) {
+            return;   // 本窗口已经打过一行 ⇒ 动作照做，日志不再写（1 秒最多一行）
         }
+        final StringBuilder tail = new StringBuilder(160);
+        tail.append(" ｜ ").append(batch.logLine());   // 既有那行「拦截 …（同类合并 N 次）」原样并进来（不是替换）
+        tail.append(" ｜ ").append(outcome == null
+                ? "heal_channel=failed ／ getMaxHealth()=" + max + " 不可用（NaN ／ 无限 ／ 非正）⇒ 血一步都没写"
+                : outcome.detail);
+        if (outcome != null && !outcome.landed()) {
+            tail.append(" ｜ ⚠ 写失败：两条腿都没把血落盘（hp_after=").append(hpAfter).append("）");
+        }
+        tail.append(" ｜ closed=").append(closed);
+        if (screenWasDeath && !closed) {
+            tail.append("（死亡界面没关：dead_after=true ⇒ 此刻 setScreen(null) 会重建 DeathScreen ／ 发 respawn 包）");
+        }
+        tail.append(" ｜ ").append(decision.reason);
+        ShanhaiMod.LOGGER.info(ShanhaiClientDeathUnlock.logLine(hpBefore, hpAfter, deadBefore, deadAfter,
+                deathTimeBefore, screenBefore, via) + tail);
     }
 }

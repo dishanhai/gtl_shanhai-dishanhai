@@ -262,16 +262,53 @@ public final class ShanhaiHoloMenuInput {
         final int action = ShanhaiHoloMenuInputRules.decide(
                 holdingModule, freshPress, airHit, boardIndex, boardClear, menuEnabled);
 
+        // 🆕 2026-10-10（C）：「清除实体」的二次确认 —— 任何<b>不是那一格</b>的一拍都要先取消 pending。
+        //   🔴 位置在【动作分派之前】：否则"先点第 1 格、再点第 2 格"会让第 2 格的动作（开面板）
+        //      带着一个还武装着的 purge pending 跑下去。
+        //   ⚠️ 只有新鲜按下才会走到这里（{@code decide} 对 freshPress=false 一律返回 ACT_NONE），
+        //      所以"按住不放"的重复回调不会把 pending 冲掉。
+        final int purgeArmedBoard = ShanhaiHoloClickRules.PURGE.board();
+        final int purgeForeign = ShanhaiHoloClickRules.purgeCancelOnForeignTap(
+                ShanhaiHoloClickRules.PURGE, holdingModule,
+                action == ShanhaiHoloMenuInputRules.ACT_REALITY_PURGE, boardIndex);
+        if (purgeForeign != ShanhaiHoloClickRules.P_NONE) {
+            logPurgeCancelled(lp, purgeArmedBoard, purgeForeign, source);
+        }
+
         // 每一拍"可能有事"的现场都留一行（同一 tick 只留一行）。
         // 判据：投影开着 / 拿着模块 / 打到了板 —— 三者全不成立才是"普通玩游戏的右键"，那时不记。
         if (freshPress && lp.tickCount != lastLoggedTick
                 && (menuEnabled || holdingModule || boardIndex >= 0)) {
             lastLoggedTick = lp.tickCount;
-            ShanhaiMod.LOGGER.info("{} holo_click source={} action={} player={} hand={} {}",
+            // 🆕 2026-11-08：这一拍用【当场重扫】的外来实体在场值（周期扫描在 tick 末尾，比右键晚一拍，
+            //   只靠它这一行会用到最多 1 秒前的旧值 —— 而"附近有没有外来实体"正是要拿来对照的因变量）。
+            ShanhaiHoloEnvScan.refreshNow(mc.level, lp);
+            // 🆕 2026-10-10（D）：把"他到底瞄了哪块板"补成可判读数。
+            //   board_dist = 射线打到那块板的距离（{@code -1.00} = 这一拍没打到任何板）。
+            //   修复前这一行只有"几号板" ⇒ 无法回答"准星偏了多少度才打偏/打中"。
+            // 🆕 2026-11-08：yaw/pitch **先规范化到 (-180,180] 再打**（旧读数出现过 yaw=-993.45 这种越界值，
+            //   那一行会误导人）；越界时补打 yaw_raw/pitch_raw，否则"原来是越界值"这条线索就消失了。
+            //   格式口径仍是 {@code %.2f} + Locale.ROOT（{@link ShanhaiHoloClickRules#angleText}）。
+            // 🆕 2026-11-08：env_near / env_type / env_dist —— 「附近有没有外来实体」的机器可判字段
+            //   （字段口径与拼装点只有一处：{@link ShanhaiHoloEnvScan#line}）。
+            final boolean angleRaw = ShanhaiHoloViewMath.angleOutOfRange(lp.getYRot(), lp.getXRot());
+            ShanhaiMod.LOGGER.info("{} holo_click source={} action={} player={} hand={} yaw={} pitch={} "
+                            + "board_dist={} {} {}{} {}",
                     PREFIX, source, ShanhaiHoloMenuInputRules.actionName(action),
                     lp.getGameProfile().getName(), hand,
+                    ShanhaiHoloViewMath.yawText(lp.getYRot()),
+                    ShanhaiHoloViewMath.pitchText(lp.getXRot()),
+                    ShanhaiHoloClickRules.distText(boardDistance),
                     ShanhaiHoloMenuInputRules.contextLine(holdingModule, freshPress, airHit,
-                            boardIndex, boardClear, menuEnabled));
+                            boardIndex, boardClear, menuEnabled),
+                    ShanhaiHoloEnvScan.line(),
+                    angleRaw ? (" yaw_raw=" + ShanhaiHoloClickRules.angleText(lp.getYRot())
+                            + " pitch_raw=" + ShanhaiHoloClickRules.angleText(lp.getXRot())) : "",
+                    // 🆕 2026-11-08：生命态三字段（口径见 {@link ShanhaiHoloVitals}）。
+                    //   用户假设「我把猫放出来时玩家可能已经死了 / 没有血了」要靠它们反驳或坐实：
+                    //   同一拍里 hp/dead 与下面那行 visibility 的 local_drawn/boards_in 一对，
+                    //   就能分开"死态不是阻断因素 / 死态确实是主因"。
+                    ShanhaiHoloVitals.of(lp.getHealth(), lp.isDeadOrDying(), lp.deathTime).line());
         }
 
         if (action == ShanhaiHoloMenuInputRules.ACT_NONE) {
@@ -286,9 +323,25 @@ public final class ShanhaiHoloMenuInput {
         final String context = ShanhaiHoloMenuInputRules.contextLine(
                 holdingModule, freshPress, airHit, boardIndex, boardClear, menuEnabled);
         if (action == ShanhaiHoloMenuInputRules.ACT_TOGGLE_MENU) {
+            // 🔴 2026-11-08：连点去抖（病根见 {@link ShanhaiHoloMenuToggleGate} 类注释 §1）
+            //   用户日志实证：1 秒内 6 次 now=true/false 交替 ⇒ 两次切换互相抵消 ⇒
+            //   净状态落回"关" ⇒ 他看到的现象是「打不开面板」。
+            //   ⚠️ 这里【只】决定这一拍要不要落下去；"拿着模块右键 = 切换投影"的判据一个字没动。
+            final ShanhaiHoloMenuToggleGate.Decision gate =
+                    ShanhaiHoloMenuToggleGate.offer(System.nanoTime());
+            if (!gate.accepted()) {
+                ShanhaiMod.LOGGER.info("{} {} src={} player={} hand={} {} {}",
+                        PREFIX, ShanhaiHoloMenuToggleGate.debouncedLine(gate.gapMs()),
+                        source, lp.getGameProfile().getName(), hand, context,
+                        ShanhaiHoloVitals.of(lp.getHealth(), lp.isDeadOrDying(), lp.deathTime).line());
+                return;
+            }
             final boolean now = ShanhaiHoloMenuState.toggle();
-            ShanhaiMod.LOGGER.info("{} holo_menu_toggled_by_item player={} hand={} now={} src={} {}",
-                    PREFIX, lp.getGameProfile().getName(), hand, now, source, context);
+            // 🆕 2026-11-08：开↔关这一行也带 env_near（用来把「打不开」与「那一刻附近有什么」对照起来）
+            ShanhaiMod.LOGGER.info("{} holo_menu_toggled_by_item player={} hand={} now={} src={} {} {} {}",
+                    PREFIX, lp.getGameProfile().getName(), hand, now, source, context,
+                    ShanhaiHoloEnvScan.line(),
+                    ShanhaiHoloVitals.of(lp.getHealth(), lp.isDeadOrDying(), lp.deathTime).line());
         } else if (action == ShanhaiHoloMenuInputRules.ACT_OPEN_EDITOR
                 || action == ShanhaiHoloMenuInputRules.ACT_OPEN_CREATIVE_ITEMS) {
             // 🆕 2026-10-17：「现实物品」那一格与「配方修改」走【同一条】"请服务端开面板"的路 ——
@@ -328,18 +381,47 @@ public final class ShanhaiHoloMenuInput {
                     ShanhaiHoloMenuBoards.boardNumber(boardIndex), boardIndex,
                     lp.getGameProfile().getName(), source, context);
         } else if (action == ShanhaiHoloMenuInputRules.ACT_REALITY_PURGE) {
-            // 🆕 第 1 格「清除实体」——🔴 点一次【直接执行】（本轮把"再点一次确认"那套两拍机制整个删掉）。
-            //    ⚠️ 空手点击同样能触发（与别的板子同一条 decide 真值表：不拿模块才走到这里，
-            //       拿着模块的那一拍在上面被 ACT_TOGGLE_MENU 截走了）。
-            //    执行内容 = 与 /shanhai purge 完全同一段代码：客户端只发那条命令，
-            //    服务端 onCommandRequest 会再查一次"身上有没有模块"，然后跑同一套清除实体
-            //    （装了扩展时由本体委托给扩展的逐级阶梯，见 api\ShanhaiAdd#purgeAll）。
-            //    🔴 输入侧只留这一条日志（规格点名）：holo_purge_execute board=0 idx=0 player=… cmd=shanhai purge
-            ShanhaiMod.LOGGER.info("{} holo_purge_execute board={} idx={} player={} cmd={}",
-                    PREFIX, boardIndex, boardIndex, lp.getGameProfile().getName(), "shanhai purge");
-            lp.displayClientMessage(net.minecraft.network.chat.Component.literal(
-                    "§c[清除实体] §7已发出抹除指令（服务端还要复核模块）"), true);
-            ShanhaiHoloMenuNetwork.requestCommand("shanhai purge");
+            // 🔴🔴 2026-10-10（C）：第 1 格「清除实体」改成 **连点两次确认**。
+            //
+            //   崩服现场（日志原文）：玩家<b>空手、正对前方</b>点了 13 次，全部命中 board=1 idx=0
+            //   ⇒ 旧行为是"每一次都当场执行" ⇒ 每次都把世界里所有实体清场 ⇒
+            //   连带把其它模组的实体也摘掉 ⇒ 它在自己的 tick 里 NoSuchElementException ⇒ <b>崩服</b>。
+            //   ⇒ 一次误触就能造成不可逆后果的动作，只用"一拍"是不够的。
+            //
+            //   现在的规则（状态机在 {@link ShanhaiHoloClickRules}，纯算术、离线可验）：
+            //     第 1 拍  ⇒ 只记 pending（purge_confirm_armed board=… idx=… window_ms=3000），
+            //                 <b>不发包、不清任何实体</b>
+            //     第 2 拍  ⇒ 同一格 + 仍然空手 + 距第 1 拍 ≤ 3000 ms ⇒ 这一拍才真发
+            //                 {@code shanhai purge}（purge_execute confirmed=true）
+            //     换板/换手/超时/投影关了 ⇒ 清 pending 并打 purge_confirm_cancelled reason=…
+            //
+            //   ⚠️ 手动 {@code /shanhai purge}（服务端命令）完全不受影响 —— 它不经过这里。
+            //   ⚠️ 这里只发命令，执行仍是服务端的事（它还会再查一次"身上有没有模块"）。
+            final int confirm = ShanhaiHoloClickRules.purgeTap(
+                    ShanhaiHoloClickRules.PURGE, holdingModule, boardIndex, System.nanoTime());
+            if (confirm == ShanhaiHoloClickRules.P_ARMED) {
+                ShanhaiMod.LOGGER.info("{} purge_confirm_armed board={} idx={} window_ms={} "
+                                + "player={} hand={} src={} （第 1 次：再点一次才执行）{}",
+                        PREFIX, ShanhaiHoloMenuBoards.boardNumber(boardIndex), boardIndex,
+                        ShanhaiHoloClickRules.PURGE_WINDOW_MS,
+                        lp.getGameProfile().getName(), hand, source, context);
+                lp.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                        "§c[清除实体] §7危险操作：§f再点一次同一格 §7才执行（"
+                                + (ShanhaiHoloClickRules.PURGE_WINDOW_MS / 1000) + " 秒内、空手）"), true);
+            } else if (confirm == ShanhaiHoloClickRules.P_EXECUTE) {
+                ShanhaiMod.LOGGER.info("{} holo_purge_execute confirmed=true board={} idx={} player={} "
+                                + "cmd={} src={} {}",
+                        PREFIX, ShanhaiHoloMenuBoards.boardNumber(boardIndex), boardIndex,
+                        lp.getGameProfile().getName(), "shanhai purge", source, context);
+                lp.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                        "§c[清除实体] §7已发出抹除指令（服务端还要复核模块）"), true);
+                ShanhaiHoloMenuNetwork.requestCommand("shanhai purge");
+            } else if (confirm == ShanhaiHoloClickRules.P_CANCEL_HAND
+                    || confirm == ShanhaiHoloClickRules.P_CANCEL_BOARD
+                    || confirm == ShanhaiHoloClickRules.P_CANCEL_TIMEOUT) {
+                // 同一拍里"先点第 1 格、再拿模块/换格" ⇒ 取消（并且这一拍不再做别的事）
+                logPurgeCancelled(lp, boardIndex, confirm, source);
+            }
         } else {
             // 认不出来的动作码（表里没有的那种）—— 不许静默：这是一条"点了没反应"的唯一痕迹
             ShanhaiMod.LOGGER.warn("{} holo_board_click_unhandled action={} board_idx={} player={} src={} {}",
@@ -426,11 +508,23 @@ public final class ShanhaiHoloMenuInput {
                 return;
             }
             lastActedTick = lp.tickCount;
+            // 🔴 2026-11-08：与菜单那条路【同一个】去抖闸门（同一套手感，不许两套口径）
+            final ShanhaiHoloMenuToggleGate.Decision gate =
+                    ShanhaiHoloMenuToggleGate.offer(System.nanoTime());
+            if (!gate.accepted()) {
+                ShanhaiMod.LOGGER.info("{} {} src={} player={} hand={} panel_was={} {}",
+                        PREFIX, ShanhaiHoloMenuToggleGate.debouncedLine(gate.gapMs()),
+                        source, lp.getGameProfile().getName(), hand,
+                        ShanhaiHoloMenuPanel.modeName(mode),
+                        ShanhaiHoloVitals.of(lp.getHealth(), lp.isDeadOrDying(), lp.deathTime).line());
+                return;
+            }
             final boolean now = ShanhaiHoloMenuState.toggle();
             ShanhaiMod.LOGGER.info("{} holo_menu_toggled_by_item player={} hand={} now={} src={} "
-                            + "panel_was={}",
+                            + "panel_was={} {} {}",
                     PREFIX, lp.getGameProfile().getName(), hand, now, source,
-                    ShanhaiHoloMenuPanel.modeName(mode));
+                    ShanhaiHoloMenuPanel.modeName(mode), ShanhaiHoloEnvScan.line(),
+                    ShanhaiHoloVitals.of(lp.getHealth(), lp.isDeadOrDying(), lp.deathTime).line());
             return;
         }
         // ② 面板格子
@@ -661,11 +755,29 @@ public final class ShanhaiHoloMenuInput {
     // ------------------------------------------------------------------ 每 tick
 
     /**
-     * 三个职责：
+     * 每 tick 推进一次（<b>这是动画唯一的推进点</b>）——
+     * 「清除实体」二次确认被取消的<b>唯一</b>日志落点（判据：{@code purge_confirm_cancelled reason=…}）。
+     *
+     * @param armedBoard 被取消时<b>武装在哪块板</b>（0 基；要在状态被清掉之前先取出来）
+     * @param reason     {@link ShanhaiHoloClickRules} 的 {@code P_CANCEL_*} 之一
+     */
+    private static void logPurgeCancelled(LocalPlayer lp, int armedBoard, int reason, String source) {
+        ShanhaiMod.LOGGER.info("{} purge_confirm_cancelled reason={} board={} idx={} player={} src={}",
+                PREFIX, ShanhaiHoloClickRules.purgeReasonName(reason),
+                ShanhaiHoloMenuBoards.boardNumber(armedBoard), armedBoard,
+                lp == null ? "?" : lp.getGameProfile().getName(), source);
+    }
+
+    /**
+     * 每 tick 的四件事（顺序是有理由的）：
      * <ol>
+     *   <li>🔴 <b>推进动画</b>（{@link ShanhaiHoloMenuRenderer#onClientTickEnd()}）——
+     *       它必须在最前面、并且<b>不看有没有世界</b>：退出世界 / 暂停 / 死亡界面也要把动画走到两端，
+     *       否则 {@code progress} 会停在中途，下次进世界的第一帧就是"半开的板"。</li>
      *   <li>更新"右键是不是按着的"（必须跑在 {@code handleKeybinds} 之后，见类注释 §2）；</li>
      *   <li>规格 ② 的第二个关闭入口：<b>模块整个离开玩家</b> ⇒ 自动关投影；</li>
-     *   <li>🆕 「正在加载」状态机：<b>面板一出来就把提示收掉</b>（超时/投影被关掉也要收）。
+     *   <li>🆕 「正在加载」状态机 + 🆕「清除实体」确认窗口的到期检查
+     *       （{@code purge_confirm_cancelled reason=timeout} 靠它才会有人打）。
      *       ⚠️ 它只是"读一眼 {@code mc.screen}"并清状态，<b>不做任何等待</b>。</li>
      * </ol>
      */
@@ -674,6 +786,10 @@ public final class ShanhaiHoloMenuInput {
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
+        // 🆕 2026-10-10（B）：🔴 动画推进点 = 【客户端 tick】，不是渲染帧。
+        //   顺序证据见 {@link ShanhaiHoloMenuRenderer#onRenderLevelStage} 里那段注释
+        //   （右键事件在同一个 tick 更早发出，ClientTickEvent.END 在 Minecraft.tick() 的 offset 828）。
+        ShanhaiHoloMenuRenderer.onClientTickEnd();
         final Minecraft mc = Minecraft.getInstance();
         final LocalPlayer lp = mc.player;
         useKeyWasDown = lp != null && mc.screen == null && mc.options.keyUse.isDown();
@@ -684,6 +800,10 @@ public final class ShanhaiHoloMenuInput {
             selfTestLogged = true;
             logSelfTests();
         }
+        // 🆕 2026-11-08：外来实体在场信号（每 20 tick 一次、只用客户端已加载实体、不发包）。
+        //   ⚠️ 位置：必须在所有"关投影/开面板"的判定【之前】、在空判之后 ——
+        //      它是纯观测，任何一条 return 都不该把它挡住（否则"投影关着"时这个信号会缺一段）。
+        ShanhaiHoloEnvScan.tick(mc.level, lp);
 
         // ---- 🆕 「正在加载」的收尾 ----
         if (ShanhaiHoloMenuPending.isPending()) {
@@ -717,7 +837,25 @@ public final class ShanhaiHoloMenuInput {
             }
         }
 
+        // 🆕 2026-10-10（C）：「清除实体」的确认窗口到期检查。
+        //   为什么必须每 tick 查：取消要留一行痕，而"用户再也不点了"是常态 ⇒
+        //   只靠下一次点击触发的话那条 purge_confirm_cancelled reason=timeout 永远不会出现。
+        final int purgeArmedBoard = ShanhaiHoloClickRules.PURGE.board();
+        final int purgeExpired = ShanhaiHoloClickRules.purgeExpire(
+                ShanhaiHoloClickRules.PURGE, System.nanoTime());
+        if (purgeExpired != ShanhaiHoloClickRules.P_NONE) {
+            logPurgeCancelled(lp, purgeArmedBoard, purgeExpired, "tick");
+        }
+
         if (!ShanhaiHoloMenuState.enabled()) {
+            // 🆕 2026-10-10（C）：投影关着 ⇒ 未确认的「清除实体」一并作废
+            //   （否则"点了一次 → 关投影 → 再开投影 → 点一次"会被当成两次确认）。
+            final int armedBoard = ShanhaiHoloClickRules.PURGE.board();
+            final int purgeWhy = ShanhaiHoloClickRules.purgeCancel(
+                    ShanhaiHoloClickRules.PURGE, ShanhaiHoloClickRules.P_CANCEL_MENU);
+            if (purgeWhy != ShanhaiHoloClickRules.P_NONE) {
+                logPurgeCancelled(lp, armedBoard, purgeWhy, "tick");
+            }
             ShanhaiHoloMenuState.setPanelHover(-1, -1);
             return;
         }
@@ -746,6 +884,13 @@ public final class ShanhaiHoloMenuInput {
         ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloMenuHitTest.selfTestLine());
         ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloMenuPending.selfTestLine());
         ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloMenuPanel.selfTestLine());
+        // 🆕 2026-10-10：清除实体二次确认 + 点击日志 yaw/pitch 口径的离线自检（含 5 个突变体）
+        ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloClickRules.selfTestLine());
+        // 🆕 2026-11-08：角度规范化 (-180,180] + NDC/视锥判定 + 原版/外来命名空间 + 板心世界坐标
+        //   （58 条断言，含"w<0 但商落在 [−1,1]"的背后陷阱与命名空间负对照）
+        ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloViewMath.selfTestLine());
+        // 🆕 2026-10-10：动画推进点搬到 tick 之后的步数口径（tick 7 步 / 帧 21 步）
+        ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloMenuAnim.stepsSelfTestLine());
         ShanhaiMod.LOGGER.info("{} {} {}", PREFIX, ShanhaiHoloMenuNetwork.statsLine(),
                 "module_id=" + MODULE_ID);
     }

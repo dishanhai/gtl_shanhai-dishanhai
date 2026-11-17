@@ -131,6 +131,15 @@ public class ShanhaiMod {
         // ① 18 个物品：纯 Registrate builder 入列，不碰 GTRegistry，构造期合法。
         ShanhaiRegistry.init();
 
+        // 🆕 2026-11-16（阶段 3）：16 件异常投掷物的装配点。
+        //    ├─ 注册唯一那个 EntityType（shanhai:crash_bolt，渲染用原版 ThrownItemRenderer）
+        //    ├─ 占住 OOM 用的「保命缓冲」（几十 MB，崩时先还给堆，报告才写得出来）
+        //    └─ 把「落地 3 秒后真崩」挂到 Forge 总线（ServerTickEvent START —— 不在任何 try 里，
+        //       这样 ReportedException 里的 CrashReport 才会被 runServer 原样提取，
+        //       Description 才保得住；取证见 com.shanhai.common.crash.ShanhaiCrashBoltScheduler 类注释）
+        //    🔴 时序：必须在 ShanhaiRegistration.register(modEventBus) 之后（REGISTRATE 才挂上了总线）。
+        com.shanhai.common.crash.ShanhaiCrashBoltBootstrap.install();
+
         // 🔴 取证探针 [SHANHAI-SLOT-WATCH]（2026-09-26）：显式挂到 FORGE 总线。
         //    为什么不用 @Mod.EventBusSubscriber：那种自动订阅【成功时一行日志都没有】，
         //    「探针到底挂上了没有」在日志上不可判。显式注册 + 紧跟一行日志 ⇒ 可判。

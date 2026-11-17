@@ -9,11 +9,19 @@
     "ShanhaiLivingEntityDieGuardMixin",
     "ShanhaiServerPlayerDieGuardMixin",
     "ShanhaiEntitySetRemovedGuardMixin",
+    "ShanhaiServerGamePacketListenerSelfInputMixin",
+    "ShanhaiValueWriteProbeMixin",
     "ShanhaiServerLevelTickClockMixin",
     "ShanhaiLevelSetBlockClockMixin",
     "ShanhaiContainerClickClockMixin",
     "ShanhaiContainerPacketClockMixin",
     "ShanhaiServerPlayerDropClockMixin",
+    "ShanhaiLevelChunkReplayMixin",
+    "ShanhaiLevelRemoveBlockReplayMixin",
+    "ShanhaiBlockEntitySetChangedReplayMixin",
+    "ShanhaiLevelChunkBlockEntityReplayMixin",
+    "ShanhaiServerLevelEntityEventMixin",
+    "ShanhaiServerEntityForceTeleportMixin",
     "ShanhaiGravityLivingMixin",
     "ShanhaiGravityItemEntityMixin",
     "ShanhaiGravityExperienceOrbMixin",
@@ -37,6 +45,7 @@
   ],
   "client": [
     "ShanhaiLevelRendererTickClockMixin",
+    "ShanhaiLevelRendererTicksAccessor",
     "ShanhaiClientLevelTickTimeClockMixin",
     "ShanhaiClientLevelEntityClockMixin",
     "ShanhaiClientLevelAnimateTickClockMixin",
@@ -44,7 +53,12 @@
     "ShanhaiTextureManagerClockMixin",
     "ShanhaiLevelBlockEntityClockMixin",
     "ShanhaiTimerClockMixin",
-    "ShanhaiClientPlayerDropClockMixin"
+    "ShanhaiClientPlayerDropClockMixin",
+    "ShanhaiClientTeleportClockMixin",
+    "ShanhaiLevelRendererRainClockMixin",
+    "ShanhaiParticleEngineGatherMixin",
+    "ShanhaiParticleEngineAccessor",
+    "ShanhaiParticleAccessor"
   ],
   "injectors": {
     "defaultRequire": 0

@@ -69,6 +69,16 @@ public final class ShanhaiJeiRecipePatches {
     private static final java.util.Set<String> UNCHANGED_LOGGED =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /**
+     * 🔴 2026-11-09：<b>「该追加却被焦点闸挡住」这件事只记一笔</b>的日志闸。
+     *
+     * <p>为什么需要它：只看"没有 {@code jei_append_delivered}"是<b>缺席证据</b>，分不清
+     * 「闸按焦点生效了」和「压根没有该追加的补丁」。这一行是<b>在场证据</b>
+     * （{@code jei_append_suppressed_focused}）⇒ 游戏内一眼可判。
+     * 每帧只跑几个布尔判断 + 一次小循环，打满一次就再也不进。
+     */
+    private static volatile boolean focusedGateLogged;
+
     private ShanhaiJeiRecipePatches() {}
 
     /** 一条配方要贴成什么样。 */
@@ -567,14 +577,33 @@ public final class ShanhaiJeiRecipePatches {
     // ------------------------------------------------------------------ 注入点出口
 
     /**
-     * 把 JEI 交出来的那份列表按补丁表<b>过滤/替换/追加</b>。
+     * 旧的<b>二参入口</b> —— <b>拿不到焦点信息</b>，保留给它原来的调用点。
+     *
+     * <p>目前全工程<b>唯一</b>的调用点是 {@link #patchedForBookmark}（收藏夹通道）：它传的
+     * {@code recipeTypeUid} 恒为 {@code null} ⇒ 追加分支的第一道闸（{@code recipeTypeUid != null}）
+     * 本来就不会放行，所以"焦点"这一位在那条路上<b>不影响任何行为</b>。
+     *
+     * <p>⚠️ 这里<b>故意</b>按 {@code focused = false} 走：语义是"这次调用没带焦点信息"，
+     * 效果与改动前逐字一致（改动前=不管有没有焦点都追加）。真正区分焦点的是三参重载，
+     * 由 {@code ShanhaiJeiRecipeOrderMixin} 调用。
+     */
+    public static <T> List<T> patched(List<T> recipes, String recipeTypeUid) {
+        return patched(recipes, recipeTypeUid, false);
+    }
+
+    /**
+     * 把 JEI 交出来的那份列表按补丁表<b>过滤/替换/追加</b>（<b>带焦点信息</b>的那一个，真正干活的）。
      *
      * @param recipes       JEI 原本要显示的那一份（只读；我们<b>不</b>改它）
      * @param recipeTypeUid 当前分类的 RecipeType uid（用来判断补丁属不属于这一页）
+     * @param focused       这一拍是不是<b>按物品查</b>（{@code IFocusGroup} 非空）。
+     *                      🔴 {@code true} ⇒ <b>绝不追加</b>：焦点语义是"这个物品真正参与的配方"，
+     *                      往里塞一条它不参与的配方 = 界面上凭空多出不相干的条目（用户报的那个现象）；
+     *                      {@code false}（浏览分类页）⇒ 追加兜底照旧（新建的配方仍要在分类页看得见）。
      * @return 处理后的列表；<b>没有补丁时原样返回同一个对象</b>（等价于这条路径不存在）
      */
     @SuppressWarnings("unchecked")
-    public static <T> List<T> patched(List<T> recipes, String recipeTypeUid) {
+    public static <T> List<T> patched(List<T> recipes, String recipeTypeUid, boolean focused) {
         if (PATCHES.isEmpty() || recipes == null || recipes.isEmpty()) {
             return recipes;
         }
@@ -690,7 +719,20 @@ public final class ShanhaiJeiRecipePatches {
             //    ⚠️ 下面第 410 行的「空列表直接原样返回」**故意没动**：放开它会让"点物品"这类**有焦点**的
             //       查询也往里补，而焦点语义是"这个物品参与的配方"，硬补一条可能补错（不是这个物品参与的）。
             //       本轮修的是**索引**（正确的那条路），不是把这层放宽。
-            if (recipeTypeUid != null) {
+            //
+            // 🔴🔴 2026-11-09（**用户报的那个 bug 就死在这一行**）：
+            //    用户原话：「JEI 里对物品按 R/U 看获取方式/用途时，会混进配方编辑器创建/改过的配方」。
+            //    根因：这一支以前只按【分类 uid】过滤、**不看焦点** ⇒ JEI 按物品查（有焦点）时，
+            //    只要该分类里有编辑器补丁，就会把**整批**编辑器配方追加进"这个物品的配方"那一页
+            //    （取证与统计见 temp\jei-editor-recipe\报告.md ② 根因 1/2：664 行 jei_append_delivered、
+            //     in=1 有 598 次、同一毫秒跨 5 个分类追加 ⇒ 那正是"按一次 R，JEI 挨个问每个配方类型"的形态）。
+            //    ⇒ **焦点闸**：有焦点时一条都不补（焦点语义是"这个物品参与的配方"，
+            //      凭空补一条它不参与的 = 界面上多出不相干的条目）。
+            //      无焦点（浏览分类页）时照旧补 —— 新建的配方在分类页仍要看得见（用户验过的行为，不许改）。
+            //    ⚠️ 这一闸同时管住**两种**补丁：`op=add`（新建）和 `op=set`（改过已有配方）——
+            //       后者之所以也走这一支，是因为 `matched` 是"这一拍"的读数（见上面清零那段）：
+            //       有焦点的页里那条改过的配方不在结果里 ⇒ matched=0 ⇒ 以前同样被追加。
+            if (recipeTypeUid != null && !focused) {
                 for (Patch p : PATCHES.values()) {
                     if (p.matched != 0 || p.removed) {
                         continue;
@@ -735,6 +777,10 @@ public final class ShanhaiJeiRecipePatches {
                                 PREFIX, p.deliveredTimes, p.recipeId, p.typeId, recipes.size(), out.size());
                     }
                 }
+            } else if (recipeTypeUid != null) {
+                // 🔴 2026-11-09：走在这里 = **有焦点**（且这一页有本分类的补丁）⇒ 追加被焦点闸挡住。
+                //    只记一笔"在场证据"（见 focusedGateLogged 的注释），不做每帧日志。
+                noteFocusedGateSuppressed(recipeTypeUid, recipes.size(), out.size());
             }
             logOnce(recipeTypeUid);
             return out;
@@ -743,6 +789,43 @@ public final class ShanhaiJeiRecipePatches {
             ShanhaiMod.LOGGER.error("{} jei_patch_failed uid={} err={} (降级为原列表)", PREFIX, recipeTypeUid, t.toString(), t);
             return recipes;
         }
+    }
+
+    /**
+     * 🔴 2026-11-09：<b>有焦点时"本该追加却被焦点闸挡住"的在场证据</b>（每次会话只打一行）。
+     *
+     * <p>为什么值得单独打一行：只看"按 R 的时候没有 {@code jei_append_delivered}"是<b>缺席证据</b> ——
+     * 它无法区分「闸按焦点生效了」和「这一页压根没有该追加的补丁」。这一行是<b>在场证据</b>：
+     * <pre>
+     *   看到 jei_append_suppressed_focused ⇒ 焦点闸真的按焦点生效了（修复生效）
+     *   按 R 仍然多出配方、却看不到这一行 ⇒ 闸没生效（回去查 mixin 传的 focused 是不是恒 false）
+     * </pre>
+     *
+     * <p>开销：只有"这一页确有本分类补丁 + 有焦点"时才进来；打满一次后只多一个布尔判断。
+     */
+    private static void noteFocusedGateSuppressed(String uid, int in, int out) {
+        if (focusedGateLogged) {
+            return;
+        }
+        int candidates = 0;
+        String sampleId = null;
+        for (Patch p : PATCHES.values()) {
+            if (p.matched != 0 || p.removed || !uid.equals(p.typeId)) {
+                continue;
+            }
+            candidates++;
+            if (sampleId == null) {
+                sampleId = p.recipeId;
+            }
+        }
+        if (candidates == 0) {
+            return;
+        }
+        focusedGateLogged = true;
+        ShanhaiMod.LOGGER.info("{} jei_append_suppressed_focused candidates={} sample_id={} type={} in={} out={} "
+                        + "（★在场证据：这一拍【有焦点=按物品查】⇒ 追加兜底被焦点闸挡住，in 与 out 相等；"
+                        + "浏览分类页（无焦点）时才会追加。修复前这里会走 jei_append_delivered）",
+                PREFIX, candidates, sampleId, uid, in, out);
     }
 
     /** 每一条补丁（属于这一页的）打一行判据日志，只打一次。 */

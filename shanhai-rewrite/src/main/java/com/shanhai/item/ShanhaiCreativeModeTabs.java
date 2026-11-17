@@ -450,6 +450,130 @@ public final class ShanhaiCreativeModeTabs {
         output.accept(ShanhaiItems.TEST_ITEM.asStack());
         output.accept(ShanhaiItems.TEST_DYNAMIC_TEXT.asStack());
 
+
+        // ---- 🆕 2026-11-16：95 件现实/剧情物品（用户点单，阶段 1）----
+        // 🔴 用户拍板：放进本桶（「彩蛋与测试」），**不新建桶**。
+        // 🔴 为什么必须在这里列出：本栏的 displayItems 同时是 JEI 物品表的来源
+        //    （见本类开头 ItemStackListFactory 取证）⇒ 不列进来 = JEI 搜不到。
+        // 顺序 = ShanhaiItems 里这 95 个字段的顺序（剧情 → 大类 → mc_* → ex_*）。
+        // ---- A · 7 件剧情物品（story 段，按用户点名的顺序） ----
+        output.accept(ShanhaiItems.CONDENSED_TIME.asStack());
+        output.accept(ShanhaiItems.CONDENSED_SPACE.asStack());
+        output.accept(ShanhaiItems.SCHRODINGER_CONCEPTION.asStack());
+        output.accept(ShanhaiItems.NEWTONS_TEAR.asStack());
+        output.accept(ShanhaiItems.NEWTONS_COFFIN_LID.asStack());
+        output.accept(ShanhaiItems.TURINGS_COMPUTER.asStack());
+        output.accept(ShanhaiItems.DGY_CODE.asStack());
+        // ---- B · 7 个大类（group 段，按用户点名的顺序） ----
+        output.accept(ShanhaiItems.ENTITY_PERSISTENCE_GATE.asStack());
+        output.accept(ShanhaiItems.INTERACTION_DISPATCH_BUS.asStack());
+        output.accept(ShanhaiItems.REGION_BLOCK_STATE_MATRIX.asStack());
+        output.accept(ShanhaiItems.WORLD_PROCESS_ORCHESTRATOR.asStack());
+        output.accept(ShanhaiItems.TEMPORAL_PULSE_MEDIUM.asStack());
+        output.accept(ShanhaiItems.CLIENT_ACTION_PACKET_RELAY.asStack());
+        output.accept(ShanhaiItems.WORLD_STATE_SYNC_CORE.asStack());
+        // ---- C · 65 件 MC 底层（mc_* 段，id-plan.json 原序） ----
+        output.accept(ShanhaiItems.MC_LIVINGATTACKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_LIVINGHURTEVENT.asStack());
+        output.accept(ShanhaiItems.MC_LIVINGDEATHEVENT.asStack());
+        output.accept(ShanhaiItems.MC_LIVINGDROPSEVENT.asStack());
+        output.accept(ShanhaiItems.MC_CRITICALHITEVENT.asStack());
+        output.accept(ShanhaiItems.MC_PLAYERINTERACTEVENT_RIGHTCLICKITEM.asStack());
+        output.accept(ShanhaiItems.MC_PLAYERINTERACTEVENT_LEFTCLICKBLOCK.asStack());
+        output.accept(ShanhaiItems.MC_ITEMTOSSEVENT.asStack());
+        output.accept(ShanhaiItems.MC_ENTITYITEMPICKUPEVENT.asStack());
+        output.accept(ShanhaiItems.MC_ANVILUPDATEEVENT.asStack());
+        output.accept(ShanhaiItems.MC_BLOCKEVENT_BREAKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_BLOCKEVENT_ENTITYPLACEEVENT.asStack());
+        output.accept(ShanhaiItems.MC_BLOCKEVENT_NEIGHBORNOTIFYEVENT.asStack());
+        output.accept(ShanhaiItems.MC_EXPLOSIONEVENT_START.asStack());
+        output.accept(ShanhaiItems.MC_CHUNKEVENT_LOAD.asStack());
+        output.accept(ShanhaiItems.MC_ENTITYJOINLEVELEVENT.asStack());
+        output.accept(ShanhaiItems.MC_ENTITYTRAVELTODIMENSIONEVENT.asStack());
+        output.accept(ShanhaiItems.MC_ENTITYSTRUCKBYLIGHTNINGEVENT.asStack());
+        output.accept(ShanhaiItems.MC_SERVERCHATEVENT.asStack());
+        output.accept(ShanhaiItems.MC_REGISTERCOMMANDSEVENT.asStack());
+        output.accept(ShanhaiItems.MC_TICKEVENT_SERVERTICKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_TICKEVENT_LEVELTICKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_TICKEVENT_PLAYERTICKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_TICKEVENT_CLIENTTICKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_TICKEVENT_RENDERTICKEVENT.asStack());
+        output.accept(ShanhaiItems.MC_SERVERBOUNDPLAYERACTIONPACKET.asStack());
+        output.accept(ShanhaiItems.MC_SERVERBOUNDUSEITEMPACKET.asStack());
+        output.accept(ShanhaiItems.MC_SERVERBOUNDCONTAINERCLICKPACKET.asStack());
+        output.accept(ShanhaiItems.MC_SERVERBOUNDCHATCOMMANDPACKET.asStack());
+        output.accept(ShanhaiItems.MC_SERVERBOUNDCUSTOMPAYLOADPACKET.asStack());
+        output.accept(ShanhaiItems.MC_CLIENTBOUNDBLOCKUPDATEPACKET.asStack());
+        output.accept(ShanhaiItems.MC_CLIENTBOUNDSETHEALTHPACKET.asStack());
+        output.accept(ShanhaiItems.MC_CLIENTBOUNDPLAYERCOMBATKILLPACKET.asStack());
+        output.accept(ShanhaiItems.MC_CLIENTBOUNDSOUNDPACKET.asStack());
+        output.accept(ShanhaiItems.MC_CLIENTBOUNDLEVELPARTICLESPACKET.asStack());
+        output.accept(ShanhaiItems.MC_MINECRAFTSERVER_RUNSERVER.asStack());
+        output.accept(ShanhaiItems.MC_LEVELACCESSOR_SCHEDULETICK.asStack());
+        output.accept(ShanhaiItems.MC_SERVERLEVEL_TICKCHUNK.asStack());
+        output.accept(ShanhaiItems.MC_LEVEL_NEIGHBORCHANGED.asStack());
+        output.accept(ShanhaiItems.MC_SERVERLEVEL_SETDAYTIME.asStack());
+        output.accept(ShanhaiItems.MC_CHUNKLEVEL.asStack());
+        output.accept(ShanhaiItems.MC_COMPOUNDTAG.asStack());
+        output.accept(ShanhaiItems.MC_REGISTRY.asStack());
+        output.accept(ShanhaiItems.MC_PALETTEDCONTAINER.asStack());
+        output.accept(ShanhaiItems.MC_PACKREPOSITORY.asStack());
+        output.accept(ShanhaiItems.MC_RECIPEMANAGER.asStack());
+        output.accept(ShanhaiItems.MC_LOOTDATAMANAGER.asStack());
+        output.accept(ShanhaiItems.MC_TAGKEY.asStack());
+        output.accept(ShanhaiItems.MC_SERVERADVANCEMENTMANAGER.asStack());
+        output.accept(ShanhaiItems.MC_GAMERULES.asStack());
+        output.accept(ShanhaiItems.MC_SERVERFUNCTIONMANAGER.asStack());
+        output.accept(ShanhaiItems.MC_LIVINGENTITY_TRAVEL.asStack());
+        output.accept(ShanhaiItems.MC_AABB.asStack());
+        output.accept(ShanhaiItems.MC_PATHNAVIGATION.asStack());
+        output.accept(ShanhaiItems.MC_LEVELLIGHTENGINE.asStack());
+        output.accept(ShanhaiItems.MC_FLOWINGFLUID_SPREAD.asStack());
+        output.accept(ShanhaiItems.MC_DIMENSIONTYPE_GETTELEPORTATIONSCALE.asStack());
+        output.accept(ShanhaiItems.MC_STRUCTURESTART.asStack());
+        output.accept(ShanhaiItems.MC_WORLDOPTIONS_SEED.asStack());
+        output.accept(ShanhaiItems.MC_PACKETUTILS_ENSURERUNNINGONSAMETHREAD.asStack());
+        output.accept(ShanhaiItems.MC_BLOCKABLEEVENTLOOP_ISSAMETHREAD.asStack());
+        output.accept(ShanhaiItems.MC_ABSTRACTCONTAINERMENU.asStack());
+        output.accept(ShanhaiItems.MC_PLAYERLIST_RESPAWN.asStack());
+        output.accept(ShanhaiItems.MC_SERVERSTATSCOUNTER.asStack());
+        output.accept(ShanhaiItems.MC_PLAYERENDERCHESTCONTAINER.asStack());
+        // ---- D · 16 件运行时异常（ex_* 段，id-plan.json 原序） ----
+        output.accept(ShanhaiItems.EX_NULLPOINTEREXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_NOCLASSDEFFOUNDERROR.asStack());
+        output.accept(ShanhaiItems.EX_EXCEPTIONININITIALIZERERROR.asStack());
+        output.accept(ShanhaiItems.EX_IOEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_CLASSNOTFOUNDEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_SQLEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_NOSUCHELEMENTEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_ILLEGALARGUMENTEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_ILLEGALSTATEEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_UNSUPPORTEDOPERATIONEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_MIDIUNAVAILABLEEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_CONCURRENTMODIFICATIONEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_INDEXOUTOFBOUNDSEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_NOSUCHMETHODEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_CLASSCASTEXCEPTION.asStack());
+        output.accept(ShanhaiItems.EX_OUTOFMEMORYERROR.asStack());
+        // ---- E · 14 件「底层技术 · 时序与改写」（2026-11-16 用户点单，阶段 1）----
+        // 🔴 位置纪律：接在上面那 95 件（同一段：本桶的「现实/剧情物品」）末尾，**不新建桶**。
+        // 🔴 顺序 = ShanhaiItems 里这 14 个字段的顺序 = temp/design-sheet/data-story.js 第 9 类的原序。
+        // ⚠️ 追加在末尾 ⇒ 不移位任何既有格子（本栏 displayItems 同时是 JEI 物品表的来源）。
+        output.accept(ShanhaiItems.TEMPORAL_SEQUENCE_BREAKER.asStack());
+        output.accept(ShanhaiItems.DIFFERENTIAL_TRACE_REGISTER.asStack());
+        output.accept(ShanhaiItems.NEGENTROPY_REVERSE_DRIVE_CORE.asStack());
+        output.accept(ShanhaiItems.EPOCH_ORIGIN_CALIBRATOR.asStack());
+        output.accept(ShanhaiItems.DELAYED_CHOICE_COMPENSATOR.asStack());
+        output.accept(ShanhaiItems.PHASE_LOCK_LOOP.asStack());
+        output.accept(ShanhaiItems.INERTIAL_FRAME_REANCHOR.asStack());
+        output.accept(ShanhaiItems.NOETHER_CONSERVATION_RECONCILER.asStack());
+        output.accept(ShanhaiItems.EXTERNAL_SAVE_WRITE_TERMINAL.asStack());
+        output.accept(ShanhaiItems.ANOMALY_DATA_DETECTOR.asStack());
+        output.accept(ShanhaiItems.JUST_IN_TIME_RECOMPILE_INJECTOR.asStack());
+        output.accept(ShanhaiItems.STATE_DEVIATION_CALIBRATION_MATRIX.asStack());
+        output.accept(ShanhaiItems.MUTATION_PROVENANCE_CHAIN.asStack());
+        output.accept(ShanhaiItems.PROBABILITY_FIELD_SAMPLER.asStack());
+
         // ==================================================================
         // 桶 ⑪ · 其余物品（放最后）
         // 顺序 = 改前的相对顺序（不额外排序）。
@@ -488,6 +612,15 @@ public final class ShanhaiCreativeModeTabs {
         output.accept(ShanhaiItems.WORLD_FRAGMENTS_CREATION.asStack());
         // 🟢 2026-10-18 用户点单新增：物质模块批产模块-MK1（加在本段末尾，与 ShanhaiItems 的字段位置同口径）
         output.accept(ShanhaiItems.MATERIAL_MODULE_MASS_PRODUCTION_MODULE_MK1.asStack());
+        // 🆕 主机样板搬运工具（工具类，跟着同类的"其余物品"放；见下面那段归属说明）
+        //    🔴 为什么落「桶 ⑪ 其余物品末尾」而不是段 1（星律总成旁边）：
+        //      ① 本栏没有"工具"桶，⑪ 的语义就是「其余物品」（本类注释里 7 个桶的定义）；
+        //      ② 追加在末尾 ⇒ **不移位任何既有格子**（创造栏顺序 = JEI 物品表顺序，见本类开头的取证）；
+        //      ③ 它不是机器、也不是任何配方产物，放段 1 会打断「主机 + 全部原初模块」那个冻结段。
+        //    ⚠️ 若用户希望它紧跟「星律样板总成 / 超级通配符总成」（都是样板类），
+        //       把这一行搬到段 1 的 stellarSampleAssembler 之后即可（`temp/pattern-mover/第一刀.md`
+        //       的「待你确认」里列了这一条）。
+        output.accept(ShanhaiItems.HOST_PATTERN_MOVER.asStack());
 
         // ==================================================================
         // 桶 ⑫ · 🆕 现实物品（2026-10-17「自己新增物品」）

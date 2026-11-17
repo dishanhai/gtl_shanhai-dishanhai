@@ -280,35 +280,91 @@ public final class ShanhaiRecipeIoApply {
      * @param eut 目标 EU/t（发电型请传正数；本方法按现有方向写）
      * @return true = 两步都写了
      */
+    /** 🆕 2026-11：唯一实现收口到三参数那个重载（{@code side == null} = 按当前那一侧写）。
+     *  这样"两侧只留一侧"的不变量对所有调用点都成立，不会出现"这个入口没清另一侧"的分叉。 */
     public static boolean applyEut(GTRecipe r, long eut) {
-        if (r == null) {
-            return false;
-        }
-        final EuSide side = euSideOf(r);
-        switch (side) {
-            case CONSUME -> RecipeHelper.setInputEUt(r, eut);
-            case GENERATE -> RecipeHelper.setOutputEUt(r, eut);
-            case NONE -> {
-                // 这条配方原本没有 EU 输入（例如无电类型的机器）⇒ 显式加一条，并如实记日志。
-                final List<Content> list = new ArrayList<>(1);
-                list.add(new Content(eut, 10000, 10000, 0, null, null));
-                r.tickInputs.put(EURecipeCapability.CAP, list);
-                ShanhaiMod.LOGGER.info("{} eu_apply_created_tick_input eut={} (这条配方原本没有 tickInputs.eu)",
-                        PREFIX, eut);
-            }
-            default -> {
-                return false;
-            }
-        }
-        // 🔴 data.euTier 是【派生值】，改 tickInputs 不会自动更新它（运行期实测，见类注释 §2）。
-        final int tier = GTUtil.getTierByVoltage(Math.abs(eut));
-        r.data.putInt("euTier", tier);
-        return true;
+        return applyEut(r, eut, null);
     }
 
     /** 这条配方的 EU 该落在哪张 tick 表：发电型 ⇒ {@code tickOutputs}，其余 ⇒ {@code tickInputs}。 */
     public static String tickTableNameFor(GTRecipe r) {
         return euSideOf(r) == EuSide.GENERATE ? "tickOutputs" : "tickInputs";
+    }
+
+    /** 某一侧对应的表名（{@link EuSide#NONE} 当耗电处理 —— 与 GT 建配方时的默认一致）。 */
+    public static String tickTableNameOf(EuSide side) {
+        return side == EuSide.GENERATE ? "tickOutputs" : "tickInputs";
+    }
+
+    /** 另一侧的表名（"把 EU 从这一侧搬到那一侧"用的就是它）。 */
+    public static String otherTickTableName(String which) {
+        return "tickOutputs".equals(which) ? "tickInputs" : "tickOutputs";
+    }
+
+    /**
+     * 🆕 <b>把 EU 搬到指定一侧并写值</b>（用户点单：「加个一键切换发电or耗电的按钮」）。
+     *
+     * <h4>为什么不复用 {@link #applyEut(GTRecipe, long)}</h4>
+     * 那个方法按<b>当前</b>那一侧写（{@code euSideOf}），切换侧的时候它会"把新值写回旧那一侧"。
+     * 本方法改成<b>三步</b>：① 把两张 tick 表里的 EU 都拿掉；② 往目标那一侧写一条；
+     * ③ 同拍写 {@code data.euTier}（与 {@link #applyEut} 同一条已取证纪律）。
+     * ⇒ 结果恒为"EU 只在一侧"，不存在"两侧都有"的中间态。
+     *
+     * <h4>GT 侧的口径（javap 实测，2026-11）</h4>
+     * <pre>
+     *   GTRecipeBuilder#EUt(long) 偏移 10..63：
+     *     EU &gt; 0 ⇒ tickInput.remove(EU)  → inputEU(eu)    （perTick=true ⇒ 进 tickInputs）
+     *     EU &lt; 0 ⇒ tickOutput.remove(EU) → outputEU(-eu)  （进 tickOutputs）
+     *   ⇒ 耗电 = tickInputs.eu；发电 = tickOutputs.eu；两侧本来就不会同时有。
+     * </pre>
+     *
+     * @param r    目标配方
+     * @param eut  目标 EU/t（正数；发电也是正数，方向由 {@code side} 表达）
+     * @param side 目标侧；{@code null} / {@link EuSide#NONE} ⇒ 用当前那一侧（与老行为一致）
+     * @return true = 写了
+     */
+    public static boolean applyEut(GTRecipe r, long eut, EuSide side) {
+        if (r == null) {
+            return false;
+        }
+        final EuSide target = (side == null || side == EuSide.NONE) ? euSideOf(r) : side;
+        // ① 两侧都清掉（幂等）。② 目标侧写一条。
+        removeEu(r.tickInputs);
+        removeEu(r.tickOutputs);
+        final java.util.Map<RecipeCapability<?>, List<Content>> table =
+                target == EuSide.GENERATE ? r.tickOutputs : r.tickInputs;
+        List<Content> list = table.get(EURecipeCapability.CAP);
+        if (list == null || list.isEmpty()) {
+            list = new ArrayList<>(1);
+            table.put(EURecipeCapability.CAP, list);
+        }
+        if (list.isEmpty()) {
+            list.add(new Content(Long.valueOf(eut), 10000, 10000, 0, null, null));
+        } else {
+            for (Content c : list) {
+                c.content = Long.valueOf(eut);
+            }
+        }
+        // ③ data.euTier 是派生值，改 tick 表不会自动更新（见类注释 §2）
+        r.data.putInt("euTier", GTUtil.getTierByVoltage(Math.abs(eut)));
+        // ④ 🆕 不变量自检（**防回归的那一行**）：写完必须"恰好只有一侧有 EU"。
+        //    判据行（出现即为 bug，必须 grep 为空）：{@code eu_side_invariant_broken}
+        final boolean inEu = !r.getTickInputContents(EURecipeCapability.CAP).isEmpty();
+        final boolean outEu = !r.getTickOutputContents(EURecipeCapability.CAP).isEmpty();
+        if (inEu == outEu) {
+            ShanhaiMod.LOGGER.error("{} eu_side_invariant_broken id={} target_side={} in_eu={} out_eu={} "
+                            + "（约定：耗电 ⇒ 只有 tickInputs、发电 ⇒ 只有 tickOutputs）",
+                    PREFIX, r.id, target, inEu, outEu);
+            return false;
+        }
+        return true;
+    }
+
+    /** 把某张表里的 EU 条目整段拿掉（只动 EU 这一种 capability，item/fluid 原样留着）。 */
+    private static void removeEu(java.util.Map<RecipeCapability<?>, List<Content>> table) {
+        if (table != null) {
+            table.remove(EURecipeCapability.CAP);
+        }
     }
 
     /**
@@ -360,6 +416,29 @@ public final class ShanhaiRecipeIoApply {
             arr.add(c);
         }
         out.add(K_EU, arr);
+        return out;
+    }
+
+    /**
+     * 🆕 <b>落盘侧的另一半</b>：把某一侧 tick 表里的 EU 拿掉（切"发电/耗电"时，旧那一侧必须不再有 EU）。
+     *
+     * <p>🔴 只有在<b>那张表本来真的有 EU</b> 时才返回对象；本来没有就返回 {@code null}
+     * （= 这张表这次不动）。理由：覆盖层 {@code fields} 的语义是<b>整段替换</b>
+     * （{@link #applyTable} 第一句就是 {@code table.clear()}），而 {@code tableJson} 只认
+     * item / fluid / eu 三种 capability ⇒ 对一张本来没有 EU 的表写 {@code {}}，会把
+     * <b>别的 capability（CWU / 热 / 应力…）整段抹掉</b>。那是静默丢数据，宁可不动。
+     *
+     * @return 去掉 {@code eu} 之后的那张表；本来没有 eu ⇒ {@code null}
+     */
+    public static JsonObject tickTableWithoutEut(GTRecipe r, String which) {
+        if (r == null) {
+            return null;
+        }
+        final JsonObject out = tableJson(r, which);
+        if (!out.has(K_EU)) {
+            return null;
+        }
+        out.remove(K_EU);
         return out;
     }
 }

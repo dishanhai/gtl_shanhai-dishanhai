@@ -211,10 +211,33 @@ public final class ShanhaiJeiIndexCheck {
      *   <li>{@code recipes.isEmpty() ⇒ return recipes}（源码第 410 行 —— "点不动"的最后环）；</li>
      *   <li>同 id 只留一条；</li>
      *   <li>命中的那条：**我们自己的句柄原样放行**（它就是改过的那一版），否则换成我们造的 {@code rebuilt}；</li>
-     *   <li>分类页（无焦点）且一条都没命中 ⇒ 追加 {@code rebuilt}（{@code jei_sync APPENDED} 那一支）。</li>
+     *   <li>分类页 + **无焦点** 且一条都没命中 ⇒ 追加 {@code rebuilt}（{@code jei_sync APPENDED} 那一支）。</li>
      * </ol>
+     *
+     * <p>⚠️ 四参这一版 = <b>改动前的老写法</b>（拿不到焦点 ⇒ 等价于 {@code focused = false}），
+     * 保留它有两个用途：① 老用例逐字不动；② 第 6 组里当"改前形态"的负对照基线。
      */
     static List<Object> outlet(List<Object> jeiList, String recipeId, Object rebuilt, boolean categoryChannel) {
+        return outlet(jeiList, recipeId, rebuilt, categoryChannel, false);
+    }
+
+    /**
+     * 🔴 <b>2026-11-09 焦点闸</b>：五参版 = 生产代码 {@code patched(List, String, boolean)} 的逐字移植。
+     *
+     * <p>唯一的区别就是追加那一支多了一个 {@code !focused}：
+     * <pre>
+     *   生产 : if (recipeTypeUid != null &amp;&amp; !focused) { …追加… }
+     *   这里 : if (categoryChannel &amp;&amp; !focused &amp;&amp; matched == 0 &amp;&amp; …) out.add(rebuilt)
+     * </pre>
+     * 语义：<b>有焦点（按物品查）</b>时一条都不追加 —— 焦点页是"这个物品真正参与的配方"，
+     * 凭空补一条它不参与的 = 界面上多出不相干的条目（用户报的那个 bug）；
+     * <b>无焦点（浏览分类页）</b>时照旧追加（新建的配方要能在分类页看见）。
+     *
+     * @param categoryChannel 这一拍有没有分类 uid（= 生产代码里的 {@code recipeTypeUid != null}）
+     * @param focused         这一拍有没有焦点（= 生产代码里的 {@code !focusGroup.isEmpty()}）
+     */
+    static List<Object> outlet(List<Object> jeiList, String recipeId, Object rebuilt,
+                               boolean categoryChannel, boolean focused) {
         if (jeiList == null || jeiList.isEmpty()) {
             return jeiList;                       // ← patched():410 「空列表直接原样返回」
         }
@@ -237,10 +260,47 @@ public final class ShanhaiJeiIndexCheck {
                 out.add(rebuilt);                 // 原件 ⇒ 换成我们造的那一份
             }
         }
-        if (categoryChannel && matched == 0 && rebuilt != null && !seen.containsKey(recipeId)) {
-            out.add(rebuilt);                     // APPENDED 那一支（只对分类页做）
+        if (categoryChannel && !focused && matched == 0 && rebuilt != null && !seen.containsKey(recipeId)) {
+            out.add(rebuilt);                     // APPENDED 那一支（只对分类页、且**无焦点**时才做）
         }
         return out;
+    }
+
+    /**
+     * 两份列表是不是<b>逐元素同一批实例、同一个顺序</b>（判"一条都没变"要用它，不能只比 size：
+     * size 相同但内容被换掉是另一种病）。{@code null} 与空表按相等处理。
+     */
+    static boolean sameSequence(List<Object> a, List<Object> b) {
+        if (a == null || b == null) {
+            return a == b;
+        }
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            if (a.get(i) != b.get(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 把 {@code after} 里比 {@code before} 多出来的那些 id 列出来（多了哪些、一条不落地写进读数行）。 */
+    static String appendedIds(List<Object> before, List<Object> after) {
+        final Map<Object, Integer> mine = new LinkedHashMap<>();
+        for (Object o : before) {
+            mine.merge(o, 1, Integer::sum);
+        }
+        final List<String> extra = new ArrayList<>();
+        for (Object o : after) {
+            final Integer n = mine.get(o);
+            if (n != null && n > 0) {
+                mine.put(o, n - 1);
+            } else {
+                extra.add(String.valueOf(idOf(o)));
+            }
+        }
+        return extra.isEmpty() ? "无" : extra.toString();
     }
 
     static String idOf(Object o) {
@@ -434,6 +494,88 @@ public final class ShanhaiJeiIndexCheck {
         return l.size() == 1;
     }
 
+    // ------------------------------------------------------------------ 第 6 组：焦点闸
+
+    private static final String FOCUS_PRODUCT = "item:shanhai:focus_probe";
+
+    /**
+     * 第 6 组（<b>2026-11-09，用户报的那个 bug</b>）：<b>有焦点时一条补丁都不许追加</b>。
+     *
+     * <h4>它验的是哪一件事</h4>
+     * 用户原话：「JEI 里对物品按 R/U 看获取方式/用途时，会混进<b>配方编辑器创建/改过</b>的配方」。
+     * 生产代码里那一支（{@code ShanhaiJeiRecipePatches} 的追加兜底）原来<b>只按分类 uid 过滤</b>、
+     * 不看焦点 ⇒ 只要该分类里有编辑器补丁，按该分类里<b>任何</b>物品查，都会把整批编辑器配方塞进结果页。
+     * 本组把"有焦点 / 无焦点 / 改过的那条 / 新建的那条"四种组合喂进模型，逐条给读数。
+     *
+     * <h4>为什么"改过已有配方"要单列一条（③）</h4>
+     * {@code matched} 是<b>这一拍</b>的读数（{@code patched()} 开头清零）。有焦点的那一页里，
+     * 一条"只改了产物"的已有配方<b>并不在该物品的配方里</b> ⇒ {@code matched=0} ⇒ 它和"新建的配方"
+     * 走的是<b>同一支</b>追加。⇒ 用户看到的"混进来的配方"里两种都有，所以两者的闸必须一起验。
+     *
+     * <h4>本组的两个"设计好的读数"</h4>
+     * <ul>
+     *   <li>负对照行要求<b>现象复现</b>（有焦点也追加 2 条）：它绿 = 本判据能抓到 bug；</li>
+     *   <li>② 要求"无焦点时与改动前<b>逐元素相同</b>"：浏览页是用户已经验收过的行为，改焦点闸<b>不许</b>动它。</li>
+     * </ul>
+     */
+    public static String[] simulateFocusedAppendGate() {
+        final List<String> lines = new ArrayList<>();
+        // 同一分类下的两条补丁：一条【新建】、一条【改过已有】——后者就是报告里的"次级同因"。
+        final String addId = "shanhai:demo/new_recipe_9";
+        final Object addMade = new Copy(addId, "item:shanhai:made_9", 1);
+        final String setId = "shanhai:demo/edited_existing";
+        final Object setMade = new Copy(setId, "item:shanhai:edited_out", 2);
+
+        // 有焦点时 JEI 给的那一份 = 这个物品**真参与**的两条；两条补丁都不在里面
+        // ⇒ 两条的 matched 都是 0 —— 这正是 bug 的触发条件（不是巧合，是现场形态）。
+        final List<Object> focusedIn = new ArrayList<>();
+        focusedIn.add(new Copy("shanhai:demo/uses_this_item_1", FOCUS_PRODUCT, 0));
+        focusedIn.add(new Copy("shanhai:demo/uses_this_item_2", FOCUS_PRODUCT, 0));
+
+        // ---------- ① 有焦点：out 必须等于 in（一条都不追加） ----------
+        List<Object> fixed = outlet(focusedIn, addId, addMade, true, true);
+        fixed = outlet(fixed, setId, setMade, true, true);
+        final boolean eq1 = sameSequence(focusedIn, fixed);
+        lines.add("JEI_FOCUS ① 有焦点（按物品查） in=" + focusedIn.size() + " out=" + fixed.size()
+                + " out==in=" + eq1 + " 多出来的=" + appendedIds(focusedIn, fixed)
+                + " PASS=" + eq1 + " (新建 op=add 与改过 op=set 两条补丁都在同一分类里，一条都不许进来)");
+
+        // ---------- ③ 被【改过】的那一条（次级同因）：有焦点时同样不许追加 ----------
+        final List<Object> fixedSetOnly = outlet(focusedIn, setId, setMade, true, true);
+        final boolean eq3 = sameSequence(focusedIn, fixedSetOnly);
+        lines.add("JEI_FOCUS ③ 改过已有配方(op=set, matched=0) 有焦点 in=" + focusedIn.size()
+                + " out=" + fixedSetOnly.size() + " out==in=" + eq3
+                + " 多出来的=" + appendedIds(focusedIn, fixedSetOnly)
+                + " PASS=" + eq3 + " (这一条不是新建：它在 JEI 里本来就有，只是产物被改过 ⇒ 同样不许被追加)");
+
+        // ---------- ② 无焦点（浏览分类页）：追加照旧，且与【改动前】逐字一致 ----------
+        final List<Object> pageIn = new ArrayList<>(focusedIn);
+        pageIn.add(new Copy("shanhai:demo/side_3", "item:shanhai:side_3", 0));
+        pageIn.add(new Copy("shanhai:demo/side_4", "item:shanhai:side_4", 0));
+        // 改动前（四参 = 拿不到焦点，等价 focused=false）：
+        List<Object> legacy = outlet(pageIn, addId, addMade, true);
+        legacy = outlet(legacy, setId, setMade, true);
+        // 改动后（五参 + focused=false）：
+        List<Object> now = outlet(pageIn, addId, addMade, true, false);
+        now = outlet(now, setId, setMade, true, false);
+        final boolean sameAsBefore = sameSequence(legacy, now);
+        final boolean countOk = now.size() == pageIn.size() + 2;
+        lines.add("JEI_FOCUS ② 无焦点（浏览分类页） in=" + pageIn.size() + " out=" + now.size()
+                + " expected=" + (pageIn.size() + 2) + " 多出来的=" + appendedIds(pageIn, now)
+                + " 与改前逐元素相同=" + sameAsBefore + " PASS=" + (countOk && sameAsBefore)
+                + " (浏览页行为必须逐字不变：新建的配方仍要在分类页看得见)");
+
+        // ---------- 负对照：把"有焦点"那一拍按老写法做（= focused 恒传 false）----------
+        List<Object> bug = outlet(focusedIn, addId, addMade, true);
+        bug = outlet(bug, setId, setMade, true);
+        final boolean reproduced = bug.size() == focusedIn.size() + 2;
+        lines.add("JEI_FOCUS 负对照 有焦点但恒传 focused=false（= 改动前的调用形态） in=" + focusedIn.size()
+                + " out=" + bug.size() + " 多出来的=" + appendedIds(focusedIn, bug)
+                + " 现象复现=" + reproduced
+                + " (这一行【要求复现】：复现 = 本组判据确实有判别力，不是自说自话)");
+        return lines.toArray(new String[0]);
+    }
+
     /**
      * 自检（离线可跑）：5 组读数 ＋ 1 组负对照，返回逐条原始读数。
      *
@@ -447,8 +589,10 @@ public final class ShanhaiJeiIndexCheck {
         Collections.addAll(out, simulateUntouched());
         Collections.addAll(out, negativeControlOnlyHide());
         Collections.addAll(out, simulatePageCountUnchanged());
+        Collections.addAll(out, simulateFocusedAppendGate());
         out.add("JEI_INDEX 断言 改过之后『点物品』必须恒 1 条（修复前恒 0 条）；未改动配方 hide/add 调用恒 0；"
-                + "分类页条数不变 —— 正对照全绿 + 负对照复现 ⇒ 这条判据有判别力");
+                + "分类页条数不变；有焦点时一条补丁都不许追加（无焦点时与改前逐元素相同）"
+                + " —— 正对照全绿 + 负对照复现 ⇒ 这条判据有判别力");
         return out.toArray(new String[0]);
     }
 

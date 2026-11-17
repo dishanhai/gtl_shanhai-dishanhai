@@ -120,7 +120,8 @@ public final class ShanhaiSupplyOnlyFluidHandler implements IRecipeHandlerTrait<
         for (int i = 0; i < now.size(); i++) {
             final FluidStack stack = now.get(i);
             if (stack != null && stack.getAmount() > 0L) {
-                total += stack.getAmount();
+                // 饱和加：单个来源可能是 Long.MAX（超级AE无限元件），裸加会绕回负数
+                total = shanhaiSatAdd(total, stack.getAmount());
             }
         }
         return total;
@@ -167,9 +168,27 @@ public final class ShanhaiSupplyOnlyFluidHandler implements IRecipeHandlerTrait<
                 continue;
             }
             if (need.test(have)) {
-                available += have.getAmount();
+                // 饱和加：多个来源里有 Long.MAX（∞ 元件）时裸加会绕回负数 ⇒ 会把"满足"误判成"不满足"
+                available = shanhaiSatAdd(available, have.getAmount());
             }
         }
         return available;
+    }
+
+    /**
+     * 🔴 <b>饱和加</b>：AE2 的 {@code KeyCounter} 是<b>裸 long 加</b>
+     * （{@code KeyCounter#add} → {@code VariantCounter#add} → fastutil {@code Object2LongOpenHashMap#addToValue} 的 {@code ladd}），
+     * 而超级AE无限元件的单键上限是 {@code Long.MAX_VALUE} ⇒ 两个来源相加就会绕回负数，
+     * 这里再把负数拿去跟 {@code required} 比，会把"明明够"判成"不够"（机器不吃料）。
+     * <p>所以本类凡"把若干来源加起来"的地方一律走这里：越界就夹在 {@code Long.MAX_VALUE}，绝不翻负。
+     */
+    private static long shanhaiSatAdd(long a, long b) {
+        if (b > 0L && a > Long.MAX_VALUE - b) {
+            return Long.MAX_VALUE;
+        }
+        if (b < 0L && a < Long.MIN_VALUE - b) {
+            return Long.MIN_VALUE;
+        }
+        return a + b;
     }
 }

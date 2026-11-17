@@ -13,7 +13,13 @@ import net.minecraft.world.item.Item;
  * → 150（{@code worldline_crystal_core}）→ 167（B1b/B1c 的 17 条 gt_shanhai: 物品）
  * → <b>186</b>（<b>2026-10-03 加入 18 个新粒子</b>，同日再加 <b>1 个「创造维度碎片」</b>，见文末两段）
  * → <b>189</b>（<b>2026-10-18 加入 3 个：高级世线晶核 / 奇迹世线晶核 / 物质模块批产模块-MK1</b>）。
- * 现有字段数可用 {@code Select-String -Pattern 'module\("'} 直接数出来（本行写明的数必须与它一致）。
+ * → <b>284</b>（<b>2026-11-16 加入 95 件「现实/剧情物品」</b>：7 剧情 + 7 大类 + 65 {@code mc_*} + 16 {@code ex_*}，
+ *   全部纯 {@link Item}、无行为；见桶 ⑭）。
+ * → <b>298</b>（<b>2026-11-16 加入 14 件「底层技术 · 时序与改写」</b>：全是纯 {@link Item}、无行为；见桶 ⑮）。
+ * 现有字段数 = {@code module("} 217 + {@code eventInput("} 65 + {@code crashBolt("} 16 = <b>298</b>
+ * （另有 128 个 {@code reality_item_N} 壳与 {@code host_pattern_mover} 走独立形状，不计入 298）。
+ * ⚠️ 旧版本写的是「可用 {@code Select-String -Pattern 'module\("'} 直接数出来」——
+ * 实测 {@code module("} 只数得到 217（另有 65 + 16 走的不是 module），那条口径自 284 那时起就不准。
  *
  * <p>⛔ <b>已作废的旧段落描述（逐字留档，供对照）</b>：
  * <pre>
@@ -743,6 +749,304 @@ public final class ShanhaiItems {
     @SuppressWarnings("unchecked")
     public static final ItemEntry<RealityShellItem>[] REALITY_ITEMS = realityItems();
 
+    // ==================================================================
+    // 桶 ⑬ · 🆕 2026-11-06：主机样板搬运工具（用户点单，第一刀）
+    //    🔴 为什么它【必须排在 128 个现实物品壳之后】（而不是跟着创造栏的桶 ⑪ 放）：
+    //      本类上面 桶 ⑫ 的注释写明「这一段必须放在最后一个字段组，让既有物品的数字 id
+    //      一个都不移位（存档安全）」。而字段顺序 = 注册顺序 = 注册表数字 id 顺序 ⇒
+    //      任何插在 桶 ⑫【之前】的新字段都会把这 128 个壳的数字 id 整体 +1。
+    //      为了守住那条纪律，本物品**追加在最后一个字段之后**：
+    //      代价 = 「字段顺序 ≈ 创造栏顺序」在最后这一格上不再成立（创造栏里它仍在桶 ⑪），
+    //      换来 = 既有物品的数字 id 一个都没动。这条取舍是刻意的。
+    // ==================================================================
+
+    /**
+     * 🆕 <b>主机样板搬运工具</b>（{@code shanhai:host_pattern_mover}）· 堆叠 <b>1</b>。
+     *
+     * <p>行为（用户拍板）：Shift+右键主机 = 读取全部样板并入物品（已有则合并，<b>只读、不清源</b>）；
+     * 右键主机 = 放置（第二刀）；Shift+右键空气 = 面板（第一刀只读查看）。
+     *
+     * <p>🔴 <b>为什么要单独一行、不走本类的 {@link #module(String)}</b>：
+     * <ol>
+     *   <li>可堆叠 1（{@code stacksTo(1)}）—— 里面装着最多 1.5 MiB 的样板 NBT，
+     *       堆叠会让「哪一份是权威」变成歧义；</li>
+     *   <li>需要真类 {@code HostPatternMoverItem}（覆写 {@code onItemUseFirst} / {@code use} /
+     *       {@code appendHoverText}），不是裸 {@code Item}；</li>
+     *   <li>⚠️ 属性必须在<b>注册那一刻</b>定（{@code Item.Properties} 是构造参数，注册表冻结后改不了）——
+     *       所以 {@code stacksTo(1)} 写在工厂里，而不是事后 {@code stack.setCount}。</li>
+     * </ol>
+     * <p>图标：{@code textures/item/host_pattern_mover.png}＝<b>临时借用的占位</b>
+     * （复制自 {@code wanxiang_core.png}）。最终图标由用户另行出预览，换同名 png 即可，<b>代码不用改</b>
+     * （模型 json 的 {@code layer0} 已经指向 {@code shanhai:item/host_pattern_mover}）。
+     */
+    public static final ItemEntry<com.shanhai.common.patternmover.HostPatternMoverItem> HOST_PATTERN_MOVER =
+            ShanhaiRegistration.REGISTRATE
+                    .item("host_pattern_mover",
+                            properties -> new com.shanhai.common.patternmover.HostPatternMoverItem(
+                                    properties.stacksTo(1)))
+                    .model(NonNullBiConsumer.noop())
+                    .register();
+
+
+    // ==================================================================
+    // 桶 ⑭ · 🆕 2026-11-16「95 件现实/剧情物品」（用户点单）
+    //    🔴 95 件 = 7 剧情 + 7 大类 + 65 MC 底层（mc_*）+ 16 运行时异常（ex_*）
+    //    🔴 注册形状：7 + 7 + 16 = 30 件走 {@link #module(String)}（纯 Item）；
+    //       65 件 mc_* 走 {@link #eventInput(String)}（自定义类 ShanhaiRealityInputItem）——
+    //       **不**复用 128 个 {@code reality_item} 壳 —— 壳的图标只支持内置色块/借图，
+    //       吃不下这 95 张自定义 png（取证见 temp/reality-items/报告.md §1.3）。
+    //    🔴 位置纪律：必须【追加在 HOST_PATTERN_MOVER 之后】（= 最后一个字段组），
+    //       否则 128 个壳的数字 id 会整体 +95（存档安全，见桶 ⑫ 与桶 ⑬ 的注释）。
+    //    🔴 id 的字符集只能是 [a-z0-9/._-] —— 图标源文件名是中文的 14 件已在拷入时改成 ASCII id。
+    //    🆕 阶段 1（已完成）：注册 + 图标 + 语言 + 创造栏，一个特殊行为都不写。
+    //    🆕 阶段 2（2026-11-16）：只把 65 件 mc_* 的实现类换成 ShanhaiRealityInputItem
+    //       （右键空气开登记面板）；id / 显示名（lang）/ 图标（模型 json）/ 创造栏位置
+    //       （ShanhaiCreativeModeTabs#fill 里那 65 行 accept）**一个字节都没动**。
+    //    🆕 阶段 3（2026-11-16）：只把 16 件 ex_* 的实现类换成 ShanhaiCrashBoltItem
+    //       （三叉戟式蓄力投掷物，落地 3 秒后真崩）；id / 显示名 / 图标 / 创造栏位置 / 堆叠上限
+    //       **一个字节都没动**。story_* / group_* 这 14 件仍是纯 Item。
+    // ==================================================================
+
+
+    // ---- A · 7 件剧情物品（story 段，按用户点名的顺序） ----
+    /** shanhai:condensed_time（凝聚态时间）· 贴图 textures/item/condensed_time.png */
+    public static final ItemEntry<Item> CONDENSED_TIME = module("condensed_time");
+    /** shanhai:condensed_space（凝聚态空间）· 贴图 textures/item/condensed_space.png */
+    public static final ItemEntry<Item> CONDENSED_SPACE = module("condensed_space");
+    /** shanhai:schrodinger_conception（薛定谔的创想）· 贴图 textures/item/schrodinger_conception.png */
+    public static final ItemEntry<Item> SCHRODINGER_CONCEPTION = module("schrodinger_conception");
+    /** shanhai:newtons_tear（牛顿的眼泪）· 贴图 textures/item/newtons_tear.png */
+    public static final ItemEntry<Item> NEWTONS_TEAR = module("newtons_tear");
+    /** shanhai:newtons_coffin_lid（牛顿的棺材板）· 贴图 textures/item/newtons_coffin_lid.png */
+    public static final ItemEntry<Item> NEWTONS_COFFIN_LID = module("newtons_coffin_lid");
+    /** shanhai:turings_computer（图灵的电脑）· 贴图 textures/item/turings_computer.png */
+    public static final ItemEntry<Item> TURINGS_COMPUTER = module("turings_computer");
+    /** shanhai:dgy_code（dgy 的代码）· 贴图 textures/item/dgy_code.png */
+    public static final ItemEntry<Item> DGY_CODE = module("dgy_code");
+
+    // ---- B · 7 个大类（group 段，按用户点名的顺序） ----
+    /** shanhai:entity_persistence_gate（实体存续判定闸门）· 贴图 textures/item/entity_persistence_gate.png */
+    public static final ItemEntry<Item> ENTITY_PERSISTENCE_GATE = module("entity_persistence_gate");
+    /** shanhai:interaction_dispatch_bus（交互动作分派总线）· 贴图 textures/item/interaction_dispatch_bus.png */
+    public static final ItemEntry<Item> INTERACTION_DISPATCH_BUS = module("interaction_dispatch_bus");
+    /** shanhai:region_block_state_matrix（区域方块状态改写矩阵）· 贴图 textures/item/region_block_state_matrix.png */
+    public static final ItemEntry<Item> REGION_BLOCK_STATE_MATRIX = module("region_block_state_matrix");
+    /** shanhai:world_process_orchestrator（世界进程编排装置）· 贴图 textures/item/world_process_orchestrator.png */
+    public static final ItemEntry<Item> WORLD_PROCESS_ORCHESTRATOR = module("world_process_orchestrator");
+    /** shanhai:temporal_pulse_medium（时序脉冲发生介质）· 贴图 textures/item/temporal_pulse_medium.png */
+    public static final ItemEntry<Item> TEMPORAL_PULSE_MEDIUM = module("temporal_pulse_medium");
+    /** shanhai:client_action_packet_relay（客户端动作包转译中继）· 贴图 textures/item/client_action_packet_relay.png */
+    public static final ItemEntry<Item> CLIENT_ACTION_PACKET_RELAY = module("client_action_packet_relay");
+    /** shanhai:world_state_sync_core（世界状态同步核心）· 贴图 textures/item/world_state_sync_core.png */
+    public static final ItemEntry<Item> WORLD_STATE_SYNC_CORE = module("world_state_sync_core");
+
+    // ---- C · 65 件 MC 底层（mc_* 段，id-plan.json 原序） ----
+    /** shanhai:mc_livingattackevent（LivingAttackEvent）· 贴图 textures/item/mc_livingattackevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LIVINGATTACKEVENT = eventInput("mc_livingattackevent");
+    /** shanhai:mc_livinghurtevent（LivingHurtEvent）· 贴图 textures/item/mc_livinghurtevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LIVINGHURTEVENT = eventInput("mc_livinghurtevent");
+    /** shanhai:mc_livingdeathevent（LivingDeathEvent）· 贴图 textures/item/mc_livingdeathevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LIVINGDEATHEVENT = eventInput("mc_livingdeathevent");
+    /** shanhai:mc_livingdropsevent（LivingDropsEvent）· 贴图 textures/item/mc_livingdropsevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LIVINGDROPSEVENT = eventInput("mc_livingdropsevent");
+    /** shanhai:mc_criticalhitevent（CriticalHitEvent）· 贴图 textures/item/mc_criticalhitevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CRITICALHITEVENT = eventInput("mc_criticalhitevent");
+    /** shanhai:mc_playerinteractevent_rightclickitem（PlayerInteractEvent.RightClickItem）· 贴图 textures/item/mc_playerinteractevent_rightclickitem.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PLAYERINTERACTEVENT_RIGHTCLICKITEM = eventInput("mc_playerinteractevent_rightclickitem");
+    /** shanhai:mc_playerinteractevent_leftclickblock（PlayerInteractEvent.LeftClickBlock）· 贴图 textures/item/mc_playerinteractevent_leftclickblock.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PLAYERINTERACTEVENT_LEFTCLICKBLOCK = eventInput("mc_playerinteractevent_leftclickblock");
+    /** shanhai:mc_itemtossevent（ItemTossEvent）· 贴图 textures/item/mc_itemtossevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ITEMTOSSEVENT = eventInput("mc_itemtossevent");
+    /** shanhai:mc_entityitempickupevent（EntityItemPickupEvent）· 贴图 textures/item/mc_entityitempickupevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ENTITYITEMPICKUPEVENT = eventInput("mc_entityitempickupevent");
+    /** shanhai:mc_anvilupdateevent（AnvilUpdateEvent）· 贴图 textures/item/mc_anvilupdateevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ANVILUPDATEEVENT = eventInput("mc_anvilupdateevent");
+    /** shanhai:mc_blockevent_breakevent（BlockEvent.BreakEvent）· 贴图 textures/item/mc_blockevent_breakevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_BLOCKEVENT_BREAKEVENT = eventInput("mc_blockevent_breakevent");
+    /** shanhai:mc_blockevent_entityplaceevent（BlockEvent.EntityPlaceEvent）· 贴图 textures/item/mc_blockevent_entityplaceevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_BLOCKEVENT_ENTITYPLACEEVENT = eventInput("mc_blockevent_entityplaceevent");
+    /** shanhai:mc_blockevent_neighbornotifyevent（BlockEvent.NeighborNotifyEvent）· 贴图 textures/item/mc_blockevent_neighbornotifyevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_BLOCKEVENT_NEIGHBORNOTIFYEVENT = eventInput("mc_blockevent_neighbornotifyevent");
+    /** shanhai:mc_explosionevent_start（ExplosionEvent.Start）· 贴图 textures/item/mc_explosionevent_start.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_EXPLOSIONEVENT_START = eventInput("mc_explosionevent_start");
+    /** shanhai:mc_chunkevent_load（ChunkEvent.Load）· 贴图 textures/item/mc_chunkevent_load.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CHUNKEVENT_LOAD = eventInput("mc_chunkevent_load");
+    /** shanhai:mc_entityjoinlevelevent（EntityJoinLevelEvent）· 贴图 textures/item/mc_entityjoinlevelevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ENTITYJOINLEVELEVENT = eventInput("mc_entityjoinlevelevent");
+    /** shanhai:mc_entitytraveltodimensionevent（EntityTravelToDimensionEvent）· 贴图 textures/item/mc_entitytraveltodimensionevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ENTITYTRAVELTODIMENSIONEVENT = eventInput("mc_entitytraveltodimensionevent");
+    /** shanhai:mc_entitystruckbylightningevent（EntityStruckByLightningEvent）· 贴图 textures/item/mc_entitystruckbylightningevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ENTITYSTRUCKBYLIGHTNINGEVENT = eventInput("mc_entitystruckbylightningevent");
+    /** shanhai:mc_serverchatevent（ServerChatEvent）· 贴图 textures/item/mc_serverchatevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERCHATEVENT = eventInput("mc_serverchatevent");
+    /** shanhai:mc_registercommandsevent（RegisterCommandsEvent）· 贴图 textures/item/mc_registercommandsevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_REGISTERCOMMANDSEVENT = eventInput("mc_registercommandsevent");
+    /** shanhai:mc_tickevent_servertickevent（TickEvent.ServerTickEvent）· 贴图 textures/item/mc_tickevent_servertickevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_TICKEVENT_SERVERTICKEVENT = eventInput("mc_tickevent_servertickevent");
+    /** shanhai:mc_tickevent_leveltickevent（TickEvent.LevelTickEvent）· 贴图 textures/item/mc_tickevent_leveltickevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_TICKEVENT_LEVELTICKEVENT = eventInput("mc_tickevent_leveltickevent");
+    /** shanhai:mc_tickevent_playertickevent（TickEvent.PlayerTickEvent）· 贴图 textures/item/mc_tickevent_playertickevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_TICKEVENT_PLAYERTICKEVENT = eventInput("mc_tickevent_playertickevent");
+    /** shanhai:mc_tickevent_clienttickevent（TickEvent.ClientTickEvent）· 贴图 textures/item/mc_tickevent_clienttickevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_TICKEVENT_CLIENTTICKEVENT = eventInput("mc_tickevent_clienttickevent");
+    /** shanhai:mc_tickevent_rendertickevent（TickEvent.RenderTickEvent）· 贴图 textures/item/mc_tickevent_rendertickevent.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_TICKEVENT_RENDERTICKEVENT = eventInput("mc_tickevent_rendertickevent");
+    /** shanhai:mc_serverboundplayeractionpacket（ServerboundPlayerActionPacket）· 贴图 textures/item/mc_serverboundplayeractionpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERBOUNDPLAYERACTIONPACKET = eventInput("mc_serverboundplayeractionpacket");
+    /** shanhai:mc_serverbounduseitempacket（ServerboundUseItemPacket）· 贴图 textures/item/mc_serverbounduseitempacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERBOUNDUSEITEMPACKET = eventInput("mc_serverbounduseitempacket");
+    /** shanhai:mc_serverboundcontainerclickpacket（ServerboundContainerClickPacket）· 贴图 textures/item/mc_serverboundcontainerclickpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERBOUNDCONTAINERCLICKPACKET = eventInput("mc_serverboundcontainerclickpacket");
+    /** shanhai:mc_serverboundchatcommandpacket（ServerboundChatCommandPacket）· 贴图 textures/item/mc_serverboundchatcommandpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERBOUNDCHATCOMMANDPACKET = eventInput("mc_serverboundchatcommandpacket");
+    /** shanhai:mc_serverboundcustompayloadpacket（ServerboundCustomPayloadPacket）· 贴图 textures/item/mc_serverboundcustompayloadpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERBOUNDCUSTOMPAYLOADPACKET = eventInput("mc_serverboundcustompayloadpacket");
+    /** shanhai:mc_clientboundblockupdatepacket（ClientboundBlockUpdatePacket）· 贴图 textures/item/mc_clientboundblockupdatepacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CLIENTBOUNDBLOCKUPDATEPACKET = eventInput("mc_clientboundblockupdatepacket");
+    /** shanhai:mc_clientboundsethealthpacket（ClientboundSetHealthPacket）· 贴图 textures/item/mc_clientboundsethealthpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CLIENTBOUNDSETHEALTHPACKET = eventInput("mc_clientboundsethealthpacket");
+    /** shanhai:mc_clientboundplayercombatkillpacket（ClientboundPlayerCombatKillPacket）· 贴图 textures/item/mc_clientboundplayercombatkillpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CLIENTBOUNDPLAYERCOMBATKILLPACKET = eventInput("mc_clientboundplayercombatkillpacket");
+    /** shanhai:mc_clientboundsoundpacket（ClientboundSoundPacket）· 贴图 textures/item/mc_clientboundsoundpacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CLIENTBOUNDSOUNDPACKET = eventInput("mc_clientboundsoundpacket");
+    /** shanhai:mc_clientboundlevelparticlespacket（ClientboundLevelParticlesPacket）· 贴图 textures/item/mc_clientboundlevelparticlespacket.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CLIENTBOUNDLEVELPARTICLESPACKET = eventInput("mc_clientboundlevelparticlespacket");
+    /** shanhai:mc_minecraftserver_runserver（MinecraftServer.runServer）· 贴图 textures/item/mc_minecraftserver_runserver.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_MINECRAFTSERVER_RUNSERVER = eventInput("mc_minecraftserver_runserver");
+    /** shanhai:mc_levelaccessor_scheduletick（LevelAccessor.scheduleTick）· 贴图 textures/item/mc_levelaccessor_scheduletick.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LEVELACCESSOR_SCHEDULETICK = eventInput("mc_levelaccessor_scheduletick");
+    /** shanhai:mc_serverlevel_tickchunk（ServerLevel.tickChunk）· 贴图 textures/item/mc_serverlevel_tickchunk.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERLEVEL_TICKCHUNK = eventInput("mc_serverlevel_tickchunk");
+    /** shanhai:mc_level_neighborchanged（Level.neighborChanged）· 贴图 textures/item/mc_level_neighborchanged.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LEVEL_NEIGHBORCHANGED = eventInput("mc_level_neighborchanged");
+    /** shanhai:mc_serverlevel_setdaytime（ServerLevel.setDayTime）· 贴图 textures/item/mc_serverlevel_setdaytime.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERLEVEL_SETDAYTIME = eventInput("mc_serverlevel_setdaytime");
+    /** shanhai:mc_chunklevel（ChunkLevel）· 贴图 textures/item/mc_chunklevel.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_CHUNKLEVEL = eventInput("mc_chunklevel");
+    /** shanhai:mc_compoundtag（CompoundTag）· 贴图 textures/item/mc_compoundtag.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_COMPOUNDTAG = eventInput("mc_compoundtag");
+    /** shanhai:mc_registry（Registry）· 贴图 textures/item/mc_registry.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_REGISTRY = eventInput("mc_registry");
+    /** shanhai:mc_palettedcontainer（PalettedContainer）· 贴图 textures/item/mc_palettedcontainer.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PALETTEDCONTAINER = eventInput("mc_palettedcontainer");
+    /** shanhai:mc_packrepository（PackRepository）· 贴图 textures/item/mc_packrepository.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PACKREPOSITORY = eventInput("mc_packrepository");
+    /** shanhai:mc_recipemanager（RecipeManager）· 贴图 textures/item/mc_recipemanager.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_RECIPEMANAGER = eventInput("mc_recipemanager");
+    /** shanhai:mc_lootdatamanager（LootDataManager）· 贴图 textures/item/mc_lootdatamanager.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LOOTDATAMANAGER = eventInput("mc_lootdatamanager");
+    /** shanhai:mc_tagkey（TagKey）· 贴图 textures/item/mc_tagkey.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_TAGKEY = eventInput("mc_tagkey");
+    /** shanhai:mc_serveradvancementmanager（ServerAdvancementManager）· 贴图 textures/item/mc_serveradvancementmanager.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERADVANCEMENTMANAGER = eventInput("mc_serveradvancementmanager");
+    /** shanhai:mc_gamerules（GameRules）· 贴图 textures/item/mc_gamerules.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_GAMERULES = eventInput("mc_gamerules");
+    /** shanhai:mc_serverfunctionmanager（ServerFunctionManager）· 贴图 textures/item/mc_serverfunctionmanager.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERFUNCTIONMANAGER = eventInput("mc_serverfunctionmanager");
+    /** shanhai:mc_livingentity_travel（LivingEntity.travel）· 贴图 textures/item/mc_livingentity_travel.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LIVINGENTITY_TRAVEL = eventInput("mc_livingentity_travel");
+    /** shanhai:mc_aabb（AABB）· 贴图 textures/item/mc_aabb.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_AABB = eventInput("mc_aabb");
+    /** shanhai:mc_pathnavigation（PathNavigation）· 贴图 textures/item/mc_pathnavigation.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PATHNAVIGATION = eventInput("mc_pathnavigation");
+    /** shanhai:mc_levellightengine（LevelLightEngine）· 贴图 textures/item/mc_levellightengine.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_LEVELLIGHTENGINE = eventInput("mc_levellightengine");
+    /** shanhai:mc_flowingfluid_spread（FlowingFluid.spread）· 贴图 textures/item/mc_flowingfluid_spread.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_FLOWINGFLUID_SPREAD = eventInput("mc_flowingfluid_spread");
+    /** shanhai:mc_dimensiontype_getteleportationscale（DimensionType.getTeleportationScale）· 贴图 textures/item/mc_dimensiontype_getteleportationscale.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_DIMENSIONTYPE_GETTELEPORTATIONSCALE = eventInput("mc_dimensiontype_getteleportationscale");
+    /** shanhai:mc_structurestart（StructureStart）· 贴图 textures/item/mc_structurestart.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_STRUCTURESTART = eventInput("mc_structurestart");
+    /** shanhai:mc_worldoptions_seed（WorldOptions.seed）· 贴图 textures/item/mc_worldoptions_seed.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_WORLDOPTIONS_SEED = eventInput("mc_worldoptions_seed");
+    /** shanhai:mc_packetutils_ensurerunningonsamethread（PacketUtils.ensureRunningOnSameThread）· 贴图 textures/item/mc_packetutils_ensurerunningonsamethread.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PACKETUTILS_ENSURERUNNINGONSAMETHREAD = eventInput("mc_packetutils_ensurerunningonsamethread");
+    /** shanhai:mc_blockableeventloop_issamethread（BlockableEventLoop.isSameThread）· 贴图 textures/item/mc_blockableeventloop_issamethread.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_BLOCKABLEEVENTLOOP_ISSAMETHREAD = eventInput("mc_blockableeventloop_issamethread");
+    /** shanhai:mc_abstractcontainermenu（AbstractContainerMenu）· 贴图 textures/item/mc_abstractcontainermenu.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_ABSTRACTCONTAINERMENU = eventInput("mc_abstractcontainermenu");
+    /** shanhai:mc_playerlist_respawn（PlayerList.respawn）· 贴图 textures/item/mc_playerlist_respawn.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PLAYERLIST_RESPAWN = eventInput("mc_playerlist_respawn");
+    /** shanhai:mc_serverstatscounter（ServerStatsCounter）· 贴图 textures/item/mc_serverstatscounter.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_SERVERSTATSCOUNTER = eventInput("mc_serverstatscounter");
+    /** shanhai:mc_playerenderchestcontainer（PlayerEnderChestContainer）· 贴图 textures/item/mc_playerenderchestcontainer.png */
+    public static final ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> MC_PLAYERENDERCHESTCONTAINER = eventInput("mc_playerenderchestcontainer");
+
+    // ---- D · 16 件运行时异常（ex_* 段，id-plan.json 原序） ----
+    //   🆕 阶段 3（2026-11-16）：这 16 件从纯 Item 换成 ShanhaiCrashBoltItem
+    //      （按住右键蓄力 → 松手扔出 → 落地 3 秒后按"它对应的那个异常"真崩）。
+    //      🔴 只换实现类：id / 显示名（lang）/ 图标 / 创造栏位置 / 堆叠上限 一个字节都没动。
+    //      🔴 第二个参数 = 异常序号（0..15），与 com.shanhai.common.crash.ShanhaiCrashBoltTable
+    //         的 ROWS **逐行对齐**；改这里的数字必须同步改那张表（stage3-audit.mjs 会核行序）。
+    /** shanhai:ex_nullpointerexception（NullPointerException）· 贴图 textures/item/ex_nullpointerexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_NULLPOINTEREXCEPTION = crashBolt("ex_nullpointerexception", 0);
+    /** shanhai:ex_noclassdeffounderror（NoClassDefFoundError）· 贴图 textures/item/ex_noclassdeffounderror.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_NOCLASSDEFFOUNDERROR = crashBolt("ex_noclassdeffounderror", 1);
+    /** shanhai:ex_exceptionininitializererror（ExceptionInInitializerError）· 贴图 textures/item/ex_exceptionininitializererror.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_EXCEPTIONININITIALIZERERROR = crashBolt("ex_exceptionininitializererror", 2);
+    /** shanhai:ex_ioexception（IOException）· 贴图 textures/item/ex_ioexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_IOEXCEPTION = crashBolt("ex_ioexception", 3);
+    /** shanhai:ex_classnotfoundexception（ClassNotFoundException）· 贴图 textures/item/ex_classnotfoundexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_CLASSNOTFOUNDEXCEPTION = crashBolt("ex_classnotfoundexception", 4);
+    /** shanhai:ex_sqlexception（SQLException）· 贴图 textures/item/ex_sqlexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_SQLEXCEPTION = crashBolt("ex_sqlexception", 5);
+    /** shanhai:ex_nosuchelementexception（NoSuchElementException）· 贴图 textures/item/ex_nosuchelementexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_NOSUCHELEMENTEXCEPTION = crashBolt("ex_nosuchelementexception", 6);
+    /** shanhai:ex_illegalargumentexception（IllegalArgumentException）· 贴图 textures/item/ex_illegalargumentexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_ILLEGALARGUMENTEXCEPTION = crashBolt("ex_illegalargumentexception", 7);
+    /** shanhai:ex_illegalstateexception（IllegalStateException）· 贴图 textures/item/ex_illegalstateexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_ILLEGALSTATEEXCEPTION = crashBolt("ex_illegalstateexception", 8);
+    /** shanhai:ex_unsupportedoperationexception（UnsupportedOperationException）· 贴图 textures/item/ex_unsupportedoperationexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_UNSUPPORTEDOPERATIONEXCEPTION = crashBolt("ex_unsupportedoperationexception", 9);
+    /** shanhai:ex_midiunavailableexception（MidiUnavailableException）· 贴图 textures/item/ex_midiunavailableexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_MIDIUNAVAILABLEEXCEPTION = crashBolt("ex_midiunavailableexception", 10);
+    /** shanhai:ex_concurrentmodificationexception（ConcurrentModificationException）· 贴图 textures/item/ex_concurrentmodificationexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_CONCURRENTMODIFICATIONEXCEPTION = crashBolt("ex_concurrentmodificationexception", 11);
+    /** shanhai:ex_indexoutofboundsexception（IndexOutOfBoundsException）· 贴图 textures/item/ex_indexoutofboundsexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_INDEXOUTOFBOUNDSEXCEPTION = crashBolt("ex_indexoutofboundsexception", 12);
+    /** shanhai:ex_nosuchmethodexception（NoSuchMethodException）· 贴图 textures/item/ex_nosuchmethodexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_NOSUCHMETHODEXCEPTION = crashBolt("ex_nosuchmethodexception", 13);
+    /** shanhai:ex_classcastexception（ClassCastException）· 贴图 textures/item/ex_classcastexception.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_CLASSCASTEXCEPTION = crashBolt("ex_classcastexception", 14);
+    /** shanhai:ex_outofmemoryerror（OutOfMemoryError）· 贴图 textures/item/ex_outofmemoryerror.png */
+    public static final ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> EX_OUTOFMEMORYERROR = crashBolt("ex_outofmemoryerror", 15);
+
+    // ---- E · 14 件「底层技术 · 时序与改写」（2026-11-16 用户点单，阶段 1 只做注册/图标/语言/创造栏） ----
+    //   🔴 顺序 = temp/design-sheet/data-story.js 第 9 类（cat: '底层技术 · 时序与改写（实现层）'）的 14 条原序。
+    //   🔴 位置纪律：追加在 EX_OUTOFMEMORYERROR 之后（= 本类最后一个字段组，仍在所有既有物品之后），
+    //      否则 128 个现实物品壳 + 95 件的数字 id 会整体 +14（存档安全，见桶 ⑫/⑬/⑭ 的注释）。
+    //   🔴 注册形状：14 件全是纯 Item（无行为），走 module(String)，与 7 剧情 / 7 大类同形。
+    //   🔴 图标：textures/item/<id>.png 为 64×1536 的 24 帧竖条动画（4 列 × 6 行），
+    //      配 <id>.png.mcmeta = {"animation":{"frametime":2,"interpolate":true}}；模型 json 随包提供。
+    /** shanhai:temporal_sequence_breaker（时序闸断器）· 贴图 textures/item/temporal_sequence_breaker.png */
+    public static final ItemEntry<Item> TEMPORAL_SEQUENCE_BREAKER = module("temporal_sequence_breaker");
+    /** shanhai:differential_trace_register（差分留痕寄存器）· 贴图 textures/item/differential_trace_register.png */
+    public static final ItemEntry<Item> DIFFERENTIAL_TRACE_REGISTER = module("differential_trace_register");
+    /** shanhai:negentropy_reverse_drive_core（逆熵反向驱动核）· 贴图 textures/item/negentropy_reverse_drive_core.png */
+    public static final ItemEntry<Item> NEGENTROPY_REVERSE_DRIVE_CORE = module("negentropy_reverse_drive_core");
+    /** shanhai:epoch_origin_calibrator（时刻原点定标器）· 贴图 textures/item/epoch_origin_calibrator.png */
+    public static final ItemEntry<Item> EPOCH_ORIGIN_CALIBRATOR = module("epoch_origin_calibrator");
+    /** shanhai:delayed_choice_compensator（延迟选择补偿器）· 贴图 textures/item/delayed_choice_compensator.png */
+    public static final ItemEntry<Item> DELAYED_CHOICE_COMPENSATOR = module("delayed_choice_compensator");
+    /** shanhai:phase_lock_loop（相位锁定回路）· 贴图 textures/item/phase_lock_loop.png */
+    public static final ItemEntry<Item> PHASE_LOCK_LOOP = module("phase_lock_loop");
+    /** shanhai:inertial_frame_reanchor（惯性系重锚）· 贴图 textures/item/inertial_frame_reanchor.png */
+    public static final ItemEntry<Item> INERTIAL_FRAME_REANCHOR = module("inertial_frame_reanchor");
+    /** shanhai:noether_conservation_reconciler（诺特守恒对账器）· 贴图 textures/item/noether_conservation_reconciler.png */
+    public static final ItemEntry<Item> NOETHER_CONSERVATION_RECONCILER = module("noether_conservation_reconciler");
+    /** shanhai:external_save_write_terminal（域外存档写入终端）· 贴图 textures/item/external_save_write_terminal.png */
+    public static final ItemEntry<Item> EXTERNAL_SAVE_WRITE_TERMINAL = module("external_save_write_terminal");
+    /** shanhai:anomaly_data_detector（异常数据检测器）· 贴图 textures/item/anomaly_data_detector.png */
+    public static final ItemEntry<Item> ANOMALY_DATA_DETECTOR = module("anomaly_data_detector");
+    /** shanhai:just_in_time_recompile_injector（即时重编译注入器）· 贴图 textures/item/just_in_time_recompile_injector.png */
+    public static final ItemEntry<Item> JUST_IN_TIME_RECOMPILE_INJECTOR = module("just_in_time_recompile_injector");
+    /** shanhai:state_deviation_calibration_matrix（状态偏差校准矩阵）· 贴图 textures/item/state_deviation_calibration_matrix.png */
+    public static final ItemEntry<Item> STATE_DEVIATION_CALIBRATION_MATRIX = module("state_deviation_calibration_matrix");
+    /** shanhai:mutation_provenance_chain（变更溯源链路）· 贴图 textures/item/mutation_provenance_chain.png */
+    public static final ItemEntry<Item> MUTATION_PROVENANCE_CHAIN = module("mutation_provenance_chain");
+    /** shanhai:probability_field_sampler（概率场采样器）· 贴图 textures/item/probability_field_sampler.png */
+    public static final ItemEntry<Item> PROBABILITY_FIELD_SAMPLER = module("probability_field_sampler");
+
     /** 建 128 个壳：每个都是普通 {@link Item} + 静态模型（模型 json 见 resources/models/item）。 */
     private static ItemEntry<RealityShellItem>[] realityItems() {
         final int n = com.shanhai.common.reality.ShanhaiRealityItemTable.SLOT_COUNT;
@@ -777,6 +1081,46 @@ public final class ShanhaiItems {
     private static ItemEntry<Item> module(String id) {
         return ShanhaiRegistration.REGISTRATE
                 .item(id, Item::new)
+                .model(NonNullBiConsumer.noop())
+                .register();
+    }
+
+    /**
+     * 🆕 2026-11-16（阶段 2）：<b>65 件 {@code mc_*} 事件物品</b>的注册形状 —— 自定义类
+     * {@code ShanhaiRealityInputItem}（右键空气开「目标 / 要干什么」登记面板）。
+     *
+     * <p>与 {@link #module(String)} <b>逐字节等价</b>，只换了实现类：
+     * 同一个 {@code id}、同一个 {@code .model(noop())}（模型 json 已随包提供）、
+     * <b>不写</b> {@code stacksTo(…)}（保持默认 64，与阶段 1 一致）。
+     *
+     * <p>写法照工程既有的「自定义 Item 子类」先例
+     * （{@code HOST_PATTERN_MOVER} 那一条 {@code properties -> new HostPatternMoverItem(...)}），
+     * 只是把 65 行重复收成一个方法 —— {@link #module(String)} 也是同一种收法。
+     *
+     * <p>⚠️ 注册顺序不变 ⇒ 65 个数字 id 一个都不移位（它们仍在 {@code HOST_PATTERN_MOVER} 之后）。
+     */
+    private static ItemEntry<com.shanhai.common.reality.ShanhaiRealityInputItem> eventInput(String id) {
+        return ShanhaiRegistration.REGISTRATE
+                .item(id, properties -> new com.shanhai.common.reality.ShanhaiRealityInputItem(id, properties))
+                .model(NonNullBiConsumer.noop())
+                .register();
+    }
+
+    /**
+     * 🆕 2026-11-16（阶段 3）：<b>16 件 {@code ex_*} 运行时异常投掷物</b>的注册形状 —— 自定义类
+     * {@code ShanhaiCrashBoltItem}（按住右键蓄力、松手扔出，落地 3 秒后按"它对应的那个异常"真崩）。
+     *
+     * <p>与 {@link #module(String)} <b>逐字节等价</b>，只换了实现类：
+     * 同一个 {@code id}、同一个 {@code .model(noop())}（模型 json 已随包提供）、
+     * <b>不写</b> {@code stacksTo(…)}（保持默认 64，与阶段 1/2 一致）。
+     *
+     * @param id    注册 id 的 path（{@code ex_nullpointerexception}）
+     * @param index 异常序号（0..15）—— 必须与
+     *              {@code com.shanhai.common.crash.ShanhaiCrashBoltTable} 的行序逐行对齐
+     */
+    private static ItemEntry<com.shanhai.common.crash.ShanhaiCrashBoltItem> crashBolt(String id, int index) {
+        return ShanhaiRegistration.REGISTRATE
+                .item(id, properties -> new com.shanhai.common.crash.ShanhaiCrashBoltItem(index, properties))
                 .model(NonNullBiConsumer.noop())
                 .register();
     }

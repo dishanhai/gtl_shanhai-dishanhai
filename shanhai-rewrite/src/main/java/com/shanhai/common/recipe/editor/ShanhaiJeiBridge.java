@@ -127,12 +127,23 @@ public final class ShanhaiJeiBridge {
             RESTORE_OR_EDIT_NOTIFY.incrementAndGet();
             noteBackInForce(recipe.id.toString());   // 这条又回来了 ⇒ 不再替它保住"已删"补丁
             ShanhaiMod.LOGGER.info("{} net_sent action=changed id={} type={} dur={} eu={} in_bytes={} out_bytes={} "
-                            + "cond_n={} cond_bytes={} cond_types={}",
+                            + "cond_n={} cond_bytes={} cond_types={} recipe_bytes={} body={} "
+                            + "（body=true 才算「客户端能把它重建出来」：没字节时客户端只会走 "
+                            + "jei_runtime_hide_skipped reason=cannot_rebuild why=no_bytes）",
                     PREFIX, recipe.id, recipe.getType() == null ? "?" : recipe.getType().registryName,
                     msg.duration, msg.eut, msg.inputsJson == null ? 0 : msg.inputsJson.length(),
                     msg.outputsJson == null ? 0 : msg.outputsJson.length(),
                     conds.size(), msg.conditionsJson == null ? 0 : msg.conditionsJson.length(),
-                    ShanhaiRecipeConditions.summary(conds));
+                    ShanhaiRecipeConditions.summary(conds),
+                    msg.recipeBytes == null ? 0 : msg.recipeBytes.length,
+                    msg.recipeBytes != null && msg.recipeBytes.length > 0);
+            if (msg.recipeBytes == null || msg.recipeBytes.length == 0) {
+                // 🔴 不许静默：这条包"发了"，但客户端重建不出来 ⇒ JEI 上仍是旧的/看不到。
+                ShanhaiMod.LOGGER.warn("{} net_sent_no_body id={} type={} -> 这条 changed 包没有配方字节 "
+                                + "⇒ 客户端 jei_runtime_hide_skipped reason=cannot_rebuild why=no_bytes"
+                                + "（成因见 net_encode_recipe_failed 那一行）",
+                        PREFIX, recipe.id, recipe.getType() == null ? "?" : recipe.getType().registryName);
+            }
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} net_send_failed id={} err={}", PREFIX, recipe.id, t.toString(), t);
         }

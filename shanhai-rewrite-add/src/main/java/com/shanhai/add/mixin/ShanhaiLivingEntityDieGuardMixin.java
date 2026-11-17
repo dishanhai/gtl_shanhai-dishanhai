@@ -59,6 +59,13 @@ public abstract class ShanhaiLivingEntityDieGuardMixin {
             require = 1)
     private void shanhai$refuseDie(DamageSource source, CallbackInfo ci) {
         try {
+            // 🆕 2026-11-08（用户纠正）：「抓栈必须在原版被写的那一刻」。
+            //   真玩家走的是 ServerPlayer#die（那条另有一份），这里是基类兜底那一条。
+            com.shanhai.add.guard.stack.ShanhaiViolationProbe.dieHead((Object) this, "LivingEntity#die");
+        } catch (Throwable ignored) {
+            // 抓栈坏了不许影响死亡判定
+        }
+        try {
             // (Object) this ⇒ 本类体内零 MC 成员引用（与 ShanhaiSetHealthGuardMixin 同一套写法）
             if (ShanhaiGuardValueLayer.refuseDie((Object) this, "LivingEntity#die")) {
                 ci.cancel();

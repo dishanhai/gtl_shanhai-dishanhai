@@ -144,6 +144,13 @@ public final class ShanhaiRecipeEditorOps {
         final ResourceLocation id = target.id;
         final GTRecipeType type = target.getType();
         final String fp = resolveBaseFp(server, id, type, target.duration);
+        // 🆕 删除那一刻给「已删除配方」列表留一份原样（产物/输入输出都在里面）。
+        //    🔴 覆盖文件里 op=remove 的条目**只有** uid/op/id/type/fields(空)/base_fp/ts
+        //    （见 ShanhaiRecipeOverrideStore#makeRemoveEntry），base_fp 还是 400 字的截断窗口
+        //    ⇒ 不在这里留一份，删完之后（尤其是重启之后）就再也没有地方能知道"它产出什么"。
+        //    🔴 **只在 persist=true 时留**：persist=false 是自检/演练用的软删（覆盖文件一个字节都没动）
+        //       —— 那种删除"重启就回来"，给它留快照只会把自检靶子写进用户的配置文件里。
+        final boolean snapshotOk = persist && ShanhaiRemovedRecipeSnapshot.putLive(target);
 
         ShanhaiRecipeBase.markRemoved(id);
         ShanhaiRecipeBase.markTypeTouched(type);
@@ -159,8 +166,8 @@ public final class ShanhaiRecipeEditorOps {
         ShanhaiRecipeReverseIndex.invalidate();
         final PersistOutcome po = persist ? persistRemove(server, id, type, fp) : PersistOutcome.OFF;
 
-        ShanhaiMod.LOGGER.info("{} edit_remove id={} index_ms={} vanilla_ms={} persist={}",
-                PREFIX, id, indexMs, vanillaMs, po.note());
+        ShanhaiMod.LOGGER.info("{} edit_remove id={} index_ms={} vanilla_ms={} persist={} snapshot={}",
+                PREFIX, id, indexMs, vanillaMs, po.note(), snapshotOk);
         return new Result(true, "已删除 " + id, "index_ms=" + indexMs + " vanilla_ms=" + vanillaMs + " " + po.note(),
                 indexMs, vanillaMs, true, po.written(), fp);
     }
@@ -334,6 +341,24 @@ public final class ShanhaiRecipeEditorOps {
                                     Integer duration, Long eut,
                                     com.google.gson.JsonArray conditions,
                                     boolean rebuildIndex, boolean persist) {
+        return applyEdits(server, target, inputs, outputs, tickInputs, duration, eut, conditions,
+                null, rebuildIndex, persist);
+    }
+
+    /**
+     * 🆕 同上 ＋ <b>发电 / 耗电切换</b>（用户点单：「我不能修改/添加发电的配方，你把这个功能补上，
+     * 在配方编辑的页面加个一键切换发电or耗电的按钮」）。
+     *
+     * @param euSide {@code null} = 这次不切侧（行为与 10 参数那个重载<b>逐字相同</b>）；
+     *               {@code CONSUME}/{@code GENERATE} = 把 EU 搬到那一侧，另一侧清掉
+     *               （GT 侧口径见 {@link ShanhaiRecipeIoApply#applyEut(GTRecipe, long, ShanhaiRecipeIoApply.EuSide)}）。
+     */
+    public static Result applyEdits(MinecraftServer server, GTRecipe target,
+                                    JsonObject inputs, JsonObject outputs, JsonObject tickInputs,
+                                    Integer duration, Long eut,
+                                    com.google.gson.JsonArray conditions,
+                                    ShanhaiRecipeIoApply.EuSide euSide,
+                                    boolean rebuildIndex, boolean persist) {
         if (target == null || target.id == null) {
             return new Result(false, "目标配方不存在", "target/id == null", 0, 0, false, false, null);
         }
@@ -353,6 +378,10 @@ public final class ShanhaiRecipeEditorOps {
         }
         if (eut != null) {
             ShanhaiRecipeBase.setEut(id, eut);
+        }
+        if (euSide != null) {
+            // 🆕 与 setEut 同拍：切侧的时候 EU 值本身可以不变，只靠它表达"搬哪一侧"。
+            ShanhaiRecipeBase.setEutSide(id, euSide.name());
         }
         if (duration != null) {
             ShanhaiRecipeBase.setDuration(id, duration);
@@ -394,6 +423,20 @@ public final class ShanhaiRecipeEditorOps {
             //    ⇒ 盘上的 tickInputs.eu 不动 ⇒ 下一局活配方 eu=8/euTier=5 分叉。
             final String tickKey = ShanhaiRecipeIoApply.tickTableNameFor(target);
             fields.add(tickKey, ShanhaiRecipeIoApply.tickTableWithEut(target, tickKey, eut));
+            // 🆕 切换了发电/耗电 ⇒ 盘上【两侧都要写】：目标侧写 eu，另一侧把 eu 拿掉
+            //    （那一侧本来没有 eu 就完全不动它 —— 见 ShanhaiRecipeIoApply#tickTableWithoutEut
+            //      里"整段替换会把别的 capability 抹掉"的注释）。
+            if (euSide != null) {
+                final String onKey = ShanhaiRecipeIoApply.tickTableNameOf(euSide);
+                final String offKey = ShanhaiRecipeIoApply.otherTickTableName(onKey);
+                fields.add(onKey, ShanhaiRecipeIoApply.tickTableWithEut(target, onKey, eut));
+                final JsonObject off = ShanhaiRecipeIoApply.tickTableWithoutEut(target, offKey);
+                if (off != null) {
+                    fields.add(offKey, off);
+                }
+                ShanhaiMod.LOGGER.info("{} edit_apply_eu_side id={} side={} wrote={} cleared={}",
+                        PREFIX, id, euSide, onKey, off == null ? "(none)" : offKey);
+            }
         }
         if (conditions != null) {
             fields.add(ShanhaiRecipeConditions.FIELD, conditions);
@@ -411,11 +454,13 @@ public final class ShanhaiRecipeEditorOps {
         //    ⇒ 一行里两个口径不同现，就会再次把人（和下一个会话）引到「盘上 200、游戏里 1 ⇒ 是不是写丢了」
         //      这个错方向上去。dur_live= 就是补上另一半；它只读不改，对配方的行为零影响。
         final int durRawAfter = duration == null ? durBefore : duration;
-        ShanhaiMod.LOGGER.info("{} edit_apply id={} type={} dur={}->{} dur_live={} eut={}->{} in={} out={} tickIn={} "
+        ShanhaiMod.LOGGER.info("{} edit_apply id={} type={} dur={}->{} dur_live={} eut={}->{} eu_side={} "
+                        + "in={} out={} tickIn={} "
                         + "conds={}->{} rebuilt={} index_ms={} vanilla_ms={} persist={} fields={} base_fp_len={}",
                 PREFIX, id, typeId(type), durBefore, duration == null ? "(untouched)" : duration,
                 ShanhaiRecipeDuration.toLive(type, durRawAfter),
                 eutBefore, eut == null ? "(untouched)" : eut,
+                euSide == null ? "(untouched)" : euSide.name(),
                 countOf(inputs), countOf(outputs), countOf(tickInputs),
                 ShanhaiRecipeConditions.summary(condBefore),
                 conditions == null ? "(untouched)" : ShanhaiRecipeConditions.summary(conditions),
@@ -424,6 +469,8 @@ public final class ShanhaiRecipeEditorOps {
         return new Result(true,
                 "已保存（耗时 " + (duration == null ? "未动" : durBefore + "→" + duration)
                         + " · 电压 " + (eut == null ? "未动" : eutBefore + "→" + eut + " EU/t")
+                        + (euSide == null ? "" : " · 方向 " + (euSide == ShanhaiRecipeIoApply.EuSide.GENERATE
+                        ? "发电" : "耗电"))
                         + " · 条件 " + (conditions == null ? "未动" : conditions.size() + " 条") + "）",
                 "index_ms=" + indexMs + " vanilla_ms=" + vanillaMs + " " + po.note(),
                 indexMs, vanillaMs, rebuildIndex, po.written(), fp);
@@ -775,9 +822,32 @@ public final class ShanhaiRecipeEditorOps {
         if (target == null || target.id == null) {
             return new Result(false, "目标配方不存在", "target/id == null", 0, 0, false, false, null);
         }
+        return restoreOneById(server, target.id, target.getType(), rebuildIndex, persist);
+    }
+
+    /**
+     * 🆕 <b>只恢复一条（按 id ＋ 类型）</b> —— 已删除配方详情页那颗「恢复这条配方」走的就是这一条。
+     *
+     * <h4>为什么原来的 {@code restoreOne(GTRecipe)} 不够用</h4>
+     * 它要一个<b>活</b> {@link GTRecipe} 才能拿到 {@code id} 与 {@code type}；而"被删掉的配方"
+     * 在活表里已经不存在了（{@code ShanhaiRecipeReverseIndex.byId} 返回 {@code null}）——
+     * 这正是用户那句「我现在没法在配方编辑器恢复删除掉的配方」的根因：
+     * {@code /shanhai edit restore <id>} 那条命令同样是"先按反查索引找活配方，找不到就报
+     * 找不到这条配方"（{@code ShanhaiRecipeEditorCommand#restoreOne} 第 487 行）。
+     *
+     * <p>本方法只吃 {@code id ＋ typeId}：它要做的三件事本来就不需要活对象 ——
+     * ① 清台账；② 清覆盖条目；③ 按<b>底本</b>重建那个类型。底本里还有这条（同一局里删的）
+     * ⇒ 索引里当场回来；底本里没有（上一局删的）⇒ 覆盖条目一清，<b>下一局开机它自己就回来了</b>
+     * （覆盖层不再删它）。两条路都会在日志里写清楚是哪种。
+     *
+     * @param type 可为 {@code null}（查不到类型时只清账，不重建索引 —— 如实记在 detail 里）
+     */
+    public static Result restoreOneById(MinecraftServer server, ResourceLocation id, GTRecipeType type,
+                                        boolean rebuildIndex, boolean persist) {
+        if (id == null) {
+            return new Result(false, "目标配方不存在", "id == null", 0, 0, false, false, null);
+        }
         ShanhaiRecipeBase.captureIfAbsent(server);
-        final ResourceLocation id = target.id;
-        final GTRecipeType type = target.getType();
 
         ShanhaiRecipeBase.clearEdit(id);
         ShanhaiRecipeBase.markTypeTouched(type);
@@ -818,8 +888,29 @@ public final class ShanhaiRecipeEditorOps {
             forgot = true;
         }
 
+        final Variant outcome = planRestore(server, id, type);
+
+        // 🔴🔴 2026-11-08（用户原话：「**恢复配方之后我不能立刻在 jei 中看到被恢复的配方**」）：
+        //    "上一局被删的那条"这一局<b>压根不在表里</b> —— KubeJS 覆盖层在开机那一刻就把
+        //    op=remove 套用了 ⇒ 它从没进过 RecipeManager ⇒ 底本里也没有它。
+        //    用户实例现场读数（logs\2026-11-07-1.log.gz，逐字）：
+        //      RESTORE_DELETED id=gtceu:assembler/casing_large_scale_assembling …
+        //                      has_snapshot=true **in_base=false in_live_index=false**
+        //      net_sent action=**removed** id=… (by_id)      RESTORE_ONE … net_changed=0 net_removed=1
+        //      客户端：jei_patch_stored … action=**removed** recipe_bytes=0
+        //              jei_runtime_hide_gave_up … reason=removed_not_present
+        //              jei_sync matched=0 hidden=0 added=0 … visible_expected=0
+        //    ⇒ 下面那句"活表里读不到 ⇒ 发 removed"命中 ⇒ 客户端存下的是一条"删掉"的补丁
+        //      ⇒ 查询出口按补丁把这一条滤掉 ⇒ 用户看到的就是"恢复了、JEI 里却没有"。
+        //    ⇒ 恢复**必须往"有"的方向发**：底本里没有它，就用快照把它当场造回底本
+        //      （与「新建配方」同一条已验通的路：registerNew ＋ rebuildTypeFromBase ＋ insertIntoVanilla），
+        //      于是下面的判据拿到的是活对象 ⇒ 发 changed（带整条字节）⇒ 客户端把它加进 JEI。
+        final String revive = ShanhaiRecipeBase.pristine(id) != null
+                ? ShanhaiRestoreJeiPlan.R_ALREADY_IN_BASE
+                : reviveFromBaseSnapshot(server, id, type);
+
         final long t0 = System.nanoTime();
-        if (rebuildIndex) {
+        if (rebuildIndex && type != null) {
             rebuildTypeFromBase(server, type);
         }
         final int indexMs = (int) ((System.nanoTime() - t0) / 1_000_000L);
@@ -836,9 +927,13 @@ public final class ShanhaiRecipeEditorOps {
         //    绝不整机重注册）。
         int netChanged = 0;
         int netRemoved = 0;
+        final GTRecipe live = ShanhaiRecipeReverseIndex.byId(server, id);
+        // 判据在纯核里（离线可跑断言，见 temp\editor-restore2\selfcheck）：恢复后**活表里有没有它**
+        // 决定发 changed 还是 removed；有 ⇒ 这一条 changed 包必须带整条配方字节。
+        final ShanhaiRestoreJeiPlan.Plan plan =
+                ShanhaiRestoreJeiPlan.of(live != null, type != null, revive);
         try {
-            final GTRecipe live = ShanhaiRecipeReverseIndex.byId(server, id);
-            if (live != null) {
+            if (plan.sendChanged() && live != null) {
                 ShanhaiJeiBridge.broadcastRecipeChanged(server, live);
                 netChanged = 1;
             } else {
@@ -849,17 +944,259 @@ public final class ShanhaiRecipeEditorOps {
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.warn("{} restore_one_notify_failed id={} err={}", PREFIX, id, t.toString());
         }
+        ShanhaiMod.LOGGER.info("{} restore_jei_payload id={} type={} kind={} code={} send_changed={} "
+                        + "needs_body={} revive={} live_in_table={} zh={}",
+                PREFIX, id, type == null ? null : type.registryName, plan.kind(), plan.code(),
+                plan.sendChanged(), plan.needsBody(), revive, live != null, plan.zh());
+        if (!plan.sendChanged()) {
+            // 🔴 这一条**不是**静默：恢复本身成功了（覆盖条目已清），但这一局 GT 表里没有它
+            //    ⇒ JEI 里也不该凭空出现（界面显示的东西必须和机器能跑的东西一致）。
+            //    下一局开机覆盖层不再删它 ⇒ 它自己回来。原因词表见 ShanhaiRestoreJeiPlan.Kind。
+            ShanhaiMod.LOGGER.warn("{} restore_jei_not_visible id={} type={} code={} revive={} -> "
+                            + "这一局 JEI 里看不到它是**预期**的（表里真的没有它）；覆盖条目已清，"
+                            + "下一局开机会自己回来。要当场看到：先确认这条有可用快照（缺快照 = 救不回来）",
+                    PREFIX, id, type == null ? null : type.registryName, plan.code(), revive);
+        }
 
         ShanhaiMod.LOGGER.info("{} RESTORE_ONE id={} type={} file_entries_dropped={} rebuilt={} "
-                        + "index_ms={} vanilla_ms={} net_changed={} net_removed={} "
-                        + "（单条通知：与界面「删除这条」同一条路）",
-                PREFIX, id, type == null ? null : type.registryName, fileDropped, rebuildIndex,
-                indexMs, vanillaMs, netChanged, netRemoved);
+                        + "index_ms={} vanilla_ms={} net_changed={} net_removed={} outcome={} jei={} revive={} "
+                        + "（单条通知：与界面「删除这条」同一条路；jei= 后面那个码见 "
+                        + "ShanhaiRestoreJeiPlan —— 恢复之后 JEI 该收到哪一种载荷就是它）",
+                PREFIX, id, type == null ? null : type.registryName, fileDropped,
+                rebuildIndex && type != null, indexMs, vanillaMs, netChanged, netRemoved, outcome.code,
+                plan.code(), revive);
 
         return new Result(true, "已恢复 " + id,
                 "index_ms=" + indexMs + " vanilla_ms=" + vanillaMs + " file_entries_dropped=" + fileDropped
-                        + " net_changed=" + netChanged + " net_removed=" + netRemoved,
+                        + " net_changed=" + netChanged + " net_removed=" + netRemoved
+                        + " jei=" + plan.code() + " revive=" + revive
+                        + " outcome=" + outcome.code + " · " + outcome.zh
+                        + "（" + plan.zh() + "）",
                 indexMs, vanillaMs, rebuildIndex, fileDropped >= 0, null);
+    }
+
+    /**
+     * 🔴 <b>把"上一局被删掉、这一局压根不在表里"的那条配方，用快照当场造回底本</b>。
+     *
+     * <h4>为什么需要它（用户原话：「恢复配方之后我不能立刻在 jei 中看到被恢复的配方」）</h4>
+     * 恢复那条路的判据是"活表里读得到 ⇒ 发 changed（带字节）；读不到 ⇒ 发 removed"。
+     * 而上一局删的那条<b>这一局从来没进过</b> {@code RecipeManager}（KubeJS 覆盖层在开机那一刻
+     * 就把它拉掉了）⇒ 判据永远落到 removed ⇒ 客户端存一条"删掉"的补丁 ⇒ JEI 里看不到。
+     * 现场读数与完整推演见 {@link #restoreOneById} 里那段注释。
+     *
+     * <h4>它做的四件事（一步都不许少，全部是已验通的现成路径）</h4>
+     * <ol>
+     *   <li><b>严判据</b>：快照必须过 {@link ShanhaiDeletedRecipeList#isComplete}
+     *       （有 type ＋ 有产出键）—— 半成品/空壳一律不拿它造配方（宁可这一局看不到，也不造假配方）；</li>
+     *   <li>{@code GTRecipeSerializer.SERIALIZER.fromJson} 造对象（= 「新建配方」那同一条路，
+     *       形状不对它会抛 ⇒ 我们不往下走）；</li>
+     *   <li>{@link ShanhaiRecipeBase#registerNew} 登记进底本（撞 id 一律拒收并留痕，绝不覆盖）；</li>
+     *   <li>{@link #insertIntoVanilla} 插进原版 {@code RecipeManager}
+     *       —— 这一步是"活表里读得到"的前提，而恢复的收尾判据正是按活表读的。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>不落盘</b>：不写 {@code op=add}（它本来就该在数据包里，下一局开机覆盖层不再删它
+     * ⇒ 真正的定义自己回来，比我们这份副本更权威）。所以这一步是"这一局先让它能跑、能看到"。
+     *
+     * @return 结论词（{@code revived} / {@code no_snapshot} / … 见 {@link ShanhaiRestoreJeiPlan} 的 {@code R_*}）。
+     *         <b>永不抛</b>（恢复本身不许因为这一步失败而失败）。
+     */
+    private static String reviveFromBaseSnapshot(MinecraftServer server, ResourceLocation id,
+                                                GTRecipeType type) {
+        if (id == null || server == null) {
+            return ShanhaiRestoreJeiPlan.R_NO_TYPE;
+        }
+        if (type == null) {
+            // 连类型都不知道 ⇒ 造出来的对象不知道该往哪个索引树里放（不猜）
+            return ShanhaiRestoreJeiPlan.R_NO_TYPE;
+        }
+        final com.google.gson.JsonObject json;
+        try {
+            json = ShanhaiRemovedRecipeSnapshot.get(id.toString());
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} restore_revive_snapshot_read_failed id={} err={}", PREFIX, id, t.toString());
+            return ShanhaiRestoreJeiPlan.R_PARSE_FAILED;
+        }
+        if (json == null) {
+            return ShanhaiRestoreJeiPlan.R_NO_SNAPSHOT;
+        }
+        if (!ShanhaiDeletedRecipeList.isComplete(json)) {
+            ShanhaiMod.LOGGER.warn("{} restore_revive_snapshot_incomplete id={} keys={} "
+                            + "（严判据要求 type ＋ 产出键；不拿半成品造配方）",
+                    PREFIX, id, json.keySet());
+            return ShanhaiRestoreJeiPlan.R_SNAPSHOT_INCOMPLETE;
+        }
+        final GTRecipe made;
+        try {
+            made = ShanhaiDeletedRecipeIndex.parseForDisplay(id.toString(), json);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} restore_revive_parse_failed id={} err={}", PREFIX, id, t.toString());
+            return ShanhaiRestoreJeiPlan.R_PARSE_FAILED;
+        }
+        if (made == null) {
+            return ShanhaiRestoreJeiPlan.R_PARSE_FAILED;
+        }
+        // 类型必须**是同一个对象**：rebuildTypeFromBase 按 `recipe.getType() != type` 过滤
+        // ⇒ 不是同一个实例的话造进去也不会被打进那棵树（表面上"救回来了"，其实没有）。
+        if (made.getType() == null || made.getType() != type) {
+            ShanhaiMod.LOGGER.warn("{} restore_revive_type_mismatch id={} want={} got={} "
+                            + "（保守：不救，照旧发 removed）",
+                    PREFIX, id, type.registryName,
+                    made.getType() == null ? null : made.getType().registryName);
+            return ShanhaiRestoreJeiPlan.R_TYPE_MISMATCH;
+        }
+        made.id = id;
+        if (!ShanhaiRecipeBase.registerNew(made)) {
+            return ShanhaiRestoreJeiPlan.R_REGISTER_REFUSED;
+        }
+        ShanhaiRecipeBase.markTypeTouched(type);
+        insertIntoVanilla(server, made);
+        ShanhaiMod.LOGGER.info("{} restore_revive_ok id={} type={} dur={} eut={} index_size={} vanilla_has={} "
+                        + "（用快照把它造回底本：这样恢复之后 JEI 才收得到「有」的补丁；"
+                        + "不落盘 —— 下一局开机会从数据包读回真正的定义）",
+                PREFIX, id, type.registryName, made.duration, ShanhaiRecipeIoApply.euOf(made),
+                indexSizeOf(type), readFromVanilla(server, type, id) != null);
+        return ShanhaiRestoreJeiPlan.R_REVIVED;
+    }
+
+    /**
+     * 恢复一条时会落在哪一种情形（<b>只读判据</b>，用它给用户一句准确的话）：
+     * <pre>
+     *   BACK_NOW      ：底本里还有这条 ⇒ 重建索引当场回表（同一局里删的那种）
+     *   NEXT_BOOT     ：底本里没有 ⇒ 覆盖条目清掉之后，下一局开机它自己回来（上一局删的那种）
+     *   NO_TYPE       ：连类型都查不出来 ⇒ 只清账，不重建索引（日志里会点名）
+     * </pre>
+     */
+    private record Variant(String code, String zh) {}
+
+    private static Variant planRestore(MinecraftServer server, ResourceLocation id, GTRecipeType type) {
+        if (type == null) {
+            return new Variant("NO_TYPE", "查不到类型 ⇒ 只清了编辑账与覆盖条目（下一局开机自动回来）");
+        }
+        try {
+            if (ShanhaiRecipeBase.pristine(id) != null) {
+                return new Variant("BACK_NOW", "底本里还有它 ⇒ 索引当场重建回来了");
+            }
+        } catch (Throwable ignored) {
+            // 读底本失败 ⇒ 保守按 NEXT_BOOT 说
+        }
+        return new Variant("NEXT_BOOT", "底本里没有它（上一局删的）⇒ 覆盖条目已清，下一局开机自动回来");
+    }
+
+    /**
+     * 这条"已删除配方"是不是非 GT 的（工作台 / 原版）。
+     *
+     * <p>判据两条，任一条成立就算（都要能说清为什么）：
+     * <ol>
+     *   <li>覆盖条目里那个 {@code type} <b>不在 GT 的配方类型注册表里</b>
+     *       （= {@code ShanhaiRecipeEditorWorkspace.isVanillaTypeId}，编辑器第一屏也是这么分的）；</li>
+     *   <li>非 GT 底本里有它、而 GT 底本里没有（历史条目没写 type 时的兜底）。</li>
+     * </ol>
+     */
+    private static boolean looksVanilla(ResourceLocation id, String typeIdString) {
+        try {
+            if (typeIdString != null && !typeIdString.isEmpty()) {
+                final ResourceLocation tid = ResourceLocation.tryParse(typeIdString);
+                if (tid != null && ShanhaiRecipeEditorWorkspace.isVanillaTypeId(tid)) {
+                    return true;
+                }
+            }
+            if (ShanhaiVanillaRecipeTable.pristine(id) != null && ShanhaiRecipeBase.pristine(id) == null) {
+                return true;
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} restore_deleted_kind_probe_failed id={} err={}", PREFIX, id, t.toString());
+        }
+        return false;
+    }
+
+    /**
+     * 🆕 <b>「已删除配方」详情页那颗「恢复这条配方」</b>的后端入口。
+     *
+     * <p>与 {@code /shanhai edit restore <id>} 走的是<b>同一条服务端逻辑</b>
+     * （{@link #restoreOneById}）—— 只是那条命令先按反查索引找活配方、
+     * 找不到就报"找不到这条配方"，而这里允许"它已经不在活表里"（那正是已删除配方的定义）。
+     *
+     * @param typeIdString 覆盖文件条目里记的那个 {@code type}（可空 ⇒ 只剩"查活配方/底本"两条路）
+     */
+    public static Result restoreDeletedById(MinecraftServer server, ResourceLocation id, String typeIdString) {
+        if (server == null || id == null) {
+            return new Result(false, "目标配方不存在", "server/id == null", 0, 0, false, false, null);
+        }
+        ShanhaiRecipeBase.captureIfAbsent(server);
+        // 🔴 严禁"假成功"：先确认这条 id 至少在三处之一存在（覆盖条目 / 底本 / 活表），
+        //    否则一个随手打错的 id 也会拿到"已恢复"（本工程红线：宁可缺，不可假）。
+        final boolean known = ShanhaiRecipeOverrideStore.findEntry(id) != null
+                || ShanhaiRecipeBase.pristine(id) != null
+                || ShanhaiVanillaRecipeTable.pristine(id) != null
+                || ShanhaiRecipeReverseIndex.byId(server, id) != null;
+        if (!known) {
+            ShanhaiMod.LOGGER.warn("{} restore_deleted_unknown id={} type={} -> 覆盖条目/底本/活表里都没有它，"
+                    + "拒绝返回成功", PREFIX, id, typeIdString);
+            return new Result(false, "这条配方不存在（覆盖条目、底本、活表里都没有它）",
+                    "UNKNOWN id", 0, 0, false, false, null);
+        }
+        // 🔴 先分流：非 GT（工作台 / 原版）那一支**必须**走它自己的 restoreOne ——
+        //    那条路除了清覆盖条目，还要清 {@code ShanhaiVanillaRecipeTable} 里那条 markRemoved，
+        //    否则这一局里它仍然不出现（同族的两个洞在 2026-10-06 已经踩过一次）。
+        if (looksVanilla(id, typeIdString)) {
+            final Result vr = ShanhaiVanillaRecipeOps.restoreOne(server, id, true);
+            ShanhaiMod.LOGGER.info("{} RESTORE_DELETED id={} type={} kind=vanilla ok={} detail={}",
+                    PREFIX, id, typeIdString, vr.ok(), vr.detail());
+            return vr;
+        }
+        GTRecipeType type = null;
+        String typeSource = "(none)";
+        // ① 覆盖条目里那个 type 字符串（最可靠：它就是当初被删的那条配方的类型）
+        if (typeIdString != null && !typeIdString.isEmpty()) {
+            try {
+                final ResourceLocation tid = new ResourceLocation(typeIdString);
+                type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES.get(tid);
+                if (type != null) {
+                    typeSource = "overlay_entry";
+                }
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} restore_deleted_type_parse_failed id={} type={} err={}",
+                        PREFIX, id, typeIdString, t.toString());
+            }
+        }
+        // ② 活配方（万一它其实还在 —— 例如别的路径刚把它放回来）
+        if (type == null) {
+            final GTRecipe live = ShanhaiRecipeReverseIndex.byId(server, id);
+            if (live != null && live.getType() != null) {
+                type = live.getType();
+                typeSource = "live_recipe";
+            }
+        }
+        // ③ 底本（同一局里删掉的那种，底本还握着原对象的类型）
+        if (type == null) {
+            try {
+                final GTRecipe pristine = ShanhaiRecipeBase.pristine(id);
+                if (pristine != null && pristine.getType() != null) {
+                    type = pristine.getType();
+                    typeSource = "base";
+                }
+            } catch (Throwable ignored) {
+                // 没有第 ③ 条路也能恢复（只是这一局看不到它回来）
+            }
+        }
+        ShanhaiMod.LOGGER.info("{} RESTORE_DELETED id={} type={} type_source={} has_snapshot={} "
+                        + "in_base={} in_live_index={}",
+                PREFIX, id, type == null ? null : type.registryName, typeSource,
+                ShanhaiRemovedRecipeSnapshot.has(id.toString()),
+                ShanhaiRecipeBase.pristine(id) != null,
+                ShanhaiRecipeReverseIndex.byId(server, id) != null);
+        final Result r = restoreOneById(server, id, type, true, true);
+        if (r.ok()) {
+            // 恢复成功 ⇒ 这条不再是"已删除" ⇒ 它的原样快照也没用了（留着只会变成一条没人读的垃圾，
+            // 而且下次再删同一条时 put 会覆盖掉它，本来也不会读到错的那份）。
+            ShanhaiRemovedRecipeSnapshot.remove(id.toString());
+        }
+        if (type == null) {
+            ShanhaiMod.LOGGER.warn("{} restore_deleted_no_type id={} -> 只清了编辑账与覆盖条目；"
+                    + "下一局开机覆盖层不再删它 ⇒ 它会自己回来（这一局看不到它是正常的）", PREFIX, id);
+        }
+        return r;
     }
 
     /** 🔴 负对照用：{@code rebuildIndex=false} 时索引里应当<b>读不到</b>恢复后的值。 */
@@ -1583,7 +1920,7 @@ public final class ShanhaiRecipeEditorOps {
                         return false;
                     }
                 }
-                case "inputs", "outputs", "tickInputs" -> {
+                case "inputs", "outputs", "tickInputs", "tickOutputs" -> {
                     if (!want.isJsonObject()) {
                         return false;
                     }

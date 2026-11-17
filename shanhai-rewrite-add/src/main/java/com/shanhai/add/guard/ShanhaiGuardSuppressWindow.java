@@ -26,7 +26,7 @@ import java.util.Map;
  * <h2>🔴 fail-closed：只压制"被我们抹过的类型"</h2>
  * 本类<b>没有</b>任何 mod 包名、类名、实体 id 常量，也不提供"按名字判断该不该压制"的入口 ——
  * <b>上榜的唯一通道就是 {@link WindowTable#note} 被调用</b>，而调用点只有两个：
- * {@code ShanhaiPurge#purgeAll}（{@code /shanhai purge} 真抹掉的那一只）与
+ * {@code ShanhaiPurge#purgeLegacy}（旧阶梯真抹掉的那一只）与
  * {@code ShanhaiPurge#drainQueue}（挨打反击抹掉的那一只）。
  * ⇒ 任何"没被我们动过"的类型永远进不了这张表。
  *

@@ -6,9 +6,12 @@ import com.shanhai.common.guard.ShanhaiGuardCore;
 import com.shanhai.common.guard.ShanhaiGuardEvents;
 import com.shanhai.common.guard.ShanhaiGuardRemoval;
 
+import java.lang.reflect.Method;
+
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 山海 · <b>① 拦实体移除（玩家删不掉）的执行体</b>（mixin 只转发，判据全在
@@ -45,6 +48,12 @@ import net.minecraft.world.entity.Entity;
  * <h2>兜底（复用既有逻辑，不写第二份）</h2>
  * 万一还是被摘掉了，{@code ShanhaiGuardEvents#guardOne} 每 tick 的「被移除检测 ＋ 救回」
  * （{@code revive()} → {@code ServerLevel#addFreshEntity}）会把玩家实体挂回去 —— 本类不重复实现。
+ *
+ * <h2>🆕 分诊 R4 的 {@code setRemoved} 半边（只记账）</h2>
+ * 判出"拦下"之后会静默调一次本体的 {@code ShanhaiGuardTriageBridge.noteRemoval(player, reason)}，
+ * 让 R4（{@code die} / {@code setRemoved} 触达且同 tick 无伤害事件）拿到 {@code setRemoved} 那一路的读数
+ * （{@code die} 半边本体自己已接，见 {@code ShanhaiGuardValueLayer}）。
+ * 🔴 只在真的拦下时记一次；只在 {@code return true} 之前；反射调用、异常全吞 ⇒ 不改变"拦不拦"。
  */
 public final class ShanhaiGuardEntityGuard {
 
@@ -55,6 +64,15 @@ public final class ShanhaiGuardEntityGuard {
 
     /** 日志类别（渲染出来就是 {@code [SHANHAI-GUARD] 拦截 移除}）。 */
     public static final String KIND_REMOVAL = "移除";
+
+    /** 🆕 本体分诊桥的类名（反射用，理由见下方 {@code noteRemoval} —— add 只 compileOnly 本体 jar）。 */
+    private static final String TRIAGE_BRIDGE = "com.shanhai.common.guard.ShanhaiGuardTriageBridge";
+
+    /** 缓存下来的 {@code noteRemoval(Player, String)}；{@code null} = 解析失败过（不再重试）。 */
+    private static volatile Method noteRemovalMethod;
+
+    /** 是否已经试过解析（true ⇒ 不再 {@code Class.forName}，WARN 也只打一行）。 */
+    private static volatile boolean noteRemovalResolved;
 
     /**
      * 🔴 <b>这一拍 {@code setRemoved(reason)} 要不要拦下</b>。
@@ -92,6 +110,8 @@ public final class ShanhaiGuardEntityGuard {
             // 🆕 A 件·取证：**谁**在每秒几十次地调 setRemoved —— 打外部 mod 调用帧（每局最多 3 次）
             //    🔴 只在"受保护玩家被拦下"这一条路上打（普通实体的移除在方法第一行就 return false 了）
             noteRemovalCaller(player, reasonName);
+            // 🆕 R4 的 setRemoved 半边：**只在真的拦下这一支**记账（分诊桥的静默入口，只记录不反制）
+            noteRemoval(player, reasonName);
             return true;
         } catch (Throwable t) {
             // 我们坏了也绝不许改变原版移除行为（不 cancel）
@@ -134,6 +154,51 @@ public final class ShanhaiGuardEntityGuard {
                     + " ／ player=" + player.getName().getString());
         } catch (Throwable ignored) {
             // 取证是"附加动作"：它坏了绝不许改变"拦不拦"的结论
+        }
+    }
+
+    /**
+     * 🆕 <b>R4 的 {@code setRemoved} 半边</b>：把"这一下真的被我们拦掉了"记进本体分诊桥
+     * （{@code ShanhaiGuardTriageBridge.noteRemoval(Player, String)}：{@code void}、内部全吞、只记账）。
+     *
+     * <p>🔴 <b>为什么用反射而不是硬 import</b>：本工程的 add→本体 依赖是
+     * {@code build.gradle} 里的 {@code compileOnly files(bodyJar)}（<b>不是</b>
+     * {@code implementation project(':shanhai-rewrite')}），而那个 jar 是<b>上一次</b>构建的产物 ——
+     * {@code ShanhaiGuardTriageBridge} 是本轮新加的类，<b>现在 build/libs 的 jar 里还没有它</b>
+     * ⇒ 硬 import 会让整个 add 编译不过（{@code cannot find symbol}），而这跟"拦不拦得住移除"无关。
+     * 反射同时还顺手满足"类加载不到 ／ 签名变了 ⇒ 只 WARN 一行、绝不抛"。
+     *
+     * <p>调用点只在 {@link #refuseSetRemoved} 判出 {@code decision.yes} 之后 ⇒
+     * <b>不会</b>在每一 tick 的轮询里无条件记账（否则 R4 读数全是噪声）。
+     *
+     * <p>🔴 异常<b>不外抛</b>：外层的 {@code catch (Throwable)} 是 {@code return false}（放行），
+     * 所以记账抛出去就等于"把拦下的移除又放走了" —— 本方法自己吞掉一切。
+     *
+     * @param player     被拦下的玩家（{@code noteRemoval} 自带 {@code ServerPlayer} 闸门）
+     * @param reasonName {@code RemovalReason#name()}（只进日志尾巴，不进判据）
+     */
+    private static void noteRemoval(ServerPlayer player, String reasonName) {
+        try {
+            Method m = noteRemovalMethod;
+            if (!noteRemovalResolved) {
+                try {
+                    // false = 只加载、不初始化（与 ShanhaiAeGate#load 同一套写法）
+                    final Class<?> bridge = Class.forName(TRIAGE_BRIDGE, false,
+                            ShanhaiGuardEntityGuard.class.getClassLoader());
+                    m = bridge.getMethod("noteRemoval", Player.class, String.class);
+                } catch (Throwable t) {
+                    m = null;
+                    ShanhaiMod.LOGGER.warn(ShanhaiGuardCore.LOG_PREFIX
+                            + "分诊桥不可用（R4 的移除读数会缺，拦截行为逐字不变）：" + t);
+                }
+                noteRemovalMethod = m;
+                noteRemovalResolved = true;
+            }
+            if (m != null) {
+                m.invoke(null, player, reasonName);
+            }
+        } catch (Throwable ignored) {
+            // 记账是"附加动作"：它坏了绝不许改变"拦不拦"的结论
         }
     }
 }

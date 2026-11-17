@@ -227,6 +227,10 @@ public final class ShanhaiRecipeEditorSelfcheck {
         }
 
         runCase("module_level_tip", () -> caseModuleLevelTip());
+        // 🆕 2026-11-08（用户原话：「流体产出没有标注流体的名字」/「恢复配方之后我不能立刻在 jei 中
+        //    看到被恢复的配方」）⇒ 两条纯判据：产物名字阶梯 ＋ 恢复之后 JEI 那一种载荷。
+        //    只新增 case，既有 case 的断言一个字没动。
+        runCase("deleted_fluid_label_and_restore_payload", () -> caseDeletedFluidLabelAndRestorePayload());
 
         // 🔴🔴 2026-10-05（用户澄清：「但是我删除写的是 /shanhai edit restore」）：
         //    全局恢复那条命令必须【逐条】给客户端发单条补丁 —— 这是"restore 之后 JEI 不刷新"的判据。
@@ -268,6 +272,105 @@ public final class ShanhaiRecipeEditorSelfcheck {
      * <p>⚠️ 等级不从 {@code requiredLevel} 字段读，而是现问 {@code getModuleLevelById} —— 与
      * {@code ModuleLevelCondition.levelSuffix()} 同一个源，这样这条判据不会和生产代码一起漂移。
      */
+    // ================================================================== 🆕 流体名 ＋ 恢复载荷
+
+    /**
+     * 🆕 <b>两条纯判据（只新增，不动既有任何一条）</b>：
+     * <ol>
+     *   <li>用户原话「<b>流体产出没有标注流体的名字</b>」⇒ 纯流体快照的主产物必须<b>带出流体 id</b>
+     *       （显示名由 {@code ShanhaiDeletedRecipeIndex#mainNameOf} 用 {@code FluidStack} 换），
+     *       而"认不出流体"那条老路仍然只能是 {@code 流体产出}；</li>
+     *   <li>用户原话「<b>恢复配方之后我不能立刻在 jei 中看到被恢复的配方</b>」⇒ 恢复之后
+     *       <b>活表里读得到就必须发 changed（且必须带整条字节）</b>；读不到才发 removed。
+     *       判据本体在 {@link ShanhaiRestoreJeiPlan}（纯核）。</li>
+     * </ol>
+     *
+     * <p>⚠️ 两条都不断言中文名：本自检跑在无头专服里，专服不加载客户端 lang
+     * （同 {@code caseModuleLevelTip} 的说明）⇒ 这里只断言"名字有没有走对那一条路"。
+     */
+    private static void caseDeletedFluidLabelAndRestorePayload() {
+        // ---- ① 纯流体快照（形状取自用户实例的真实快照，逐字）----
+        final com.google.gson.JsonObject fluidOnly = new com.google.gson.JsonObject();
+        fluidOnly.addProperty("type", "gtceu:distillation_tower");
+        final com.google.gson.JsonObject outputs = new com.google.gson.JsonObject();
+        final com.google.gson.JsonArray items = new com.google.gson.JsonArray();     // 空的：纯流体
+        outputs.add("item", items);
+        final com.google.gson.JsonArray fluids = new com.google.gson.JsonArray();
+        final com.google.gson.JsonObject f = new com.google.gson.JsonObject();
+        final com.google.gson.JsonObject content = new com.google.gson.JsonObject();
+        content.addProperty("amount", 48000);
+        final com.google.gson.JsonArray value = new com.google.gson.JsonArray();
+        final com.google.gson.JsonObject one = new com.google.gson.JsonObject();
+        one.addProperty("fluid", "gtceu:nitrogen_dioxide");
+        value.add(one);
+        content.add("value", value);
+        f.add("content", content);
+        f.addProperty("chance", 10000);
+        fluids.add(f);
+        outputs.add("fluid", fluids);
+        fluidOnly.add("outputs", outputs);
+
+        final ShanhaiDeletedRecipeList.Main fm = ShanhaiDeletedRecipeList.mainProductOf(fluidOnly);
+        final boolean idOk = fm != null && fm.hasFluid() && "gtceu:nitrogen_dioxide".equals(fm.fluidId());
+        // 显示名来之前，tag 也必须带上 id（"流体产出"那四个字等于什么都没说）
+        final boolean tagOk = fm != null && fm.tag() != null && fm.tag().contains("gtceu:nitrogen_dioxide");
+        final boolean cntOk = fm != null && fm.count() == 48000;
+        check("deleted_fluid_main_has_id", idOk && tagOk && cntOk,
+                "main=" + (fm == null ? "null" : ("[" + fm.tag() + " id=" + fm.fluidId()
+                        + " n=" + fm.count() + "]")));
+
+        // 显示名那一侧：拿一个一定存在的流体走一遍 FluidStack 那条路（专服给的是键名/英文名，
+        // 断言"非空且不抛" —— 中文名只有客户端 lang 才给得出，这里不断言中文）
+        final String water = ShanhaiDeletedRecipeIndex.fluidDisplayName("minecraft:water");
+        check("deleted_fluid_display_name", water != null && !water.isEmpty(),
+                "minecraft:water ⇒ [" + water + "]（专服没有 zh_cn lang ⇒ 这里只判「拿得到名字」）");
+
+        // 行标签：显示名优先，且必须是 §f 白字那一支
+        final ShanhaiDeletedRecipeList.Row row = new ShanhaiDeletedRecipeList.Row(
+                "gtceu:distillation_tower/x", "gtceu:distillation_tower", fm, "", "二氧化氮 x48000 mB", true);
+        final String label = ShanhaiDeletedRecipeList.rowLabel(row);
+        check("deleted_fluid_row_label", label.contains("二氧化氮") && label.contains("§f")
+                        && label.contains("gtceu:distillation_tower/x"),
+                "label=[" + label + "]");
+
+        // ---- ② 产物名字清单（详情页那行读数后面跟的那一份）----
+        final String products = ShanhaiDeletedRecipeList.productsLine(fluidOnly,
+                id -> null, id -> id.endsWith("nitrogen_dioxide") ? "二氧化氮" : null, 6);
+        check("deleted_products_line", "二氧化氮".equals(products), "products=[" + products + "]");
+
+        // ---- ③ 负对照：认不出流体 ⇒ 仍然只能是"流体产出"（老文案原样保留）----
+        final com.google.gson.JsonObject weird = fluidOnly.deepCopy();
+        final com.google.gson.JsonArray wf = new com.google.gson.JsonArray();
+        final com.google.gson.JsonObject w0 = new com.google.gson.JsonObject();
+        w0.add("content", new com.google.gson.JsonObject());       // 既没有 fluid 也没有 tag
+        wf.add(w0);
+        final com.google.gson.JsonObject wOut = weird.getAsJsonObject("outputs");
+        wOut.remove("fluid");
+        wOut.add("fluid", wf);
+        final ShanhaiDeletedRecipeList.Main wm = ShanhaiDeletedRecipeList.mainProductOf(weird);
+        check("deleted_fluid_label_negative", wm != null && !wm.hasFluid()
+                        && "流体产出".equals(wm.tag()),
+                "main=[" + (wm == null ? "null" : wm.tag()) + "]（认不出流体时必须原样退回这四个字）");
+
+        // ---- ④ 恢复之后 JEI 收哪一种载荷（判据表只在 ShanhaiRestoreJeiPlan 里）----
+        final ShanhaiRestoreJeiPlan.Plan livePlan =
+                ShanhaiRestoreJeiPlan.of(true, true, ShanhaiRestoreJeiPlan.R_ALREADY_IN_BASE);
+        final ShanhaiRestoreJeiPlan.Plan revivedPlan =
+                ShanhaiRestoreJeiPlan.of(true, true, ShanhaiRestoreJeiPlan.R_REVIVED);
+        final ShanhaiRestoreJeiPlan.Plan deadPlan =
+                ShanhaiRestoreJeiPlan.of(false, true, ShanhaiRestoreJeiPlan.R_REGISTER_REFUSED);
+        final ShanhaiRestoreJeiPlan.Plan noSnap =
+                ShanhaiRestoreJeiPlan.of(false, true, ShanhaiRestoreJeiPlan.R_NO_SNAPSHOT);
+        check("restore_jei_payload_plan",
+                livePlan.sendChanged() && livePlan.needsBody()
+                        && revivedPlan.sendChanged() && revivedPlan.needsBody()
+                        && !deadPlan.sendChanged() && !deadPlan.needsBody()
+                        && !noSnap.sendChanged(),
+                "live=" + livePlan.code() + " revived=" + revivedPlan.code()
+                        + " refused=" + deadPlan.code() + " no_snapshot=" + noSnap.code()
+                        + "（活表里有 ⇒ changed 且必须带字节；否则只能 removed）");
+    }
+
     private static void caseModuleLevelTip() {
         final String id = "shanhai:material_recombination_module";
         final int tableLv = com.shanhai.machine.module.PrimordialModuleMachine.getModuleLevelById(id);

@@ -59,13 +59,14 @@ import net.minecraftforge.fml.common.Mod;
  *                 → 受保护玩家被写 &lt;=0 ⇒ 改成满血
  *                 ⚠ 只装本体时这两道不存在 ⇒ 本体这条路只剩"事件层 ＋ 每 tick 补血（③ ／ ③″）"，
  *                 这也是用户 2026-10-18 拍板的口径（免死只做到事件层和 setHealth，不碰 mixin）。
- *   ⑧ 对手桥      ★2026-10-17★ 反射调对手自己的 public static（setHealthDelta / obtainHealthDelta /
- *                 checkEntityDead）＋ 清它 ForgeData 里的锁存计数器 ⇒ 日志 omnimobs_bridge=counter_reset / delta_reset；
- *                 ⚠ 这层依赖对手的类名/方法名，换版本就失效（失效只记一行 unavailable，自动退回值层）
- *   ⑨ 反击退      ★2026-10-17★ 每 tick 只对受保护玩家：① {@code hurtMarked} 置 false
+ *   ⑧ 反击退      ★2026-10-17★ 每 tick 只对受保护玩家：① {@code hurtMarked} 置 false
  *                 ② 「刚被攻击」窗口（我们最近 20 tick 拦过东西）内 ＋ 水平速度 &gt; 0.6 格/tick
  *                 ⇒ {@code setDeltaMovement} 的 x/z 清零、y 保留（🔴 只刹车，不搬人：没有 setPos / 没有拉回）
  *                 ③ 豁免：鞘翅飞行 / 在载具里 / 旁观者 / 刚传送（2 tick）　④ 日志每秒最多一行、默认不播
+ *   ⑨ 热改播报    ★2026-11-08★ {@link #chatRawBodies}：把"主动热改改了哪个敌方法"以
+ *                 {@code [创始现实修改模块] PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)}
+ *                 这种形播到聊天栏 —— <b>复用 ⑥ 那条通道</b>（同一个 {@link #CHAT} 闸门、同一个前缀、
+ *                 同一个收件人规则），正文纯 ASCII，一律不新建通道
  * </pre>
  *
  * <h2>🔴 为什么死亡界面那一段被搬走了（2026-10-10 专服崩溃）</h2>
@@ -116,20 +117,11 @@ public final class ShanhaiGuardEvents {
     // 🔴 2026-10-17 新增两类（值层兜底：② 死亡流程复位 ／ ④ 拒绝死亡）
     private static final String KIND_RESET = ShanhaiGuardCore.KIND_RESET;
     private static final String KIND_DIE_REFUSED = ShanhaiGuardCore.KIND_DIE_REFUSED;
-    // 🔴 2026-10-17 新增一类（⑤ 对手桥维护：清它的 delta / 锁存计数器；诊断类，只进日志）
-    private static final String KIND_OMNIMOBS = ShanhaiGuardCore.KIND_OMNIMOBS;
     // 🔴 2026-10-17 新增一类（反击退 / 反挤压；诊断类，只进日志、不进聊天栏）
     private static final String KIND_KNOCKBACK = ShanhaiGuardCore.KIND_KNOCKBACK;
 
     /** 细节日志闸门：与 {@link #LOG} 同一套「同类合并 ＋ 每秒最多一行」，但带原因串（只打每窗口的"末次"）。 */
     private static final ShanhaiGuardCore.LogGate DETAIL = new ShanhaiGuardCore.LogGate();
-
-    /**
-     * 🔴 <b>⑤ 对手桥自己的闸门</b>（2026-10-17 加）：同样"同类合并 ＋ 每秒最多一行"，
-     * 但<b>单独一个</b> —— 它的原因串（{@code omnimobs_bridge=counter_reset / delta_reset}）很重要，
-     * 不能和同一秒里的别的类别挤在 {@link #DETAIL} 那一行里被"末次"顶掉。
-     */
-    private static final ShanhaiGuardCore.LogGate OMNI = new ShanhaiGuardCore.LogGate();
 
     /**
      * 🔴 <b>反击退自己的闸门</b>（2026-10-17 加）：同样"同类合并 ＋ 每秒最多一行"，
@@ -199,6 +191,11 @@ public final class ShanhaiGuardEvents {
         if (!(event.getEntity() instanceof Player player)) {
             return;
         }
+        // 🆕 T 件①③ 的分诊读数【不在这里】—— 见下方 onLivingAttackObserved。
+        //    原因（2026-11-07 实测）：本方法没有 receiveCanceled ⇒ 只要**任何别的监听器**先取消了这次攻击，
+        //    Forge 就不会把事件发给我们，于是"僵尸被反击抹除了、分诊却一行没打"。
+        //    观测必须放在一个 receiveCanceled = true 的独立监听器里，才能保证任何一次攻击都留下读数。
+        //    ⚠️ 这里一个字节的判定都没改（不 cancel、不返回）。
         if (!ShanhaiGuardCore.blocksDamage(isGuarded(player))) {
             return;
         }
@@ -206,6 +203,44 @@ public final class ShanhaiGuardEvents {
         log(KIND_DAMAGE);
         chat(player, KIND_DAMAGE);   // 🆕 聊天栏（只发给他本人；日志那一行照旧在上面）
         noteIntercept(player);       // 🆕 反击退：这一拍把「刚被攻击」窗口打开了（20 tick）
+    }
+
+    /** 观测行每秒最多一条（防刷；一次挨打本来就很少）。 */
+    private static long LAST_ATTACK_SEEN_MS = 0L;
+
+    /**
+     * 🔴 <b>攻击事件的【观测】监听器</b>（2026-11-07 加，只记录、绝不改判定）。
+     *
+     * <p>为什么必须单独一个：{@link #onLivingAttack} 没有 {@code receiveCanceled}，
+     * 只要**别的监听器**先取消了这次攻击（实测：扩展层的反击抹除能拿到、本体这一路拿不到），
+     * Forge 就不再把事件发给它 ⇒ 分诊的四个读数永远是"没发生"。
+     * 本监听器用 {@code receiveCanceled = true, priority = LOWEST} 保证**任何一次攻击都留一行读数**。
+     *
+     * <p>它只做三件事：① 调分诊的 {@code noteDamage}（R1 ＋ 抓一次栈，每人每局 3 次）；
+     * ② 每秒最多打一行 {@code damage_seen canceled=… guarded=… dmg=… src=…}（用来回答"谁先取消的"）；
+     * ③ 什么都不取消、不改血量。
+     */
+    @SubscribeEvent(receiveCanceled = true, priority = net.minecraftforge.eventbus.api.EventPriority.LOWEST)
+    public static void onLivingAttackObserved(LivingAttackEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        try {
+            ShanhaiGuardTriageBridge.noteDamage(player);
+        } catch (Throwable ignored) {
+            // 分诊坏了绝不许影响伤害流程
+        }
+        final long now = System.currentTimeMillis();
+        if (now - LAST_ATTACK_SEEN_MS >= 1000L) {
+            LAST_ATTACK_SEEN_MS = now;
+            try {
+                ShanhaiMod.LOGGER.info("{} damage_seen canceled={} guarded={} dmg={} src={} player={}",
+                        ShanhaiGuardTriageBridge.PREFIX, event.isCanceled(), isGuarded(player),
+                        event.getAmount(), event.getSource().getMsgId(), player.getName().getString());
+            } catch (Throwable ignored) {
+                // 观测坏了绝不许影响伤害流程
+            }
+        }
     }
 
     // ═══════════════════════════════ ② 拦死亡 ═══════════════════════════════
@@ -231,7 +266,7 @@ public final class ShanhaiGuardEvents {
         }
         event.setCanceled(true);
         // 🔴 2026-10-17：补血改走【两条腿】（setHealth → 自证 → 直写同步血量 → 再自证）——
-        //    对手的杀人链不过 setHealth、且给 setHealth 挂了单向锁存的 cancel、给 getHealth() 加了偏移，
+        //    有的第三方 mod 的杀人链不过 setHealth、还会把别人的 setHealth 取消掉、给 getHealth() 加偏移，
         //    ⇒ 只走 setHealth 会把"其实没补上"当成功。日志里带 heal_channel=setHealth/direct/failed。
         //    "缺不缺"也要用【字段真值】判（读不到才退回 getHealth()），不能只信 getHealth()。
         final float missing = ShanhaiGuardCore.healAmount(true,
@@ -247,6 +282,10 @@ public final class ShanhaiGuardEvents {
                 logDetail(KIND_HEAL_FAIL, heal.detail);
             }
         }
+        // 🆕 T 件①②：死亡事件 ⇒ R1 置位；已经拦下（上面 setCanceled）⇒ R2 的"救过"置位。
+        //    两行都只读；读数的落盘在 onServerTick 的拍末（那时才取"救完之后"的字段真值血量）。
+        ShanhaiGuardTriageBridge.noteDeath(player);
+        ShanhaiGuardTriageBridge.noteRescued(player);
         log(KIND_DEATH);
         chat(player, KIND_DEATH);   // 🆕 聊天栏（只发给他本人；日志那一行照旧在上面）
         noteIntercept(player);      // 🆕 反击退：拦到死亡也算"我们确实拦到了东西"
@@ -275,6 +314,10 @@ public final class ShanhaiGuardEvents {
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
+        // 🆕 T 件④：进世界后【一次】的关键类扫描（换服务器实例 = 新的一局）。
+        //    刻意放在下面那个 enabled 闸门【之前】：关掉守卫也该看得见"谁改过 LivingEntity"。
+        //    它只做 Class.forName(initialize=false) + getDeclaredMethods()，一个字段都不写。
+        ShanhaiGuardTriageBridge.onServerTickHead(event.getServer());
         if (!ShanhaiGuardCore.enabled) {
             return;
         }
@@ -301,6 +344,9 @@ public final class ShanhaiGuardEvents {
                 guardKnockback(player, id);
             }
         }
+        // 🆕 T 件②：拍末把这一拍的四个读数判成一句"解没解决"并落盘
+        //    （同一 src 每人 5 秒最多一行；只读，绝不影响上面任何一个字段）
+        ShanhaiGuardTriageBridge.flushTick(roster);
         // 名单里已经没有的人 ⇒ 连登记一起清掉（避免无限增长；也避免把离线玩家的坐标留着乱拉）
         REMEMBERED.retainAll(present);
         TRACKS.keySet().retainAll(present);
@@ -387,16 +433,8 @@ public final class ShanhaiGuardEvents {
             }
         }
 
-        // ── ⑤-1 🔴 2026-10-17 对手桥（补血之前）：清它的「单向锁存计数器」 ──
-        //    对手的判据是 `counter >= 5 && 新值 > 当前血 ⇒ cancel setHealth`，而 counter 单向锁存
-        //    ⇒ 不清它，我们下面两条腿里的第一条腿【永久无效】（这就是"中招后 setHealth 补血无效"的机制）。
-        final String omniCounter = ShanhaiGuardValueLayer.clearOmnimobsCounter(player);
-        if (omniCounter != null) {
-            logOmni(omniCounter);
-        }
-
         // ── ③ 回血（两条腿）＋ 当场自证（两条腿都失败 ⇒ 核里记一次失败，不静默） ──
-        //    🔴 2026-10-17：对手的杀人链不过 setHealth、且给 setHealth 挂了单向锁存的 cancel
+        //    🔴 2026-10-17：有的第三方 mod 的杀人链不过 setHealth、还会把别人的 setHealth 取消掉
         //    ⇒ 只走 setHealth 会"以为补上了、其实没补"。这里改走 ShanhaiGuardValueLayer#healTwoLegs：
         //    setHealth → 自证 → 直写同步血量字段（第二通道）→ 用字段真值再自证；日志带 heal_channel=…。
         //    "缺不缺"也要用【字段真值】判（读不到才退回 getHealth()，因为对手给 getHealth() 加了偏移）。
@@ -417,8 +455,8 @@ public final class ShanhaiGuardEvents {
         }
 
         // ── ③′ 🔴 2026-10-17 新增：值层兜底·第二道 —— 把"已经进入死亡流程"的人拉回来 ──
-        //    判据在核里（deathFlowResetDecision，四条任一为真：isDeadOrDying / deathTime>0 /
-        //    🔴 同步血量字段真值 <= 0 / 🔴 ⑤ 对手自己的 checkEntityDead 说死）。
+        //    判据在核里（deathFlowResetDecision，三条任一为真：isDeadOrDying / deathTime>0 /
+        //    🔴 同步血量字段真值 <= 0）—— 只看原版读数，不引用任何第三方 mod 的类名/方法名/数据键。
         //    复位动作与 ④ die 拒绝共用同一个工具方法（两条腿补血 ＋ deathTime=0 ＋ hurtTime=0）。
         //    ⚠️ 这一条【不】计入"补血成功"的计数：它是另一件事（把死亡流程拉回来），
         //        日志用独立类别（KIND_RESET）＋ 独立闸门（DETAIL，每秒最多一行）。
@@ -426,26 +464,17 @@ public final class ShanhaiGuardEvents {
         final int deathTimeBefore = player.deathTime;
         final int hurtTimeBefore = player.hurtTime;
         final float fieldHealthNow = ShanhaiGuardValueLayer.readHealthField(player);   // 复位前【重新读一次】（上面刚补过血）
-        final boolean omniSaysDead = ShanhaiGuardValueLayer.omnimobsSaysDead(player);  // ⑤ 它自己的判死
         final ShanhaiGuardCore.Decision resetDecision = ShanhaiGuardCore.deathFlowResetDecision(
-                dying, deathTimeBefore, fieldHealthNow, omniSaysDead, ShanhaiGuardCore.enabled);
+                dying, deathTimeBefore, fieldHealthNow, ShanhaiGuardCore.enabled);
         if (resetDecision.yes) {
             final ShanhaiGuardValueLayer.HealOutcome reset = ShanhaiGuardValueLayer.resetDeathFlow(player);
             logDetail(KIND_RESET, "isDeadOrDying=" + dying + " ／ deathTime 原值=" + deathTimeBefore
-                    + " ／ hurtTime 原值=" + hurtTimeBefore + " ／ 对手说死=" + omniSaysDead
+                    + " ／ hurtTime 原值=" + hurtTimeBefore
                     + " ／ " + reset.detail
                     + " ／ " + ShanhaiGuardCore.trustedHealthReason(player.getHealth(), fieldHealthNow)
                     + " ｜ " + resetDecision.reason);
             chat(player, KIND_RESET);   // 聊天栏（只给他本人；同一套闸门，每秒最多一行）
             noteIntercept(player);      // 🆕 反击退：把"已经进了死亡流程"的人拉回来也算一次拦截
-        }
-
-        // ── ⑤-3 🔴 2026-10-17 对手桥（补血之后，每 tick 兜一次）：清它的 getHealth() 偏移（delta）──
-        //    它的 getHealth() = 血量字段 + delta ⇒ delta 归零后读数才是真值，假死/假血一起消失。
-        //    清完再跑下面的读血交叉校验，"矛盾"才是真的矛盾（不是被 delta 造出来的）。
-        final String omniDelta = ShanhaiGuardValueLayer.clearOmnimobsDelta(player);
-        if (omniDelta != null) {
-            logOmni(omniDelta);
         }
 
         // ── ③b 读血交叉校验：getHealth() 与 isDeadOrDying/deathTime/hurtTime 互相矛盾 ⇒ 记一条 ──
@@ -957,21 +986,6 @@ public final class ShanhaiGuardEvents {
         }
     }
 
-    /**
-     * 🔴 <b>⑤ 对手桥的行</b>（2026-10-17 加）：带 {@code omnimobs_bridge=counter_reset / delta_reset}，
-     * 走它自己的 {@link #OMNI} 闸门 —— 同样"同类合并 ＋ 每秒最多一行"，但不会被同窗口别的类别顶掉。
-     *
-     * <p>为什么单独一行：用户要求"日志里区分来源"（{@code heal_channel=…} 与
-     * {@code omnimobs_bridge=counter_reset|delta_reset}）—— 混在补血那一行里，读日志的人分不清
-     * "这次是值层补上的、还是把它的偏移清掉之后才补上的"。
-     */
-    private static void logOmni(String reason) {
-        final String line = OMNI.admit(KIND_OMNIMOBS, System.currentTimeMillis());
-        if (line != null) {
-            ShanhaiMod.LOGGER.warn(line + " ｜ 末次：" + reason);
-        }
-    }
-
     // ═══════════════════════════════ 聊天栏（2026-10-10 用户点单） ═══════════════════════════════
     //
     // 用户原话（逐字就是规格）：
@@ -1006,10 +1020,122 @@ public final class ShanhaiGuardEvents {
             return;   // 同一秒里已经有过一条 ⇒ 这一次合并进去，不刷屏
         }
         final String line = batch.chatLine();
-        if (line == null) {
+        if (line != null) {
+            sendLine(holder, line);
+        }
+        // 🔴 2026-11-08：这一拍同时是"热改播报的落盘点" —— 上面那次 admitBatch 会把攒着的
+        //    原始正文一起带出来（见核里的 Batch#rawLines）。不发就等于把它们丢了。
+        for (final String rawLine : batch.rawLines()) {
+            sendLine(holder, rawLine);
+        }
+    }
+
+    // ═══════════════════════════════ 热改播报（2026-11-08，用户点单） ═══════════════════════════════
+    //
+    // 用户口径（逐字就是规格）：「把主动热改废掉敌方代码这件事播报到玩家聊天栏」，三条样例：
+    //   [创始现实修改模块] PATCHED examplemod EntityHelper#forceSetHealth -> RETURN (health)
+    //   [创始现实修改模块] PATCH_REFUSED examplemod EntityHelper#forceSetHealth (gate_already_patched)
+    //   [创始现实修改模块] PATCH_REVERTED examplemod EntityHelper#forceSetHealth (observed_only)
+    //
+    // 🔴 三条硬约束（用户硬要求）：
+    //   ① **复用这同一条通道**（这一个类、这一个 {@link #CHAT} 闸门、这一个前缀、这一个收件人规则）
+    //      —— 不新建 socket、不开第二条聊天通道；
+    //   ② 正文**纯 ASCII**：非 ASCII 一律**拒收并返回 false**（判据在核 {@code isBroadcastableBody}，
+    //      自检 ⑱ 带负对照）；
+    //   ③ 前缀后面那**一个半角空格**必须保留（{@link ShanhaiGuardCore#CHAT_PREFIX} 自带，这里不另拼）；
+    //   ④ 控制台／没有玩家上下文 ⇒ **一条都不发**（那一侧日志照旧，不受这里影响）；
+    //   ⑤ 一次 patch 改了几个方法 ⇒ **每个方法一行**（核里 rawLines 是"一条正文一行"，不拼成一行）。
+
+    /**
+     * 🔴 <b>通用入口：把一条任意 ASCII 正文以 {@code [创始现实修改模块] } 前缀发给他本人</b>。
+     *
+     * <pre>
+     *   holder 不是服务端玩家 / null        ⇒ false（控制台、无玩家上下文：一条都不发）
+     *   他不是受保护玩家（没那件模块）      ⇒ false（收件人规则照旧 = 只发给持有者本人）
+     *   正文非 ASCII / 空白 / 带换行        ⇒ false（硬判据，核里就拒收）
+     *   正文可播                            ⇒ true（已收下：可能当场发，也可能进下一行合并）
+     * </pre>
+     *
+     * @param holder   收件人（<b>只有他一个人</b>；{@code null} ⇒ 不发）
+     * @param asciiBody 正文（<b>不含</b>前缀；必须纯 ASCII）
+     * @return 收下了没有（{@code false} = 这条没发、也不会补发）
+     */
+    public static boolean chatRawBody(ServerPlayer holder, String asciiBody) {
+        if (asciiBody == null) {
+            return false;
+        }
+        return chatRawBodies(holder, List.of(asciiBody)) > 0;
+    }
+
+    /**
+     * 🔴 同 {@link #chatRawBody(ServerPlayer, String)}，但<b>一次投多条</b>（一次 patch 改了同类多个方法）。
+     *
+     * <p>为什么要"一次投多条"而不是逐条调：这几种正文属于<b>同一个事件</b>，一次投进去它们才落在
+     * <b>同一个窗口</b>里 ⇒ 当场就能一起发（"每个方法一行"）。逐条调的话第二条会被"每秒最多一行"
+     * 推到下一拍去。
+     *
+     * <p>本方法可以在<b>任何线程</b>调：不是服务端线程时会把投递排到服务端线程
+     * （{@code MinecraftServer#execute}），绝不在工作线程上碰玩家连接。
+     *
+     * @return 收下了几条（0 = 没发：没有玩家上下文 ／ 不是持有者 ／ 正文全都不可播 ／ 没有服务端）
+     */
+    public static int chatRawBodies(ServerPlayer holder, List<String> asciiBodies) {
+        if (holder == null || asciiBodies == null || asciiBodies.isEmpty()) {
+            return 0;   // 控制台 / 没有玩家上下文 ⇒ 一条都不发（那一侧日志照旧）
+        }
+        if (!isGuarded(holder)) {
+            return 0;   // 收件人规则：只有持有「创始现实修改模块」的受保护玩家才收得到
+        }
+        final List<String> ok = ShanhaiGuardCore.broadcastableBodies(asciiBodies);
+        if (ok.isEmpty()) {
+            return 0;   // 🔴 非 ASCII / 空白：一条都不发（硬判据；返回 false 的负对照在核的自检 ⑱）
+        }
+        final MinecraftServer server = holder.getServer();
+        if (server == null) {
+            return 0;   // 还没挂到服务端（登录中／已断开）⇒ 不发
+        }
+        final String[] bodies = ok.toArray(new String[0]);
+        if (server.isSameThread()) {
+            deliverRaw(holder, bodies);
+        } else {
+            // 热改的工作线程会从这里进来：排队到服务端线程再发（绝不跨线程碰玩家连接）。
+            server.execute(new Runnable() {
+                @Override
+                public void run() {
+                    deliverRaw(holder, bodies);
+                }
+            });
+        }
+        return bodies.length;
+    }
+
+    /**
+     * 真的把这一批原始正文交给闸门并发出去（<b>必须在服务端线程</b>）。
+     *
+     * @return 真的发出了几行（0 = 同一秒里已经有过一行，合并进下一拍）
+     */
+    private static int deliverRaw(ServerPlayer holder, String[] bodies) {
+        final ShanhaiGuardCore.LogGate.Batch batch = CHAT.admitRawBatch(bodies, System.currentTimeMillis());
+        if (batch == null) {
+            return 0;   // 同一秒里已经有过一行 ⇒ 合并进去（走既有合并，不刷屏）
+        }
+        int sent = 0;
+        for (final String line : batch.rawLines()) {
+            sendLine(holder, line);
+            sent++;
+        }
+        return sent;
+    }
+
+    /**
+     * 逐行投递给<b>他一个人</b>（投递方式与 {@link #chat} 完全相同）。
+     *
+     * <p>收件人由核 {@code chatRecipients} 给出（第二个参数故意传 {@code null} —— 那条规则根本不看在线名单）。
+     */
+    private static void sendLine(ServerPlayer holder, String line) {
+        if (line == null || line.isEmpty()) {
             return;
         }
-        // 🔴 收件人由核给出：**只有他一个人**（第二个参数故意传 null —— 核里那条规则根本不看在线名单）
         for (final ServerPlayer to : ShanhaiGuardCore.chatRecipients(holder, null)) {
             to.sendSystemMessage(net.minecraft.network.chat.Component.literal(line));
         }

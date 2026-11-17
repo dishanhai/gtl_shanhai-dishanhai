@@ -2323,7 +2323,19 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
                 }
             }
         }
-        return null;
+        // 🔴 2026-11-14 追加（用户原话：「把零点能发生器……做成直接链接无线电网（就像伪神之锻炉）」）：
+        //    ③ 最后回落【宿主的池子键】—— 挂在归墟视界枢核上的这台，即使模块自己没被玩家放置过、
+        //       结构里也没有终端部件，也用主机的那个 uuid（= 主机「零点能发电入池」用的同一个键）。
+        //
+        //    为什么必须加这一条：主机侧的耗电/发电已经"直连"了，而发电模块原来只认
+        //    ①自己的放置者 ②终端部件 —— 挂在归墟上时这两个都可能为空 ⇒ 模块产的电静默不发。
+        //
+        //    ⚠️ 默认安全：`PrimordialOmegaEngineMachine#shanhaiHostWirelessPoolUuid()` 默认返回 null
+        //       ⇒ 老主机（原始终焉引擎）上逐字不变；且本方法的**两个调用点都被 `isGenerator()` 挡着**
+        //       （`shanhai$suppressRecipeElectricity` / `shanhai$depositGenerationToWirelessPool`）
+        //       ⇒ 其余 23 台耗电模块一个字节都读不到这条回落（判据⑤）。
+        final PrimordialOmegaEngineMachine host = getHost();
+        return host == null ? null : host.shanhaiHostWirelessPoolUuid();
     }
 
     // ═════════════════════ 🔴 无线电网能量通道（BigInteger 扣电） ═════════════════════
@@ -2352,7 +2364,7 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * 所以 {@code shanhai$refreshWirelessEnergyHandler} 的扫描是<b>兜底</b>（给别的模组/别的部件形态），
      * 真正的来源是上面那个「推」。
      *
-     * <h2>🔴 为什么不直接覆写 {@code getWirelessNetworkEnergyHandler()}</h2>
+     * <h2>🔴 为什么不让它返回自持 handler（本类现在的 {@code getWirelessNetworkEnergyHandler()} 覆写恒 {@code return null}）</h2>
      * 覆写它会让父类 {@code MutableRecipesLogic#getRecipe()} 整体改走 {@code buildFinalWirelessRecipe}
      * （字节码 {@code wirelessTrait != null ? buildFinalWirelessRecipe : buildFinalNormalRecipe}），
      * 而本工程把 <b>N3/N5/N6 + 批处理 + 影子对账全挂在 Normal 支</b>
@@ -2362,6 +2374,26 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      */
     @Nullable
     private IWirelessNetworkEnergyHandler shanhai$wirelessEnergyHandler;
+
+    /**
+     * 🔴 <b>恒返回 {@code null}</b> —— 本机「永远走 {@code buildFinalNormalRecipe}」的<b>显式断言</b>。
+     *
+     * <p>此前这条不变式是"<b>恰好没覆写</b>"（靠接口默认实现 {@code return null}），
+     * 而 gtladditions 的 {@code @Mixin(WorkableElectricMultiblockMachine) +
+     * @Implements(IWirelessElectricMultiblockMachine, prefix="gtladditions$")} 已经把
+     * 一个 handler 字段和它的 getter/setter 织进了<b>基类</b>（{@code javap} 实证）——
+     * 也就是说"返回 null"依赖的其实是"上游那个字段没人写"。
+     * ⇒ 本覆写把它变成<b>本类自己的硬约束</b>：不管继承链上发生什么，这里只返回 {@code null}。
+     *
+     * <p>判据（字节码级）：{@code javap -c} 里本方法只能是 {@code aconst_null / areturn} 两条。
+     * <p>⛔ 不许删、不许改成返回 {@link #shanhai$wirelessEnergyHandler}；
+     * 理由与负对照见 {@code GuixuVisionCoreMachine} 的 🔒 锁死条款（它管三台机器）。
+     * <p>⚠️ 终端照样推得进来：它推的是 {@link #setWirelessNetworkEnergyHandler}，不是这个 getter。
+     */
+    @Override
+    public @Nullable IWirelessNetworkEnergyHandler getWirelessNetworkEnergyHandler() {
+        return null;
+    }
 
     /** {@code null} 也允许：结构破坏时我们主动清、成型时由终端部件推入。 */
     @Override
@@ -2381,9 +2413,11 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     }
 
     /**
-     * ⛔ <b>刻意【不】覆写 {@code IWirelessElectricMultiblockMachine#getWirelessNetworkEnergyHandler()}。</b>
+     * ⛔ <b>刻意【不】让 {@code IWirelessElectricMultiblockMachine#getWirelessNetworkEnergyHandler()} 返回任何非 null 值。</b>
+     * （2026-11-16 起本类对它写了<b>一条恒 {@code return null} 的覆写</b>，见上面那个方法；
+     *   从"恰好没覆写"改成"显式断言"的理由见那里的 javadoc。）
      *
-     * <p>它现在返回接口默认值 {@code null}，这不是"没接上"，而是<b>必须</b>：
+     * <p>它现在返回 {@code null}，这不是"没接上"，而是<b>必须</b>：
      * 我们两个配方逻辑的直接父类
      * {@code com.gtladd.gtladditions.api.machine.logic.MutableRecipesLogic}（<b>gtladditions</b>，不是 gtlcore）
      * 的 {@code getRecipe()} 里<b>自己</b>就有这个分流（{@code javap -p -c} 原文）：
@@ -2602,6 +2636,14 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
             final BigInteger before = WirelessEnergyManager.getUserEU(uuid);
             final boolean accepted = WirelessEnergyManager.addEUToGlobalEnergyMap(uuid, production, this);
             final BigInteger after = WirelessEnergyManager.getUserEU(uuid);
+            // 🆕 2026-11-18：同一本账（见 {@link ShanhaiPoolLedger}）——
+            //   池审计的 Σ 必须覆盖「我们全部的入池路径」，否则同一队伍里归墟那台写进同一个池子的量
+            //   会被算成"别人"（实测差额 2.4e32 级 ⇒ 每 5 秒一条 WARN，而池子其实一分没漏）。
+            //   ⚠️ 这里只是**记一笔**：金额、顺序、返回值的语义一个字节都没变。
+            //   只在上游真的接受时才记（被拒的那笔池子里没有 ⇒ 记了反而会造出负差额）。
+            if (accepted) {
+                ShanhaiPoolLedger.note(uuid, production, "发电模块" + getPos());
+            }
             shanhai$auditMine = shanhai$auditMine.add(production);
             // 🔴 2026-11-02 追加（用户点单「查是不是被别的机器用掉了」）：
             //    再累计一份「若走 long 重载，池子实际会收到多少」= Σ min(xᵢ, Long.MAX)。
@@ -2647,6 +2689,26 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     private boolean shanhai$depositOverloadLogged;
     @Nullable
     private BigInteger shanhai$auditLastPool;
+
+    // 🔴🆕 2026-11-18（用户报「池审计差额报红」）：Σ 改口径后的三个基线。
+    //
+    //  根因（读代码 + 日志实数可判定）：
+    //    Δ池 是**整个池子**（按玩家/队伍共享）的增量，而原来的 Σ 只记**这一台**自己的入池
+    //    （{@code shanhai$auditMine}，累加点 = 上面的 {@code shanhai$auditMine.add(production)}）。
+    //    同一队伍里归墟视界枢核的零点能发电也在写同一个池子
+    //    （{@code GuixuVisionCoreMachine#shanhai$depositGeneration}，实测
+    //     乘积=40564819207303340707157014216704 ／ tick），而它**不经过**本类的累加点
+    //    ⇒ 它的量全部落进「差额」⇒ 2.4e32 级 ⇒ 超出 1e19 的已知带 ⇒ WARN。
+    //    实测两地同窗口的次数相等（6/6、20/20），差额 ≈ 6 × 乘积，量级完全吻合。
+    //
+    //  ⇒ Σ 的累加/取值统一走 {@link ShanhaiPoolLedger}（覆盖发电模块 + 归墟 + 任何我们自己的写入），
+    //    这三个基线只做"窗口 = 现在 − 上次结算"的减法，不改任何窗口语义。
+    /** 上一次结算时台账里的「我们全部入池」累计值。 */
+    private BigInteger shanhai$auditLedgerSumBase = BigInteger.ZERO;
+    /** 上一次结算时台账里的「我们全部入池」笔数。 */
+    private long shanhai$auditLedgerCountBase;
+    /** 上一次结算时台账里的 Σ min(xᵢ, Long.MAX)（long 重载的逐位预报用）。 */
+    private BigInteger shanhai$auditLedgerClampedBase = BigInteger.ZERO;
 
     /**
      * 🔴 <b>池审计那一行的闸门（2026-10-01 用户点单「日志的问题」；2026-11-02 判据改按入池重载分档 + 两级）。</b>
@@ -2725,11 +2787,19 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         }
         if (shanhai$auditLastPool != null) {
             final BigInteger deltaTotal = poolNow.subtract(shanhai$auditLastPool);
-            // 「其它收支」= Δ池 − 我们Σ（逐位；bigint 档下我们那一半是精确的）
-            final BigInteger others = PrimordialPoolBand.otherWritersNet(deltaTotal, shanhai$auditMine);
+            // 🔴🆕 2026-11-18：Σ 的口径 = 【本队伍我们自己的**全部**入池】（见 ShanhaiPoolLedger）。
+            //   原来是"这一台" ⇒ 归墟那台写同一个池子的量被算成"别人"（实测 ⇒ 每 5 秒一条 WARN）。
+            final ShanhaiPoolLedger.Snapshot led = ShanhaiPoolLedger.sum(uuid);
+            final BigInteger sumAll = led.total.subtract(shanhai$auditLedgerSumBase);
+            final BigInteger clampedAll = led.longClampedTotal.subtract(shanhai$auditLedgerClampedBase);
+            final long depositsAll = led.count - shanhai$auditLedgerCountBase;
+            // 「其它收支」= Δ池 − 我们(全部)Σ（逐位；bigint 档下我们那一半是精确的）
+            final BigInteger others = PrimordialPoolBand.otherWritersNet(deltaTotal, sumAll);
             final PrimordialPoolBand.DepositOverload overload = PrimordialPoolBand.DEPOSIT_OVERLOAD;
+            // 用户 2026-11-18 点单：差额正好是「乘积」的整数倍 ⇒ 不许 WARN（那通常是另一台同款机器在写同额的账）。
+            final BigInteger intMultiple = PrimordialPoolBand.integerMultipleFactor(others, led.lastAmount);
             final PrimordialPoolBand.Band band = PrimordialPoolBand.bandOf(
-                    overload, others, shanhai$auditMine, shanhai$auditMineLongClamped);
+                    overload, others, sumAll, clampedAll, led.lastAmount);
             final ShanhaiLogThrottle.Level level = PrimordialPoolBand.levelOf(band);
             if (level == ShanhaiLogThrottle.Level.NONE) {
                 // 今天只有 long 档的「差额 == 闭式预报」会走到这里（long 档在生产上是跑不到的分支）。
@@ -2748,15 +2818,25 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
                     // 那四个字段只有一处构造（PrimordialPoolBand#fieldsLine）⇒ INFO 行与 WARN 行不会漂移。
                     final String fields = PrimordialPoolBand.fieldsLine(overload, others, w.detailText())
                             + PrimordialPoolBand.witnessSuffix(band, w.readable);
-                    final String body = "Δ总=" + deltaTotal + " ／ 我这台 Σ=" + shanhai$auditMine
-                            + "（" + shanhai$auditDeposits + " 次入池）／ 差额=" + others + "；"
+                    // 🔴🆕 2026-11-18：这一行现在自带**对账三连**（用户点单：`Σ=… 本次=… 累计次数=…`），
+                    //   并明确区分「Σ（我们全部）」与「本机 Σ」—— 两者相等 ⇒ 这个池子只有本机在写。
+                    final String body = "对账|Σ=" + sumAll + " 本次=" + led.lastAmount
+                            + "（" + led.lastWho + "） 累计次数=" + led.count
+                            + " 本机Σ=" + shanhai$auditMine
+                            + "（" + shanhai$auditDeposits + " 次） 整数倍=" + (intMultiple == null ? "否" : ("×" + intMultiple))
+                            + " ｜ Δ总=" + deltaTotal
+                            + " ／ 我这台 Σ=" + shanhai$auditMine
+                            + "（" + shanhai$auditDeposits + " 次入池）"
+                            + " ／ 我们合计 Σ=" + sumAll + "（" + depositsAll + " 次入池：发电模块+归墟等全部）"
+                            + " ／ 差额=" + others + "；"
                             + fields + "；"
                             + "已知带 = " + PrimordialPoolBand.bandText(
-                                    overload, shanhai$auditMine, shanhai$auditMineLongClamped) + "；"
+                                    overload, sumAll, clampedAll) + "；"
                             + "long 重载的预期差额（逐位）= "
                             + PrimordialPoolBand.longOverloadExpectedDiff(
-                                    shanhai$auditMine, shanhai$auditMineLongClamped)
-                            + "（本次 Σ(min(xᵢ,Long.MAX))=" + shanhai$auditMineLongClamped + "）；"
+                                    sumAll, clampedAll)
+                            + "（本次 Σ(min(xᵢ,Long.MAX))=" + clampedAll
+                            + "；本机那台=" + shanhai$auditMineLongClamped + "）；"
                             + "本队伍取电机器「最后一次单笔」之和 = " + w.negativeSumText()
                             + "（负 = 取电；⚠️不是窗口累计）。"
                             + "【限流：INFO=同一形态只打一次、WARN=同形每 "
@@ -2778,6 +2858,12 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         shanhai$auditMine = BigInteger.ZERO;
         shanhai$auditMineLongClamped = BigInteger.ZERO;
         shanhai$auditDeposits = 0;
+        // 🆕 2026-11-18：台账基线必须与 {@code shanhai$auditLastPool} **同一个结算点**推进，
+        //   否则窗口两端错一格 ⇒ 差额恒有一个常数偏移（又一个"自己造出来的差额"）。
+        final ShanhaiPoolLedger.Snapshot tail = ShanhaiPoolLedger.sum(uuid);
+        shanhai$auditLedgerSumBase = tail.total;
+        shanhai$auditLedgerClampedBase = tail.longClampedTotal;
+        shanhai$auditLedgerCountBase = tail.count;
     }
 
     /**

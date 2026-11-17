@@ -66,6 +66,14 @@ public abstract class ShanhaiSetHealthGuardMixin {
             require = 1)
     private float shanhai$guardSetHealth(float value) {
         try {
+            // 🆕 2026-11-08（用户纠正）：「抓栈必须在原版被写的那一刻」——
+            //   这里就是那一刻。判据（值异常 / 受保护玩家）与 1/s 限流全在普通类里，
+            //   未命中时只花一次 instanceof + 两次 float 比较，**不改任何行为**。
+            com.shanhai.add.guard.stack.ShanhaiViolationProbe.guardSetHealthHead((Object) this, value);
+        } catch (Throwable ignored) {
+            // 抓栈坏了不许影响写血
+        }
+        try {
             // (Object) this ⇒ 本类体内零 MC 成员引用（理由见类注释）。
             return ShanhaiGuardValueLayer.guardSetHealth((Object) this, value);
         } catch (Throwable ignored) {

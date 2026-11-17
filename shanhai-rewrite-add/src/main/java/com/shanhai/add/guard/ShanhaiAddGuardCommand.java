@@ -18,16 +18,19 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 /**
- * 山海扩展 · <b>逐级抹除 / 压制表的命令入口</b>（{@code /shanhai_add} 下面的两棵子树）。
+ * 山海扩展 · <b>逐级抹除 / 压制表 / 钩子自检的命令入口</b>（{@code /shanhai_add} 下面的三棵子树）。
  *
  * <h2>命令树（设计 §3.2）</h2>
  * <pre>
- *   /shanhai_add purge                    🔴 逐级版清除实体（L1→L6，日志 purge_channel=L1|L3|L4|L5|L6）
+ *   /shanhai_add purge                    🔴 安全清场（HurtOnly：写 0.1 血 ＋ 原版 hurt；默认通道）
  *   /shanhai_add purge count              只数不抹（安全读数）
- *   /shanhai_add purge selfcheck          自检（通道表 ＋ 隔离阈值 ＋ 压制表读数 ＋ 三个开关）
+ *   /shanhai_add purge legacy             🔴 旧阶梯（L1→L6，可能造成第三方崩；只给显式排查用）
+ *   /shanhai_add purge legacy count       旧阶梯只数不抹
+ *   /shanhai_add purge selfcheck          自检（通道表 ＋ 隔离阈值 ＋ 压制表读数 ＋ 三个开关 ＋ 新通道常量）
  *   /shanhai_add suppress                 看压制表（= suppress list）
  *   /shanhai_add suppress list            逐条列出"现在还在压制窗口里的类型 ＋ 剩余秒数"
  *   /shanhai_add suppress clear           清空压制表（立刻停止周期抹除）
+ *   /shanhai_add hooks                    🆕 只读：立刻跑一轮"我们的注入还在不在"自检（存在性 ＋ 两条探针 ＋ 是否降级）
  * </pre>
  *
  * <h2>🔴 两条命令树的边界（硬约束，grep 可判）</h2>
@@ -47,7 +50,8 @@ import net.minecraftforge.fml.common.Mod;
  * <h2>日志标记（机器可判）</h2>
  * <pre>
  *   [SHANHAI-GUARD] add_command_registered /shanhai_add purge + suppress ; shanhai_add_children=[…]
- *   [SHANHAI-GUARD] add_purge_via=ladder dry_run=&lt;b&gt; removed=&lt;n&gt; scanned=&lt;n&gt; skipped_players=&lt;n&gt; unresolved=&lt;n&gt; channels={L1=…}
+ *   [SHANHAI-GUARD] add_purge_via=hurt dry_run=&lt;b&gt; swept=&lt;n&gt; killed=&lt;n&gt; stuck=&lt;n&gt; skipped_not_living=&lt;n&gt; …
+ *   [SHANHAI-GUARD] purge_kill window_ms=5000 swept=&lt;n&gt; killed=&lt;n&gt; stuck=&lt;n&gt; skipped=&lt;n&gt; reason=… ｜ killed：类型×N
  *   [SHANHAI-GUARD] suppress_cleared items=&lt;n&gt;
  * </pre>
  * 🔴 {@code add_purge_via=ladder} 只在<b>本类</b>打；本体走桥那次打的是 {@code purge_via=add}。
@@ -65,12 +69,19 @@ public final class ShanhaiAddGuardCommand {
     public static final String COMMAND_PURGE = "purge";
     /** 压制表那个子命令名（阶段 3b 从本体整棵搬来）。 */
     public static final String COMMAND_SUPPRESS = "suppress";
+    /** 🆕 钩子自检那个子命令名（只读：立刻跑一轮"我们的注入还在不在"；不设模块门槛）。 */
+    public static final String COMMAND_HOOKS = "hooks";
 
     private ShanhaiAddGuardCommand() {}
 
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
-        event.getDispatcher().register(Commands.literal(ROOT).then(commandBranch()));
+        // 🔴 2026-11-07 修：purge 与 suppress 必须是【兄弟】（以前 suppress 被 `.then(...)` 挂成 purge 的子节点
+        //    ⇒ 真实路径 `/shanhai_add purge suppress …`，`/shanhai_add suppress` 不存在）。
+        event.getDispatcher().register(Commands.literal(ROOT)
+                .then(commandBranch())
+                .then(suppressBranch())
+                .then(hooksBranch()));
         final var node = event.getDispatcher().getRoot().getChild(ROOT);
         final StringBuilder kids = new StringBuilder();
         if (node != null) {
@@ -79,17 +90,23 @@ public final class ShanhaiAddGuardCommand {
             }
         }
         // 这一行同时是"扩展的命令树真的挂上了"的唯一运行时证据（modid 写错就会被 Forge 静默跳过）
-        ShanhaiMod.LOGGER.info("{} add_command_registered /{}/{} + /{}/{} ; {}_children=[{}]",
-                PREFIX, ROOT, COMMAND_PURGE, ROOT, COMMAND_SUPPRESS, ROOT, kids.toString().trim());
+        // 🔴 2026-11-07：改成回读命令树给 present=，不再只打印"打算注册什么"。
+        final boolean purgePresent = node != null && node.getChild(COMMAND_PURGE) != null;
+        final boolean suppressPresent = node != null && node.getChild(COMMAND_SUPPRESS) != null;
+        ShanhaiMod.LOGGER.info("{} add_command_registered /{}/{} present={} + /{}/{} present={} ; {}_children=[{}]",
+                PREFIX, ROOT, COMMAND_PURGE, purgePresent, ROOT, COMMAND_SUPPRESS, suppressPresent,
+                ROOT, kids.toString().trim());
     }
 
-    /** {@code /shanhai_add} 下面挂的两棵子树。 */
+    /** {@code /shanhai_add} 下面的 purge 子树（suppress 由 register 那一层并排挂上去）。 */
     public static LiteralArgumentBuilder<CommandSourceStack> commandBranch() {
         return Commands.literal(COMMAND_PURGE)
-                .executes(ctx -> purge(ctx, false))
-                .then(Commands.literal("count").executes(ctx -> purge(ctx, true)))
-                .then(Commands.literal("selfcheck").executes(ShanhaiAddGuardCommand::selfcheck))
-                .then(suppressBranch());
+                .executes(ctx -> purge(ctx, false, false))
+                .then(Commands.literal("count").executes(ctx -> purge(ctx, true, false)))
+                .then(Commands.literal("legacy")
+                        .executes(ctx -> purge(ctx, false, true))
+                        .then(Commands.literal("count").executes(ctx -> purge(ctx, true, true))))
+                .then(Commands.literal("selfcheck").executes(ShanhaiAddGuardCommand::selfcheck));
     }
 
     /** {@code /shanhai_add suppress …}（门与 purge 同一条：玩家身上要带模块）。 */
@@ -98,6 +115,17 @@ public final class ShanhaiAddGuardCommand {
                 .executes(ShanhaiAddGuardCommand::suppressList)
                 .then(Commands.literal("list").executes(ShanhaiAddGuardCommand::suppressList))
                 .then(Commands.literal("clear").executes(ShanhaiAddGuardCommand::suppressClear));
+    }
+
+    /**
+     * 🆕 {@code /shanhai_add hooks} —— <b>只读</b>：立刻跑一轮"我们的注入还在不在"自检
+     * （存在性 ＋ 两条行为探针，判据全在 {@link com.shanhai.add.guard.selfcheck.ShanhaiHookSelfCheck}）。
+     *
+     * <p>挂在根上作 {@code purge} ／ {@code suppress} 的<b>兄弟</b>；<b>不设</b>模块门槛
+     * （只读、不改世界；控制台也算成功）。
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> hooksBranch() {
+        return Commands.literal(COMMAND_HOOKS).executes(ShanhaiAddGuardCommand::hooks);
     }
 
     // ═══════════════════════════════ 门槛 ═══════════════════════════════
@@ -123,16 +151,18 @@ public final class ShanhaiAddGuardCommand {
     // ═══════════════════════════════ /shanhai_add purge ═══════════════════════════════
 
     /**
-     * {@code /shanhai_add purge} 与 {@code /shanhai_add purge count}。
+     * {@code /shanhai_add purge}、{@code … purge count}、{@code … purge legacy}、{@code … purge legacy count}。
      *
-     * <p>与本体 {@code /shanhai purge} 的区别<b>只有手段</b>：这里直接走 {@link ShanhaiPurge#purgeAll}
-     * 的逐级阶梯（L1→L6，含 L5 反射摘账与 L6 隔离），而本体没装扩展时是逐维度 {@code kill @e}。
-     * 门槛、跳过玩家、回显格式三者与本体一致。
+     * <p>🆕 默认走 <b>安全清场通道（HurtOnly）</b> {@link ShanhaiPurge#purgeAll}：先写 0.1 血骗过
+     * {@code isDeadOrDying} 前置，再用原版 {@code hurt} 打一记必杀；<b>永不</b> setRemoved/discard/改 Level 容器
+     * （旧的 L1→L6 阶梯对"替身 setRemoved 空实现"的实体会把对方内部表搞成不一致 ⇒ 崩服）。
+     * {@code legacy} 子命令是<b>显式</b>退回旧阶梯（日志会写 {@code purge_legacy_removal … 可能造成第三方崩}）。
      *
-     * @param dryRun true = 只数不抹（{@code /shanhai_add purge count}）
+     * @param dryRun true = 只数不抹（{@code … purge count}）
+     * @param legacy true = 旧阶梯（{@code … purge legacy}）
      */
     private static int purge(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
-                             boolean dryRun) {
+                             boolean dryRun, boolean legacy) {
         final CommandSourceStack source = ctx.getSource();
         final String denied = gate(source);
         if (denied != null) {
@@ -153,21 +183,35 @@ public final class ShanhaiAddGuardCommand {
             ShanhaiMod.LOGGER.warn("{} add_purge_rejected reason=no_server", PREFIX);
             return 0;
         }
-        final ShanhaiPurge.Result r = ShanhaiPurge.purgeAll(server, owner, dryRun);
-        // 维度数不在这里再数一遍：purgeAll 自己那行 `purge_start scope=all_levels levels=<n>` 才是权威读数
+        final ShanhaiPurge.Result r = legacy
+                ? ShanhaiPurge.purgeLegacy(server, owner, dryRun)
+                : ShanhaiPurge.purgeAll(server, owner, dryRun);
+        // 维度数不在这里再数一遍：purgeAll 自己那行 `purge_start … levels=<n>` 才是权威读数
         // （在这里另数一次就成了"同一件事两个来源"，早晚会不一致）。
-        ShanhaiMod.LOGGER.info("{} add_purge_via=ladder dry_run={} removed={} scanned={}"
-                        + " skipped_players={} unresolved={} channels={}",
-                PREFIX, dryRun, r.removed, r.scanned, r.skippedPlayers, r.unresolved, r.channels);
-        // 回显与本体 /shanhai purge 同格式（只换数字来源，运维不必记两套）
-        final String line = (dryRun ? "§b[勘数] §7范围内 §f" : "§a[已执行] §7已抹除 §f")
-                + (dryRun ? r.scanned : r.removed)
-                + (dryRun ? " §7只（未抹）" : " §7只")
-                + " §7／跳过玩家 §f" + r.skippedPlayers + " §7个"
-                + (r.unresolved > 0 ? " §c／这一轮没解决 " + r.unresolved + " 只（已进重申表）" : "")
-                + " §8／逐级解决 " + r.channels;
+        ShanhaiMod.LOGGER.info("{} add_purge_via={} dry_run={} swept={} killed={} stuck={}"
+                        + " skipped_not_living={} skipped_players={} removed={} unresolved={} channels={}",
+                PREFIX, r.mode, dryRun, r.scanned, r.killed, r.stuck,
+                r.notLivingSkipped, r.skippedPlayers, r.removed, r.unresolved, r.channels);
+        // 回显：默认通道报 killed/stuck/skipped；legacy 通道保留旧那套（逐级解决 + 重申表）
+        final String line;
+        if (legacy) {
+            line = (dryRun ? "§b[勘数·旧阶梯] §7范围内 §f" : "§a[已执行·旧阶梯] §7已抹除 §f")
+                    + (dryRun ? r.scanned : r.removed)
+                    + (dryRun ? " §7只（未抹）" : " §7只")
+                    + " §7／跳过玩家 §f" + r.skippedPlayers + " §7个"
+                    + (r.unresolved > 0 ? " §c／这一轮没解决 " + r.unresolved + " 只（已进重申表）" : "")
+                    + " §8／逐级解决 " + r.channels
+                    + " §c／旧阶梯可能造成第三方崩";
+        } else {
+            line = (dryRun ? "§b[勘数] §7可杀候选 §f" : "§a[已执行] §7已抹除 §f")
+                    + (dryRun ? r.scanned : r.killed)
+                    + (dryRun ? " §7只（未抹）" : " §7只")
+                    + " §8／删不掉 §f" + (dryRun ? 0 : r.stuck) + " §7只（留在原地）"
+                    + " §8／非生物跳过 §f" + r.notLivingSkipped
+                    + " §7／跳过玩家 §f" + r.skippedPlayers + " §7个";
+        }
         source.sendSuccess(() -> Component.literal(line), false);
-        return r.removed;
+        return "legacy".equals(r.mode) ? r.removed : r.killed;
     }
 
     /**
@@ -185,6 +229,9 @@ public final class ShanhaiAddGuardCommand {
                 + " 放行(CHANGED_DIMENSION)=" + (!allow.yes)
                 + " 逐级通道=" + String.join("/", ShanhaiGuardRemoval.purgeChannels())
                 + " 隔离阈值=" + ShanhaiGuardRemoval.ISOLATE_AFTER_REASSERTS
+                + " ／ 默认通道=hurt(prime=" + ShanhaiPurgeAdmission.PRIME_HEALTH
+                + " damage_max=" + ShanhaiPurgeAdmission.SAFE_DAMAGE_MAX
+                + " headroom=" + ShanhaiPurgeAdmission.DAMAGE_HEADROOM + ")"
                 + " ／ " + ShanhaiGuardSuppression.statusLine()
                 + " ／ " + ShanhaiGuardSwitches.statusLine();
         ctx.getSource().sendSuccess(() -> Component.literal("§a" + line), false);
@@ -222,5 +269,32 @@ public final class ShanhaiAddGuardCommand {
         source.sendSuccess(() -> Component.literal(line), true);
         ShanhaiMod.LOGGER.info("{} suppress_cleared items={}", PREFIX, n);
         return n;
+    }
+
+    // ═══════════════════════════════ /shanhai_add hooks ═══════════════════════════════
+
+    /**
+     * 🆕 {@code /shanhai_add hooks} —— <b>只读</b>：立刻跑一轮"我们的注入还在不在"自检。
+     *
+     * <p>回显规格那行（逐字）：
+     * <pre>
+     *   [SHANHAI-GUARD] hooks status=ok|missing data_only=&lt;bool&gt; found=&lt;0..4&gt; missing=&lt;名单&gt; probe=ok|health|remove
+     * </pre>
+     * 判据、探针、降级标志全在 {@link com.shanhai.add.guard.selfcheck.ShanhaiHookSelfCheck}；
+     * 控制台另落两行：同一行 ＋ {@code hooks_found …}（<b>实际跑在类里的方法名</b>，带 {@code handler$<token>$} 前缀，
+     * 对账用）。
+     *
+     * <p>🔴 这一条也<b>不过</b> {@link #gate}：只读、不改世界、不动真玩家（探针零实体），
+     * 控制台（{@code player == null}）同样算成功 ⇒ 永远返回 1。
+     * 自检发现钩子缺失时，状态本身会在那行里如实写 {@code status=missing}（不靠返回值表达）。
+     */
+    private static int hooks(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        final com.shanhai.add.guard.selfcheck.ShanhaiHookSelfCheck.Result result =
+                com.shanhai.add.guard.selfcheck.ShanhaiHookSelfCheck.runForCommand();
+        source.sendSuccess(() -> Component.literal("§a" + result.line), false);
+        ShanhaiMod.LOGGER.info(result.line);
+        ShanhaiMod.LOGGER.info("{}hooks_found {}", PREFIX, result.foundDetail());
+        return 1;
     }
 }

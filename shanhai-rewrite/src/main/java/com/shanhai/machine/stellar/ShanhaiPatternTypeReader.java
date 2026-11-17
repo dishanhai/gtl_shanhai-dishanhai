@@ -411,19 +411,58 @@ public final class ShanhaiPatternTypeReader {
             for (String key : keys) {
                 (isTypeRelatedKey(key) ? preferred : rest).add(key);
             }
-            final List<ShanhaiPatternRawNbt.Pair> out = new ArrayList<>(Math.min(maxPairs, keys.size()));
-            for (List<String> bucket : List.of(preferred, rest)) {
-                for (String key : bucket) {
-                    if (out.size() >= maxPairs) {
-                        return List.copyOf(out);
-                    }
-                    out.add(new ShanhaiPatternRawNbt.Pair(key, rawValueOf(tag, key)));
-                }
-            }
-            return List.copyOf(out);
+            final List<String> ordered = new ArrayList<>(keys.size());
+            ordered.addAll(preferred);
+            ordered.addAll(rest);
+            return pairsOf(tag, ordered, maxPairs);
         } catch (Throwable t) {
             return List.of();
         }
+    }
+
+    /**
+     * {@code /shanhai why} ③ 用的「原始声明」取法：<b>只取跟类型有关的键</b>
+     * （{@link #isTypeRelatedKey}），一个都没有时才退回「前 {@code maxPairs} 个键」。
+     *
+     * <p>为什么要与 {@link #rawPairs} 分开：那一行是<b>聊天栏/日志里的正文</b>，
+     * 绝大多数正常样板有类型键 ⇒ 只显示 {@code gt_shanhai_recipe_type='…'} 这一段（与用户给的样例逐字一致）；
+     * 而<b>一个类型键都没有</b>恰恰是关键读数 ⇒ 那时列出它真正有的前几个键
+     * （总比空着强，长度由 {@link ShanhaiPatternRawNbt#VALUE_MAX_CHARS} 与键数双重封顶）。
+     */
+    public static @NotNull List<ShanhaiPatternRawNbt.Pair> typePairs(@Nullable CompoundTag tag, int maxPairs) {
+        if (maxPairs <= 0) {
+            return List.of();
+        }
+        try {
+            final List<String> keys = allKeys(tag);
+            if (keys.isEmpty()) {
+                return List.of();
+            }
+            final List<String> typeRelated = new ArrayList<>(keys.size());
+            for (String key : keys) {
+                if (isTypeRelatedKey(key)) {
+                    typeRelated.add(key);
+                }
+            }
+            return pairsOf(tag, typeRelated.isEmpty() ? keys : typeRelated, maxPairs);
+        } catch (Throwable t) {
+            return List.of();
+        }
+    }
+
+    /** 按给定键序取前 {@code maxPairs} 个「键 → 原始值」对。 */
+    private static @NotNull List<ShanhaiPatternRawNbt.Pair> pairsOf(@Nullable CompoundTag tag,
+                                                                   @NotNull List<String> ordered,
+                                                                   int maxPairs) {
+        final List<ShanhaiPatternRawNbt.Pair> out =
+                new ArrayList<>(Math.min(maxPairs, ordered.size()));
+        for (String key : ordered) {
+            if (out.size() >= maxPairs) {
+                break;
+            }
+            out.add(new ShanhaiPatternRawNbt.Pair(key, rawValueOf(tag, key)));
+        }
+        return List.copyOf(out);
     }
 
     /** 一个键的原始值：{@code TAG_STRING} ⇒ 原文（不带引号）；其它 ⇒ SNBT 原文。读不到 ⇒ {@code ""}。 */
@@ -451,11 +490,17 @@ public final class ShanhaiPatternTypeReader {
      */
     public static @NotNull String rawDeclaration(@Nullable ItemStack stack) {
         try {
-            if (stack == null || stack.isEmpty()) {
-                return "";
-            }
+            return stack == null || stack.isEmpty() ? "" : rawDeclaration(stack.getTag());
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** {@link #rawDeclaration(ItemStack)} 的<b>纯 NBT</b> 版本（离线自证只需要 CompoundTag，不需要 ItemStack）。 */
+    public static @NotNull String rawDeclaration(@Nullable CompoundTag tag) {
+        try {
             final List<ShanhaiPatternRawNbt.Pair> pairs =
-                    rawPairs(stack.getTag(), ShanhaiPatternRawNbt.WHY_RAW_MAX);
+                    typePairs(tag, ShanhaiPatternRawNbt.WHY_RAW_MAX);
             return pairs.isEmpty() ? "" : ShanhaiPatternRawNbt.rawText(pairs, ShanhaiPatternRawNbt.WHY_RAW_MAX);
         } catch (Throwable t) {
             return "";
@@ -472,7 +517,15 @@ public final class ShanhaiPatternTypeReader {
      */
     public static @NotNull String describeRawNbt(int slot, @Nullable ItemStack stack) {
         try {
-            final CompoundTag tag = stack == null || stack.isEmpty() ? null : stack.getTag();
+            return describeRawNbt(slot, stack == null || stack.isEmpty() ? null : stack.getTag());
+        } catch (Throwable t) {
+            return "XRECIPE_NBT slot=" + slot + " keys=[] raw=[]";
+        }
+    }
+
+    /** {@link #describeRawNbt(int, ItemStack)} 的<b>纯 NBT</b> 版本（离线自证用）。 */
+    public static @NotNull String describeRawNbt(int slot, @Nullable CompoundTag tag) {
+        try {
             return ShanhaiPatternRawNbt.body(slot, allKeys(tag),
                     rawPairs(tag, ShanhaiPatternRawNbt.XRECIPE_RAW_MAX));
         } catch (Throwable t) {

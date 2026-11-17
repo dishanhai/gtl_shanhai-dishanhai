@@ -263,7 +263,14 @@ jar {
                 //    但注入点**显式**写死 require = 1：缺装 ⇒ 安静（类不加载）；
                 //    装了但方法签名漂了 ⇒ 一行 ERROR 级 WARN 把「接管失效」说出来，而不是悄悄不生效。
                 //    ③ 同样不许塞进 shanhai.mixin.json（那份 required:true，跨 mod 目标改签名会把启动打崩）。
-                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json,shanhai.probe.mixin.json,shanhai.meinfinitycell.mixin.json,shanhai.extendedaeplus.mixin.json',
+                // 🔴 2026-11-06 追加：第六份 `shanhai.appeng.mixin.json`
+                //    只装「AE2 存量累加饱和」那一个 mixin（ShanhaiAeCounterSatMixin），
+                //    目标 = AE2 自己的包私有类 appeng.api.stacks.VariantCounter#add(AEKey,J)V
+                //    （超级 AE 无限元件把单键上限抬到 Long.MAX 之后，两个来源相加会绕回负数）。
+                //    AE2 是本 mod 的运行期常客、但仍是**可选**目标 ⇒ 一律 required:false + defaultRequire:0，
+                //    注入点写死 require = 0（AE2 不在 / 方法漂了 ⇒ 安静跳过，不打崩启动）。
+                //    ③ 同样不许塞进 shanhai.mixin.json（那份 required:true）。
+                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json,shanhai.probe.mixin.json,shanhai.meinfinitycell.mixin.json,shanhai.extendedaeplus.mixin.json,shanhai.appeng.mixin.json',
         ])
     }
     // The refmap must sit at the JAR ROOT: shanhai.mixin.json references it by

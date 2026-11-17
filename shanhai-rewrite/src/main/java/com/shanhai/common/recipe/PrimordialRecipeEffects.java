@@ -42,7 +42,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
-import org.gtlcore.gtlcore.config.ConfigHolder;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -1926,8 +1925,12 @@ public final class PrimordialRecipeEffects {
      * 🔴 <b>批处理的时间窗份数 N —— 照抄 gtlcore {@code BatchProcessing.getBatchSize} 的第一段。</b>
      *
      * <pre>
-     *   [字节码] BatchProcessing.apply：
-     *       22: iconst_1 / 23: ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks / 29: Math.max  → window
+     *   [字节码] BatchProcessing.apply（分组布局实测，如 gtlcore 1.2.3.2-fix5 / 1.2.3.3-fix2）：
+     *       26: getfield ConfigHolder.machines:ConfigHolder$MachineOptions
+     *       29: getfield ConfigHolder$MachineOptions.batchProcessingTimeLimitTicks:I  / Math.max  → window
+     *       ⚠️ 布局有两代（javap 实证）：≤1.2.3.2-fix4 该字段在 ConfigHolder【顶层】（扁平），
+     *       ≥1.2.3.2-fix5 搬到 ConfigHolder$MachineOptions（分组）⇒ 本类统一经
+     *       {@code shanhai$batchWindowTicks()} → {@code GtlConfigCompat}，两种布局都读得到。
      *       34–57: (duration &gt; 0 &amp;&amp; duration &lt;= window / 2) ⇒ Eligibility.TIME_WINDOW
      *              （⇒ 时长 &gt; 时间窗一半的配方【根本不进批处理】）
      *   [字节码] BatchProcessing.getBatchSize：
@@ -1956,8 +1959,22 @@ public final class PrimordialRecipeEffects {
         if (originDuration <= 0) {
             return 1;
         }
-        final int window = Math.max(1, ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks);
+        final int window = Math.max(1, shanhai$batchWindowTicks());
         return Math.max(1, window / originDuration);
+    }
+
+    /**
+     * gtlcore 的<b>批处理时间窗</b>（tick）—— 布局两代都兼容（本类所有日志/计算点的唯一入口）。
+     *
+     * <pre>
+     *   扁平（gtlcore ≤ 1.2.3.2-fix4）：ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks（顶层字段）
+     *   分组（gtlcore ≥ 1.2.3.2-fix5）：ConfigHolder.INSTANCE.machines.batchProcessingTimeLimitTicks
+     * </pre>
+     * 两条都读不到 ⇒ 用上游默认值 <b>100</b>（{@code ConfigHolder$MachineOptions} 构造器里 {@code bipush 100}），
+     * 并且 {@code GtlConfigCompat} 会打一行 WARN（不许静默）。
+     */
+    private static int shanhai$batchWindowTicks() {
+        return com.shanhai.common.compat.GtlConfigCompat.machineInt("batchProcessingTimeLimitTicks", 100);
     }
 
     /**
@@ -2209,7 +2226,7 @@ public final class PrimordialRecipeEffects {
         }
         final long[] ps = parallels.length == originCount
                 ? parallels : java.util.Arrays.copyOf(parallels, originCount);
-        final long window = Math.max(1, ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks);
+        final long window = Math.max(1, shanhai$batchWindowTicks());
         final ShanhaiBatchPlan.Outcome outcome = ShanhaiBatchPlan.run(window, durations, ps,
                 i -> shanhai$batchInputBoundOf(machine, origins.get(i)),
                 wanted -> shanhai$batchOutputBoundOf(machine, finalRecipe, wanted),
@@ -2338,7 +2355,7 @@ public final class PrimordialRecipeEffects {
                         + "产出：{} 张 → {} 张（×N）；duration：{} → {}（×N）；"
                         + "★EUt：{} → {}（必须相等 ⇒ 「批处理不影响机器的耗电」）。",
                 originCount, outcome.d0Max,
-                Math.max(1, ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks), outcome.nTime,
+                Math.max(1, shanhai$batchWindowTicks()), outcome.nTime,
                 outcome.nInput, outcome.nOutput, outcome.cycles,
                 java.util.Arrays.toString(parallels), outcome.extrasText(),
                 outcome.zeroParallelCount == 0 ? "全部" : ("除 " + outcome.zeroParallelCount + " 条份额≤0 的之外，共 "),
@@ -2408,7 +2425,7 @@ public final class PrimordialRecipeEffects {
                         + "（已被输入量/输出空间钳过）⇒ 额外补扣原料 = (N-1)×p = {} 份。"
                         + "产出：{} 张 → {} 张（×N）；duration：{} → {}（×N）；"
                         + "★EUt：{} → {}（必须相等 ⇒ 这就是「批处理不影响机器的耗电」）。",
-                Math.max(1, ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks), originRecipe.duration,
+                Math.max(1, shanhai$batchWindowTicks()), originRecipe.duration,
                 wanted, parallel, applied, extra,
                 before.outputs.size(), after.outputs.size(), before.duration, after.duration,
                 euBefore, euAfter);
@@ -2427,7 +2444,7 @@ public final class PrimordialRecipeEffects {
         LOGGER.info("[SHANHAI-BATCH] 批处理【本轮跳过】：时间窗份数={}，而 p={} 这一份之后"
                         + "输入量或输出空间已装不下第二份 ⇒ 退化为未开批处理（不扣额外料、不改耗时）。"
                         + "这不是「没实现」，是「料不够」。（时间窗={} tick ／ 原配方时长={} tick ／ 机器={}）",
-                wanted, parallel, Math.max(1, ConfigHolder.INSTANCE.batchProcessingTimeLimitTicks),
+                wanted, parallel, Math.max(1, shanhai$batchWindowTicks()),
                 originRecipe.duration, machine == null ? null : machine.self());
     }
 

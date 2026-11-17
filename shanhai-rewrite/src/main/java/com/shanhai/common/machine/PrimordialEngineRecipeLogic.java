@@ -37,6 +37,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -549,23 +551,128 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
     }
 
     /**
-     * 🔴 <b>覆写只为【观测】—— 返回值逐字就是父类的返回值</b>（2026-10-02 第十轮）。
+     * 证据行 {@code [SHANHAI-CROSSTYPE]} 的限流状态：上一次落盘的毫秒与形态串。
      *
-     * <p>为什么要有这个覆写：运行期一致性探针（{@link CandidateSetConsistency}）必须看到
-     * <b>每一次</b>取候选的结果，而主机的候选集出口原本只有父类
-     * {@code MutableRecipesLogic#lookupRecipeSet()}。覆写之后，
+     * <p>⚠️ 这两个是<b>实例</b>字段（每个 {@code RecipeLogic} 实例属于一台机器）⇒ 天然做到了
+     * 「<b>同一台机器</b> 5 秒内最多一行」，不需要任何静态表。
+     * 语义与模块侧 {@code PrimordialModuleRecipeLogic#shanhai$logCrossType} 逐条相同：
+     * 同形不重复打 ＋ 5 秒窗口内该机器的任何一行都不打（形态变了也等窗口过去）。
+     */
+    private long shanhai$lastCrossTypeLogMillis;
+
+    /** 上一次落盘的形态串；{@code null} = 还没打过（见上一条字段的说明）。 */
+    @Nullable
+    private String shanhai$lastCrossTypeShape;
+
+    /**
+     * <b>取本轮候选</b> —— 本类唯一的候选集出口；两条路只差"从哪里取"。
+     *
+     * <p>🔴 <b>路 A（2026-10-25 新增）：主机授予跨配方种类并行时，取全部声明类型的并集。</b>
+     * 判据 {@code grantsCrossTypeParallel() && !isLock()}；形制照抄模块侧已跑通的那套
+     * （{@code PrimordialModuleRecipeLogic#shanhai$lookupCrossTypeSet}）：逐类型
+     * {@code type.getLookup().getRecipeIterator(holder, this::checkRecipe)} 后取并集，
+     * 返回<b>保序</b>的 {@link LinkedHashSet}。
+     * <p>为什么必须补在"主机自己"这条路上：上游父类只按 {@code getRecipeType()}
+     * （= {@code activeRecipeType} 那一个）取，而{@code grantsCrossTypeParallel()} 的调用点
+     * 全在模块 / Jade / 样板搬运上，<b>没有一处</b>覆盖主机自己；归墟又故意摘掉了「机器模式」页
+     * （玩家连切都切不了）⇒ 不补这一刀，归墟声明的 3 个配方类型里永远只有下标 0 那个会被检索。
+     *
+     * <p>🔴 <b>路 B（老路径，逐字未改）</b>：未授予 / 锁配方 ⇒ 原样 {@code super.lookupRecipeSet()}。
+     * 老主机（原始终焉引擎）{@code grantsCrossTypeParallel() == false} ⇒ 行为一个字节都不变，
+     * 连日志一行都不打。
+     *
+     * <p>🔴 <b>为什么这个覆写最早存在（2026-10-02 第十轮）</b>：运行期一致性探针
+     * （{@link CandidateSetConsistency}）必须看到<b>每一次</b>取候选的结果 ——
      * {@code shanhai$updatePowerParallelCap()} 那次调用、本类自己那次调用、以及父类
      * {@code calculateParallels()} 内部那一句 {@code invokevirtual lookupRecipeSet()}
-     * <b>全部</b>汇到这里 —— 于是"同一轮两次取候选是不是同一个集合"才有得比。
+     * <b>全部</b>汇到这里 ⇒ "同一轮两次取候选是不是同一个集合"才有得比。
+     * 观察窗之外（{@code isRoundActive() == false}）连字符串都不建。
      *
      * <p>⚠️ <b>与模块侧那份覆写的关键差别</b>：模块侧会<b>截断</b>（{@code ≤ threads} 条），
-     * 本类<b>一条都不动</b>（主机不截断，见 {@code shanhai$updatePowerParallelCap()} 的注释）
-     * ⇒ 这里只有"记录 + 原样返回"，没有任何"改内容"的可能。
-     * 观察窗之外（{@code isRoundActive() == false}）连字符串都不建，开销为一次布尔读。
+     * 本类<b>一条都不动</b>（主机不截断，见 {@code calculateParallels} 里那条注释）
+     * ⇒ 并集把每个类型的全部候选都收进来，<b>不按线程数截</b>；要限份额属于分配层
+     * （greedy / fair），不在候选层做。
      */
     @Override
     protected @NotNull Set<GTRecipe> lookupRecipeSet() {
-        final Set<GTRecipe> all = super.lookupRecipeSet();
+        // ═════════ 2026-10-25（用户原话逐字：「它是跨配方种类并行，那就不需要选择」）═════════
+        // 🔴 主机【自己】也要同时检索全部声明类型。
+        //    上游 MutableRecipesLogic#lookupRecipeSet() 只按 machine.getRecipeType()（= activeRecipeType
+        //    那一个）取；归墟视界枢核又故意摘掉了「机器模式」页（玩家连切都切不了）⇒ 若不在这里补，
+        //    归墟声明的 3 个配方类型里永远只有下标 0 那个会被检索。授予钩子 grantsCrossTypeParallel()
+        //    只覆盖「模块 / Jade / 样板搬运」，【没有一处】覆盖"主机自己"这条路。
+        //
+        // 形制【照抄】模块侧已跑通的那套（PrimordialModuleRecipeLogic#shanhai$lookupCrossTypeSet）：
+        //   · 判定 = 主机授予 && !isLock()（锁配方时"玩家锁了哪条就是哪条"，与上游锁分支同义）；
+        //   · 逐类型取 type.getLookup().getRecipeIterator(holder, this::checkRecipe) 并取【并集】；
+        //   · this::checkRecipe 与父类 lookupRecipeSet 里 invokedynamic 捕获的是【同一个虚方法】
+        //     （本类覆写了它：额外挂载槽闸门 → 电压闸门 → 配方条件）⇒ 不另写一份过滤，否则
+        //     "父类认的"与"这里认的"会分叉，症状是"单类型能跑、跨类型跑不了"且无从解释；
+        //   · 返回 LinkedHashSet（不是 ObjectOpenHashSet）：下游 buildFinalNormalRecipe 按
+        //     getOriginRecipeList() 的顺序【逐条扣料】⇒ 集合顺序 = 玩家看到的扣料顺序。
+        //     插入序 = ①getRecipeTypes() 数组序 ②类型内 getRecipeIterator 的真实序，两级都确定。
+        //
+        // ⚠️ 与模块侧【唯一】的刻意差异：主机【不截断】（见下方 calculateParallels 的注释
+        //    "主机不截断"）⇒ 并集把每个类型的全部候选都收进来，一条都不丢，也不按线程数截。
+        //    要限份额属于【分配层】（greedy/fair），不在候选层做。
+        // ⚠️ 两处【一个字都没动】：activeRecipeType 字段与它的存档语义（老存档一个字节不变）、
+        //    PrimordialRecipeEffects.greedyAllocateWithLongLimit。
+        final PrimordialOmegaEngineMachine host = getMachine();
+        final Set<GTRecipe> all;
+        if (host != null && host.grantsCrossTypeParallel() && !isLock()) {
+            final GTRecipeType[] types = host.getRecipeTypes();
+            final LinkedHashSet<GTRecipe> picked = new LinkedHashSet<>();
+            // 证据行 order=（贡献过候选的类型 id，按扫描序 ⇒ 与 getRecipeTypes() 下标序一致）
+            final List<String> order = new ArrayList<>();
+            // 证据行 scanned=（迭代器吐出的原始条数，含"同一 id 被两个类型重复注册"的那些）
+            int scanned = 0;
+            if (types != null) {
+                for (GTRecipeType type : types) {
+                    if (type == null) {
+                        continue;   // 注册期 requireNoNullRecipeTypes 已挡，这里只是兜底
+                    }
+                    final Iterator<GTRecipe> it = type.getLookup()
+                            .getRecipeIterator((IRecipeCapabilityHolder) host, this::checkRecipe);
+                    int addedHere = 0;
+                    while (it.hasNext()) {
+                        final GTRecipe candidate = it.next();
+                        scanned++;
+                        // 同一个 id 可能被两个类型同时注册（GTRecipe.equals 比的是 id）⇒ 去重，
+                        // 但【不去重扫描计数】：scanned 与 picked 的差就是判"有没有撞 id"的读数。
+                        if (picked.add(candidate)) {
+                            addedHere++;
+                        }
+                    }
+                    if (addedHere > 0) {
+                        order.add(type.registryName != null ? type.registryName.toString() : String.valueOf(type));
+                    }
+                }
+            }
+            // 兜底：并集为空 ⇒ 退回父类单类型的结果（宁可少跑，也不要返回空集让机器"装作没配方"）。
+            all = picked.isEmpty() ? super.lookupRecipeSet() : picked;
+            // ── 判据行：生效时一台机器 5 秒内最多一行；未生效时【一行都不打】（这一段只在分支内） ──
+            final String shape = "types=" + (types == null ? 0 : types.length)
+                    + " scanned=" + scanned + " picked=" + picked.size() + " order=" + String.join(",", order);
+            final long now = System.currentTimeMillis();
+            if (!shape.equals(shanhai$lastCrossTypeShape) && now - shanhai$lastCrossTypeLogMillis >= 5_000L) {
+                shanhai$lastCrossTypeLogMillis = now;
+                shanhai$lastCrossTypeShape = shape;
+                try {
+                    ShanhaiMod.LOGGER.info(
+                            "[SHANHAI-CROSSTYPE] host={} on=true types={} scanned={} picked={} order={}",
+                            host.getDefinition().getId(),
+                            types == null ? 0 : types.length,
+                            scanned,
+                            picked.size(),
+                            String.join(",", order));
+                } catch (Throwable ignored) {
+                    // 判据行永远不许把候选集带崩（与 shanhai$logWirelessTick 同一条纪律）
+                }
+            }
+        } else {
+            // ══════════ 未授予 / 锁配方 ⇒ 逐字走父类（老主机行为一个字节都不变） ══════════
+            all = super.lookupRecipeSet();
+        }
         if (CandidateSetConsistency.isRoundActive()) {
             final List<String> ids = new ArrayList<>(all.size());
             for (GTRecipe candidate : all) {

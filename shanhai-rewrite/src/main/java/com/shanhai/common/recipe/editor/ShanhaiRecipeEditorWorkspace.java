@@ -127,9 +127,15 @@ public final class ShanhaiRecipeEditorWorkspace {
      * 只改一个 ⇒ 机器看到的档位与真实耗电分叉。所以 {@link #loadBuffer} 与保存路径
      * 都从 {@code pendingEut} 这一个来源同时推 {@code euTier}（见
      * {@code ShanhaiRecipeIoApply.applyEut}）。
+     *
+     * <p>🔴 <b>2026-11 改口径（用户点单）：「把那个上限64A的去掉」</b>。
+     * 老值 {@code 64} 是<b>业务上限</b>（当年照着"一台机器最多 64A"随手写的），
+     * 现在上限就是 {@code int} 的边界本身 —— 见 {@link ShanhaiRecipeEnergy#AMPERAGE_MAX} 的类注释：
+     * MAX 档电压 2147483647 × 电流 2147483647 = 4.61e18 &lt; {@code Long.MAX} 9.22e18，
+     * 还剩约一半余量 ⇒ 电流放到 int 上限也撑不破 {@code long}，不需要任何夹取。
      */
-    public static final int AMPERAGE_MIN = 1;
-    public static final int AMPERAGE_MAX = 64;
+    public static final int AMPERAGE_MIN = ShanhaiRecipeEnergy.AMPERAGE_MIN;
+    public static final int AMPERAGE_MAX = ShanhaiRecipeEnergy.AMPERAGE_MAX;
 
     /**
      * 每页多少格（一栏一页）。用户要求「格子区要能滚动或分页」——
@@ -158,10 +164,72 @@ public final class ShanhaiRecipeEditorWorkspace {
     private final List<ResourceLocation> recipes = new ArrayList<>();
     private final ShanhaiIoTable io = new ShanhaiIoTable();
 
+    // ---------------------------------------------------------------- 🆕 已删除配方（恢复入口）
+    //
+    // 用户点单（逐字）：「我现在没法在配方编辑器恢复删除掉的配方，你在图1红框这里添加一个按钮，
+    //   点击之后如图2中红框这样的列表显示该配方的主产物以及配方id，点击该配方可以直接进入编辑页面，
+    //   显示配方的输入和输出，但是下面的按钮只剩下恢复这条配方+返回按钮」
+    //
+    // 落地口径：
+    //   · 列表 = 【同一个列表控件、换数据源】（不新开一屏）⇒ stage 仍是 TYPES，只是 deletedList=true；
+    //   · 详情 = 复用编辑屏那一套控件（只读）⇒ stage=EDIT 且 previewId != null；
+    //   · 数据源 = 覆盖层 op=remove/disable ＋ 快照（服务端算，客户端只画推下来的那一份）。
+
+    /** 第一屏的列表源是不是「已删除配方」。 */
+    private boolean deletedList;
+
+    /** 服务端那份完整列表（客户端那份不用；客户端只画服务端推下来的 12 行）。 */
+    private ShanhaiDeletedRecipeList deletedRowsList = ShanhaiDeletedRecipeList.empty();
+
+    /** 编辑屏现在显示的是"已删除配方的只读详情"（非 {@code null} ⇒ 只读预览）。 */
+    private ResourceLocation previewId;
+
+    /** 预览那条的类型 id（恢复时用它重建索引 —— 那条已经查不到活对象了）。 */
+    private String previewTypeId;
+
+    /** 客户端那份：服务端推下来的 12 行主产物图标（不是已删除模式时恒为空栈）。 */
+    private final ItemStack[] deletedIcons = new ItemStack[ShanhaiDeletedRecipeList.ROWS_PER_PAGE];
+
+    /** 详情页那一行说明（"这是只读预览 / 有没有快照"）。 */
+    private String deletedNote = "";
+
     private int pendingDuration;
-    private int pendingEut;
+    /**
+     * 缓冲里的 EU/t。
+     * <p>🔴 <b>2026-11 从 int 放宽到 long</b>：新口径是 {@code EUt = 该档电压 × 电流}，而电流上限
+     * 已经是 int 上限 ⇒ 乘积最大 4.61e18，<b>int 装不下</b>（老代码在这里夹到
+     * {@code Integer.MAX_VALUE}，于是 MAX 档 &gt;1A 时"耗能功率没有变"）。
+     * GT 侧的 EU 本来就是 long：{@code RecipeHelper#getInputEUt(GTRecipe)} 返回 long，
+     * {@code Content.content} 是 {@code Object}（EU 那一条装 Long）⇒ 一路存得下。
+     */
+    private long pendingEut;
     private int tierIndex = -1;
     private int amperage = 1;
+
+    /**
+     * 🆕 <b>"用户动过哪几项"</b>——保存时"该不该写"的唯一判据（见
+     * {@link ShanhaiRecipeEnergy#shouldWriteEut}/{@link ShanhaiRecipeEnergy#shouldWriteDuration}）。
+     *
+     * <p>🔴 为什么必须记"动过"而不是"值不同"：老代码拿 {@code pendingEut != 活配方EUt} 判脏，
+     * 于是"配方本来没有 EU"（或 EUt &lt; 8、档位反查成 -1）时 {@code recomputeEut()} 算出来的 0
+     * 与活配方的 0 相等 ⇒ <b>改电流一个字都不写</b>（用户报的"耗能功率没有变"）；
+     * 反过来，{@code amperage} 是载入时四舍五入反推的（EUt=30、ULV ⇒ 4A）⇒ 用户什么都没动，
+     * 一保存也会把 EUt 从 30 静默改成 32。
+     */
+    private boolean amperageTouched;
+    private boolean tierTouched;
+    private boolean durationTouched;
+    private boolean euSideTouched;
+
+    /**
+     * 🆕 这条配方此刻是<b>耗电</b>还是<b>发电</b>（用户点单：一键切换）。
+     *
+     * <p>GT 侧口径（javap 实测）：{@code GTRecipeBuilder#EUt(long)} 里
+     * EU&gt;0 ⇒ 进 {@code tickInputs}（耗电）、EU&lt;0 ⇒ 进 {@code tickOutputs}（发电）
+     * ⇒ 本字段就是"EU 该落哪一侧"。{@link ShanhaiRecipeIoApply.EuSide#NONE}（这条配方压根没有 EU）
+     * 归一化成 {@code CONSUME}，与 GT 建配方时的默认一致。
+     */
+    private ShanhaiRecipeIoApply.EuSide euSide = ShanhaiRecipeIoApply.EuSide.CONSUME;
     private int pendingCount = 1;
     /** 🆕 格子小窗里的概率三件套（GT 口径 10000 = 100%）。 */
     private int pendingChance = 10000;
@@ -619,6 +687,11 @@ public final class ShanhaiRecipeEditorWorkspace {
     }
 
     public int pendingEut() {
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, pendingEut));
+    }
+
+    /** 缓冲里的 EU/t（<b>真值，long</b>）—— 保存路径与判据用这一个，别用上面那个 int 视图。 */
+    public long pendingEutLong() {
         return pendingEut;
     }
 
@@ -628,6 +701,21 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     public int amperage() {
         return amperage;
+    }
+
+    /** 🆕 这条配方此刻是耗电还是发电（面板画那颗切换按钮的文字）。 */
+    public boolean euGenerate() {
+        return euSide == ShanhaiRecipeIoApply.EuSide.GENERATE;
+    }
+
+    /** 🆕 切换按钮上的字（两个词的宽度都按 5 个可见字算过，58px 装得下）。 */
+    public String euSideButtonText() {
+        return euGenerate() ? "§6发电" : "§b耗电";
+    }
+
+    /** 🆕 状态行里那一小截（"§b耗电" / "§6发电"）。 */
+    public String euSideText() {
+        return euGenerate() ? "§6发电" : "§b耗电";
     }
 
     public int inPage() {
@@ -735,6 +823,14 @@ public final class ShanhaiRecipeEditorWorkspace {
         page = 0;
         recipeId = null;
         loadedRecipe = false;
+        // 🆕 「重读配方表」= 回到类型列表本体（别把"已删除配方"那个换过数据源的列表留在屏幕上）
+        deletedList = false;
+        previewId = null;
+        previewTypeId = null;
+        deletedNote = "";
+        // 🆕 顺手把「已删除配方」那份名单也算一遍：第一屏那颗按钮上的条数就是它
+        //    （开面板那一拍就 recalculation，免得用户先看到 "(0)" 再点进去才发现有 3 条）。
+        refreshDeletedRows("reload_types");
         // 🆕 第 7 轮：配方表重建了 ⇒ 上一次查询的结果作废（它引用的 id 可能已经不在了）
         queryResult = new ShanhaiRecipeQuery.Result(ShanhaiRecipeQuery.Kind.NONE, List.of(), 0, "(还没查过)");
         queryKind = ShanhaiRecipeQuery.Kind.NONE;
@@ -1092,9 +1188,20 @@ public final class ShanhaiRecipeEditorWorkspace {
         //       （用户实测那条「关闭后再打开编辑器里面重新变回了 1200」）。
         final Integer durFromTable = ShanhaiRecipeDuration.rawOriginal(live.id);
         pendingDuration = ShanhaiRecipeDuration.originalOf(live);
-        pendingEut = (int) Math.max(0, Math.min(Integer.MAX_VALUE, ShanhaiRecipeIoApply.euOf(live)));
-        tierIndex = tierOf(pendingEut);
-        amperage = amperageOf(pendingEut, tierIndex);
+        // 🔴 2026-11：EUt 放宽成 long（GT 侧本来就是 long），这里不再夹进 int
+        //    —— 老代码 `(int) min(Integer.MAX_VALUE, euOf(live))` 会把 >21 亿的配方读成 2147483647。
+        pendingEut = Math.max(0L, ShanhaiRecipeIoApply.euOf(live));
+        tierIndex = ShanhaiRecipeEnergy.tierOf(TIER_VOLTAGE, pendingEut);
+        amperage = ShanhaiRecipeEnergy.amperageOf(TIER_VOLTAGE, pendingEut, tierIndex);
+        // 🆕 2026-11：新载入一条配方 ⇒ "动过"标记全清（保存判据只看它们）。
+        amperageTouched = false;
+        tierTouched = false;
+        durationTouched = false;
+        euSideTouched = false;
+        // 🆕 发电/耗电：从活配方本身读（EU 在 tickInputs ⇒ 耗电、在 tickOutputs ⇒ 发电）。
+        //    两侧都没有 EU ⇒ NONE ⇒ 归一化成耗电（与 GT 建配方时的默认一致）。
+        euSide = ShanhaiRecipeIoApply.euSideOf(live) == ShanhaiRecipeIoApply.EuSide.GENERATE
+                ? ShanhaiRecipeIoApply.EuSide.GENERATE : ShanhaiRecipeIoApply.EuSide.CONSUME;
         // 🆕 B 组：条件缓冲跟着活配方重新对齐（dirty 全清）
         // 🔴🔴 2026-10-05 第 5 轮修的就是这一行 —— 用户原话：「6：额外条件重进存档会丢失」。
         //    真相（原始读数）：覆盖文件里明明有 conditions、开机重放也 APPLIED 成功，
@@ -1299,22 +1406,21 @@ public final class ShanhaiRecipeEditorWorkspace {
     /**
      * 由 EU/t 与档位反推电流（A）。{@code eut = 电压 × 电流} ⇒ {@code 电流 = eut / 电压}。
      * <p>取不到就回 1A（老口径 = 隐含 1A，读数不会突变）。
+     * <p>🔴 2026-11：本方法<b>不再夹 64A</b>（用户点单去掉那个业务上限）；
+     * 实现收口到 {@link ShanhaiRecipeEnergy#amperageOf(long[], long, int)}，那里写清了
+     * "round 之后再转 int、且先夹到 int 上限 ⇒ 不可能溢出"。
      */
     public static int amperageOf(long eut, int tier) {
-        if (tier < 0) {
-            return 1;
-        }
-        final long v = TIER_VOLTAGE[tier];
-        if (v <= 0L) {
-            return 1;
-        }
-        final long a = Math.round((double) Math.max(0L, eut) / (double) v);
-        return (int) Math.max(AMPERAGE_MIN, Math.min(AMPERAGE_MAX, a));
+        return ShanhaiRecipeEnergy.amperageOf(TIER_VOLTAGE, eut, tier);
     }
 
     public boolean back() {
         if (blank()) {
             return false;
+        }
+        // 🆕 已删除配方详情页：「返回」= 回那个列表（不是回配方列表，也不是关面板）
+        if (previewId != null) {
+            return closeDeletedPreview();
         }
         // 🆕 B 组：离开编辑屏就把条件页收起来（它挂在编辑屏上，留着会让"返回"看起来没生效）
         condOpen = false;
@@ -1333,6 +1439,7 @@ public final class ShanhaiRecipeEditorWorkspace {
         if (stage == Stage.RECIPES || stage == Stage.QUERY) {
             stage = Stage.TYPES;
             typeId = null;
+            deletedList = false;                 // 🆕 回类型列表 = 回到正常数据源
             page = clampPage(typesPage);
             say("§7已回到类型列表", "§8选一个配方类型，或直接用下面的物品框/搜索框查");
             return true;
@@ -1346,6 +1453,10 @@ public final class ShanhaiRecipeEditorWorkspace {
             return false;
         }
         if (stage == Stage.TYPES) {
+            // 🆕 已删除配方列表：点一行 ⇒ 进它的详情页（只读 + 恢复/返回两颗按钮）
+            if (deletedList) {
+                return openDeletedPreview(row);
+            }
             final int idx = page * ROWS + row;
             return idx >= 0 && idx < types.size() && selectType(types.get(idx).id());
         }
@@ -1444,6 +1555,9 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     public int pageCount() {
         final int n;
+        if (stage == Stage.TYPES && deletedList) {
+            return deletedRowsList.pageCount();      // 🆕 已删除配方列表（12 行/页）
+        }
         if (stage == Stage.RECIPES) {
             n = recipes.size();
         } else if (stage == Stage.QUERY) {
@@ -2141,6 +2255,12 @@ public final class ShanhaiRecipeEditorWorkspace {
      * @return true = 收下了
      */
     public boolean offerIngredient(int index, Object ingredient) {
+        // 🆕 已删除配方的详情页是【只读】的：格子照常画出来（要看输入输出），但一个都不许收。
+        //    闸门在这里（数据入口），不押在"面板把控件藏住了"上 —— 藏控件是显示问题，这里是真值。
+        if (previewId != null) {
+            say("§c这是已删除配方的只读预览", "§8要改它，先点「" + ShanhaiDeletedRecipeList.BTN_RESTORE + "」把它放回来");
+            return false;
+        }
         final ShanhaiIoTable.Cell c = io.cell(index);
         if (c == null) {
             return false;
@@ -2202,6 +2322,10 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 右键：清掉这一格（同样两侧都允许，理由见 {@link #offerIngredient}）。 */
     public boolean clearCell(int index) {
+        if (previewId != null) {
+            say("§c这是已删除配方的只读预览", "§8要改它，先点「" + ShanhaiDeletedRecipeList.BTN_RESTORE + "」把它放回来");
+            return false;
+        }
         final ShanhaiIoTable.Cell c = io.cell(index);
         if (c == null || c.empty()) {
             return false;
@@ -2266,6 +2390,11 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 中键：打开"改数量"小窗（作用在他点的这一格）。两侧都允许，客户端那份立刻显示。 */
     public boolean openCountEditor(int index) {
+        // 🆕 已删除配方详情页 = 只读：中键不许开"改这一格"的小窗（开了它也什么都存不下去）
+        if (previewId != null) {
+            say("§c这是已删除配方的只读预览", "§8要改它，先点「" + ShanhaiDeletedRecipeList.BTN_RESTORE + "」把它放回来");
+            return false;
+        }
         final ShanhaiIoTable.Cell c = io.cell(index);
         if (c == null || c.empty()) {
             return false;
@@ -2429,9 +2558,24 @@ public final class ShanhaiRecipeEditorWorkspace {
         return true;
     }
 
-    /** 数字框的回调（两侧都会跑；只有服务端那份会被写盘）。 */
+    /**
+     * 耗时框的回调（两侧都会跑；只有服务端那份会被写盘）。
+     *
+     * <p>🆕 2026-11：只有<b>值真的变了</b>才置 {@link #durationTouched} ——
+     * GT 的 {@code NumberInputWidget} 在<b>建控件那一拍</b>就会回调一次 setter
+     * （{@code NumberInputWidget#buildUI → updateTextFieldRange → setValue}，javap 实测无等值判断），
+     * 不挡住的话"打开面板"本身就会把耗时标成脏 ⇒ 一保存就把原始值写回去。
+     *
+     * <p>上限 {@code Integer.MAX_VALUE}：{@code GTRecipe.duration} 就是 {@code int}（javap 实测），
+     * 再大在 GT 侧会溢成负数 ⇒ 见 {@link ShanhaiRecipeEnergy#DURATION_MAX}。
+     */
     public void setPendingDuration(int v) {
-        pendingDuration = v;
+        final int want = ShanhaiRecipeEnergy.clampDuration(v);
+        if (want == pendingDuration) {
+            return;
+        }
+        pendingDuration = want;
+        durationTouched = true;
     }
 
     /**
@@ -2439,18 +2583,72 @@ public final class ShanhaiRecipeEditorWorkspace {
      * <p>保留这个 setter 只为了让"反推电流"这条链可读（例如将来想直接写 EU/t = 快速反算）；
      * <b>面板上那个耗能输入框已经拿掉</b>（用户口径：改电流、由电压和电流共同算出耗能）。
      */
-    public void setPendingEut(int v) {
-        pendingEut = v;
-        tierIndex = tierOf(v);
-        amperage = amperageOf(v, tierIndex);
+    public void setPendingEut(long v) {
+        pendingEut = Math.max(0L, v);
+        tierIndex = ShanhaiRecipeEnergy.tierOf(TIER_VOLTAGE, pendingEut);
+        amperage = ShanhaiRecipeEnergy.amperageOf(TIER_VOLTAGE, pendingEut, tierIndex);
     }
 
-    /** 电流输入（用户点单：把电流做成输入框）。 */
+    /**
+     * 电流输入（用户点单：把电流做成输入框）。
+     *
+     * <h4>🔴 2026-11 修的就是这一条</h4>
+     * 用户原话：「编辑电流之后反而时长增加了，耗能功率没有变」。
+     * 老写法的两个洞：
+     * <ol>
+     *   <li>没记"用户动过电流"⇒ 保存时靠 {@code pendingEut != 活配方EUt} 判脏。而配方本来没 EU
+     *       或 EUt&lt;8 时档位反查成 {@code -1}，{@code recomputeEut()} 把 EUt 算成 <b>0</b>
+     *       ⇒ 与活配方的 0 相等 ⇒ <b>一个字都没写</b>（"耗能功率没有变"）；</li>
+     *   <li>档位 {@code -1} 时 {@code recomputeEut()} 直接把 EUt 归零，<b>用户写的电流被吃掉</b>。</li>
+     * </ol>
+     * 现在：① 记 {@link #amperageTouched}（保存判据只看它）；② 档位迷时<b>兜到 ULV</b>
+     * 并把这一步打进日志（{@code numbers_tier_defaulted}）⇒ {@code EUt = 8 × A} 恒成立，
+     * 不会再有"算了却等于没算"的中间态。
+     */
     public void setAmperage(int amps) {
-        amperage = Math.max(AMPERAGE_MIN, Math.min(AMPERAGE_MAX, amps));
+        final int want = ShanhaiRecipeEnergy.clampAmperage(amps);
+        if (want == amperage) {
+            // GT 的 IntInputWidget 建控件/同步文本时都会回调一次 setter ⇒ 等值时必须是空操作，
+            // 否则"打开面板"就把电流标成脏。
+            return;
+        }
+        amperage = want;
+        amperageTouched = true;
+        if (tierIndex < 0) {
+            // 这条配方没有 EU（或 EUt < 8，反查不出档）⇒ 按 GT 最低一档 ULV(8V) 兜底，
+            // 这样 v×a 有定义、EUt 也真的会跟着电流走。
+            tierIndex = 0;
+            tierTouched = true;
+            ShanhaiMod.LOGGER.info("{} numbers_tier_defaulted id={} amps={} -> tier=ULV(8V) "
+                            + "（配方原本没有可反查的电压档；改电流按 ULV 算，EUt={}）",
+                    PREFIX, recipeId, want, ShanhaiRecipeEnergy.eutOf(TIER_VOLTAGE[0], want));
+        }
         recomputeEut();
         numbersVersion++;
         touch();
+    }
+
+    /**
+     * 🆕 <b>一键切换发电 / 耗电</b>（用户点单）。
+     *
+     * <p>只翻缓冲里的那一侧 ＋ 置脏；<b>真正搬 EU 是保存那一拍做的</b>
+     * （{@code ShanhaiRecipeEditorOps.applyEdits(…, euSide, …)} → 活配方两侧清空后写目标侧，
+     * 盘上同时写目标侧与"另一侧去掉 eu"）。
+     * 这样"点错了再点回来"不会在活配方上来回折腾 —— 与其它所有编辑同一条纪律（改了才在保存时生效）。
+     */
+    public void toggleEuSide() {
+        if (blank() || previewId != null) {
+            return;
+        }
+        euSide = euSide == ShanhaiRecipeIoApply.EuSide.GENERATE
+                ? ShanhaiRecipeIoApply.EuSide.CONSUME
+                : ShanhaiRecipeIoApply.EuSide.GENERATE;
+        euSideTouched = true;
+        numbersVersion++;
+        touch();
+        ShanhaiMod.LOGGER.info("{} numbers_eu_side id={} side={} eut={} amps={} tier={} "
+                        + "（只翻缓冲；保存那一拍才搬 tickInputs/tickOutputs 里的 EU 条目）",
+                PREFIX, recipeId, euSide, pendingEut, amperage, tierIndex);
     }
 
     public void setPendingCount(int v) {
@@ -2528,7 +2726,14 @@ public final class ShanhaiRecipeEditorWorkspace {
         if (idx < 0) {
             return;
         }
+        if (idx == tierIndex) {
+            // 等值也得重算一次（档没变、但电流可能刚被别的路改过），但【不】置脏 ——
+            // LDLib 的 SelectorWidget 在同步文本时也会回调，置脏会让"打开面板"就算改动。
+            recomputeEut();
+            return;
+        }
         tierIndex = idx;
+        tierTouched = true;
         recomputeEut();
         // 🔴 这里必须把数字也推一次：否则"在服务端选了档、客户端的电流/耗能框还显示旧值"。
         //    与 setPendingEut（客户端输入框回调）不同 —— 那条路是客户端自己改的，不许回推（会打架）。
@@ -2540,15 +2745,16 @@ public final class ShanhaiRecipeEditorWorkspace {
      * 耗能的<b>唯一</b>计算点：{@code pendingEut = 电压档位 × 电流}。
      * <p>🔴 任何改电压/改电流的地方都必须走它 —— 这样 {@code pendingEut} 不可能与两个输入分叉，
      * 而 {@code data.euTier} 又是从 {@code pendingEut} 反推的（保存路径），三者同拍。
+     * <p>🔴 2026-11：<b>不再夹进 int</b>（老代码 {@code min(Integer.MAX_VALUE, total)} 是条静默上限：
+     * MAX 档 &gt;1A 被削平 ⇒ 读数"没变"）。公式本体收口在
+     * {@link ShanhaiRecipeEnergy#eutOf(long, int)}，那里有"4.61e18 &lt; Long.MAX"的不溢出证明。
      */
     private void recomputeEut() {
         if (tierIndex < 0) {
             pendingEut = 0;
             return;
         }
-        final long v = TIER_VOLTAGE[tierIndex];
-        final long total = v * (long) amperage;
-        pendingEut = (int) Math.max(0L, Math.min(Integer.MAX_VALUE, total));
+        pendingEut = ShanhaiRecipeEnergy.eutOf(TIER_VOLTAGE[tierIndex], amperage);
     }
 
     // ---------------------------------------------------------------- ③ 编辑：保存 / 删除 / 恢复
@@ -2557,6 +2763,11 @@ public final class ShanhaiRecipeEditorWorkspace {
     public ShanhaiRecipeEditorOps.Result save() {
         if (blank()) {
             return new ShanhaiRecipeEditorOps.Result(false, "客户端不可写", "client side", 0, 0, false, false, null);
+        }
+        // 🆕 只读预览（已删除配方的详情页）：保存这条路整条关掉（它连活配方都查不到）。
+        if (previewId != null) {
+            say("§c这是已删除配方的只读预览，存不了", "§8要改它，先点「" + ShanhaiDeletedRecipeList.BTN_RESTORE + "」把它放回来");
+            return new ShanhaiRecipeEditorOps.Result(false, "只读预览：不能保存", "deleted preview", 0, 0, false, false, null);
         }
         // 🆕 非 GT（工作台 / 原版配方）：另一条完全独立的保存路径，见 saveVanilla()。
         if (vanillaType) {
@@ -2572,10 +2783,18 @@ public final class ShanhaiRecipeEditorWorkspace {
         //    —— 用户只要对那条配方点一次「保存这条」，写坏的 maxChance 就修回 10000。
         final boolean ioRepair = io.anyCatalystRepair();
         final boolean ioDirty = io.anyDirty() || ioRepair;
-        // 🔴 2026-10-05（duration 原始值）：pending 那一侧是【原始值】、live 那一侧是【实际值】
-        //    ⇒ 必须换算之后再比。直接比会在有乘数的实例上把"改成同一个数"判成脏（或反过来）。
-        final boolean durDirty = ShanhaiRecipeDuration.toLive(live.getType(), pendingDuration) != live.duration;
-        final boolean eutDirty = pendingEut != ShanhaiRecipeIoApply.euOf(live);
+        // 🔴🔴 2026-11 <b>本轮的根因就在这里</b>（用户原话：「编辑电流之后反而时长增加了，耗能功率没有变」）：
+        //    下面这两行原来是【按数值比】判脏的，两个方向都会错 ——
+        //      · durDirty = toLive(类型, 原始耗时) != 活配方实际耗时 ⇒ 只要该类型被判成 UNFITTED
+        //        （样本不足 / 自相矛盾 ⇒ 不做换算），这个比较【恒为真】⇒ 任何一次保存（哪怕只改电流）
+        //        都会把"原始值"写进活配方：用户实例 k=0.001 下就是 1 tick → 200 tick
+        //        = 【时长增加了】；
+        //      · eutDirty = 缓冲EUt != 活配方EUt ⇒ 配方本来没 EU（或 EUt<8、档位反查成 -1）时
+        //        recomputeEut() 算出 0、活配方也是 0 ⇒ 【一个字都没写】= 【耗能功率没有变】。
+        //    ⇒ 改成"用户动过哪一项"（唯一判据收口在 ShanhaiRecipeEnergy#shouldWrite*）。
+        final boolean durDirty = ShanhaiRecipeEnergy.shouldWriteDuration(durationTouched);
+        final boolean eutDirty = ShanhaiRecipeEnergy.shouldWriteEut(amperageTouched, tierTouched, euSideTouched);
+        final ShanhaiRecipeIoApply.EuSide sideToWrite = euSideTouched ? euSide : null;
         // 🆕 B 组：条件脏不脏 —— 与【活配方当前那一份】比（口径与 IO/duration 一致：改回原样就不算脏）
         final com.google.gson.JsonArray condNow = ShanhaiRecipeConditions.encodeOf(live);
         final boolean condDirty = !ShanhaiRecipeConditions.sameAs(conditions, condNow);
@@ -2608,19 +2827,26 @@ public final class ShanhaiRecipeEditorWorkspace {
         final com.google.gson.JsonObject outputs = ioDirty ? io.json("outputs") : null;
         final com.google.gson.JsonObject tickInputs = null;   // 电压走 eut 参数（它同拍写 tickInputs + data.euTier）
 
+        // 🔴 2026-11：保存之后要把 (档位, 电流) 还原回"用户刚设的那一对" —— 见下面 restoreNumbers。
+        final int tierWanted = tierIndex;
+        final int ampsWanted = amperage;
+        final long eutWanted = pendingEut;
         final ShanhaiRecipeEditorOps.Result r = ShanhaiRecipeEditorOps.applyEdits(
                 server, live, inputs, outputs, tickInputs,
-                durDirty ? pendingDuration : null,
-                eutDirty ? (long) pendingEut : null,
+                durDirty ? Integer.valueOf(pendingDuration) : null,
+                eutDirty ? Long.valueOf(pendingEut) : null,
                 condDirty ? conditions : null,
+                sideToWrite,
                 true, true);
 
         say((r.ok() ? "§a" : "§c") + r.message(), "§8" + r.detail());
         ShanhaiMod.LOGGER.info("{} workspace_save id={} io_dirty={} io_repair={} dur_dirty={} eut_dirty={} "
-                        + "cond_dirty={} cond_now={} cond_buf={} ok={} persisted={}",
+                        + "eu_side={} cond_dirty={} cond_now={} cond_buf={} ok={} persisted={} eut={} amps={} tier={}",
                 PREFIX, recipeId, ioDirty, ioRepair, durDirty, eutDirty,
+                sideToWrite == null ? "(untouched)" : sideToWrite.name(),
                 condDirty, ShanhaiRecipeConditions.summary(condNow),
-                ShanhaiRecipeConditions.summary(conditions), r.ok(), r.persisted());
+                ShanhaiRecipeConditions.summary(conditions), r.ok(), r.persisted(),
+                eutWanted, ampsWanted, tierWanted);
 
         // 🔴 保存之后必须【重新取一次活的那条配方】再广播给客户端：
         //    applyEdits 会把 GT 索引里那条换成一个【新对象】（它出自台账重建），
@@ -2635,11 +2861,45 @@ public final class ShanhaiRecipeEditorWorkspace {
         }
         if (after != null) {
             loadBuffer(after);          // 缓冲重新对齐权威值（dirty 全清）
+            restoreNumbers(after, tierWanted, ampsWanted, eutWanted, sideToWrite);
         } else {
             ShanhaiMod.LOGGER.error("{} workspace_after_read_failed id={} (缓冲仍是保存前的显示值)", PREFIX, recipeId);
         }
         ShanhaiJeiBridge.broadcastRecipeChanged(server, after != null ? after : live);
         return r;
+    }
+
+    /**
+     * 🔴 <b>保存之后把 (档位, 电流) 还原成用户刚设的那一对</b>。
+     *
+     * <h4>为什么必须有这一拍</h4>
+     * {@code amperage} 是"由 EUt 反推"的（{@link ShanhaiRecipeEnergy#amperageOf}）。
+     * 用户在 ULV 把电流 1A 改成 4A ⇒ 存盘后 EUt = 32 ⇒ 重新载入时
+     * {@code tierOf(32)} 得到 <b>LV</b>、电流反推成 <b>1A</b> ⇒ 面板当场变回「LV × 1A」。
+     * 数据是对的（EUt 还是 32），但用户看到的"我刚写的 4A 没了"，等于这次编辑在界面上没发生。
+     * ⇒ 只要保存后的 EUt 与"用户设的那一对"自洽（{@code 档位电压 × 电流 == EUt}），就把那一对还回去。
+     * 不自洽（说明写入被别的东西改了）⇒ 什么都不做，如实显示权威值。
+     */
+    private void restoreNumbers(GTRecipe after, int tierWanted, int ampsWanted, long eutWanted,
+                                ShanhaiRecipeIoApply.EuSide sideWanted) {
+        if (after == null || tierWanted < 0 || tierWanted >= TIER_VOLTAGE.length || ampsWanted < 1) {
+            return;
+        }
+        final long live = Math.max(0L, ShanhaiRecipeIoApply.euOf(after));
+        final long product = ShanhaiRecipeEnergy.eutOf(TIER_VOLTAGE[tierWanted], ampsWanted);
+        if (live != product) {
+            return;                      // 写入结果与用户设的那一对对不上 ⇒ 不还原（显示权威值）
+        }
+        tierIndex = tierWanted;
+        amperage = ampsWanted;
+        pendingEut = eutWanted == live ? eutWanted : live;
+        if (sideWanted != null) {
+            euSide = sideWanted;
+        }
+        numbersVersion++;
+        touch();
+        ShanhaiMod.LOGGER.info("{} numbers_restored_after_save id={} tier={} amps={} eut={} side={}",
+                PREFIX, recipeId, tierIndex, amperage, pendingEut, euSide);
     }
 
     /**
@@ -2844,6 +3104,12 @@ public final class ShanhaiRecipeEditorWorkspace {
         if (blank()) {
             return new ShanhaiRecipeEditorOps.Result(false, "客户端不可写", "client side", 0, 0, false, false, null);
         }
+        // 🆕 只读预览：这里没有"活配方"可删（它在覆盖文件里已经是删除态了）。
+        if (previewId != null) {
+            say("§c这是已删除配方的只读预览", "§8它已经是删除状态了 —— 这里只有「"
+                    + ShanhaiDeletedRecipeList.BTN_RESTORE + "」和「" + ShanhaiDeletedRecipeList.BTN_BACK + "」");
+            return new ShanhaiRecipeEditorOps.Result(false, "只读预览：不能删除", "deleted preview", 0, 0, false, false, null);
+        }
         // 🆕 非 GT 那一支
         if (vanillaType) {
             if (recipeId == null || vanillaView == null) {
@@ -2877,6 +3143,8 @@ public final class ShanhaiRecipeEditorWorkspace {
         }
         final ShanhaiRecipeEditorOps.Result r = ShanhaiRecipeEditorOps.removeRecipe(server, live, true);
         ShanhaiJeiBridge.broadcastRecipeRemoved(server, live);
+        // 🆕 刚删掉的这条要立刻进「已删除配方」名单（用户下一拍点那颗按钮就该看见它）
+        refreshDeletedRows("delete_gt");
         say((r.ok() ? "§a" : "§c") + r.message(), "§8" + r.detail());
         final ResourceLocation keepType = typeId;
         recipes.remove(recipeId);
@@ -2896,6 +3164,13 @@ public final class ShanhaiRecipeEditorWorkspace {
     public ShanhaiRecipeEditorOps.Result restoreSelected() {
         if (blank()) {
             return new ShanhaiRecipeEditorOps.Result(false, "客户端不可写", "client side", 0, 0, false, false, null);
+        }
+        // 🆕 只读预览：「恢复原样」在这里没有意义（那条本来就已经不在表里了）——
+        //    详情页那颗「恢复这条配方」走的是另一条（restoreDeletedPreview）。
+        if (previewId != null) {
+            say("§c这是已删除配方的只读预览", "§8这里请点「" + ShanhaiDeletedRecipeList.BTN_RESTORE + "」");
+            return new ShanhaiRecipeEditorOps.Result(false, "只读预览：请用「恢复这条配方」", "deleted preview",
+                    0, 0, false, false, null);
         }
         // 🆕 非 GT 那一支
         if (vanillaType) {
@@ -3627,9 +3902,15 @@ public final class ShanhaiRecipeEditorWorkspace {
         final String v = tierIndex >= 0
                 ? TIER_NAMES[tierIndex].split(" ")[1] + "V" : "?";
         final String name = tierIndex >= 0 ? TIER_NAMES[tierIndex].split(" ")[0] : "未定";
-        return "§7耗时 §f" + pendingDuration + " §7t · §7电压 §f" + name + " §8(" + v + ")"
+        // 🔴 2026-11：加了"§b耗电/§6发电"这一截，同时把尾巴上的说明从
+        //    "(v×a 算出来的)" 缩成 "(v×a)" / "(当前实际值)" —— 总长度不增（版面 340 宽，用户报过重叠）。
+        //    为什么要区分：刚载入的配方 EUt 未必正好等于「档位电压 × 反推出来的电流」
+        //    （例如 30 EU/t 反推出 ULV 4A），那时写"= v×a"就是假的。
+        final long product = tierIndex >= 0 ? ShanhaiRecipeEnergy.eutOf(TIER_VOLTAGE[tierIndex], amperage) : 0L;
+        return "§7耗时 §f" + pendingDuration + " §7t · " + euSideText()
+                + " §7· 电压 §f" + name + " §8(" + v + ")"
                 + " §7× 电流 §f" + amperage + "§7A = §e耗能 §f" + pendingEut + " §7EU/t"
-                + " §8(v×a 算出来的)";
+                + (product == pendingEut ? " §8(v×a)" : " §8(当前实际值)");
     }
 
     /**
@@ -4109,9 +4390,14 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 电压 × 电流 那一行（自检/日志判据用）。 */    public String energyCalcLine() {
         final long v = tierIndex >= 0 ? TIER_VOLTAGE[tierIndex] : 0L;
+        // 🔴 2026-11：不再夹 Integer.MAX_VALUE（EUt 已是 long；夹取会把 MAX 档 >1A 的读数削平）
+        final long expected = ShanhaiRecipeEnergy.eutOf(v, amperage);
         return "voltage=" + v + " amps=" + amperage + " eut=" + pendingEut
-                + " expected=" + Math.min(Integer.MAX_VALUE, v * (long) amperage)
-                + " consistent=" + (pendingEut == (int) Math.max(0L, Math.min(Integer.MAX_VALUE, v * (long) amperage)));
+                + " expected=" + expected
+                + " consistent=" + (pendingEut == expected)
+                + " side=" + euSide
+                + " touched[amps=" + amperageTouched + ",tier=" + tierTouched
+                + ",dur=" + durationTouched + ",side=" + euSideTouched + "]";
     }
 
     /**
@@ -4172,6 +4458,15 @@ public final class ShanhaiRecipeEditorWorkspace {
         }
         final int idx = page * ROWS + row;
         if (stage == Stage.TYPES) {
+            // 🆕 已删除配方列表（同一个列表控件、换数据源）
+            if (deletedList) {
+                final ShanhaiDeletedRecipeList.Row r = deletedRowsList.at(page, row);
+                if (r == null) {
+                    return "";
+                }
+                // 行左边画了 12px 的图标 ⇒ 文字前留三个空格，两者不重叠
+                return "   " + ShanhaiDeletedRecipeList.rowLabel(r);
+            }
             if (idx < 0 || idx >= types.size()) {
                 return "";
             }
@@ -4210,16 +4505,9 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     // ---------------------------------------------------------------- 电压档位工具
 
-    /** 由 EU/t 反查档位下标（找不到 = -1）。 */
+    /** 由 EU/t 反查档位下标（找不到 = -1）。实现收口在 {@link ShanhaiRecipeEnergy#tierOf(long[], long)}。 */
     public static int tierOf(long eut) {
-        final long v = Math.abs(eut);
-        int best = -1;
-        for (int i = 0; i < TIER_VOLTAGE.length; i++) {
-            if (TIER_VOLTAGE[i] <= v) {
-                best = i;
-            }
-        }
-        return best;
+        return ShanhaiRecipeEnergy.tierOf(TIER_VOLTAGE, eut);
     }
 
     public static int tierIndexByName(String name) {
@@ -4322,7 +4610,10 @@ public final class ShanhaiRecipeEditorWorkspace {
         buf.writeBoolean(includeNumbers);
         if (includeNumbers) {
             buf.writeInt(pendingDuration);
-            buf.writeInt(pendingEut);
+            // 🔴 2026-11：EUt 从 int 放宽成 long（= 该档电压 × 电流，最大 4.61e18）
+            //    ⇒ 这里必须同步改成 writeLong，否则 MAX 档的读数会被 writeInt 截断。
+            //    两侧同 jar ⇒ 不存在旧客户端兼容问题（字段顺序由本文件两侧共同维护）。
+            buf.writeLong(pendingEut);
             buf.writeInt(tierIndex);
             buf.writeInt(amperage);
         }
@@ -4342,6 +4633,29 @@ public final class ShanhaiRecipeEditorWorkspace {
         buf.writeUtf(vanillaType && vanillaShape != null ? vanillaShape.titleText() : "");
         buf.writeUtf(vanillaType && vanillaShape != null ? vanillaShape.noteText() : "");
         buf.writeUtf(vanillaType && vanillaShape != null ? vanillaShape.hintText() : "");
+        // ── 🆕 已删除配方：模式 ＋ 详情页 ＋ 那 12 行的主产物图标（顺序 = readState 的顺序）──
+        //    🔴 图标走 writeItem：客户端没有"哪条配方被删了"的任何数据源，
+        //       也**不许**自己按物品 id 猜图标（那是"客户端自己算"）⇒ 由服务端定死。
+        //    分包大小：12 个物品栈（多数为空/单物品），一行文字本来就在 LabelWidget 那条通道里，
+        //    实测同等规模的 IO 格子推送是 64 格 × 物品+流体 ⇒ 这 12 格不是量级问题。
+        buf.writeBoolean(deletedList);
+        buf.writeBoolean(previewId != null);
+        buf.writeUtf(previewId == null ? "" : previewId.toString());
+        buf.writeUtf(deletedNote == null ? "" : deletedNote);
+        for (int i = 0; i < ShanhaiDeletedRecipeList.ROWS_PER_PAGE; i++) {
+            ItemStack icon = ItemStack.EMPTY;
+            if (deletedList && stage == Stage.TYPES) {
+                final ShanhaiDeletedRecipeList.Row r = deletedRowsList.at(page, i);
+                if (r != null) {
+                    icon = ShanhaiDeletedRecipeIndex.iconOf(r);
+                }
+            }
+            buf.writeItem(icon);
+        }
+        // ── 🆕 2026-11：发电/耗电那一侧（放在**包尾**，readState 在同位置读）──
+        //    为什么放最后而不是塞进 includeNumbers 那一块：它是"每次切换都要推"的状态，
+        //    而 includeNumbers 只在 numbersVersion 变时才带 ⇒ 放进去会漏推。
+        buf.writeBoolean(euGenerate());
     }
 
     /** 客户端：收服务端推下来的状态（只改自己这份的"显示态"）。 */
@@ -4408,7 +4722,8 @@ public final class ShanhaiRecipeEditorWorkspace {
         cards = List.copyOf(cs);
         if (buf.readBoolean()) {
             pendingDuration = buf.readInt();
-            pendingEut = buf.readInt();
+            // 🔴 与 writeState 同步：EUt 是 long（2026-11 起）
+            pendingEut = buf.readLong();
             tierIndex = buf.readInt();
             amperage = buf.readInt();
             numbersVersion++;
@@ -4422,6 +4737,24 @@ public final class ShanhaiRecipeEditorWorkspace {
         vanillaSyncTitle = buf.readUtf();
         vanillaSyncNote = buf.readUtf();
         vanillaSyncHint = buf.readUtf();
+        // ── 🆕 已删除配方（顺序 = writeState 末尾的顺序，逐字对应）──
+        deletedList = buf.readBoolean();
+        final boolean preview = buf.readBoolean();
+        final String pid = buf.readUtf();
+        if (preview && pid != null && !pid.isEmpty()) {
+            final ResourceLocation pr = ResourceLocation.tryParse(pid);
+            previewId = pr;
+        } else {
+            previewId = null;
+        }
+        deletedNote = buf.readUtf();
+        for (int i = 0; i < ShanhaiDeletedRecipeList.ROWS_PER_PAGE; i++) {
+            final ItemStack icon = buf.readItem();
+            deletedIcons[i] = icon == null ? ItemStack.EMPTY : icon;
+        }
+        // 🆕 2026-11：发电/耗电那一侧（位置 = writeState 的最后一行）
+        euSide = buf.readBoolean() ? ShanhaiRecipeIoApply.EuSide.GENERATE
+                : ShanhaiRecipeIoApply.EuSide.CONSUME;
     }
 
     // ---------------------------------------------------------------- 自动保存进度的读数（自检用）
@@ -4476,5 +4809,279 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     public ShanhaiIoTable ioTable() {
         return io;
+    }
+
+    // ================================================================ 🆕 已删除配方（恢复删除掉的）
+
+    /** 第一屏现在列的是不是「已删除配方」。 */
+    public boolean deletedListMode() {
+        return deletedList;
+    }
+
+    /** 编辑屏现在是不是"已删除配方的只读详情"。 */
+    public boolean deletedPreview() {
+        return previewId != null;
+    }
+
+    /** 详情页正在看的那一条（不在详情页 ⇒ {@code null}）。 */
+    public ResourceLocation previewRecipeId() {
+        return previewId;
+    }
+
+    /** 详情页底部那一行说明（服务端算好推下来）。 */
+    public String deletedPreviewNote() {
+        return deletedNote == null ? "" : deletedNote;
+    }
+
+    /** 第一屏那颗入口按钮上写什么（进/出两种文字）。 */
+    public String deletedEntryButtonText() {
+        if (deletedList) {
+            return "§f返回类型列表";
+        }
+        final int n = deletedRowsList.size();
+        return n > 0 ? "§c已删除配方 §8(" + n + ")" : "§c已删除配方";
+    }
+
+    /** 服务端那份列表（自检/日志读数用；客户端那份是空的）。 */
+    public ShanhaiDeletedRecipeList deletedList() {
+        return deletedRowsList;
+    }
+
+    /** 【服务端】重建已删除配方列表（每次进列表都重算 —— 理由见 {@link ShanhaiDeletedRecipeIndex}）。 */
+    private void refreshDeletedRows(String reason) {
+        if (blank()) {
+            return;
+        }
+        deletedRowsList = ShanhaiDeletedRecipeIndex.load(server);
+        ShanhaiMod.LOGGER.info("{} workspace_deleted_list_refresh reason={} {}",
+                PREFIX, reason, deletedRowsList.statsLine());
+    }
+
+    /** 第一屏那颗按钮：进/出「已删除配方」列表。 */
+    public boolean toggleDeletedList() {
+        if (blank()) {
+            return false;
+        }
+        return deletedList ? closeDeletedList() : openDeletedList();
+    }
+
+    /** 进「已删除配方」列表（同一个列表控件、换数据源）。 */
+    public boolean openDeletedList() {
+        if (blank()) {
+            return false;
+        }
+        refreshDeletedRows("open");
+        deletedList = true;
+        previewId = null;
+        previewTypeId = null;
+        stage = Stage.TYPES;
+        page = 0;
+        typeId = null;
+        recipeId = null;
+        loadedRecipe = false;
+        deletedNote = "";
+        if (deletedRowsList.isEmpty()) {
+            say("§7已删除配方：一条都没有", "§8通过编辑器删掉配方之后，这里就能把它恢复回来");
+        } else {
+            say("§c已删除配方 §7共 §f" + deletedRowsList.size() + " §7条",
+                    "§8点一行看它的输入/输出 ⇒ 详情页里可以「恢复这条配方」");
+        }
+        touch();
+        return true;
+    }
+
+    /** 退回类型列表。 */
+    public boolean closeDeletedList() {
+        if (blank() || !deletedList) {
+            return false;
+        }
+        deletedList = false;
+        previewId = null;
+        previewTypeId = null;
+        stage = Stage.TYPES;
+        page = 0;
+        deletedNote = "";
+        say("§7已回到配方类型列表", "§8选一个配方类型，或直接用下面的物品框/搜索框查");
+        touch();
+        return true;
+    }
+
+    /**
+     * 点已删除配方那一行 ⇒ 进详情页（复用编辑屏那套控件，<b>只读</b>）。
+     *
+     * <p>输入输出从哪来：覆盖文件里 {@code op=remove} 的条目<b>只有 id/type/base_fp</b>
+     * （见 {@link ShanhaiRecipeOverrideStore#makeRemoveEntry}）⇒ 产物只能在
+     * {@link ShanhaiRemovedRecipeSnapshot} 那份快照里；拿不到就如实写"没有留存快照"，
+     * 仍然允许恢复（恢复走的是"删掉覆盖条目"，不依赖那份 JSON）。
+     */
+    public boolean openDeletedPreview(int row) {
+        if (blank() || !deletedList) {
+            return false;
+        }
+        final ShanhaiDeletedRecipeList.Row r = deletedRowsList.at(page, row);
+        if (r == null) {
+            say("§c这一行是空的", "§8点「已删除配方」那颗按钮可以刷新列表");
+            return false;
+        }
+        final ResourceLocation id = ResourceLocation.tryParse(r.id());
+        if (id == null) {
+            say("§c这条配方的 id 解析不出来：" + r.id(), "§8覆盖文件里那条记录可能坏了（原始值没动）");
+            return false;
+        }
+        previewId = id;
+        previewTypeId = r.typeId();
+        // 🔴 先把上一屏可能残留的"非 GT"上下文清掉 —— 否则用户刚编辑过原版配方、
+        //    再点进一条 GT 的已删除配方时，面板会按 non-GT 那一套显隐去画（3×3 网格而非 GT 格子），
+        //    看起来就像"这条配方的输入输出丢了"。这类"上一屏状态漏过来"在本工程已出过一次。
+        vanillaType = false;
+        vanillaLive = null;
+        vanillaView = null;
+        vanillaShape = null;
+        final com.google.gson.JsonObject json = ShanhaiRemovedRecipeSnapshot.get(r.id());
+        // 🔴 2026-11-07：把"快照是什么状态"先判清楚，再决定下面那一句提示 ——
+        //    「没有快照」「快照是空壳」「非 GT」「解析失败」是四种病，混成一句"没内容"用户没法修。
+        final ShanhaiDeletedRecipeIndex.SnapshotState snap = ShanhaiDeletedRecipeIndex.stateOf(r.id());
+        final ShanhaiDeletedRecipeList.Io ioSum = ShanhaiDeletedRecipeList.ioOf(json);
+        // 🆕 2026-11-08（用户原话：「流体产出没有标注流体的名字」）：详情页那行读数只有数量
+        //    （物品 3 入 / 1 出 · 流体 0 入 / 0 出）⇒ 看不出产出的是什么。这里补一份**产物名字清单**
+        //    （物品名 ＋ 流体名，认不出名字就写 id），挂在下面每一句提示的尾巴上。
+        //    ⚠️ 纯显示：不参与"这条配方有没有快照/能不能解析/能不能恢复"的任何判定。
+        final String products = ShanhaiDeletedRecipeIndex.productsLine(json);
+        final String productsClause = products.isEmpty() ? "" : " §8· §7产物：§f" + products;
+        final GTRecipe shown = ShanhaiDeletedRecipeIndex.parseForDisplay(r.id(), json);
+        if (shown != null) {
+            loadBuffer(shown);
+            deletedNote = "§7只读预览" + productsClause + " §8· §7下面两颗按钮：§a"
+                    + ShanhaiDeletedRecipeList.BTN_RESTORE
+                    + " §7/ §f" + ShanhaiDeletedRecipeList.BTN_BACK;
+        } else {
+            // 快照缺失/解析失败：如实说，并把编辑缓冲清空（绝不显示上一条的输入输出冒充这一条）
+            io.resize(0, 0, 0, 0);
+            io.clearAll();
+            pendingDuration = 0;
+            pendingEut = 0;
+            tierIndex = -1;
+            amperage = 1;
+            inPage = 0;
+            outPage = 0;
+            countCell = -1;
+            conditions = new com.google.gson.JsonArray();
+            condSel = -1;
+            condOpen = false;
+            vanillaType = false;
+            vanillaLive = null;
+            vanillaView = null;
+            vanillaShape = null;
+            loadedRecipe = false;
+            final boolean vanillaish = r.typeId() != null
+                    && isVanillaTypeId(ResourceLocation.tryParse(r.typeId()));
+            if (snap == ShanhaiDeletedRecipeIndex.SnapshotState.NONE) {
+                // 从来没有留过原样 ⇒ 这一条**下次开机**还能被补份救回来（说清楚，别让人以为永久没了）
+                deletedNote = "§c缺快照 §8（删除发生在旧版本 ⇒ 看不到输入输出；恢复功能不受影响，"
+                        + "下次开机补份会自动再试一次）" + productsClause;
+            } else if (snap == ShanhaiDeletedRecipeIndex.SnapshotState.UNUSABLE) {
+                // 留着但没用（旧版本写进去的空壳）⇒ 补份不会覆盖它，只能重删重留
+                deletedNote = "§c快照是空壳/残的 §8（" + ioSum.text()
+                        + "；恢复功能不受影响。要重留一份：先恢复、再用编辑器删一次）" + productsClause;
+            } else if (vanillaish) {
+                deletedNote = "§e这条是非 GT 配方（工作台 / 原版）§8：输入输出不在这一页显示（快照里有 "
+                        + ioSum.text() + "）；恢复功能不受影响" + productsClause;
+            } else {
+                deletedNote = "§c快照解析失败 §8（快照里有 " + ioSum.text()
+                        + "；恢复功能不受影响，日志里有原因）" + productsClause;
+            }
+        }
+        stage = Stage.EDIT;
+        numbersVersion++;
+        touch();
+        ShanhaiMod.LOGGER.info("{} workspace_deleted_preview id={} type={} snapshot={} snap_state={} "
+                        + "snapshot_io=\"{}\" products=\"{}\" parsed={} in={} out={} note=\"{}\"",
+                PREFIX, r.id(), r.typeId(), json != null, snap, ioSum.text(), products, shown != null,
+                io.count("inputs"), io.count("outputs"), deletedNote);
+        return true;
+    }
+
+    /** 详情页「返回」⇒ 回已删除配方列表（列表重算：恢复到一半的状态不该留在屏幕上）。 */
+    public boolean closeDeletedPreview() {
+        if (blank() || previewId == null) {
+            return false;
+        }
+        previewId = null;
+        previewTypeId = null;
+        deletedNote = "";
+        stage = Stage.TYPES;
+        deletedList = true;
+        refreshDeletedRows("preview_back");
+        page = deletedRowsList.clampPage(page);
+        say("§7已回到已删除配方列表 §7（§f" + deletedRowsList.size() + " §7条）",
+                "§8点一行看它的输入/输出");
+        touch();
+        return true;
+    }
+
+    /**
+     * 详情页「恢复这条配方」—— <b>复用</b> {@code /shanhai edit restore <id>} 的服务端逻辑
+     * （{@link ShanhaiRecipeEditorOps#restoreDeletedById}），不是另写一份。
+     *
+     * <p>成功之后三件事（用户点单的可见结果）：
+     * <ol>
+     *   <li>那条<b>从列表消失</b>（覆盖条目已经删掉 ⇒ 重算列表就没了）；</li>
+     *   <li>详情页<b>回到列表</b>；</li>
+     *   <li>聊天栏/状态行给<b>一行反馈</b>（成功与失败都写清楚，失败不许静默）。</li>
+     * </ol>
+     */
+    public ShanhaiRecipeEditorOps.Result restoreDeletedPreview() {
+        if (blank()) {
+            return new ShanhaiRecipeEditorOps.Result(false, "客户端不可写", "client side", 0, 0, false, false, null);
+        }
+        if (previewId == null) {
+            return new ShanhaiRecipeEditorOps.Result(false, "不在详情页", "previewId == null", 0, 0, false, false, null);
+        }
+        final ResourceLocation id = previewId;
+        final String type = previewTypeId;
+        final ShanhaiRecipeEditorOps.Result r = ShanhaiRecipeEditorOps.restoreDeletedById(server, id, type);
+        if (r.ok()) {
+            // 恢复成功 ⇒ 这条不再是"已删除" ⇒ 快照也没用了（留着只会在下一轮读到一条幽灵）
+            final boolean snap = ShanhaiRemovedRecipeSnapshot.remove(id.toString());
+            ShanhaiMod.LOGGER.info("{} workspace_deleted_restored id={} type={} snapshot_dropped={}",
+                    PREFIX, id, type, snap);
+        }
+        // 不管成功失败都回列表并重算（失败的话那条还在列表里 —— 这正是我们要的可见性）
+        previewId = null;
+        previewTypeId = null;
+        deletedList = true;
+        stage = Stage.TYPES;
+        refreshDeletedRows(r.ok() ? "restored" : "restore_failed");
+        page = deletedRowsList.clampPage(page);
+        deletedNote = "";
+        say((r.ok() ? "§a" : "§c") + "恢复 " + id + "：" + r.message(),
+                "§8" + r.detail() + " §7· 列表里还剩 §f" + deletedRowsList.size() + " §7条");
+        touch();
+        // 聊天栏也给一行（用户点单："给玩家一行反馈"）
+        try {
+            if (player instanceof ServerPlayer sp) {
+                sp.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                        (r.ok() ? "§a" : "§c") + "[配方编辑器] " + r.message() + " §8(" + id + ")"), false);
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} workspace_deleted_restore_chat_failed id={} err={}", PREFIX, id, t.toString());
+        }
+        return r;
+    }
+
+    /** 已删除配方列表第 {@code row} 行的图标（服务端现算；客户端读服务端推下来的那份）。 */
+    public ItemStack deletedRowIcon(int row) {
+        if (row < 0 || row >= deletedIcons.length) {
+            return ItemStack.EMPTY;
+        }
+        if (blank()) {
+            final ItemStack s = deletedIcons[row];
+            return s == null ? ItemStack.EMPTY : s;
+        }
+        if (!deletedList) {
+            return ItemStack.EMPTY;
+        }
+        final ShanhaiDeletedRecipeList.Row r = deletedRowsList.at(page, row);
+        return r == null ? ItemStack.EMPTY : ShanhaiDeletedRecipeIndex.iconOf(r);
     }
 }

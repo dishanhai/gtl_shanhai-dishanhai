@@ -129,7 +129,7 @@ public final class ShanhaiRecipeTypeIds {
             return asId;
         }
 
-        // ---- ② 别名表（位置与语义都保持原样，老行为不能regress）
+        // ---- ② 别名表（位置与语义都保持原样：老行为不许 regress）
         String alias = ALIASES.get(aliasKey(s));
         if (alias != null) {
             return alias;

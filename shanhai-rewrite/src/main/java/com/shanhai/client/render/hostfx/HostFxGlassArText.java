@@ -223,6 +223,10 @@ public final class HostFxGlassArText {
         namesResolved = false;
         // 2026-10-25 第二十六改：供能口径也要重新探（换维度后是另一台机器/另一套仓）
         STATE.energyInKind = HostFxGlassArModel.ENERGY_KIND_UNKNOWN;
+        // 🆕 2026-11-17：大整数通道一起作废（换维度 = 另一台机器，旧池子余额/发电功率不能留）
+        STATE.genPerTickBig = null;
+        STATE.energyInStoredBig = null;
+        STATE.energyFlags = 0;
         // 🔴 2026-10-25 第三十二改：⑦ 的排序记账簿一起复位（换维度后是另一台主机、另一批模块，
         //    "最近一次运行时间"必须是这个世界里的 tick）⇒ 顺序也退回槽号升序，等下一拍重算。
         AR_SORT.reset();
@@ -594,10 +598,13 @@ public final class HostFxGlassArText {
         final long[] in = energyTotals(host, IO.IN);
         final long[] ou = energyTotals(host, IO.OUT);
         // 只在服务端快照没给容量时才退回客户端本地容量（快照优先：与 addDisplayText 同一来源）
-        if (STATE.energyInCapacity < 0L) {
+        // 🆕 2026-11-17：但**快照一次都没到**时不许用本地读数顶 —— 客户端读仓恒 0（仓是 @Persisted），
+        //   顶上去就会把"还没同步"画成「无仓」（比 `--` 更容易骗人；本工程红线：宁可缺，不可假）。
+        final boolean snapArrived = safeInt(host::hostSnapSeq) > 0;
+        if (snapArrived && STATE.energyInCapacity < 0L) {
             STATE.energyInCapacity = in == null ? -1L : in[1];
         }
-        if (STATE.energyOutCapacity < 0L) {
+        if (snapArrived && STATE.energyOutCapacity < 0L) {
             STATE.energyOutCapacity = ou == null ? -1L : ou[1];
         }
         // 🔴 2026-10-25 第三十二改：⑦ 的【显示顺序】在这里算（= "数据推送的那一拍"）。
@@ -982,6 +989,26 @@ public final class HostFxGlassArText {
             STATE.energyInCapacity = host.hostEnergyInCapacity();
             STATE.energyOutStored = host.hostEnergyOutStored();
             STATE.energyOutCapacity = host.hostEnergyOutCapacity();
+            // 🆕 2026-11-17：大整数通道（用户：「能源仓好像到 long 上限了」＋「AR 面版也没显示发电功率」）
+            //   ① 发电功率 = 无线池入池速率（不是动力仓 IO，那条对归墟恒 0）；
+            //   ② 能源仓已存 = 池子余额的 BigInteger 真值（仓侧 long 投影会被压平到 9.22e18）；
+            //   ③ 三个标志位告诉面板"∞ 哨兵 / 池子记账 / 到底有没有装仓"。
+            //   三个都读服务端同步下来的字段；解码失败 ⇒ null（面板画 `--`，不编数）。
+            try {
+                STATE.energyFlags = host.hostEnergyFlags();
+            } catch (Throwable t) {
+                STATE.energyFlags = 0;
+            }
+            try {
+                STATE.genPerTickBig = host.hostGenPerTickBig();
+            } catch (Throwable t) {
+                STATE.genPerTickBig = null;
+            }
+            try {
+                STATE.energyInStoredBig = host.hostEnergyInStoredBig();
+            } catch (Throwable t) {
+                STATE.energyInStoredBig = null;
+            }
         } catch (Throwable t) {
             // 🔴 2026-10-25 第二十五改：以前这里是**静默**吞掉（只置 --）。
             //   这正是"编译过、运行期整片 --、日志里一句话都没有"的典型形态 ⇒ 至少留一行带分支名的证据。
@@ -993,10 +1020,15 @@ public final class HostFxGlassArText {
         }
         // 🔴 2026-10-25 第二十四改：快照到过就打一行（一次）—— 判据：
         //   这一行出现 = 服务端→客户端整条链路通；不出现 = 断在前面（看服务端那行）。
+        // 🆕 2026-11-17：这一行同时把【面板上那两格的原样文字】打出来（发电功率 / 能源仓 / 动力仓）
+        //   ⇒ 不用盯屏幕也能判"发电功率有没有数、能源仓还是不是 9.22E"。
         logOnce("snapseq", "[SHANHAI-HOSTSNAP] client seq={} 到手：installed={} 总耗能功率={} EU/t"
-                        + " 总发电功率={} EU/t 进度={}%",
-                seq, STATE.installedModules, STATE.totalEuUsedPerTick, STATE.totalEuGenPerTick,
-                STATE.hostProgressPct);
+                        + " 进度={}% | 产能={} | 能源仓={} | 动力仓={}（原文，与 AR 面板逐字相同）",
+                seq, STATE.installedModules, STATE.totalEuUsedPerTick,
+                STATE.hostProgressPct,
+                HostFxGlassArModel.generationPowerText(STATE),
+                HostFxGlassArModel.energyCellText(STATE, false),
+                HostFxGlassArModel.energyCellText(STATE, true));
         // 输出：服务端同步的是**物品注册表数值 id**（LDLib 的 syncdata 没有可用的 String 通道），
         // 客户端按 id 反查自己这一侧同一个注册表 ⇒ 名字。查不到（id<0 / byId 为 null / air）
         // ⇒ 那个条目就是"未知"，不编名字、不写 0。
@@ -1137,6 +1169,10 @@ public final class HostFxGlassArText {
         STATE.energyInCapacity = -1L;
         STATE.energyOutStored = -1L;
         STATE.energyOutCapacity = -1L;
+        // 🆕 2026-11-17：大整数通道也一起置"读不到"（null ⇒ 面板画 `--`；0 才是"真的没有"）
+        STATE.genPerTickBig = null;
+        STATE.energyInStoredBig = null;
+        STATE.energyFlags = 0;
     }
 
     /** 第 {@code slot} 个扫描位上的模块名；读不到 ⇒ {@code 槽#slot}（不编名字）。 */
