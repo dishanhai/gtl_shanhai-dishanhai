@@ -139,6 +139,7 @@ public class DShanhaiCommands {
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         var cmd = Commands.literal("shanhai")
+                .then(com.dishanhai.gt_shanhai.common.saveedit.ShanhaiSaveEditCommand.commandBranch())
                 .then(recipeCommand())
                 .then(gtQueryCommand())
                 .then(materialsCommand("materials"))
