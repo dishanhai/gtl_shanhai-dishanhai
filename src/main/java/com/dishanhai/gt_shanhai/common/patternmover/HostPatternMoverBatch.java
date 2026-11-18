@@ -96,6 +96,17 @@ public final class HostPatternMoverBatch {
 
     private HostPatternMoverBatch() {}
 
+    /** Execute a possibly nested batch and always finish it, even if a write fails. */
+    public static <T> T run(java.util.function.Supplier<T> body) {
+        if (body == null) return null;
+        begin();
+        try {
+            return body.get();
+        } finally {
+            end();
+        }
+    }
+
     // ================================================================ 开 / 关
 
     /** 进入一层批量（<b>必须</b>与 {@link #end()} 配对，放 {@code try}/{@code finally} 里）。 */

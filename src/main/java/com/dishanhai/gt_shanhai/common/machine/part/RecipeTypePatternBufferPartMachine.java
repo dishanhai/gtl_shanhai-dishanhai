@@ -41,6 +41,7 @@ import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
+import com.dishanhai.gt_shanhai.common.patternmover.HostPatternMoverBatch;
 import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudSource;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudAEIdentity;
@@ -306,6 +307,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private CompoundTag pendingCloudState = new CompoundTag();
     private boolean cloudRestorePending;
     private boolean cloudRemovalHandled;
+    private boolean suppressReplayRemovalDrops;
     private List<StellarCloudSource.Entry> cloudCandidates = List.of();
     private final Map<UUID, List<StellarCloudPatterns.Template>> cloudCompiledTemplates = new HashMap<>();
     private Set<String> cloudHostTypes = Set.of();
@@ -333,6 +335,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private int[] visibleOutputMultiplierStamps;
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
+    private final Map<AEKey, java.math.BigInteger> stellarOutputOverflow = new LinkedHashMap<>();
+    private boolean flushingStellarOverflow;
+    private boolean wildcardBatchRebuildPending;
+    private final HostPatternMoverBatch.Rebuilder wildcardBatchRebuilder = () -> {
+        if (!wildcardBatchRebuildPending || isRemote() || getLevel() == null) return false;
+        onWildcardPatternInventoryChanged();
+        return true;
+    };
     private final int wildcardSlotsPerPage;
     private final int wildcardMaxPages;
     private final int wildcardSlotCount;
@@ -408,7 +418,58 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     @Override
     protected MEPatternBufferRecipeHandlerTrait createRecipeHandler(IO io) {
-        return new RecipeTypePatternRecipeHandler(this, io);
+        return new StellarWideBufferTrait(this, io);
+    }
+
+    void gtShanhai$bufferOutput(@Nullable AEKey key, long amount) {
+        if (key == null || amount <= 0) return;
+        long current = buffer.getLong(key);
+        long updated = StellarOverflowBuffer.store(stellarOutputOverflow, key, current, amount);
+        if (updated != current) buffer.put(key, updated);
+        markDirty();
+    }
+
+    /** Make room before the parent refunds, retaining its virtual-target stripping mixin. */
+    @Override
+    protected void refundSlot(Object2LongOpenHashMap<AEItemKey> items,
+                              Object2LongOpenHashMap<AEFluidKey> fluids) {
+        gtShanhai$reserveRefundSpace(items);
+        gtShanhai$reserveRefundSpace(fluids);
+        super.refundSlot(items, fluids);
+    }
+
+    private <K extends AEKey> void gtShanhai$reserveRefundSpace(Object2LongOpenHashMap<K> inventory) {
+        for (var entry : inventory.object2LongEntrySet()) {
+            long amount = entry.getLongValue();
+            long current = buffer.getLong(entry.getKey());
+            if (amount > 0 && current > 0 && amount > Long.MAX_VALUE - current) {
+                stellarOutputOverflow.merge(entry.getKey(), java.math.BigInteger.valueOf(current), java.math.BigInteger::add);
+                buffer.removeLong(entry.getKey());
+                markDirty();
+            }
+        }
+    }
+
+    private void gtShanhai$flushOverflow() {
+        if (stellarOutputOverflow.isEmpty() || flushingStellarOverflow) return;
+        flushingStellarOverflow = true;
+        try {
+            IGrid grid = getMainNode().getGrid();
+            if (grid == null) return;
+            MEStorage storage = grid.getStorageService().getInventory();
+            if (storage == null) return;
+            long moved = StellarOverflowBuffer.flush(stellarOutputOverflow, 64,
+                    (key, amount) -> {
+                        long accepted = storage.insert(key, amount, Actionable.MODULATE, actionSource);
+                        if (accepted > 0) markDirty();
+                        return accepted;
+                    });
+            if (moved > 0) markDirty();
+        } catch (RuntimeException failure) {
+            if (getOffsetTimer() % 100 == 0) GTDishanhaiMod.LOGGER.warn("Stellar overflow flush failed at {}", getPos(), failure);
+        } finally {
+            flushingStellarOverflow = false;
+        }
     }
 
     @Override
@@ -977,6 +1038,29 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public void onMachineRemoved() {
         if (cloudRemovalHandled) return;
         cloudRemovalHandled = true;
+        try {
+            StellarRemovalPolicy.handoff(com.dishanhai.gt_shanhai.common.time.ShanhaiClockHooks.inReplayWrite(),
+                    this::gtShanhai$handoffRemovedMachine);
+        } finally {
+            suppressReplayRemovalDrops = com.dishanhai.gt_shanhai.common.time.ShanhaiClockHooks.inReplayWrite();
+            try {
+                super.onMachineRemoved();
+            } finally {
+                suppressReplayRemovalDrops = false;
+            }
+        }
+    }
+
+    @Override
+    public void clearInventory(com.lowdragmc.lowdraglib.side.item.IItemTransfer inventory) {
+        StellarRemovalPolicy.clearInventory(suppressReplayRemovalDrops && inventory == sharedCatalystInventory,
+                () -> StellarRemovalPolicy.clearSlots(inventory.getSlots(),
+                        i -> !inventory.getStackInSlot(i).isEmpty(),
+                        i -> inventory.setStackInSlot(i, ItemStack.EMPTY), inventory::onContentsChanged),
+                () -> super.clearInventory(inventory));
+    }
+
+    private void gtShanhai$handoffRemovedMachine() {
         boolean hadCloudData = cloudRestorePending || !cloudSlots.isEmpty();
         if (cloudRestorePending) restoreCloudSlots();
         // 本類並非 IDropSaveMachine：拆除時必須實際交網或交付獨立的 SDA 退料載體。
@@ -1017,7 +1101,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         clearInventory(wildcardPatternInventory);
         clearWildcardPatternData(true);
         rebuildingWildcardPatterns = false;
-        super.onMachineRemoved();
+        if (!stellarOutputOverflow.isEmpty() && getLevel() instanceof ServerLevel level) {
+            UUID cellId = UUID.randomUUID();
+            ItemStack recovery = new ItemStack(GTDishanhaiMod.SUPER_DISK_ARRAY.get());
+            recovery.getOrCreateTag().putUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID, cellId);
+            recovery.getOrCreateTag().putBoolean(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_RUNTIME_UUID, true);
+            com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(level.getServer()).updateCellBig(
+                    cellId, "sda", com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem.TOTAL_BYTES,
+                    Map.copyOf(stellarOutputOverflow));
+            StellarRecoverySavedData.get(level.getServer()).enqueue(level, getPos(), recovery);
+            stellarOutputOverflow.clear();
+        }
     }
 
     private CompoundTag snapshotCloudState() {
@@ -1091,6 +1185,15 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     @Override
     public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean forDrop) {
         super.saveCustomPersistedData(tag, forDrop);
+        net.minecraft.nbt.ListTag overflowTag = new net.minecraft.nbt.ListTag();
+        stellarOutputOverflow.forEach((key, amount) -> {
+            CompoundTag entry = key.toTagGeneric();
+            entry.putByteArray("gtShanhaiAmount", amount.toByteArray());
+            overflowTag.add(entry);
+        });
+        // On removal the recovery cell owns this material; it must not also enter a machine drop.
+        if (!forDrop && !overflowTag.isEmpty()) tag.put("gtShanhaiStellarOverflow", overflowTag);
+        else tag.remove("gtShanhaiStellarOverflow");
         saveCloudSlots(tag);
         tag.putIntArray(MOTHER_CIRCUITS_TAG, wildcardMotherCircuits);
         if (forDrop && cloudSlots.isEmpty() && buffer.isEmpty() && !cloudRestorePending) tag.remove("cloudExecutorId");
@@ -1122,6 +1225,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         loadingWildcardMothers = true;
         try {
             super.loadCustomPersistedData(tag);
+            stellarOutputOverflow.clear();
+            var overflowTag = tag.getList("gtShanhaiStellarOverflow", Tag.TAG_COMPOUND);
+            for (int i = 0; i < overflowTag.size(); i++) {
+                CompoundTag entry = overflowTag.getCompound(i);
+                AEKey key = AEKey.fromTagGeneric(entry);
+                byte[] bytes = entry.getByteArray("gtShanhaiAmount");
+                if (key == null || bytes.length == 0) throw new IllegalStateException("Invalid stellar overflow entry");
+                java.math.BigInteger amount = new java.math.BigInteger(bytes);
+                if (amount.signum() <= 0) throw new IllegalStateException("Invalid stellar overflow amount");
+                stellarOutputOverflow.merge(key, amount, java.math.BigInteger::add);
+            }
             int[] storedCircuits = tag.getIntArray(MOTHER_CIRCUITS_TAG);
             for (int i = 0; i < wildcardMotherCircuits.length; i++) {
                 wildcardMotherCircuits[i] = i < storedCircuits.length ? normalizeMotherCircuit(storedCircuits[i]) : 0;
@@ -2903,6 +3017,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         cloudScannedRevision = Long.MIN_VALUE;
         if (rebuildingWildcardPatterns || isRemote() || getLevel() == null) return;
         markDirty();
+        wildcardBatchRebuildPending = true;
+        if (HostPatternMoverBatch.suppress(wildcardBatchRebuilder)) return;
         rebuildingWildcardPatterns = true;
         try {
             refundWildcardSlots();
@@ -2911,6 +3027,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             rebuildingWildcardPatterns = false;
         }
         refreshWildcardPatterns(false);
+        wildcardBatchRebuildPending = false;
     }
 
     @Override
@@ -3151,7 +3268,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private MEPatternBufferPartMachineBase.InternalSlot createExtendedSlot(int globalSlot) {
         var slot = new StellarPatternBufferInternalSlot(globalSlot);
         slot.setOnContentsChanged(() -> {
-            markDirty(); ((RecipeTypePatternRecipeHandler) recipeHandler).notifyPatternListeners();
+            markDirty(); ((StellarWideBufferTrait) recipeHandler).notifyPatternListeners();
         });
         return slot;
     }
@@ -3305,7 +3422,16 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private void tickCloudPatterns() {
-        if (isRemote() || getLevel() == null || getOffsetTimer() % 5 != 0) return;
+        if (isRemote() || getLevel() == null) return;
+        gtShanhai$flushOverflow();
+        if (getOffsetTimer() % 5 != 0) return;
+        if (wildcardBatchRebuildPending && !HostPatternMoverBatch.active()) {
+            try {
+                onWildcardPatternInventoryChanged();
+            } catch (RuntimeException failure) {
+                GTDishanhaiMod.LOGGER.warn("Wildcard batch rebuild retry failed at {}", getPos(), failure);
+            }
+        }
         try {
             tickCloudPatternsChecked();
         } catch (RuntimeException failure) {
@@ -3577,18 +3703,6 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                             true, cloudEnabled, "gui.gt_shanhai.stellar_cloud.source_native", cloudStatus, cloudPublishedCount,
                             StellarCloudUiContract.control(cloudUiDisabledReason(player))),
                     RecipeTypePatternBufferPartMachine.this::changeCloudEnabled, () -> cloudPublishedPatterns);
-        }
-    }
-
-    private static final class RecipeTypePatternRecipeHandler extends MEPatternBufferRecipeHandlerTrait {
-
-        RecipeTypePatternRecipeHandler(RecipeTypePatternBufferPartMachine machine, IO io) {
-            super(machine, io);
-        }
-
-        void notifyPatternListeners() {
-            getMeFluidHandler().notifyListeners();
-            getMeItemHandler().notifyListeners();
         }
     }
 

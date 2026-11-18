@@ -89,10 +89,9 @@ public final class HostPatternMoverTargets {
 
     // ================================================================ 批量写入（第四刀 ①）
 
-    /** Execute using master machine-owned invalidation; no rewrite-only batch hooks. */
+    /** Defer expensive wildcard expansion until the outermost placement finishes. */
     public static <T> T inBatchWrite(java.util.function.Supplier<T> body) {
-        // Master owns invalidation; rewrite batch hooks do not exist here.
-        return body == null ? null : body.get();
+        return HostPatternMoverBatch.run(body);
     }
 
     // ================================================================ 收集
