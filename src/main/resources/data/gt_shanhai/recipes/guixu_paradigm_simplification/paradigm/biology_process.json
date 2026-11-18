@@ -1,0 +1,115 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 13,
+    "ebf_temp": 48000
+  },
+  "duration": 1,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 256,
+          "ingredient": {
+            "item": "gtceu:stem_cells"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 256,
+          "ingredient": {
+            "item": "kubejs:tcetieseaweedextract"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 256,
+          "ingredient": {
+            "tag": "forge:dusts/agar"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 3
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 8192,
+          "ingredient": {
+            "item": "kubejs:biological_cells"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 73728,
+          "value": [
+            {
+              "fluid": "gtceu:mutated_living_solder"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1024000,
+          "value": [
+            {
+              "fluid": "gtceu:biohmediumsterilized"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1024000,
+          "value": [
+            {
+              "fluid": "gtceu:sterilized_growth_medium"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/biology_process",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "sterile_cleanroom"
+    }
+  ]
+}

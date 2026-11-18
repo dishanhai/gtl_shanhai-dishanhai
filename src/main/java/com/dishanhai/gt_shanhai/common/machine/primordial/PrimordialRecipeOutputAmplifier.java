@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial;
 
+import com.dishanhai.gt_shanhai.api.recipe.PrimordialMyriadRecipeData;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.chance.logic.ChanceLogic;
@@ -12,7 +13,7 @@ import java.util.Map;
 public final class PrimordialRecipeOutputAmplifier {
 
     public static GTRecipe apply(GTRecipe recipe, int multiplier) {
-        if (recipe == null || multiplier <= 1) {
+        if (recipe == null || multiplier <= 1 || PrimordialMyriadRecipeData.isBonusDisabled(recipe)) {
             return recipe;
         }
 

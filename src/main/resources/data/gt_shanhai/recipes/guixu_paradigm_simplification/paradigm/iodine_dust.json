@@ -1,0 +1,102 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 6,
+    "ebf_temp": 7100
+  },
+  "duration": 1,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4096,
+          "ingredient": {
+            "item": "minecraft:kelp"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 3
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 640000,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:iodine_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:potassium_dust"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 30720
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/iodine_dust",
+      "defaultEnabled": true
+    }
+  ]
+}

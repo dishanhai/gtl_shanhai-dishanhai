@@ -1,0 +1,72 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 8,
+    "ebf_temp": 800
+  },
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:enriched_naquadah_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 2000,
+          "value": [
+            {
+              "fluid": "gtceu:sulfuric_acid"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 3000,
+          "value": [
+            {
+              "fluid": "gtceu:acidic_naquadria_solution"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 491520
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/acidic_naquadria_solution",
+      "defaultEnabled": true
+    }
+  ]
+}

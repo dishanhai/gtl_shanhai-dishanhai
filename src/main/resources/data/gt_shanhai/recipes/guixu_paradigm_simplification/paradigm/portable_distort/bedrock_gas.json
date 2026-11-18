@@ -1,0 +1,117 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 800
+  },
+  "duration": 2560,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 72,
+          "ingredient": {
+            "item": "gtceu:bedrock_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 63,
+          "ingredient": {
+            "item": "gtceu:naquadah_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 4
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 72000,
+          "value": [
+            {
+              "fluid": "gtceu:distilled_water"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 7200,
+          "value": [
+            {
+              "fluid": "gtceu:xenon"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "gtceu:naquadria_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "gtceu:enriched_naquadah_dust"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:bedrock_gas"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/bedrock_gas",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "law_cleanroom"
+    }
+  ]
+}

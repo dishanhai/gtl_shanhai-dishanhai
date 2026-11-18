@@ -1,0 +1,158 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 10,
+    "ebf_temp": 800
+  },
+  "duration": 1200,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1152,
+          "ingredient": {
+            "item": "kubejs:draconium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1152,
+          "ingredient": {
+            "item": "ae2:sky_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 144,
+          "ingredient": {
+            "item": "gtceu:nether_star_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 432,
+          "ingredient": {
+            "item": "gtceu:coal_ore"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 288,
+          "ingredient": {
+            "item": "minecraft:wheat_seeds"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 11
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 295200,
+          "value": [
+            {
+              "fluid": "gtceu:biomass"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 180000,
+          "value": [
+            {
+              "fluid": "gtceu:milk"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 115200,
+          "value": [
+            {
+              "fluid": "gtceu:sterilized_growth_medium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 180000,
+          "value": [
+            {
+              "fluid": "gtceu:mutated_living_solder"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 18000,
+          "value": [
+            {
+              "fluid": "gtceu:distilled_water"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 18000,
+          "value": [
+            {
+              "fluid": "gtceu:carbon_dioxide"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 180000,
+          "value": [
+            {
+              "fluid": "gtceu:super_mutated_living_solder"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 7864320
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/super_mutated_living_solder",
+      "defaultEnabled": true
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 13,
+    "ebf_temp": 21600
+  },
+  "duration": 1280,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 30,
+          "ingredient": {
+            "item": "gtceu:rhenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 56,
+          "ingredient": {
+            "item": "gtceu:lithium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 40,
+          "ingredient": {
+            "item": "gtceu:selenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 50,
+          "ingredient": {
+            "item": "gtceu:activated_carbon_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 60,
+          "ingredient": {
+            "item": "gtceu:rutile_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 55,
+          "ingredient": {
+            "item": "gtceu:quicklime_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 13
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 12000,
+          "value": [
+            {
+              "fluid": "gtceu:ethane"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 75000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:photoresist"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 4700,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 89000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 40000,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 57000,
+          "value": [
+            {
+              "fluid": "gtceu:butane"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 21600,
+          "value": [
+            {
+              "fluid": "gtceu:euv_photoresist"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/euv_photoresist",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "cleanroom"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 800
+  },
+  "duration": 400,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 486,
+          "ingredient": {
+            "item": "gtceu:carbon_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 18
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 256000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen_dioxide"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 21000,
+          "value": [
+            {
+              "fluid": "gtceu:polyimide"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 12800,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 6400,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/polyimide",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "cleanroom"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 800
+  },
+  "duration": 2000,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 360,
+          "ingredient": {
+            "item": "gtceu:trinium_compound_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 512,
+          "ingredient": {
+            "item": "gtceu:sodium_hydroxide_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:fullerene_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:carbon_nanotubes_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 8
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 300000,
+          "value": [
+            {
+              "fluid": "gtceu:nitric_acid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 12000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen_peroxide"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "gtceu:sulfur_dioxide"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 360,
+          "ingredient": {
+            "item": "gtceu:trinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 360,
+          "ingredient": {
+            "item": "gtceu:actinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 320,
+          "ingredient": {
+            "item": "gtceu:selenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 320,
+          "ingredient": {
+            "item": "gtceu:astatine_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:salt_dust"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 128000,
+          "value": [
+            {
+              "fluid": "gtceu:residual_triniite_solution"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 320000,
+          "value": [
+            {
+              "fluid": "gtceu:actinium_radium_nitrate_solution"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/trinium_compound",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "cleanroom"
+    }
+  ]
+}

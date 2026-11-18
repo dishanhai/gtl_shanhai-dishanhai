@@ -1,0 +1,149 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 800
+  },
+  "duration": 6560,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:sodium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 21
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 48000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:benzene"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 60000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:propene"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:nitric_acid"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 32,
+          "ingredient": {
+            "item": "gtceu:sodium_fluoride_dust"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 20736,
+          "value": [
+            {
+              "fluid": "gtceu:polyetheretherketone"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:carbon_dioxide"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/polyetheretherketone",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "cleanroom"
+    }
+  ]
+}

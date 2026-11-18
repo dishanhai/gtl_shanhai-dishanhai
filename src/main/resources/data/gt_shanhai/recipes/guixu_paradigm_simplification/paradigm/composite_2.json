@@ -1,0 +1,138 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 13,
+    "ebf_temp": 21600
+  },
+  "duration": 1,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1440,
+          "ingredient": {
+            "tag": "forge:dusts/carbon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 5
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 440000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 88000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 40000,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:epoxy"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:polyetheretherketone"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:polybenzimidazole"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:polyimide"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/composite_2",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "law_cleanroom"
+    }
+  ]
+}

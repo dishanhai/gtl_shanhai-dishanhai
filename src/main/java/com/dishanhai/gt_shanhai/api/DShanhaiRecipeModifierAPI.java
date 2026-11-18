@@ -1322,6 +1322,56 @@ public class DShanhaiRecipeModifierAPI {
         return true;
     }
 
+    /** Restore a single recipe by its full type and ID, including after a restart. */
+    public static boolean restoreDisabledRecipe(String recipeTypeId, String recipeId) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || recipeId == null || recipeId.isEmpty()) return false;
+        String key = recipeTypeId + "|" + recipeId;
+        GTRecipe original = RecipeOriginalSnapshotStore.copyOf(recipeTypeId, recipeId);
+        GTRecipe override = original == null ? RecipeRebuildService.editableOf(recipeTypeId, recipeId) : null;
+        GTRecipe disabled = DISABLED_RECIPES.get(key);
+        if (original == null && override == null && disabled == null) return false;
+        List<String> patterns = getDeleteRules(recipeTypeId).stream().map(rule -> rule.recipeRegex).toList();
+        boolean toggled = DISABLED_RECIPES.containsKey(key)
+                || Boolean.FALSE.equals(PERSISTED_RECIPE_TOGGLES.get(recipeId));
+        if (com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeRestoreRules.decide(
+                recipeId, patterns, toggled)
+                != com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeRestoreRules.Decision.RESTORE) {
+            return false;
+        }
+        List<DeleteEntry> previousRules = new ArrayList<>(getDeleteRules(recipeTypeId));
+        Map<String, Boolean> previousToggles = new LinkedHashMap<>(PERSISTED_RECIPE_TOGGLES);
+        if (original == null && override == null) RecipeOriginalSnapshotStore.capture(recipeTypeId, disabled);
+        DISABLED_RECIPES.remove(key);
+        removePersistedRecipeToggle(recipeId);
+        removeDeleteRuleExact(recipeTypeId, recipeId);
+        var rulesJson = new com.google.gson.JsonObject();
+        DELETE_RULES.forEach((type, entries) -> {
+            var array = new com.google.gson.JsonArray();
+            entries.forEach(entry -> array.add(entry.recipeRegex));
+            rulesJson.add(type, array);
+        });
+        var togglesJson = new com.google.gson.JsonObject();
+        PERSISTED_RECIPE_TOGGLES.forEach((id, value) -> togglesJson.addProperty(id, false));
+        var persisted = com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeRestorePersistence.write(
+                DELETE_FILE.toPath(), GSON.toJson(rulesJson).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                RECIPE_TOGGLE_FILE.toPath(), GSON.toJson(togglesJson).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                DELETE_FILE.toPath().toAbsolutePath().getParent().resolve("restore-backups"));
+        if (!persisted.ok()) {
+            if (previousRules.isEmpty()) DELETE_RULES.remove(recipeTypeId);
+            else DELETE_RULES.put(recipeTypeId, new CopyOnWriteArrayList<>(previousRules));
+            PERSISTED_RECIPE_TOGGLES.clear();
+            PERSISTED_RECIPE_TOGGLES.putAll(previousToggles);
+            if (disabled != null) DISABLED_RECIPES.put(key, disabled);
+            LOG.error("Recipe restore persistence failed: {} rollback_failures={}",
+                    persisted.error(), persisted.rollbackFailures());
+            return false;
+        }
+        if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
+        DShanhaiRecipeEngine.clearRecipeCache();
+        DShanhaiGTRecipeQuery.resetCache();
+        return true;
+    }
+
     public static boolean isRecipeEnabled(String recipeId) {
         String typeId = findRecipeTypeById(recipeId);
         if (typeId != null) return true;

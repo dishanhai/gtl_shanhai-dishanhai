@@ -1,0 +1,128 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 11
+  },
+  "duration": 96000,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "kubejs:reinforced_echo_shard"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:neutronium_buzz_saw_blade"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 256,
+          "ingredient": {
+            "item": "gtceu:double_neutronium_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 8
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 36864,
+          "value": [
+            {
+              "fluid": "gtceu:rhodium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36864,
+          "value": [
+            {
+              "fluid": "gtceu:hastelloy_x"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36864,
+          "value": [
+            {
+              "fluid": "gtceu:hsss"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36864,
+          "value": [
+            {
+              "fluid": "gtceu:hsse"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1024000,
+          "value": [
+            {
+              "fluid": "gtceu:mana"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 32512,
+          "ingredient": {
+            "item": "gtceu:bedrock_dust"
+          }
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 31457280
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/bedrock_dust_loop",
+      "defaultEnabled": true
+    }
+  ]
+}

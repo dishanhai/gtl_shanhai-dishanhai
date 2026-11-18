@@ -1,0 +1,176 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 12,
+    "ebf_temp": 18000
+  },
+  "duration": 1,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1440,
+          "ingredient": {
+            "tag": "forge:dusts/carbon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 36,
+          "ingredient": {
+            "tag": "forge:dusts/sulfur"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 36,
+          "ingredient": {
+            "tag": "forge:dusts/silicon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 7
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1908000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 144000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 144000,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:polyvinyl_chloride"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:polytetrafluoroethylene"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:silicone_rubber"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:polyphenylene_sulfide"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:styrene_butadiene_rubber"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36000,
+          "value": [
+            {
+              "fluid": "gtceu:polyvinyl_butyral"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 125829120
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/composite_1",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "law_cleanroom"
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 12,
+    "ebf_temp": 800
+  },
+  "duration": 300,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 80,
+          "ingredient": {
+            "item": "gtceu:naquadria_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "minecraft:dragon_egg"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 320,
+          "ingredient": {
+            "item": "gtceu:stem_cells"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 8
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 384000,
+          "value": [
+            {
+              "fluid": "gtceu:mana"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 320000,
+          "value": [
+            {
+              "fluid": "gtceu:sterilized_growth_medium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 82000,
+          "value": [
+            {
+              "fluid": "gtceu:xpjuice"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "gtceu:biohmediumsterilized"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 50000,
+          "value": [
+            {
+              "fluid": "gtceu:mutagen"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 319680,
+          "value": [
+            {
+              "fluid": "gtceu:dragon_blood"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 125829120
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/easier_dragon_blood",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "sterile_cleanroom"
+    }
+  ]
+}

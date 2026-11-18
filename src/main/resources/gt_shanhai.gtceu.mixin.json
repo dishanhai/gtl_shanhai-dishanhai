@@ -34,6 +34,7 @@
     "KeyStorageInsertThrottleMixin",
     "RecipeModifierAPIMixin",
     "GTRecipeTypeModifierMixin",
+    "GTRecipeJSMyriadBonusMixin",
     "RecipeIteratorStripMixin",
     "BranchStripMixin",
     "ArcanicAstrographHubCompressionMixin",

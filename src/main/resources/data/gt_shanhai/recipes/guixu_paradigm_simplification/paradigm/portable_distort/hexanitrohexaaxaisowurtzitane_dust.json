@@ -1,0 +1,211 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 800
+  },
+  "duration": 20480,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 191,
+          "ingredient": {
+            "item": "gtceu:silica_gel_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 76,
+          "ingredient": {
+            "item": "gtceu:succinic_acid_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 144,
+          "ingredient": {
+            "item": "gtceu:activated_carbon_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 216,
+          "ingredient": {
+            "item": "gtceu:sodium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 47,
+          "ingredient": {
+            "item": "gtceu:boron_trioxide_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 39,
+          "ingredient": {
+            "item": "gtceu:potassium_carbonate_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 101,
+          "ingredient": {
+            "item": "gtceu:barium_chloride_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 31
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 470000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 12000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrofluoric_acid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 62000,
+          "value": [
+            {
+              "fluid": "gtceu:methanol"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 15000,
+          "value": [
+            {
+              "fluid": "gtceu:nitric_acid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 39000,
+          "value": [
+            {
+              "fluid": "gtceu:ammonia"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 47000,
+          "value": [
+            {
+              "fluid": "gtceu:glyoxal"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 11000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 9000,
+          "value": [
+            {
+              "fluid": "gtceu:acetic_anhydride"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 7000,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen_plasma"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 288,
+          "ingredient": {
+            "item": "gtceu:hexanitrohexaaxaisowurtzitane_dust"
+          }
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/portable_distort/hexanitrohexaaxaisowurtzitane_dust",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "cleanroom"
+    }
+  ]
+}

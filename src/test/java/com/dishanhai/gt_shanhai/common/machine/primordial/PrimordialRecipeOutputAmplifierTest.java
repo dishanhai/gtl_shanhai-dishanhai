@@ -1,9 +1,11 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial;
 
+import com.google.gson.JsonParser;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.content.ContentModifier;
+import com.mojang.serialization.JsonOps;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -25,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PrimordialRecipeOutputAmplifierTest {
@@ -44,6 +47,37 @@ class PrimordialRecipeOutputAmplifierTest {
         assertSame(recipe, PrimordialRecipeOutputAmplifier.apply(recipe, 0));
         assertSame(recipe, PrimordialRecipeOutputAmplifier.apply(recipe, -10));
         assertNull(PrimordialRecipeOutputAmplifier.apply(null, 1000));
+    }
+
+    @Test
+    void recipeDataMarkerFromJsonSkipsAmplificationForNormalAndTickOutputs() {
+        GTRecipe recipe = new CopyProbeRecipe();
+        var json = JsonParser.parseString("""
+                {"data": {"sh_disable_primordial_myriad_bonus": true}}
+                """).getAsJsonObject();
+        recipe.data = CompoundTag.CODEC.parse(JsonOps.INSTANCE, json.getAsJsonObject("data"))
+                .result().orElseThrow();
+        Content normalOutput = rawContent(5L, 2000);
+        Content tickOutput = rawContent(7L, 2500);
+        recipe.outputs.putAll(contentMap(normalOutput));
+        recipe.tickOutputs.putAll(contentMap(tickOutput));
+
+        for (int multiplier : new int[] { 10, 100, 1000 }) {
+            assertSame(recipe, PrimordialRecipeOutputAmplifier.apply(recipe, multiplier));
+        }
+        assertAmounts(recipe.outputs, 5L);
+        assertAmounts(recipe.tickOutputs, 7L);
+        assertEquals(2000, normalOutput.chance);
+        assertEquals(2500, tickOutput.chance);
+    }
+
+    @Test
+    void absentOrDisabledMarkerKeepsExistingAmplification() {
+        GTRecipe recipe = new CopyProbeRecipe();
+
+        assertThrows(CopyRequested.class, () -> PrimordialRecipeOutputAmplifier.apply(recipe, 10));
+        recipe.data.putBoolean("sh_disable_primordial_myriad_bonus", false);
+        assertThrows(CopyRequested.class, () -> PrimordialRecipeOutputAmplifier.apply(recipe, 10));
     }
 
     @Test
@@ -193,6 +227,22 @@ class PrimordialRecipeOutputAmplifierTest {
                 Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap(),
                 Collections.emptyList(), Collections.emptyList(), new CompoundTag(), 240, false);
     }
+
+    private static class CopyProbeRecipe extends GTRecipe {
+        CopyProbeRecipe() {
+            super(null, new ResourceLocation("gt_shanhai", "output_amplifier_test"),
+                    Map.of(), new HashMap<>(), Map.of(), new HashMap<>(),
+                    Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of(), new CompoundTag(), 240, false);
+        }
+
+        @Override
+        public GTRecipe copy() {
+            // 观察是否进入放大分支，避免在独立 JVM 测试中初始化游戏注册表。
+            throw new CopyRequested();
+        }
+    }
+
+    private static class CopyRequested extends RuntimeException {}
 
     private static Unsafe findUnsafe() {
         try {

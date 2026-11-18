@@ -90,7 +90,7 @@ public class DShanhaiRecipeTypes {
                 .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.OUT)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
         GUIXU_PARADIGM_SIMPLIFICATION = register("guixu_paradigm_simplification", "multiblock")
-                .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.IN)
+                .setMaxIOSize(9, 144, 9, 32).setEUIO(IO.IN)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
         SPACETIME_DISTORTION = register("spacetime_distortion", "multiblock")

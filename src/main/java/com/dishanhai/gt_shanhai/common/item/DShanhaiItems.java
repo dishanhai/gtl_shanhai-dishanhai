@@ -25,6 +25,7 @@ public final class DShanhaiItems {
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
     public static ItemEntry<HostPatternMoverItem> HOST_PATTERN_MOVER;
+    public static ItemEntry<ComponentItem> BLACKHOLE_EXTRACTION_MODULE;
 
     public static void init() {
         MIRACLE_MATTER = REGISTRATE.item("miracle_matter", ComponentItem::create)
@@ -76,6 +77,9 @@ public final class DShanhaiItems {
                 .register();
         HOST_PATTERN_MOVER = REGISTRATE.item("host_pattern_mover",
                         properties -> new HostPatternMoverItem(properties.stacksTo(1)))
+                .model(NonNullBiConsumer.noop())
+                .register();
+        BLACKHOLE_EXTRACTION_MODULE = REGISTRATE.item("blackhole_extraction_module", ComponentItem::create)
                 .model(NonNullBiConsumer.noop())
                 .register();
     }

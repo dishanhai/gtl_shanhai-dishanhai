@@ -1,0 +1,161 @@
+{
+  "type": "gtceu:guixu_paradigm_simplification",
+  "data": {
+    "euTier": 11,
+    "ebf_temp": 18000
+  },
+  "duration": 1,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 450,
+          "ingredient": {
+            "tag": "forge:dusts/salt"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 450,
+          "ingredient": {
+            "tag": "forge:dusts/agar"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 450,
+          "ingredient": {
+            "tag": "forge:dusts/meat"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 228,
+          "ingredient": {
+            "item": "minecraft:kelp"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 90,
+          "ingredient": {
+            "tag": "forge:dusts/alien_algae"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 36,
+          "ingredient": {
+            "item": "gtceu:energium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "tag": "forge:dusts/mithril"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 11
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 112000,
+          "value": [
+            {
+              "fluid": "gtceu:unknowwater"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 225000,
+          "value": [
+            {
+              "fluid": "gtceu:methane"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 90000,
+          "value": [
+            {
+              "fluid": "gtceu:naphthalene"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 180000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 256,
+          "ingredient": {
+            "item": "kubejs:tcetieseaweedextract"
+          }
+        }
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 31457280
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:guixu_paradigm_simplification/paradigm/gtladditions__tcetieseaweedextract",
+      "defaultEnabled": true
+    }
+  ],
+  "recipeConditions": [
+    {
+      "type": "cleanroom",
+      "cleanroom": "law_cleanroom"
+    }
+  ]
+}
