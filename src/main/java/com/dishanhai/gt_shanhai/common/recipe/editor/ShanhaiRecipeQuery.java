@@ -24,7 +24,8 @@ public final class ShanhaiRecipeQuery {
     public enum SearchMode {
         RECIPE_ID,
         INGREDIENT,
-        OUTPUT
+        OUTPUT,
+        DELETED
     }
 
     public enum IngredientKind {
@@ -98,10 +99,52 @@ public final class ShanhaiRecipeQuery {
             SearchMode mode,
             IngredientKind ingredientKind) {
         SearchMode safeMode = mode == null ? SearchMode.RECIPE_ID : mode;
+        if (safeMode == SearchMode.DELETED) return queryDeleted(server, typeFilter, text, page, pageSize);
         if (safeMode != SearchMode.RECIPE_ID) {
             return queryReverse(server, typeFilter, text, page, pageSize, safeMode, ingredientKind);
         }
         return queryRecipeIds(typeFilter, text, page, pageSize);
+    }
+
+    private static Result queryDeleted(MinecraftServer server, String typeFilter, String text, int page, int pageSize) {
+        if (server != null) RecipeOriginalSnapshotStore.activate(server.getRecipeManager());
+        String type = typeFilter == null ? "" : typeFilter;
+        String needle = text == null ? "" : text.toLowerCase(java.util.Locale.ROOT);
+        List<Card> all = new ArrayList<>();
+        java.util.Set<String> types = new java.util.LinkedHashSet<>(RecipeOriginalSnapshotStore.typeIds());
+        types.addAll(RecipeRebuildService.overrideTypeIds());
+        java.util.Set<String> disabledIds = new java.util.HashSet<>(DShanhaiRecipeModifierAPI.getDisabledRecipeIds());
+        ShanhaiRecipeOverrideStore store = new ShanhaiRecipeOverrideStore(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides()));
+        for (String typeId : types) {
+            if (!type.isEmpty() && !type.equals(typeId)) continue;
+            Map<String, GTRecipe> candidates = new LinkedHashMap<>();
+            for (GTRecipe original : RecipeOriginalSnapshotStore.copiesOf(typeId)) {
+                if (original.getId() != null) candidates.put(original.getId().toString(), original);
+            }
+            for (String id : store.entriesForType(typeId).keySet()) {
+                if (!candidates.containsKey(id)) {
+                    GTRecipe override = RecipeRebuildService.editableOf(typeId, id);
+                    if (override != null) candidates.put(id, override);
+                }
+            }
+            for (GTRecipe original : candidates.values()) {
+                if (original.getId() == null) continue;
+                String id = original.getId().toString();
+                if (!needle.isEmpty() && !id.toLowerCase(java.util.Locale.ROOT).contains(needle)
+                        && !typeId.toLowerCase(java.util.Locale.ROOT).contains(needle)) continue;
+                if (!DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(typeId, original)
+                        && !disabledIds.contains(id)) continue;
+                all.add(card(typeId, id, ShanhaiRecipeBase.from(original)));
+            }
+        }
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(256, pageSize));
+        int from = (int) Math.min(all.size(), (long) safePage * safeSize);
+        int to = Math.min(all.size(), from + safeSize);
+        return new Result(List.copyOf(all.subList(from, to)), all.size(), currentRevision(),
+                SearchMode.DELETED, null);
     }
 
     private static Result queryRecipeIds(String typeFilter, String text, int page, int pageSize) {

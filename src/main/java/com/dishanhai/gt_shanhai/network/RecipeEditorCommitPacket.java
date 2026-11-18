@@ -80,6 +80,10 @@ public final class RecipeEditorCommitPacket {
         }
         try {
             JsonObject json = JsonParser.parseString(packet.payload).getAsJsonObject();
+            if (json.has("restoreDeleted") && json.get("restoreDeleted").getAsBoolean()) {
+                player.sendSystemMessage(Component.translatable("gt_shanhai.recipe_editor.restore_done", packet.recipeId));
+                return;
+            }
             JsonObject inputs = json.has("inputs") && json.get("inputs").isJsonObject()
                     ? json.getAsJsonObject("inputs") : new JsonObject();
             JsonObject outputs = json.has("outputs") && json.get("outputs").isJsonObject()
@@ -156,6 +160,17 @@ public final class RecipeEditorCommitPacket {
                     || !packet.recipeTypeId.equals(json.get("recipeTypeId").getAsString())
                     || !packet.recipeId.equals(json.get("recipeId").getAsString())) {
                 return invalid("recipe-identity-mismatch");
+            }
+            if (json.has("restoreDeleted") && json.get("restoreDeleted").getAsBoolean()) {
+                var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+                var store = new ShanhaiRecipeOverrideStore(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides()));
+                var result = new ShanhaiRecipeEditorOps(store).restoreDeleted(packet.recipeTypeId, packet.recipeId, server);
+                return new RecipeEditorResultPacket(
+                        result.status() == ShanhaiRecipeEditorOps.Result.Status.SUCCESS
+                                ? RecipeEditorResultPacket.Status.SUCCESS : RecipeEditorResultPacket.Status.VALIDATION_ERROR,
+                        result.message(), result.revision(), "");
             }
             boolean createNew = json.has("createNew")
                     && json.get("createNew").isJsonPrimitive()

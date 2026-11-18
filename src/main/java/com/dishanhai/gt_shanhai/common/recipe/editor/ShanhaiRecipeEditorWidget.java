@@ -228,7 +228,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     void query() {
         if (!isClient()) return;
-        if (searchMode != ShanhaiRecipeQuery.SearchMode.RECIPE_ID) {
+        if (searchMode == ShanhaiRecipeQuery.SearchMode.INGREDIENT
+                || searchMode == ShanhaiRecipeQuery.SearchMode.OUTPUT) {
             String id = searchText == null ? "" : searchText.trim();
             if (id.isEmpty()) {
                 cards.clear();
@@ -336,6 +337,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 ? ShanhaiRecipeQuery.SearchMode.RECIPE_ID : mode;
         if (next == searchMode) return;
         searchMode = next;
+        selectedCard = null;
         queryPage = 0;
         query();
     }
@@ -554,6 +556,12 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     void requestDetail(ShanhaiRecipeQuery.Card card) {
         if (!isClient() || card == null) return;
+        if (searchMode == ShanhaiRecipeQuery.SearchMode.DELETED) {
+            selectedCard = card;
+            setStatus(net.minecraft.network.chat.Component.translatable(
+                    "gt_shanhai.recipe_editor.restore_selected", card.recipeId()).getString());
+            return;
+        }
         creating = false;
         panel.syncCreateChrome();
         keepOriginal = false;
@@ -564,6 +572,27 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         ShanhaiNetwork.CHANNEL.sendToServer(
                 new RecipeEditorDetailPacket(card.recipeTypeId(), card.recipeId()));
         setStage(STAGE_EDIT, true);
+    }
+
+    String selectionActionText() {
+        return net.minecraft.network.chat.Component.translatable(searchMode == ShanhaiRecipeQuery.SearchMode.DELETED
+                ? "gt_shanhai.recipe_editor.restore_confirm" : "gt_shanhai.recipe_editor.enter_edit").getString();
+    }
+
+    void selectionAction() {
+        if (searchMode != ShanhaiRecipeQuery.SearchMode.DELETED) {
+            setStage(STAGE_EDIT, true);
+            return;
+        }
+        if (!isClient() || selectedCard == null) return;
+        JsonObject payload = new JsonObject();
+        payload.addProperty("recipeTypeId", selectedCard.recipeTypeId());
+        payload.addProperty("recipeId", selectedCard.recipeId());
+        payload.addProperty("restoreDeleted", true);
+        ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorCommitPacket(
+                selectedCard.recipeTypeId(), selectedCard.recipeId(), "", payload.toString()));
+        selectedCard = null;
+        setStatus(net.minecraft.network.chat.Component.translatable("gt_shanhai.recipe_editor.restoring").getString());
     }
 
     void syncIoDraft() {
@@ -1580,6 +1609,11 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 panel.syncBlastChrome(showBlastTemp());
                 setStatus("§a已载入 " + selectedBase.recipeId());
             }
+            return;
+        }
+        if ("recipe-restored".equals(packet.message()) && packet.status() == RecipeEditorResultPacket.Status.SUCCESS) {
+            setStatus(net.minecraft.network.chat.Component.translatable("gt_shanhai.recipe_editor.restored").getString());
+            query();
             return;
         }
         setStatus(packet.payload() != null && packet.payload().startsWith("§7条件")

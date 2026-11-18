@@ -8,8 +8,29 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 class DShanhaiDuplicateRecipeWarningsTest {
+
+    @Test
+    void differentTemperatureDataIsNotReportedAsTheSameRecipe() throws Exception {
+        var low = bareRecipe();
+        var high = bareRecipe();
+        low.data.putInt("ebf_temp", 800);
+        high.data.putInt("ebf_temp", 16000);
+        assertNotEquals(DShanhaiDuplicateRecipeWarnings.linesOf(low),
+                DShanhaiDuplicateRecipeWarnings.linesOf(high));
+    }
+
+    private static com.gregtechceu.gtceu.api.recipe.GTRecipe bareRecipe() throws Exception {
+        var field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+        field.setAccessible(true);
+        var unsafe = (sun.misc.Unsafe) field.get(null);
+        var recipe = (com.gregtechceu.gtceu.api.recipe.GTRecipe) unsafe.allocateInstance(
+                com.gregtechceu.gtceu.api.recipe.GTRecipe.class);
+        recipe.data = new net.minecraft.nbt.CompoundTag();
+        return recipe;
+    }
 
     @Test
     void packShadowNamesTheWinnerAndTheCoveredPacks() {

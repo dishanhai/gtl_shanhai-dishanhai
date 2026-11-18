@@ -10,11 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ShanhaiRecipeEditorOpsSourceTest {
 
+
     @Test
     void staleFingerprintIsRejectedWithoutWritingOverride() throws Exception {
         Path file = Files.createTempFile("shanhai-recipe-overrides", ".json");
         ShanhaiRecipeOverrideStore store = new ShanhaiRecipeOverrideStore(file);
-        ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(store);
+        // This test isolates stale-fingerprint handling. GT content codecs require
+        // the transformed Forge runtime, which ordinary JUnit does not provide.
+        ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(store,
+                (type, id) -> null, (type, id) -> null, base -> null);
         ShanhaiRecipeBase base = ShanhaiRecipeBase.simple("gtceu:assembler", "dishanhai:test", 100, 32L, 1);
 
         ShanhaiRecipeEditorOps.Result result = ops.commit(

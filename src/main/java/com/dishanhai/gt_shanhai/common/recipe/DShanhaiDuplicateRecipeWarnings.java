@@ -7,6 +7,9 @@ import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.packs.resources.Resource;
@@ -239,6 +242,8 @@ public final class DShanhaiDuplicateRecipeWarnings {
         addChances(lines, "chanceOut", recipe.outputChanceLogics);
         addChances(lines, "chanceTickIn", recipe.tickInputChanceLogics);
         addChances(lines, "chanceTickOut", recipe.tickOutputChanceLogics);
+        // GTLC 温度等要求保存在 data，不在 RecipeCondition 列表中。
+        if (recipe.data != null && !recipe.data.isEmpty()) lines.add("data " + canonicalData(recipe.data));
         if (recipe.conditions != null) {
             for (RecipeCondition condition : recipe.conditions) {
                 if (condition == null) continue;
@@ -247,6 +252,20 @@ public final class DShanhaiDuplicateRecipeWarnings {
         }
         if (recipe.isFuel) lines.add("fuel");
         return lines;
+    }
+
+    private static String canonicalData(Tag tag) {
+        if (tag instanceof CompoundTag compound) {
+            Map<String, String> fields = new java.util.TreeMap<>();
+            for (String key : compound.getAllKeys()) fields.put(key, canonicalData(compound.get(key)));
+            return fields.toString();
+        }
+        if (tag instanceof ListTag list) {
+            List<String> values = new ArrayList<>();
+            for (Tag value : list) values.add(canonicalData(value));
+            return values.toString();
+        }
+        return tag == null ? "null" : tag.getId() + ":" + tag;
     }
 
     private static void addContents(List<String> lines, String role, Map<?, List<Content>> contents) {
@@ -290,7 +309,8 @@ public final class DShanhaiDuplicateRecipeWarnings {
                 parts.add(stack.getCount() + "x " + id + nbt);
             }
             Collections.sort(parts);
-            return String.join(",", parts);
+            // 保留声明的标签、数量与匹配规则，不能只比较展开后的代表物品。
+            return ingredient.toJson() + " resolved=" + String.join(",", parts);
         }
         if (content instanceof FluidIngredient fluid) {
             List<String> parts = new ArrayList<>();

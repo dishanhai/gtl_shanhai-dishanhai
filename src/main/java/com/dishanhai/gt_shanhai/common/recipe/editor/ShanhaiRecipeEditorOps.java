@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public final class ShanhaiRecipeEditorOps {
 
@@ -23,6 +24,7 @@ public final class ShanhaiRecipeEditorOps {
     private final ShanhaiRecipeOverrideStore store;
     private final BiFunction<String, String, ShanhaiRecipeBase> editableBases;
     private final BiFunction<String, String, ShanhaiRecipeBase> originalBases;
+    private final Function<ShanhaiRecipeBase, String> baseValidator;
 
     public ShanhaiRecipeEditorOps(ShanhaiRecipeOverrideStore store) {
         this(store,
@@ -33,9 +35,17 @@ public final class ShanhaiRecipeEditorOps {
     ShanhaiRecipeEditorOps(ShanhaiRecipeOverrideStore store,
                           BiFunction<String, String, ShanhaiRecipeBase> editableBases,
                           BiFunction<String, String, ShanhaiRecipeBase> originalBases) {
+        this(store, editableBases, originalBases, ShanhaiRecipeEditorValidation::validateBase);
+    }
+
+    ShanhaiRecipeEditorOps(ShanhaiRecipeOverrideStore store,
+                          BiFunction<String, String, ShanhaiRecipeBase> editableBases,
+                          BiFunction<String, String, ShanhaiRecipeBase> originalBases,
+                          Function<ShanhaiRecipeBase, String> baseValidator) {
         this.store = Objects.requireNonNull(store, "store");
         this.editableBases = Objects.requireNonNull(editableBases, "editableBases");
         this.originalBases = Objects.requireNonNull(originalBases, "originalBases");
+        this.baseValidator = Objects.requireNonNull(baseValidator, "baseValidator");
     }
 
     public record Edit(ShanhaiRecipeBase base, String baseFingerprint) {}
@@ -266,13 +276,26 @@ public final class ShanhaiRecipeEditorOps {
     public Result restore(MinecraftServer server, GTRecipe target) {
         if (target == null || target.getId() == null) return invalidResult();
         String recipeId = target.getId().toString();
-        boolean restored = DShanhaiRecipeModifierAPI.setRecipeEnabled(recipeId, true);
+        if (target.recipeType == null || target.recipeType.registryName == null) return invalidResult();
+        String typeId = target.recipeType.registryName.toString();
+        boolean restored = DShanhaiRecipeModifierAPI.restoreDisabledRecipe(typeId, recipeId);
         if (!restored) return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-disabled", REVISION.get());
-        if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
+        if (DShanhaiRecipeModifierAPI.findLookupRecipeById(typeId, recipeId) == null) {
+            return new Result(Result.Status.REBUILD_FAILED, "recipe-restore-not-live", REVISION.get());
+        }
+        if (server != null) {
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
-                    target.recipeType.registryName.toString(), recipeId);
+                    typeId, recipeId);
         }
         return new Result(Result.Status.SUCCESS, "recipe-restored", REVISION.incrementAndGet());
+    }
+
+    public Result restoreDeleted(String typeId, String recipeId, MinecraftServer server) {
+        GTRecipe original = RecipeOriginalSnapshotStore.copyOf(typeId, recipeId);
+        if (original == null) original = RecipeRebuildService.editableOf(typeId, recipeId);
+        return original == null
+                ? new Result(Result.Status.VALIDATION_ERROR, "recipe-snapshot-missing", REVISION.get())
+                : restore(server, original);
     }
 
     public Result rollback(String recipeId) {
@@ -351,7 +374,7 @@ public final class ShanhaiRecipeEditorOps {
 
     private String validationError(Edit edit) {
         if (!valid(edit)) return "invalid-edit";
-        return ShanhaiRecipeEditorValidation.validateBase(edit.base());
+        return baseValidator.apply(edit.base());
     }
 
     private ShanhaiRecipeBase currentBase(ShanhaiRecipeBase requested) {

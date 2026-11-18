@@ -579,9 +579,14 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         }));
         side.add(machine);
 
-        ButtonWidget addRecipe = button(0, 0, SIDE_W, BTN_H, "配方添加", host::beginCreate);
+        GlassRow recipeActions = new GlassRow(0, 0, SIDE_W, BTN_H);
+        ButtonWidget addRecipe = button(0, 0, half, BTN_H, "配方添加", host::beginCreate);
         addRecipe.setHoverTooltips("新建一条配方。类型在编辑页点选，id 可按类型、输入和产物猜测");
-        side.add(addRecipe);
+        recipeActions.add(addRecipe);
+        recipeActions.add(button(shareX(0, SIDE_W, 2, 1), 0, half, BTN_H,
+                net.minecraft.network.chat.Component.translatable("gt_shanhai.recipe_editor.deleted").getString(),
+                () -> host.setSearchMode(ShanhaiRecipeQuery.SearchMode.DELETED)));
+        side.add(recipeActions);
         side.add(textField(0, 0, SIDE_W, BTN_H, () -> host.typeFilter,
                 value -> {
                     host.typeFilter = ShanhaiRecipeEditorWidget.limit(value);
@@ -663,8 +668,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 ? "§8等待配方卡片" : "§a共 " + host.queryTotal + " 条").alignRight());
 
         selectSide.addWidget(button(SIDE_X, FOOT_Y, FOOT_BTN_W, BTN_H, "刷新配方表", host::query));
-        selectSide.addWidget(button(FOOT_RIGHT_X, FOOT_Y, FOOT_BTN_W, BTN_H, "进入编辑",
-                () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_EDIT, true)));
+        selectSide.addWidget(new ButtonWidget(FOOT_RIGHT_X, FOOT_Y, FOOT_BTN_W, BTN_H,
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(host::selectionActionText)),
+                click -> host.selectionAction()));
     }
 
     private void buildEditPage() {
