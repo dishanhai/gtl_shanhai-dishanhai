@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -110,5 +111,32 @@ class ShopAutoCraftAmountsTest {
         assertEquals(0L, ShopAutoCraftAmounts.pendingOutput(100L, 60L, false));
         assertEquals(0L, ShopAutoCraftAmounts.pendingOutput(100L, -1L, true));
         assertEquals(100L, ShopAutoCraftAmounts.pendingOutput(100L, 150L, true));
+    }
+    @Test
+    void deliveryMovesPendingToRetainedWithoutInvalidatingTheApprovedGap() {
+        var demand = Map.of("target", n(10));
+        var before = ShopAutoCraftAmounts.missing(demand, Map.of(), Map.of("target", n(5)));
+        var now = ShopAutoCraftAmounts.missing(demand, Map.of("target", n(2)), Map.of("target", n(3)));
+        assertTrue(ShopAutoCraftAmounts.matchesPlannedOutputs(before, now));
+        var required = ShopAutoCraftAmounts.submissionStock(
+                ShopAutoCraftAmounts.reserve(demand, Map.of("target", n(2))), List.of(Map.of("target", n(3))));
+        assertEquals(n(5), required.get("target"), "Protect current stock plus materials, not the old zero reservation");
+    }
+
+    @Test
+    void changedOrSatisfiedTargetIsNotSilentlyResizedOrReordered() {
+        var planned = Map.of("target", n(5));
+        assertFalse(ShopAutoCraftAmounts.matchesPlannedOutputs(planned, Map.of("target", n(4))));
+        assertFalse(ShopAutoCraftAmounts.matchesPlannedOutputs(planned, Map.of("target", n(6))));
+        assertFalse(ShopAutoCraftAmounts.matchesPlannedOutputs(planned, Map.of()));
+        assertTrue(ShopAutoCraftAmounts.matchesPlannedOutputs(planned, Map.of("target", n(5), "unavailable", n(99))));
+    }
+    @Test
+    void submissionAggregatesSharedMaterialsWithoutOverflowOrMutatingInputs() {
+        var retained = Map.of("a", n(2));
+        var used = List.of(Map.of("a", n(Long.MAX_VALUE)), Map.of("a", n(Long.MAX_VALUE), "b", n(3)));
+        assertEquals(Map.of("a", n(Long.MAX_VALUE).multiply(n(2)).add(n(2)), "b", n(3)),
+                ShopAutoCraftAmounts.submissionStock(retained, used));
+        assertEquals(Map.of("a", n(2)), retained);
     }
 }

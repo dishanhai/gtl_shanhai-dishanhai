@@ -73,6 +73,7 @@ public final class ShopAutoCraft {
         Future<ICraftingPlan> future;
         ICraftingPlan result;
         String error;
+        Map<AEKey, BigInteger> used = Map.of();
 
         PlanItem(AEKey key, long amount) {
             this.key = key;
@@ -104,6 +105,7 @@ public final class ShopAutoCraft {
         final Map<AEKey, BigInteger> reserved = new LinkedHashMap<>();
         final List<PlanItem> items = new ArrayList<>();
         final List<String> notes = new ArrayList<>();
+        Map<AEKey, Long> planningStock;
         int nextItem;
         long ticks;
         int requestId;
@@ -304,9 +306,10 @@ public final class ShopAutoCraft {
         Map<ResourceLocation, BigInteger> coinTotals = new LinkedHashMap<>();
         List<ShopCost> costs = new ArrayList<>(lines.size());
         List<BigInteger> multipliers = new ArrayList<>(lines.size());
+        int discount = ShopMembership.discountPercent(player.getServer(), player.getUUID());
         for (CartLine line : lines) {
             ShopEntry entry = line.entry();
-            ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercent(player.getServer(), player.getUUID()));
+            ShopCost cost = entry.getEffectiveCost(discount);
             BigInteger multiplier = BigInteger.valueOf(line.times());
             costs.add(cost);
             multipliers.add(multiplier);
@@ -401,8 +404,12 @@ public final class ShopAutoCraft {
         PlanItem item = session.items.get(session.nextItem);
         Map<AEKey, Long> reservations = new LinkedHashMap<>();
         session.reserved.forEach((key, amount) -> reservations.put(key, amount.min(LONG_MAX).longValueExact()));
-        IActionSource source = new ShopAutoCraftActionSource(source(player), reservations);
         try {
+            IActionSource identity = source(player);
+            if (session.planningStock == null) {
+                session.planningStock = ShopAutoCraftActionSource.captureStock(session.grid.getStorageService(), identity);
+            }
+            IActionSource source = new ShopAutoCraftActionSource(identity, reservations, session.planningStock);
             item.future = session.grid.getCraftingService().beginCraftingCalculation(
                     player.level(), () -> source, item.key, item.amount, CalculationStrategy.REPORT_MISSING_ITEMS);
         } catch (RuntimeException exception) {
@@ -465,7 +472,8 @@ public final class ShopAutoCraft {
                 }
             }
             if (submittable(item)) {
-                realUsedItems(item.result).forEach((key, amount) ->
+                item.used = Map.copyOf(realUsedItems(item.result));
+                item.used.forEach((key, amount) ->
                         ShopAutoCraftAmounts.add(session.reserved, key, amount));
             }
             session.nextItem++;
@@ -475,6 +483,7 @@ public final class ShopAutoCraft {
             }
             if (!CALCULATING.remove(uuid, session)) continue;
             session.ticks = 0L;
+            session.planningStock = null; // Only required while calculating, not for the confirmation timeout.
             READY.put(uuid, session);
             sendPlanToClient(player, session);
         }
@@ -505,7 +514,7 @@ public final class ShopAutoCraft {
             String name = item.key.getDisplayName().getString();
             if (submittable(item)) {
                 willCraft.add("§b" + name + " §7×" + item.amount);
-                realUsedItems(item.result).forEach((key, amount) -> ShopAutoCraftAmounts.add(merged, key, amount));
+                item.used.forEach((key, amount) -> ShopAutoCraftAmounts.add(merged, key, amount));
             } else if (item.result != null && item.result.simulation()) {
                 notes.add("§c" + name + " 基础材料不足，未下单");
                 int shown = 0;
@@ -549,16 +558,22 @@ public final class ShopAutoCraft {
             return;
         }
         Snapshot current = snapshotForSession(player, session, grid);
-        boolean shortagesChanged = !current.shortages.equals(session.shortages);
-        boolean retainedChanged = !current.retained.equals(session.retained);
-        boolean reservedStockAvailable = hasReservedStock(player, session);
-        if (shortagesChanged || retainedChanged || !reservedStockAvailable) {
-            GTDishanhaiMod.LOGGER.info(
-                    "[ShopAutoCraft] plan invalidated player={} planId={} shortagesChanged={} retainedChanged={} reservedStockAvailable={}",
-                    player.getGameProfile().getName(), planId,
-                    shortagesChanged, retainedChanged, reservedStockAvailable);
-            message(player, "§e库存、价格或在制数量已改变，正在重新计算，请再次确认");
-            restartPlan(player, session);
+        Map<AEKey, BigInteger> plannedOutputs = new LinkedHashMap<>();
+        List<Map<AEKey, BigInteger>> consumptions = new ArrayList<>();
+        for (PlanItem item : session.items) {
+            if (!submittable(item)) continue;
+            ShopAutoCraftAmounts.add(plannedOutputs, item.key, BigInteger.valueOf(item.amount));
+            consumptions.add(item.used);
+        }
+        // A completed CPU can move items from "pending" to storage without changing the gap.
+        // Retained stock is therefore recomputed, not compared with the old preview snapshot.
+        if (!ShopAutoCraftAmounts.matchesPlannedOutputs(plannedOutputs, current.shortages)) {
+            message(player, "§e待补齐数量已改变，本次未下单。请手动重新计算并确认");
+            return;
+        }
+        Map<AEKey, BigInteger> required = ShopAutoCraftAmounts.submissionStock(current.retained, consumptions);
+        if (!hasReservedStock(player, session, required)) {
+            message(player, "§e合成材料或需保留的现货不足，本次未下单。请补齐材料后重新计算");
             return;
         }
         int submitted = 0;
@@ -602,18 +617,12 @@ public final class ShopAutoCraft {
         };
     }
 
-    private static void restartPlan(ServerPlayer player, Session session) {
-        if (session.target == Target.STAGE) beginStagePlan(player, session.stagePath, true);
-        else if (session.target == Target.ENTRY_SUBMISSION) beginEntrySubmissionPlan(player, session.entry, true);
-        else if (session.target == Target.CART) beginCartPlan(player, true, 0);
-        else beginPlan(player, session.entry, session.times, true);
-    }
-
-    private static boolean hasReservedStock(ServerPlayer player, Session session) {
+    private static boolean hasReservedStock(ServerPlayer player, Session session, Map<AEKey, BigInteger> required) {
         IActionSource source = source(player);
-        for (var requirement : session.reserved.entrySet()) {
+        for (var requirement : required.entrySet()) {
+            if (requirement.getValue().compareTo(LONG_MAX) > 0) return false;
             long available = session.grid.getStorageService().getInventory()
-                    .extract(requirement.getKey(), Long.MAX_VALUE, Actionable.SIMULATE, source);
+                    .extract(requirement.getKey(), requirement.getValue().longValueExact(), Actionable.SIMULATE, source);
             if (BigInteger.valueOf(Math.max(0L, available)).compareTo(requirement.getValue()) < 0) {
                 GTDishanhaiMod.LOGGER.info(
                         "[ShopAutoCraft] reserved stock missing player={} planId={} key={} required={} available={}",
@@ -645,6 +654,7 @@ public final class ShopAutoCraft {
     }
 
     private static void cancelSession(Session session) {
+        session.planningStock = null;
         for (PlanItem item : session.items) {
             if (item.future != null && !item.future.isDone()) item.future.cancel(true);
         }

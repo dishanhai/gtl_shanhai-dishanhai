@@ -1,9 +1,10 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import appeng.api.config.Actionable;
+import appeng.api.config.FuzzyMode;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.networking.storage.IStorageService;
 import appeng.api.stacks.AEKey;
+import appeng.api.stacks.KeyCounter;
 import appeng.crafting.inv.NetworkCraftingSimulationState;
 import com.dishanhai.gt_shanhai.common.shop.ShopAutoCraftActionSource;
 import com.dishanhai.gt_shanhai.common.shop.ShopAutoCraftAmounts;
@@ -14,29 +15,36 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** 山海商店的合成模拟使用可提取库存，并扣除前序方案的预留。 */
+import java.util.ArrayList;
+
+/** Shop plans read a frozen local inventory, including when GTLCore replaces AE's native copy. */
 @Mixin(value = NetworkCraftingSimulationState.class, priority = 1500, remap = false)
 public abstract class ShopCraftingSimulationInventoryMixin {
     @Unique
-    private IStorageService gtShanhai$storage;
-    @Unique
-    private ShopAutoCraftActionSource gtShanhai$shopSource;
+    private KeyCounter gtShanhai$shopStock;
 
     @Inject(method = "<init>", at = @At("RETURN"), remap = false)
     private void gtShanhai$reserveShopStock(IStorageService storage, IActionSource source, CallbackInfo ci) {
         if (!(source instanceof ShopAutoCraftActionSource shopSource)) return;
-        gtShanhai$storage = storage;
-        gtShanhai$shopSource = shopSource;
+        gtShanhai$shopStock = new KeyCounter();
+        shopSource.stockSnapshot(storage).forEach((key, available) -> {
+            long remaining = ShopAutoCraftAmounts.remainingStock(available, shopSource.reserved().getOrDefault(key, 0L));
+            if (remaining > 0) gtShanhai$shopStock.add(key, remaining);
+        });
     }
 
-    @Inject(method = "simulateExtractParent", at = @At("RETURN"), cancellable = true, remap = false)
+    // HEAD is intentional: bypass GTLCore's lazy live storage reads for shop jobs only.
+    // Neither exact extraction nor fuzzy search may access the world on AE's worker thread.
+    @Inject(method = "simulateExtractParent", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$limitReservedStock(AEKey key, long amount, CallbackInfoReturnable<Long> cir) {
-        long simulated = cir.getReturnValue();
-        if (gtShanhai$shopSource == null || simulated <= 0L) return;
-        long reserved = gtShanhai$shopSource.reserved().getOrDefault(key, 0L);
-        // AE2/GTLCore 可能使用缓存数量，确认方案时则按实际可提取量校验。
-        long available = gtShanhai$storage.getInventory().extract(
-                key, Long.MAX_VALUE, Actionable.SIMULATE, gtShanhai$shopSource);
-        cir.setReturnValue(Math.min(simulated, ShopAutoCraftAmounts.remainingStock(available, reserved)));
+        if (gtShanhai$shopStock != null) cir.setReturnValue(Math.min(gtShanhai$shopStock.get(key), amount));
+    }
+
+    @Inject(method = "findFuzzyParent", at = @At("HEAD"), cancellable = true, remap = false)
+    private void gtShanhai$frozenFuzzyStock(AEKey key, CallbackInfoReturnable<Iterable<AEKey>> cir) {
+        if (gtShanhai$shopStock == null) return;
+        var keys = new ArrayList<AEKey>();
+        for (var entry : gtShanhai$shopStock.findFuzzy(key, FuzzyMode.IGNORE_ALL)) keys.add(entry.getKey());
+        cir.setReturnValue(keys);
     }
 }

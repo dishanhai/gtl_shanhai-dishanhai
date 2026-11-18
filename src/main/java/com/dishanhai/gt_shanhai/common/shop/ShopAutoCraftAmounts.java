@@ -42,6 +42,19 @@ public final class ShopAutoCraftAmounts {
         return result;
     }
 
+    static <K> Map<K, BigInteger> submissionStock(Map<K, BigInteger> retained,
+            Iterable<Map<K, BigInteger>> consumptions) {
+        Map<K, BigInteger> required = new LinkedHashMap<>(retained);
+        for (var consumption : consumptions) consumption.forEach((key, amount) -> add(required, key, amount));
+        return required;
+    }
+
+    /** Only targets actually approved for submission matter; unrelated unavailable goals do not. */
+    static <K> boolean matchesPlannedOutputs(Map<K, BigInteger> planned, Map<K, BigInteger> current) {
+        return planned.entrySet().stream().allMatch(entry ->
+                entry.getValue().equals(current.getOrDefault(entry.getKey(), BigInteger.ZERO)));
+    }
+
     public static long remainingStock(long stored, long reserved) {
         return Math.max(0L, Math.max(0L, stored) - Math.max(0L, reserved));
     }

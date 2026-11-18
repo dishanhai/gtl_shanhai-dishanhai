@@ -29,7 +29,7 @@ class ShopAutoCraftSourceTest {
     @Test
     void shortagesUseActualPriceAndOutstandingFinalOutputs() throws Exception {
         String text = source("common/shop/ShopAutoCraft.java");
-        assertTrue(text.contains("entry.getEffectiveCost(ShopMembership.discountPercent("));
+        assertTrue(text.contains("entry.getEffectiveCost(discount)"));
         assertTrue(text.contains("cpu.getJobStatus()"));
         assertTrue(text.contains("status.crafting()"));
         assertFalse(text.contains("getRequestedAmount("),
@@ -64,12 +64,44 @@ class ShopAutoCraftSourceTest {
         assertTrue(text.contains("session.planId.equals(planId)"));
         assertTrue(text.contains("READY.remove(player.getUUID(), session)"));
         assertTrue(text.contains("session.grid != grid"));
-        assertTrue(text.contains("current.shortages.equals(session.shortages)"));
+        assertTrue(text.contains("ShopAutoCraftAmounts.matchesPlannedOutputs(plannedOutputs, current.shortages)"));
         for (String packet : new String[]{"ShopAutoCraftPlanPacket", "ShopAutoCraftConfirmPacket"}) {
             String packetSource = source("network/" + packet + ".java");
             assertTrue(packetSource.contains("buf.readUUID()"));
             assertTrue(packetSource.contains("buf.writeUUID(planId)"));
         }
+    }
+
+    @Test
+    void workerSimulationNeverReadsTheLiveNetworkIncludingFuzzySearch() throws Exception {
+        String text = source("mixin/ShopCraftingSimulationInventoryMixin.java");
+        assertTrue(text.contains("method = \"findFuzzyParent\""));
+        assertTrue(text.contains("@At(\"HEAD\")"));
+        assertFalse(text.contains("getInventory()"));
+        assertFalse(text.contains(".extract("));
+        assertTrue(text.contains("shopSource.stockSnapshot(storage)"));
+    }
+
+    @Test
+    void staleConfirmationNeverRestartsAndUsesCurrentRetainedStock() throws Exception {
+        String text = source("common/shop/ShopAutoCraft.java");
+        String confirmation = text.substring(text.indexOf("public static void confirmPlan("),
+                text.indexOf("private static boolean targetStillValid("));
+        assertFalse(text.contains("restartPlan("));
+        assertFalse(confirmation.contains("beginPlan("));
+        assertFalse(confirmation.contains("beginCartPlan("));
+        assertFalse(confirmation.contains("retainedChanged"));
+        assertTrue(confirmation.contains("ShopAutoCraftAmounts.submissionStock(current.retained, consumptions)"));
+        assertTrue(confirmation.contains("consumptions.add(item.used)"));
+        assertTrue(confirmation.indexOf("hasReservedStock(") < confirmation.indexOf("submitJob("));
+        assertTrue(confirmation.indexOf("READY.remove(") < confirmation.indexOf("submitJob("));
+    }
+
+    @Test
+    void materialTraversalIsCachedOnceAfterCalculation() throws Exception {
+        String text = source("common/shop/ShopAutoCraft.java");
+        assertEquals(1, text.split("realUsedItems\\(item.result\\)", -1).length - 1);
+        assertTrue(text.contains("item.used = Map.copyOf(realUsedItems(item.result))"));
     }
 
     @Test
@@ -85,7 +117,7 @@ class ShopAutoCraftSourceTest {
     void screenConsumesOnlyOneLeftClickAndCancelsOnEscape() throws Exception {
         String text = source("client/gui/shop/ShopAutoCraftConfirmScreen.java");
         assertTrue(text.contains("btn != 0"));
-        assertTrue(text.contains("private boolean finished"));
+        assertTrue(text.contains("actions.finished()"));
         assertTrue(text.contains("void onClose()"));
         assertTrue(text.contains("new ShopAutoCraftConfirmPacket(planId, true)"));
         assertTrue(text.contains("new ShopAutoCraftConfirmPacket(planId, false)"));
