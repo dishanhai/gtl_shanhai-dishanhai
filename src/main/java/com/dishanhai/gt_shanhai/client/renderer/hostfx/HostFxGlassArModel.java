@@ -223,6 +223,9 @@ public final class HostFxGlassArModel {
         public long energyInStored = -1;
         /** 动力仓已存 EU（同上）。 */
         public long energyOutStored = -1;
+        public String energyInputLine;
+        public String energyOutputLine;
+        public String actualGenerationLine;
 
         // ── 2026-10-25 第二十一改新增：AR 遮罩 + 已装模块 ──
         /**
@@ -891,8 +894,8 @@ public final class HostFxGlassArModel {
                 //    第二十六改补上"无限供电"的三档语义（见 energyUsedPowerText 的 javadoc）。
                 "总耗能功率 " + energyUsedPowerText(st, modEuSum),
                 // 🔴 玩家真正想看的那条：模块侧实际烧了多少电（创造仓下也有意义）
-                "模块耗电合计 " + powerText(modEuSum) + " · 总发电功率 "
-                        + powerText(st.totalEuGenPerTick),
+                "模块耗电合计 " + powerText(modEuSum) + " · " + (st.actualGenerationLine != null
+                        ? st.actualGenerationLine : "总发电功率 " + powerText(st.totalEuGenPerTick)),
                 "特效 " + (deg ? "降级" : "开") + " 透镜 " + (st.lensOn ? "开" : "关")
                         + " 环舰 " + (deg ? "冻结" : "转"),
                 "中央两束 " + (deg ? "红" : "青白") + " 主柱 " + st.mdPillarCount

@@ -133,7 +133,8 @@ public final class ShanhaiHoloMenuHitTest {
                 continue;                       // 与板面平行
             }
             final double t = -lz / dz2;         // 距离单位 = 格（方向已归一）
-            if (t <= 0.0 || t > MAX_DISTANCE_BLOCKS) {
+            if (t > MAX_DISTANCE_BLOCKS || !com.dishanhai.sh_better_ui.kernel.api.interaction.WorldInteractionGate
+                    .visible(t, Double.POSITIVE_INFINITY, lz, dz2)) {
                 continue;                       // 在身后 / 太远
             }
             final double hx = (po[0] + t * pd[0]) / s;

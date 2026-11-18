@@ -95,11 +95,13 @@ public final class ShanhaiHoloCommandScreen extends Screen {
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+            ShanhaiHoloMenuInput.cancelCommandConfirmation();
             ShanhaiHoloMenuPanel.backspace();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_DELETE
                 || (keyCode == GLFW.GLFW_KEY_A && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0)) {
+            ShanhaiHoloMenuInput.cancelCommandConfirmation();
             ShanhaiHoloMenuPanel.clear();
             return true;
         }
@@ -115,6 +117,7 @@ public final class ShanhaiHoloCommandScreen extends Screen {
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
         if (codePoint >= ' ' && codePoint != 0x00A7) {
+            ShanhaiHoloMenuInput.cancelCommandConfirmation();
             ShanhaiHoloMenuPanel.append(codePoint);
         }
         return true;
@@ -130,6 +133,7 @@ public final class ShanhaiHoloCommandScreen extends Screen {
     /** 关掉键盘（回世界，面板还开着）。 */
     @Override
     public void onClose() {
+        ShanhaiHoloMenuInput.cancelCommandConfirmation();
         com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.info("{} holo_cmd_screen_closed text_len={}",
                 PREFIX, ShanhaiHoloMenuPanel.command().length());
         final Minecraft mc = Minecraft.getInstance();

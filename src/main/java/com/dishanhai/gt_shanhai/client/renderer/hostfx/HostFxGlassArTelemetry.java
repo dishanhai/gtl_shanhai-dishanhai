@@ -55,8 +55,8 @@ final class HostFxGlassArTelemetry {
                 (st.formed ? "结构已成型" : "结构未成型") + " · 工作 " + number(s.activeModules()),
                 s.known() ? "模块 本地" + s.localModules() + " 远端" + s.remoteModules() + " 回响" + s.echoModules()
                         : "模块 --（等待状态快照）",
-                "能源仓 " + storedOverCapacity(st.energyInStored, st.energyInCapacity),
-                "动力仓 " + storedOverCapacity(st.energyOutStored, st.energyOutCapacity),
+                st.energyInputLine != null ? st.energyInputLine : "能源仓 " + storedOverCapacity(st.energyInStored, st.energyInCapacity),
+                st.energyOutputLine != null ? st.energyOutputLine : "动力仓 " + storedOverCapacity(st.energyOutStored, st.energyOutCapacity),
                 "物质模块 " + levelText(st.matterLevel),
                 "等级复写 " + overrideText(st.levelOverride),
                 "材料增产 " + (st.productionMultiplier < 0 ? "--" : "x" + st.productionMultiplier),

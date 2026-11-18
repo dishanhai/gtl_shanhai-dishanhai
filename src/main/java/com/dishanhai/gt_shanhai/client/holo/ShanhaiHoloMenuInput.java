@@ -133,6 +133,8 @@ public final class ShanhaiHoloMenuInput {
 
     /** 懒解析的物品句柄（注册表冻结后才可能被调到）。 */
     private static Item moduleItem;
+    private static final com.dishanhai.sh_better_ui.kernel.api.interaction.WorldInteractionGate COMMAND_CONFIRM =
+            new com.dishanhai.sh_better_ui.kernel.api.interaction.WorldInteractionGate(3_000_000_000L);
 
     private ShanhaiHoloMenuInput() {}
 
@@ -257,7 +259,8 @@ public final class ShanhaiHoloMenuInput {
         final int boardIndex = hit == null ? -1 : hit.index();
         final double boardDistance = hit == null ? -1.0 : hit.distance();
         // "板没被挡住" = 打不到任何东西，或板比原版打到的方块/实体更近
-        final boolean boardClear = hit != null && (airHit || hit.distance() < vanillaHitDistance(hr, eye));
+        final boolean boardClear = hit != null && worldPathClear(mc, lp, hit.distance())
+                && (airHit || hit.distance() < vanillaHitDistance(hr, eye));
 
         final int action = ShanhaiHoloMenuInputRules.decide(
                 holdingModule, freshPress, airHit, boardIndex, boardClear, menuEnabled);
@@ -382,6 +385,7 @@ public final class ShanhaiHoloMenuInput {
         //      拿着模块那一条路【只认几何】（不然"准星落在命令面板没画出来的那一行"时
         //      会不会切投影，会跟修复前不一样 —— 那是已验收的手感，不许改）。
         final boolean geometricClear = hit != null
+                && worldPathClear(mc, lp, hit.distance())
                 && (airHit || hit.distance() < vanillaHitDistance(hr, eye));
         final boolean clear = geometricClear && row >= 0;
         final int click = clear
@@ -430,6 +434,7 @@ public final class ShanhaiHoloMenuInput {
     /** 把一格的动作真正做掉（<b>全部即时生效、不发包</b>，除了"执行命令"那一条）。 */
     private static void applyPanelClick(Minecraft mc, LocalPlayer lp, int click, int mode,
                                         int row, int cell, String source) {
+        if (click != ShanhaiHoloMenuPanel.CLICK_CMD_RUN) COMMAND_CONFIRM.cancel();
         switch (click) {
             case ShanhaiHoloMenuPanel.CLICK_CLOSE -> {
                 ShanhaiHoloMenuState.closePanel();
@@ -591,14 +596,27 @@ public final class ShanhaiHoloMenuInput {
     public static boolean submitCommand(String raw, String source) {
         final String cmd = raw == null ? "" : raw.trim();
         if (cmd.isEmpty()) {
+            COMMAND_CONFIRM.cancel();
             ShanhaiHoloMenuPanel.setLastResult("空命令，没发");
             GTDishanhaiMod.LOGGER.info("{} holo_cmd_skipped reason=empty src={}", PREFIX, source);
             return false;
         }
-        ShanhaiHoloMenuPanel.setLastResult("已发出：" + ShanhaiHoloMenuPanel.clip(cmd, 18));
+        if (!COMMAND_CONFIRM.tap(cmd, System.nanoTime())) {
+            var prompt = net.minecraft.network.chat.Component.translatable("gt_shanhai.holo.command.confirm", cmd);
+            ShanhaiHoloMenuPanel.setLastResult(prompt.getString());
+            var player = Minecraft.getInstance().player;
+            if (player != null) player.displayClientMessage(prompt, true);
+            return false;
+        }
+        ShanhaiHoloMenuPanel.setLastResult(net.minecraft.network.chat.Component.translatable(
+                "gt_shanhai.holo.command.sent", ShanhaiHoloMenuPanel.clip(cmd, 18)).getString());
         ShanhaiHoloMenuNetwork.requestCommand(cmd);
         GTDishanhaiMod.LOGGER.info("{} holo_cmd_submit src={} cmd={}", PREFIX, source, cmd);
         return true;
+    }
+
+    public static void cancelCommandConfirmation() {
+        COMMAND_CONFIRM.cancel();
     }
 
     /**
@@ -626,11 +644,23 @@ public final class ShanhaiHoloMenuInput {
         }
         final HitResult hr = mc.hitResult;
         final boolean airHit = hr == null || hr.getType() == HitResult.Type.MISS;
-        if (!(airHit || hit.distance() < vanillaHitDistance(hr, eye))) {
+        if (!worldPathClear(mc, lp, hit.distance()) || !(airHit || hit.distance() < vanillaHitDistance(hr, eye))) {
             ShanhaiHoloMenuState.setPanelHover(-1, -1);      // 被更近的东西挡住了 ⇒ 不算指着
             return;
         }
         ShanhaiHoloMenuState.setPanelHover(hit.index(), ShanhaiHoloMenuPanel.cellOf(hit.localX()));
+    }
+
+    private static boolean worldPathClear(Minecraft mc, LocalPlayer player, double distance) {
+        if (mc.level == null || !Double.isFinite(distance) || distance <= 0
+                || ShanhaiHoloMenuAnim.animating()) return false;
+        Vec3 eye = player.getEyePosition(1.0f);
+        Vec3 end = eye.add(player.getViewVector(1.0f).scale(distance + 1e-4));
+        var obstruction = mc.level.clip(new net.minecraft.world.level.ClipContext(eye, end,
+                net.minecraft.world.level.ClipContext.Block.OUTLINE,
+                net.minecraft.world.level.ClipContext.Fluid.NONE, player));
+        return obstruction.getType() == HitResult.Type.MISS
+                || eye.distanceTo(obstruction.getLocation()) > distance + 1e-5;
     }
 
     // ------------------------------------------------------------------ 每 tick
@@ -653,6 +683,7 @@ public final class ShanhaiHoloMenuInput {
         final LocalPlayer lp = mc.player;
         useKeyWasDown = lp != null && mc.screen == null && mc.options.keyUse.isDown();
         if (lp == null || mc.level == null) {
+            COMMAND_CONFIRM.cancel();
             return;
         }
         if (!selfTestLogged) {
@@ -693,9 +724,13 @@ public final class ShanhaiHoloMenuInput {
         }
 
         if (!ShanhaiHoloMenuState.enabled()) {
+            COMMAND_CONFIRM.cancel();
             ShanhaiHoloMenuState.setPanelHover(-1, -1);
             return;
         }
+        if (ShanhaiHoloMenuState.panelMode() != ShanhaiHoloMenuPanel.MODE_COMMAND ||
+                isModule(lp.getMainHandItem()) || isModule(lp.getOffhandItem())) COMMAND_CONFIRM.cancel();
+        COMMAND_CONFIRM.pending(System.nanoTime());
         // 🆕 面板：每 tick 刷一次"射线指着哪一行"（只影响高亮；判定在点击那一拍做）
         if (ShanhaiHoloMenuState.panelOpen()) {
             updatePanelHover(mc, lp);

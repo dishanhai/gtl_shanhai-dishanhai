@@ -843,6 +843,17 @@ public final class HostFxGlassArText {
             STATE.energyInCapacity = host.hostEnergyInCapacity();
             STATE.energyOutStored = host.hostEnergyOutStored();
             STATE.energyOutCapacity = host.hostEnergyOutCapacity();
+            String unavailable = I18n.get("gt_shanhai.guixu.telemetry.unavailable");
+            String noHatch = I18n.get("gt_shanhai.guixu.telemetry.no_hatch");
+            int flags = host.hostEnergyDisplayFlags();
+            STATE.energyInputLine = I18n.get("gt_shanhai.guixu.telemetry.input",
+                    com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuTelemetryFormat.energy(
+                            host.hostInputStoredBig(), host.hostInputCapacityBig(), flags & 15, noHatch, unavailable));
+            STATE.energyOutputLine = I18n.get("gt_shanhai.guixu.telemetry.output",
+                    com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuTelemetryFormat.energy(
+                            host.hostOutputStoredBig(), host.hostOutputCapacityBig(), (flags >>> 4) & 15, noHatch, unavailable));
+            STATE.actualGenerationLine = I18n.get("gt_shanhai.guixu.telemetry.generation",
+                    com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuTelemetryFormat.number(host.hostGenerationBig()));
         } catch (Throwable t) {
             // 🔴 2026-10-25 第二十五改：以前这里是**静默**吞掉（只置 --）。
             //   这正是"编译过、运行期整片 --、日志里一句话都没有"的典型形态 ⇒ 至少留一行带分支名的证据。
@@ -986,6 +997,9 @@ public final class HostFxGlassArText {
         STATE.energyInCapacity = -1L;
         STATE.energyOutStored = -1L;
         STATE.energyOutCapacity = -1L;
+        STATE.energyInputLine = null;
+        STATE.energyOutputLine = null;
+        STATE.actualGenerationLine = null;
     }
 
     /** 第 {@code slot} 个扫描位上的模块名；读不到 ⇒ {@code 槽#slot}（不编名字）。 */
