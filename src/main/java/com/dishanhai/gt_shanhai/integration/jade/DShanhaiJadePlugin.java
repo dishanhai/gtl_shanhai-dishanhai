@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.integration.jade;
 
 import com.dishanhai.gt_shanhai.integration.jade.provider.BHCInfoProvider;
+import com.dishanhai.gt_shanhai.integration.jade.provider.GuixuEnergyTelemetryProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.EternalGregTechWorkshopInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.HubInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.InfiniteParallelProvider;
@@ -28,6 +29,7 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
 
     @Override
     public void register(IWailaCommonRegistration reg) {
+        reg.registerBlockDataProvider(GuixuEnergyTelemetryProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(PrimordialRecipeThreadsProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(RecipeThreadHatchInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(HubInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
@@ -46,6 +48,7 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
 
     @Override
     public void registerClient(IWailaClientRegistration reg) {
+        reg.registerBlockComponent(GuixuEnergyTelemetryProvider.INSTANCE, MetaMachineBlock.class);
         reg.addTooltipCollectedCallback(PrimordialRecipeThreadsOverlay.INSTANCE);
         reg.addAfterRenderCallback(PrimordialRecipeThreadsOverlay.INSTANCE);
         reg.registerBlockComponent(PrimordialRecipeThreadsProvider.INSTANCE, MetaMachineBlock.class);

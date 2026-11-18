@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -20,13 +21,15 @@ public final class GuixuEnergyHandler implements IWirelessNetworkEnergyHandler {
     private final Supplier<List<IEnergyContainer>> inputs, outputs;
     private final BooleanSupplier online, remote;
     private final Function<IEnergyContainer, Object> inputSource;
+    private final Consumer<BigInteger> committedOutput;
     private Failure lastFailure = Failure.NONE;
 
     public Failure getLastFailure() { return lastFailure; }
 
     public GuixuEnergyHandler(GuixuVisionCoreMachine host) {
         this(() -> host.getGuixuEnergyContainers(IO.IN), () -> host.getGuixuEnergyContainers(IO.OUT),
-                host::isFormed, host::isRemote);
+                host::isFormed, host::isRemote, GuixuEnergyHandler::sharedInputSource,
+                host::recordCommittedGeneration);
     }
 
     GuixuEnergyHandler(Supplier<List<IEnergyContainer>> inputs, Supplier<List<IEnergyContainer>> outputs,
@@ -36,11 +39,18 @@ public final class GuixuEnergyHandler implements IWirelessNetworkEnergyHandler {
 
     GuixuEnergyHandler(Supplier<List<IEnergyContainer>> inputs, Supplier<List<IEnergyContainer>> outputs,
                        BooleanSupplier online, BooleanSupplier remote, Function<IEnergyContainer, Object> inputSource) {
+        this(inputs, outputs, online, remote, inputSource, ignored -> {});
+    }
+
+    GuixuEnergyHandler(Supplier<List<IEnergyContainer>> inputs, Supplier<List<IEnergyContainer>> outputs,
+                       BooleanSupplier online, BooleanSupplier remote, Function<IEnergyContainer, Object> inputSource,
+                       Consumer<BigInteger> committedOutput) {
         this.inputs = inputs;
         this.outputs = outputs;
         this.online = online;
         this.remote = remote;
         this.inputSource = inputSource;
+        this.committedOutput = committedOutput;
     }
 
     private static Object sharedInputSource(IEnergyContainer container) {
@@ -109,6 +119,9 @@ public final class GuixuEnergyHandler implements IWirelessNetworkEnergyHandler {
                 }
                 return false;
             }
+        }
+        if (!extracting && amount.signum() > 0) {
+            try { committedOutput.accept(amount); } catch (RuntimeException ignored) { }
         }
         return true;
     }

@@ -107,4 +107,16 @@ class GuixuEnergyHandlerTest {
         assertEquals(20L, pool.stored);
         assertEquals(BigInteger.valueOf(20), handler.getMaxAvailableEnergy());
     }
+
+    @Test
+    void generationMeterOnlySeesCommittedOutputTransactions() {
+        Store output = new Store(0, 100);
+        java.util.List<BigInteger> committed = new java.util.ArrayList<>();
+        var handler = new GuixuEnergyHandler(List::of, () -> List.of(output.container()),
+                () -> true, () -> false, ignored -> null, committed::add);
+        assertFalse(handler.consumeEnergy(101L));
+        assertTrue(handler.consumeEnergy(40L));
+        assertFalse(handler.consumeEnergy(-1L));
+        assertEquals(List.of(BigInteger.valueOf(40)), committed);
+    }
 }

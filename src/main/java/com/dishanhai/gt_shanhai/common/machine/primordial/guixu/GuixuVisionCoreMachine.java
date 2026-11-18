@@ -307,6 +307,77 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     @DescSynced
     private long hostEnergyOutCapacity = -1L;
 
+    @DescSynced private byte[] hostGenerationBig = new byte[0];
+    @DescSynced private byte[] hostInputStoredBig = new byte[0];
+    @DescSynced private byte[] hostInputCapacityBig = new byte[0];
+    @DescSynced private byte[] hostOutputStoredBig = new byte[0];
+    @DescSynced private byte[] hostOutputCapacityBig = new byte[0];
+    @DescSynced private int hostEnergyDisplayFlags;
+    private final GuixuGenerationMeter generationMeter = new GuixuGenerationMeter();
+
+    public static final int DISPLAY_PRESENT = 1;
+    public static final int DISPLAY_INFINITE = 2;
+    public static final int DISPLAY_ABSENT = 4;
+
+    public record EnergyDisplay(BigInteger stored, BigInteger capacity, int flags) {}
+
+    void recordCommittedGeneration(BigInteger amount) {
+        if (getLevel() != null) generationMeter.record(getLevel().getGameTime(), amount);
+    }
+
+    public BigInteger actualGenerationPerTick() {
+        return getLevel() == null ? null : generationMeter.completedTick(getLevel().getGameTime());
+    }
+
+    private static BigInteger decodeDisplay(byte[] bytes) {
+        return bytes == null || bytes.length == 0 ? null : new BigInteger(bytes);
+    }
+
+    public BigInteger hostGenerationBig() { return decodeDisplay(hostGenerationBig); }
+    public BigInteger hostInputStoredBig() { return decodeDisplay(hostInputStoredBig); }
+    public BigInteger hostInputCapacityBig() { return decodeDisplay(hostInputCapacityBig); }
+    public BigInteger hostOutputStoredBig() { return decodeDisplay(hostOutputStoredBig); }
+    public BigInteger hostOutputCapacityBig() { return decodeDisplay(hostOutputCapacityBig); }
+    public int hostEnergyDisplayFlags() { return hostEnergyDisplayFlags; }
+
+    public EnergyDisplay captureEnergyDisplay(IO io) {
+        try {
+            var containers = getGuixuEnergyContainers(io);
+            if (containers.isEmpty()) return new EnergyDisplay(BigInteger.ZERO, BigInteger.ZERO, DISPLAY_ABSENT);
+            BigInteger stored = BigInteger.ZERO, capacity = BigInteger.ZERO;
+            var physical = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<IEnergyContainer, Boolean>());
+            var pools = new java.util.HashSet<java.util.UUID>();
+            int flags = DISPLAY_PRESENT;
+            for (IEnergyContainer container : containers) {
+                if (container == null || !physical.add(container)) continue;
+                if (container instanceof com.gtladd.gtladditions.common.machine.trait.NetworkEnergyContainer network) {
+                    java.util.UUID owner = network.getMachine().getUUID();
+                    if (owner == null) return new EnergyDisplay(null, null, 0);
+                    java.util.UUID team = com.hepdd.gtmthings.utils.TeamUtil.getTeamUUID(owner);
+                    if (!pools.add(team == null ? owner : team)) continue;
+                    BigInteger balance = com.hepdd.gtmthings.api.misc.WirelessEnergyManager.getUserEU(owner);
+                    if (balance == null || balance.signum() < 0) return new EnergyDisplay(null, null, 0);
+                    stored = stored.add(balance);
+                } else {
+                    long value = container.getEnergyStored();
+                    if (value < 0) return new EnergyDisplay(null, null, 0);
+                    stored = stored.add(BigInteger.valueOf(value));
+                }
+                long cap = container.getEnergyCapacity();
+                if (cap < 0) return new EnergyDisplay(null, null, 0);
+                if (cap == Long.MAX_VALUE) flags |= DISPLAY_INFINITE;
+                capacity = capacity.add(BigInteger.valueOf(cap));
+            }
+            return new EnergyDisplay(stored, capacity, flags);
+        } catch (RuntimeException failure) {
+            return new EnergyDisplay(null, null, 0);
+        }
+    }
+
+    private static byte[] displayBytes(BigInteger value) {
+        return value == null ? new byte[0] : value.toByteArray();
+    }
+
     private com.gregtechceu.gtceu.api.machine.TickableSubscription snapTick;
 
     private long snapTickCalls = 0L;
@@ -736,6 +807,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
         final BigInteger[] in = energyTotals(IO.IN);
         final BigInteger[] out = energyTotals(IO.OUT);
+        final EnergyDisplay displayIn = captureEnergyDisplay(IO.IN);
+        final EnergyDisplay displayOut = captureEnergyDisplay(IO.OUT);
+        final byte[] generationBig = displayBytes(actualGenerationPerTick());
+        final byte[] inputStoredBig = displayBytes(displayIn.stored());
+        final byte[] inputCapacityBig = displayBytes(displayIn.capacity());
+        final byte[] outputStoredBig = displayBytes(displayOut.stored());
+        final byte[] outputCapacityBig = displayBytes(displayOut.capacity());
+        final int displayFlags = displayIn.flags() | displayOut.flags() << 4;
 
         final int[] hostOutIds = sentinelInts(HOST_OUT_MAX);
         final int[] hostOutAmounts = sentinelInts(HOST_OUT_MAX);
@@ -768,6 +847,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                         || moduleEuTotal != hostModuleEuPerTick
                         || snapshotLong(in[0]) != hostEnergyInStored || snapshotLong(in[1]) != hostEnergyInCapacity
                         || snapshotLong(out[0]) != hostEnergyOutStored || snapshotLong(out[1]) != hostEnergyOutCapacity
+                        || !java.util.Arrays.equals(generationBig, hostGenerationBig)
+                        || !java.util.Arrays.equals(inputStoredBig, hostInputStoredBig)
+                        || !java.util.Arrays.equals(inputCapacityBig, hostInputCapacityBig)
+                        || !java.util.Arrays.equals(outputStoredBig, hostOutputStoredBig)
+                        || !java.util.Arrays.equals(outputCapacityBig, hostOutputCapacityBig)
+                        || displayFlags != hostEnergyDisplayFlags
                         || !java.util.Arrays.equals(pct, hostModProgressPct)
                         || !java.util.Arrays.equals(reason, hostModReason)
                         || !java.util.Arrays.equals(eu, hostModEuPerTick)
@@ -802,6 +887,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         hostEnergyInCapacity = snapshotLong(in[1]);
         hostEnergyOutStored = snapshotLong(out[0]);
         hostEnergyOutCapacity = snapshotLong(out[1]);
+        hostGenerationBig = generationBig;
+        hostInputStoredBig = inputStoredBig;
+        hostInputCapacityBig = inputCapacityBig;
+        hostOutputStoredBig = outputStoredBig;
+        hostOutputCapacityBig = outputCapacityBig;
+        hostEnergyDisplayFlags = displayFlags;
         hostModProgressPct = pct;
         hostModReason = reason;
         hostModEuPerTick = eu;
@@ -1563,7 +1654,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",
                 "hostTotalOutputKinds", "hostTotalEuUsedPerTick", "hostTotalEuGenPerTick", "hostModuleEuPerTick", "hostInstalledModules",
                 "hostModOutCount", "hostModOutItem", "hostModOutAmount", "hostOutItem", "hostOutAmount", "hostOutKinds",
-                "hostEnergyInStored", "hostEnergyInCapacity", "hostEnergyOutStored", "hostEnergyOutCapacity"}) {
+                "hostEnergyInStored", "hostEnergyInCapacity", "hostEnergyOutStored", "hostEnergyOutCapacity",
+                "hostGenerationBig", "hostInputStoredBig", "hostInputCapacityBig",
+                "hostOutputStoredBig", "hostOutputCapacityBig", "hostEnergyDisplayFlags"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
