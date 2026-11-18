@@ -1,0 +1,234 @@
+{
+  "mappings": {
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiBlockEntitySetChangedReplayMixin": {
+      "setChanged()V": "Lnet/minecraft/world/level/block/entity/BlockEntity;m_6596_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientLevelAnimateTickClockMixin": {
+      "animateTick(III)V": "Lnet/minecraft/client/multiplayer/ClientLevel;m_104784_(III)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientLevelEntityClockMixin": {
+      "tickNonPassenger(Lnet/minecraft/world/entity/Entity;)V": "Lnet/minecraft/client/multiplayer/ClientLevel;m_104639_(Lnet/minecraft/world/entity/Entity;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientLevelTickTimeClockMixin": {
+      "tickTime()V": "Lnet/minecraft/client/multiplayer/ClientLevel;m_104826_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientPlayerDropClockMixin": {
+      "drop(Z)Z": "Lnet/minecraft/client/player/LocalPlayer;m_108700_(Z)Z"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientTeleportClockMixin": {
+      "handleTeleportEntity": "Lnet/minecraft/client/multiplayer/ClientPacketListener;m_6435_(Lnet/minecraft/network/protocol/game/ClientboundTeleportEntityPacket;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiContainerClickClockMixin": {
+      "clicked(IILnet/minecraft/world/inventory/ClickType;Lnet/minecraft/world/entity/player/Player;)V": "Lnet/minecraft/world/inventory/AbstractContainerMenu;m_150399_(IILnet/minecraft/world/inventory/ClickType;Lnet/minecraft/world/entity/player/Player;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiContainerPacketClockMixin": {
+      "handleContainerClick(Lnet/minecraft/network/protocol/game/ServerboundContainerClickPacket;)V": "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;m_5914_(Lnet/minecraft/network/protocol/game/ServerboundContainerClickPacket;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiDimensionDataSaveGuardMixin": {
+      "save()V": "Lnet/minecraft/world/level/storage/DimensionDataStorage;m_78151_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelBlockEntityClockMixin": {
+      "tickBlockEntities()V": "Lnet/minecraft/world/level/Level;m_46463_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelChunkBlockEntityReplayMixin": {
+      "setBlockEntity(Lnet/minecraft/world/level/block/entity/BlockEntity;)V": "Lnet/minecraft/world/level/chunk/LevelChunk;m_142169_(Lnet/minecraft/world/level/block/entity/BlockEntity;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelChunkReplayMixin": {
+      "setBlockState(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)Lnet/minecraft/world/level/block/state/BlockState;": "Lnet/minecraft/world/level/chunk/LevelChunk;m_6978_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)Lnet/minecraft/world/level/block/state/BlockState;"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRemoveBlockReplayMixin": {
+      "removeBlock(Lnet/minecraft/core/BlockPos;Z)Z": "Lnet/minecraft/world/level/Level;m_7471_(Lnet/minecraft/core/BlockPos;Z)Z"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRendererRainClockMixin": {
+      "renderSnowAndRain(Lnet/minecraft/client/renderer/LightTexture;FDDD)V": "Lnet/minecraft/client/renderer/LevelRenderer;m_109703_(Lnet/minecraft/client/renderer/LightTexture;FDDD)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRendererTickClockMixin": {
+      "tick()V": "Lnet/minecraft/client/renderer/LevelRenderer;m_109823_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRendererTicksAccessor": {
+      "ticks": "f_109477_:I"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelSaveGuardMixin": {
+      "save(Lnet/minecraft/util/ProgressListener;ZZ)V": "Lnet/minecraft/server/level/ServerLevel;m_8643_(Lnet/minecraft/util/ProgressListener;ZZ)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelSetBlockClockMixin": {
+      "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z": "Lnet/minecraft/world/level/Level;m_6933_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleAccessor": {
+      "x": "f_107212_:D",
+      "y": "f_107213_:D",
+      "z": "f_107214_:D",
+      "age": "f_107224_:I",
+      "gravity": "f_107226_:F"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleEngineAccessor": {
+      "particles": "f_107289_:Ljava/util/Map;"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleEngineClockMixin": {
+      "tick()V": "Lnet/minecraft/client/particle/ParticleEngine;m_107388_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleEngineGatherMixin": {
+      "add(Lnet/minecraft/client/particle/Particle;)V": "Lnet/minecraft/client/particle/ParticleEngine;m_107344_(Lnet/minecraft/client/particle/Particle;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiPlayerDataSaveGuardMixin": {
+      "save(Lnet/minecraft/world/entity/player/Player;)V": "Lnet/minecraft/world/level/storage/PlayerDataStorage;m_78433_(Lnet/minecraft/world/entity/player/Player;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerEntityForceTeleportMixin": {
+      "sendChanges": "Lnet/minecraft/server/level/ServerEntity;m_8533_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerLevelEntityEventMixin": {
+      "broadcastEntityEvent(Lnet/minecraft/world/entity/Entity;B)V": "Lnet/minecraft/server/level/ServerLevel;m_7605_(Lnet/minecraft/world/entity/Entity;B)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerLevelTickClockMixin": {
+      "tick(Ljava/util/function/BooleanSupplier;)V": "Lnet/minecraft/server/level/ServerLevel;m_8793_(Ljava/util/function/BooleanSupplier;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerPlayerDropClockMixin": {
+      "drop(Z)Z": "Lnet/minecraft/server/level/ServerPlayer;m_182294_(Z)Z"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerSaveGuardMixin": {
+      "saveAllChunks(ZZZ)Z": "Lnet/minecraft/server/MinecraftServer;m_129885_(ZZZ)Z",
+      "saveEverything(ZZZ)Z": "Lnet/minecraft/server/MinecraftServer;m_195514_(ZZZ)Z"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiTextureManagerClockMixin": {
+      "tick()V": "Lnet/minecraft/client/renderer/texture/TextureManager;m_7673_()V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiTimerClockMixin": {
+      "advanceTime(J)I": "Lnet/minecraft/client/Timer;m_92525_(J)I"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiRegionFileSaveGuardMixin": {
+      "write(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/nbt/CompoundTag;)V": "Lnet/minecraft/world/level/chunk/storage/RegionFileStorage;m_63708_(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/nbt/CompoundTag;)V"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiSectionStorageAccessor": {
+      "worker": "f_63773_:Lnet/minecraft/world/level/chunk/storage/IOWorker;"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelEntityStorageAccessor": {
+      "entityManager": "f_143244_:Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiEntityManagerStorageAccessor": {
+      "permanentStorage": "f_157493_:Lnet/minecraft/world/level/entity/EntityPersistentStorage;"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiChunkStorageAccessor": {
+      "worker": "f_63495_:Lnet/minecraft/world/level/chunk/storage/IOWorker;"
+    },
+    "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiEntityStorageAccessor": {
+      "worker": "f_156539_:Lnet/minecraft/world/level/chunk/storage/IOWorker;"
+    }
+  },
+  "data": {
+    "searge": {
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiBlockEntitySetChangedReplayMixin": {
+        "setChanged()V": "Lnet/minecraft/world/level/block/entity/BlockEntity;m_6596_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientLevelAnimateTickClockMixin": {
+        "animateTick(III)V": "Lnet/minecraft/client/multiplayer/ClientLevel;m_104784_(III)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientLevelEntityClockMixin": {
+        "tickNonPassenger(Lnet/minecraft/world/entity/Entity;)V": "Lnet/minecraft/client/multiplayer/ClientLevel;m_104639_(Lnet/minecraft/world/entity/Entity;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientLevelTickTimeClockMixin": {
+        "tickTime()V": "Lnet/minecraft/client/multiplayer/ClientLevel;m_104826_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientPlayerDropClockMixin": {
+        "drop(Z)Z": "Lnet/minecraft/client/player/LocalPlayer;m_108700_(Z)Z"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiClientTeleportClockMixin": {
+        "handleTeleportEntity": "Lnet/minecraft/client/multiplayer/ClientPacketListener;m_6435_(Lnet/minecraft/network/protocol/game/ClientboundTeleportEntityPacket;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiContainerClickClockMixin": {
+        "clicked(IILnet/minecraft/world/inventory/ClickType;Lnet/minecraft/world/entity/player/Player;)V": "Lnet/minecraft/world/inventory/AbstractContainerMenu;m_150399_(IILnet/minecraft/world/inventory/ClickType;Lnet/minecraft/world/entity/player/Player;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiContainerPacketClockMixin": {
+        "handleContainerClick(Lnet/minecraft/network/protocol/game/ServerboundContainerClickPacket;)V": "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;m_5914_(Lnet/minecraft/network/protocol/game/ServerboundContainerClickPacket;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiDimensionDataSaveGuardMixin": {
+        "save()V": "Lnet/minecraft/world/level/storage/DimensionDataStorage;m_78151_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelBlockEntityClockMixin": {
+        "tickBlockEntities()V": "Lnet/minecraft/world/level/Level;m_46463_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelChunkBlockEntityReplayMixin": {
+        "setBlockEntity(Lnet/minecraft/world/level/block/entity/BlockEntity;)V": "Lnet/minecraft/world/level/chunk/LevelChunk;m_142169_(Lnet/minecraft/world/level/block/entity/BlockEntity;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelChunkReplayMixin": {
+        "setBlockState(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)Lnet/minecraft/world/level/block/state/BlockState;": "Lnet/minecraft/world/level/chunk/LevelChunk;m_6978_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)Lnet/minecraft/world/level/block/state/BlockState;"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRemoveBlockReplayMixin": {
+        "removeBlock(Lnet/minecraft/core/BlockPos;Z)Z": "Lnet/minecraft/world/level/Level;m_7471_(Lnet/minecraft/core/BlockPos;Z)Z"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRendererRainClockMixin": {
+        "renderSnowAndRain(Lnet/minecraft/client/renderer/LightTexture;FDDD)V": "Lnet/minecraft/client/renderer/LevelRenderer;m_109703_(Lnet/minecraft/client/renderer/LightTexture;FDDD)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRendererTickClockMixin": {
+        "tick()V": "Lnet/minecraft/client/renderer/LevelRenderer;m_109823_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelRendererTicksAccessor": {
+        "ticks": "f_109477_:I"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelSaveGuardMixin": {
+        "save(Lnet/minecraft/util/ProgressListener;ZZ)V": "Lnet/minecraft/server/level/ServerLevel;m_8643_(Lnet/minecraft/util/ProgressListener;ZZ)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelSetBlockClockMixin": {
+        "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z": "Lnet/minecraft/world/level/Level;m_6933_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleAccessor": {
+        "x": "f_107212_:D",
+        "y": "f_107213_:D",
+        "z": "f_107214_:D",
+        "age": "f_107224_:I",
+        "gravity": "f_107226_:F"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleEngineAccessor": {
+        "particles": "f_107289_:Ljava/util/Map;"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleEngineClockMixin": {
+        "tick()V": "Lnet/minecraft/client/particle/ParticleEngine;m_107388_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiParticleEngineGatherMixin": {
+        "add(Lnet/minecraft/client/particle/Particle;)V": "Lnet/minecraft/client/particle/ParticleEngine;m_107344_(Lnet/minecraft/client/particle/Particle;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiPlayerDataSaveGuardMixin": {
+        "save(Lnet/minecraft/world/entity/player/Player;)V": "Lnet/minecraft/world/level/storage/PlayerDataStorage;m_78433_(Lnet/minecraft/world/entity/player/Player;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerEntityForceTeleportMixin": {
+        "sendChanges": "Lnet/minecraft/server/level/ServerEntity;m_8533_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerLevelEntityEventMixin": {
+        "broadcastEntityEvent(Lnet/minecraft/world/entity/Entity;B)V": "Lnet/minecraft/server/level/ServerLevel;m_7605_(Lnet/minecraft/world/entity/Entity;B)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerLevelTickClockMixin": {
+        "tick(Ljava/util/function/BooleanSupplier;)V": "Lnet/minecraft/server/level/ServerLevel;m_8793_(Ljava/util/function/BooleanSupplier;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerPlayerDropClockMixin": {
+        "drop(Z)Z": "Lnet/minecraft/server/level/ServerPlayer;m_182294_(Z)Z"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiServerSaveGuardMixin": {
+        "saveAllChunks(ZZZ)Z": "Lnet/minecraft/server/MinecraftServer;m_129885_(ZZZ)Z",
+        "saveEverything(ZZZ)Z": "Lnet/minecraft/server/MinecraftServer;m_195514_(ZZZ)Z"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiTextureManagerClockMixin": {
+        "tick()V": "Lnet/minecraft/client/renderer/texture/TextureManager;m_7673_()V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiTimerClockMixin": {
+        "advanceTime(J)I": "Lnet/minecraft/client/Timer;m_92525_(J)I"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiRegionFileSaveGuardMixin": {
+        "write(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/nbt/CompoundTag;)V": "Lnet/minecraft/world/level/chunk/storage/RegionFileStorage;m_63708_(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/nbt/CompoundTag;)V"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiSectionStorageAccessor": {
+        "worker": "f_63773_:Lnet/minecraft/world/level/chunk/storage/IOWorker;"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiLevelEntityStorageAccessor": {
+        "entityManager": "f_143244_:Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiEntityManagerStorageAccessor": {
+        "permanentStorage": "f_157493_:Lnet/minecraft/world/level/entity/EntityPersistentStorage;"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiChunkStorageAccessor": {
+        "worker": "f_63495_:Lnet/minecraft/world/level/chunk/storage/IOWorker;"
+      },
+      "com/dishanhai/gt_shanhai/mixin/replay/ShanhaiEntityStorageAccessor": {
+        "worker": "f_156539_:Lnet/minecraft/world/level/chunk/storage/IOWorker;"
+      }
+    }
+  }
+}

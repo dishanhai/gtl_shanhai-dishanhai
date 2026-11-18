@@ -81,6 +81,8 @@ dependencies {
     implementation fileTree(dir: 'libs', include: '*.jar',
             excludes: ['sh_better_ui-*.jar', 'sh-common-lib-forge-1.20.1-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar', 'GTL-Enhancedcore-*.jar'])
     testImplementation(fg.deobf('local:appliedenergistics2-forge:15.4.10')) { transitive = false }
+    // JUnit 使用开发映射的 Minecraft；生产 GTCEu JAR 中的 SRG 成员不可直接加载。
+    testImplementation(fg.deobf('local:gtceu-1.20.1:1.4.4')) { transitive = false }
     implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
@@ -102,7 +104,8 @@ dependencies {
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
     // 主模組既有 AE2 file 依賴保留；單測使用同一原件的映射副本以執行 NBT 方法。
-    classpath = classpath.filter { it.name != 'appliedenergistics2-forge-15.4.10.jar' }
+    classpath = classpath.filter { it.name != 'appliedenergistics2-forge-15.4.10.jar'
+            && it.name != 'gtceu-1.20.1-1.4.4.jar' }
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -242,7 +245,7 @@ jar {
                 'Implementation-Title'    : mod_name,
                 'Implementation-Version'  : mod_version,
                 'Implementation-Vendor'   : mod_authors,
-                'MixinConfigs'            : 'gt_shanhai.mixin.json,gt_shanhai.minecraft.mixin.json,gt_shanhai.gtceu.mixin.json,gt_shanhai.gtlcore.mixin.json,gt_shanhai.gtladditions.mixin.json,gt_shanhai.ae2.mixin.json,gt_shanhai.ae2addons.mixin.json,gt_shanhai.jei.mixin.json,gt_shanhai.ftb.mixin.json,gt_shanhai.ldlib.mixin.json,gt_shanhai.guideme.mixin.json,gt_shanhai.optional.mixin.json,gt_shanhai.enhancedcore.mixin.json',
+                'MixinConfigs'            : 'gt_shanhai.mixin.json,gt_shanhai.minecraft.mixin.json,gt_shanhai.gtceu.mixin.json,gt_shanhai.gtlcore.mixin.json,gt_shanhai.gtladditions.mixin.json,gt_shanhai.ae2.mixin.json,gt_shanhai.ae2addons.mixin.json,gt_shanhai.jei.mixin.json,gt_shanhai.ftb.mixin.json,gt_shanhai.ldlib.mixin.json,gt_shanhai.guideme.mixin.json,gt_shanhai.optional.mixin.json,gt_shanhai.enhancedcore.mixin.json,gt_shanhai.replay.mixin.json',
         ])
     }
     doLast {

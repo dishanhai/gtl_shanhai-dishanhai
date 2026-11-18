@@ -222,6 +222,7 @@ public class GTDishanhaiMod {
 
         // 网络通道初始化
         com.dishanhai.gt_shanhai.network.ShanhaiNetwork.init();
+        com.dishanhai.gt_shanhai.common.time.ShanhaiClockInit.init();
         com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory.register();
         LOGGER.info("ShanhaiNetwork.init() 完成");
 
