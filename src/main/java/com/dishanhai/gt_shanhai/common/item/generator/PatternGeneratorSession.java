@@ -394,10 +394,14 @@ public final class PatternGeneratorSession {
         if (id == WHITE) {
             String input = buffer.readUtf(256);
             String output = buffer.readUtf(256);
-            BitSet inputItems = readBits(buffer, BuiltInRegistries.ITEM.size());
-            BitSet inputFluids = readBits(buffer, BuiltInRegistries.FLUID.size());
-            BitSet outputItems = readBits(buffer, BuiltInRegistries.ITEM.size());
-            BitSet outputFluids = readBits(buffer, BuiltInRegistries.FLUID.size());
+            int itemBits = PatternGeneratorRegistryBits.exclusiveIdLimit(
+                    BuiltInRegistries.ITEM, BuiltInRegistries.ITEM::getId);
+            int fluidBits = PatternGeneratorRegistryBits.exclusiveIdLimit(
+                    BuiltInRegistries.FLUID, BuiltInRegistries.FLUID::getId);
+            BitSet inputItems = readBits(buffer, itemBits);
+            BitSet inputFluids = readBits(buffer, fluidBits);
+            BitSet outputItems = readBits(buffer, itemBits);
+            BitSet outputFluids = readBits(buffer, fluidBits);
             if ((pendingCount > 0 || queuedTransfers > 0)
                     && (!input.equals(settings.inputWhite) || !output.equals(settings.outputWhite))) {
                 push();

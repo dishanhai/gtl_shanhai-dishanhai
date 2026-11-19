@@ -15,6 +15,22 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PatternGeneratorCodecTest {
+    @Test void sparseRawRegistryIdsRoundTripWithoutUsingTheEntryCount() {
+        var ids = List.of(0, 18, 129);
+        var hits = new BitSet();
+        hits.set(129);
+        int limit = PatternGeneratorRegistryBits.exclusiveIdLimit(ids, Integer::intValue);
+        var buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            assertThrows(IllegalArgumentException.class, () -> PatternGeneratorCodec.writeBits(buffer, hits, ids.size()));
+            PatternGeneratorCodec.writeBits(buffer, hits, limit);
+            assertEquals(hits, PatternGeneratorCodec.readBits(buffer, limit));
+            assertEquals(0, buffer.readableBytes());
+        } finally {
+            buffer.release();
+        }
+    }
+
     @Test void stateAndPreviewRoundTripAndSnapshotsDoNotLeakMutability() {
         CompoundTag settings = new CompoundTag();
         settings.putInt("transferCount", 3);
