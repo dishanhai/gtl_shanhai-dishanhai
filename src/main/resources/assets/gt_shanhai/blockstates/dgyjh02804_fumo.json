@@ -1,8 +1,12 @@
 {
   "variants": {
-    "facing=north": { "model": "gt_shanhai:block/dgyjh02804_fumo" },
-    "facing=east": { "model": "gt_shanhai:block/dgyjh02804_fumo", "y": 90 },
-    "facing=south": { "model": "gt_shanhai:block/dgyjh02804_fumo", "y": 180 },
-    "facing=west": { "model": "gt_shanhai:block/dgyjh02804_fumo", "y": 270 }
+    "facing=north,holding=false": { "model": "gt_shanhai:block/dgyjh02804_fumo" },
+    "facing=east,holding=false": { "model": "gt_shanhai:block/dgyjh02804_fumo", "y": 90 },
+    "facing=south,holding=false": { "model": "gt_shanhai:block/dgyjh02804_fumo", "y": 180 },
+    "facing=west,holding=false": { "model": "gt_shanhai:block/dgyjh02804_fumo", "y": 270 },
+    "facing=north,holding=true": { "model": "gt_shanhai:block/dgyjh02804_fumo_holding" },
+    "facing=east,holding=true": { "model": "gt_shanhai:block/dgyjh02804_fumo_holding", "y": 90 },
+    "facing=south,holding=true": { "model": "gt_shanhai:block/dgyjh02804_fumo_holding", "y": 180 },
+    "facing=west,holding=true": { "model": "gt_shanhai:block/dgyjh02804_fumo_holding", "y": 270 }
   }
 }
