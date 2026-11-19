@@ -84,12 +84,16 @@ public final class PatternGeneratorClientState {
     private void flushWhite() {
         var input = PatternGeneratorClientHooks.get().find(inputDraft);
         var output = PatternGeneratorClientHooks.get().find(outputDraft);
+        int itemBits = PatternGeneratorRegistryBits.exclusiveIdLimit(
+                BuiltInRegistries.ITEM, BuiltInRegistries.ITEM::getId);
+        int fluidBits = PatternGeneratorRegistryBits.exclusiveIdLimit(
+                BuiltInRegistries.FLUID, BuiltInRegistries.FLUID::getId);
         whiteRequest=send(WHITE, b -> {
             b.writeUtf(inputDraft,256); b.writeUtf(outputDraft,256);
-            PatternGeneratorCodec.writeBits(b,input.items(),BuiltInRegistries.ITEM.size());
-            PatternGeneratorCodec.writeBits(b,input.fluids(),BuiltInRegistries.FLUID.size());
-            PatternGeneratorCodec.writeBits(b,output.items(),BuiltInRegistries.ITEM.size());
-            PatternGeneratorCodec.writeBits(b,output.fluids(),BuiltInRegistries.FLUID.size());
+            PatternGeneratorCodec.writeBits(b,input.items(),itemBits);
+            PatternGeneratorCodec.writeBits(b,input.fluids(),fluidBits);
+            PatternGeneratorCodec.writeBits(b,output.items(),itemBits);
+            PatternGeneratorCodec.writeBits(b,output.fluids(),fluidBits);
         });
         whiteDirty = false;
         awaitingWhite=true;
