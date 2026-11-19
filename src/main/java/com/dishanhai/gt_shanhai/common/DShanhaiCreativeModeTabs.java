@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.block.DShanhaiAE2Blocks;
+import com.dishanhai.gt_shanhai.common.block.DShanhaiFumos;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.CreativeModeTab;
@@ -58,6 +59,7 @@ public class DShanhaiCreativeModeTabs {
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_PARALLEL_PROCESSOR_ITEM.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_CRAFTING_STORAGE_ITEM.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_STRUCTURE_ITEM.get()));
+                            output.accept(DShanhaiFumos.dgyjh02804Item());
                         })
         ).register();
     }

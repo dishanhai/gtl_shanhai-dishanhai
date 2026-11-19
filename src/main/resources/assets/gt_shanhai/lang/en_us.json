@@ -1,4 +1,7 @@
 {
+  "block.gt_shanhai.dgyjh02804_fumo": "dgyjh02804 Fumo Plush",
+  "tooltip.gt_shanhai.dgyjh02804_fumo.skin_note": "This model uses a similar skin because the original texture is unavailable.",
+  "subtitles.gt_shanhai.dgyjh02804_fumo": "Fumo plush dances",
   "gt_shanhai.shop.currency_sale.limit": "Base low-tier sale quota (doubles per tier, 0 = disabled)",
   "gt_shanhai.shop.currency_sale.period": "Low-tier sale refresh period (real seconds)",
   "gt_shanhai.shop.currency_sale.edit_required": "Enable shop edit mode to change the currency sale limit.",

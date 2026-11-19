@@ -19,6 +19,7 @@ import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
+import com.dishanhai.gt_shanhai.common.block.DShanhaiFumos;
 import com.dishanhai.gt_shanhai.common.item.EternalGregTechWorkshopDataModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuHyperdimensionalLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuNyarlathotepLinkModuleItem;
@@ -204,6 +205,7 @@ public class GTDishanhaiMod {
         // 配方库缓存数据包：把 DShanhaiRecipeCache 落盘的 json 常驻注入成数据包，vanilla 原生加载
         bus.addListener(com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipePackFinder::onAddPackFinders);
 
+        DShanhaiFumos.init(bus);
         BLOCKS.register(bus);
         ITEMS.register(bus);
         MENUS.register(bus);

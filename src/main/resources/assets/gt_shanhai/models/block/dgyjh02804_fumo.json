@@ -1,0 +1,7 @@
+{
+  "parent": "sh_common_lib:block/fumo/skin_64",
+  "render_type": "minecraft:cutout",
+  "textures": {
+    "skin": "gt_shanhai:block/dgyjh02804_fumo"
+  }
+}

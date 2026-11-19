@@ -1,4 +1,7 @@
 ﻿{
+  "block.gt_shanhai.dgyjh02804_fumo": "dgyjh02804 Fumo 玩偶",
+  "tooltip.gt_shanhai.dgyjh02804_fumo.skin_note": "模型取用相似皮肤，没有原皮肤材质",
+  "subtitles.gt_shanhai.dgyjh02804_fumo": "Fumo 玩偶跳舞",
   "gt_shanhai.shop.currency_sale.limit": "低阶货币基础限额（每升一档翻倍，0 = 禁售）",
   "gt_shanhai.shop.currency_sale.period": "低阶货币刷新周期（现实秒）",
   "gt_shanhai.shop.currency_sale.edit_required": "请在商店编辑模式中修改货币限售设置。",

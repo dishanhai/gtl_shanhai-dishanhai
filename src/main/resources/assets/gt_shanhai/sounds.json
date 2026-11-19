@@ -1,4 +1,10 @@
 {
+  "dgyjh02804_fumo": {
+    "subtitle": "subtitles.gt_shanhai.dgyjh02804_fumo",
+    "sounds": [
+      { "name": "sh_common_lib:plushie_music", "stream": true, "attenuation_distance": 16 }
+    ]
+  },
   "blackhole_activate": {
     "sounds": [
       "gt_shanhai:blackhole_activate"
