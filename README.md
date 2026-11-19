@@ -38,12 +38,14 @@
 | GTCEu | 1.4.4 或更高 |
 | GTLCore | 1.2.2.9 或更高 |
 | GTLAdditions | 3.1 或更高 |
-| GTL-Extend（`gtl_extend`） | 必装，未声明最低版本 |
+| GTL-Extend（`gtl_extend`） | 4.9.1 的历史前置；4.9.4 已过时，非必装 |
 | KubeJS | 2001.6.5-build.14 或更高 |
 | GuideME | 20.1.14 或更高 |
 | AE2 Wireless Terminals（`ae2wtlib`） | 15.3.3 或更高 |
 | SH-Better-UI（Forge） | 完整包附带 1.0.3，声明范围为 1.0.3（含）至 2.0.0（不含） |
 | Kotlin for Forge | 4.12（含）至 5.0（不含），主模组内置 |
+
+> ⚠️ **4.9.4：GTL-Extend 已过时。** 不再作为必装前置，新安装不建议添加。上表保留 4.9.1 的历史兼容信息。
 
 AE2、JEI、GTMThings、FTB Quests、FTB Teams、Curios、ExtendedAE 与 ExtendedAE Plus 用于对应的样板、商店、钱包等功能。整合包兼容性与已知冲突见版本发布页。[4.9.1 兼容性说明](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
 
@@ -80,7 +82,9 @@ Download mirrors. [Google Drive](https://drive.google.com/drive/folders/1ko4R7ha
 
 ### Requirements
 
-Use the [4.9.1 requirements table](#运行环境) for exact versions. GTL-Extend is required, the complete package includes SH-Better-UI for Forge 1.0.3, and the mod JAR embeds Kotlin for Forge. Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE, and ExtendedAE Plus. [Modpack compatibility and known conflicts](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+Use the [4.9.1 requirements table](#运行环境) for exact versions. For 4.9.1, GTL-Extend was required, the complete package includes SH-Better-UI for Forge 1.0.3, and the mod JAR embeds Kotlin for Forge. Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE, and ExtendedAE Plus. [Modpack compatibility and known conflicts](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+
+> ⚠️ **4.9.4: GTL-Extend is deprecated.** It is no longer required. Do not add it to new installations.
 
 ### Feedback
 
