@@ -30,9 +30,9 @@ final class PrimordialNeutronStarSuction {
     private static final float SLACK = 2.6f;
 
     /** 比真实环带再宽一截。停在这条线外面，下一刻的转动卷不进盘。 */
-    private static final float SWEEP = 1.6f;
+    private static final float SWEEP = 1.2f;
 
-    private static final float ALONG_SPEED = 0.55f;
+    private static final float ALONG_SPEED = 0.65f;
     private static final float LATERAL_SPEED = 2.3f;
     private static final float LINGER_TICKS = 40.0f;
 
@@ -172,8 +172,8 @@ final class PrimordialNeutronStarSuction {
         }
         if (zTry != z) {
             chooseAim(index, tick, zTry, goal, planetRadius, starRadius, x, y);
-            int pair = index == COUNT ? 1 : 2;
-            boolean crowded = hardCount(zTry, fat) >= pair
+            // A single ring must not veto a safe diagonal step for the miniature track.
+            boolean crowded = hardCount(zTry, fat) >= 2
                     && Math.hypot(x - aimX, y - aimY) > 1.5f;
             if (!crowded
                     && slideFat(x, y, aimX, aimY, zTry, tick, starRadius, planetRadius, xySpeed, true)
@@ -475,14 +475,18 @@ final class PrimordialNeutronStarSuction {
                                  float starRadius, float fromX, float fromY) {
         boolean inward = PHASE[index] == PHASE_IN || PHASE[index] == PHASE_LINGER;
         float along = -z;
-        if (index == COUNT && along < 60.0f) {
-            float plus = closerSign(tick, 2, planetRadius, fromX, fromY);
-            if (normalReal(tick, z, 2, plus, planetRadius, starRadius)) {
-                writeNormal(tick, 2, plus, planetRadius);
+        int innerRing = PrimordialEngineRingOffset.COUNT - 1;
+        float innerRelease = PrimordialEngineRingOffset.bandInner(innerRing, planetRadius + SWEEP) - 1.0f;
+        // Release the miniature from the ring normal after it crosses the inner edge.
+        // Otherwise it keeps orbiting that normal instead of reaching the host star.
+        if (index == COUNT && along < 60.0f && along > innerRelease) {
+            float plus = closerSign(tick, innerRing, planetRadius, fromX, fromY);
+            if (normalReal(tick, z, innerRing, plus, planetRadius, starRadius)) {
+                writeNormal(tick, innerRing, plus, planetRadius);
                 return;
             }
-            if (normalReal(tick, z, 2, -plus, planetRadius, starRadius)) {
-                writeNormal(tick, 2, -plus, planetRadius);
+            if (normalReal(tick, z, innerRing, -plus, planetRadius, starRadius)) {
+                writeNormal(tick, innerRing, -plus, planetRadius);
                 return;
             }
         }

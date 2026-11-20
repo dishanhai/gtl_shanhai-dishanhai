@@ -46,13 +46,17 @@ class ShanhaiNyarlathotepEchoTest {
         assertFalse(machine.contains("setCount("));
         assertFalse(machine.contains("shrink("));
     }
-    @Test void newVoiceRecipesAreRealRecipesWithNoInheritedBroadcastType() throws Exception {
-        for (String name : new String[]{"quantized_reality_item", "quantized_reality_fluid"}) {
-            var recipe = JsonParser.parseString(Files.readString(Path.of("src/main/resources/data/gt_shanhai/recipes/voice_of_the_faceless/" + name + ".json"))).getAsJsonObject();
-            assertEquals("gtceu:voice_of_the_faceless", recipe.get("type").getAsString());
-            assertTrue(recipe.get("duration").getAsInt() > 0);
-            assertTrue(recipe.getAsJsonObject("inputs").has("fluid"));
-            assertTrue(recipe.getAsJsonObject("tickInputs").has("eu"));
+    @Test void shippedVoiceRecipesUseTheirOwnTypeAndPower() throws Exception {
+        Path directory = Path.of("src/main/resources/data/gt_shanhai/recipes/voice_of_the_faceless");
+        assertTrue(Files.isRegularFile(directory.resolve("quantized_reality_item.json")));
+        try (var paths = Files.list(directory)) {
+            for (Path path : paths.filter(p -> p.getFileName().toString().endsWith(".json")).toList()) {
+                var recipe = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+                assertEquals("gtceu:voice_of_the_faceless", recipe.get("type").getAsString(), path.toString());
+                assertTrue(recipe.get("duration").getAsInt() > 0);
+                assertTrue(recipe.getAsJsonObject("inputs").has("fluid"));
+                assertTrue(recipe.getAsJsonObject("tickInputs").has("eu"));
+            }
         }
     }
     @Test void structureMatchesExpandedThirteenByTwelveByFifteenMapping() throws Exception {
