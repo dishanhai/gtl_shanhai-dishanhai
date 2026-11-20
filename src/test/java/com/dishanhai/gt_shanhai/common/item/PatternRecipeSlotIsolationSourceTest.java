@@ -134,7 +134,7 @@ class PatternRecipeSlotIsolationSourceTest {
     @Test
     void activeScopedCandidatesAreMergedBeforeEmptyBaseCandidatesReturn() throws IOException {
         String source = Files.readString(SELECTABLE_RECIPE_LOGIC);
-        int search = source.indexOf("Set<GTRecipe> recipes = searchSelectedRecipeTypes(machine);");
+        int search = source.indexOf("Set<GTRecipe> recipes = searchRecipeTypes(machine, lookupTypes);");
         int merge = source.indexOf("Set<GTRecipe> merged = mergeMarkedPatternRecipesCached(machine, recipes);", search);
         int emptyCheck = source.indexOf("if (merged.isEmpty())", merge);
 

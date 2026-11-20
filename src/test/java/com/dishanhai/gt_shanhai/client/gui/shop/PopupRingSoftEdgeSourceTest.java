@@ -45,7 +45,7 @@ class PopupRingSoftEdgeSourceTest {
         String glass = read("../SH-Better-UI/src/main/kotlin/com/dishanhai/sh_better_ui/client/glass/GlassBlur.kt");
         String style = read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/blur/GlassStyle.java");
         assertAll(
-                () -> assertTrue(blur.contains("motionAxisUniform.set(axisX, axisY, featherPx, 0f);")),
+                () -> assertTrue(blur.contains("motionAxisUniform.set(axisX, axisY, featherPx, cornerPx);")),
                 () -> assertTrue(blur.contains("NO_WAVE, 1f, 1f, glass2, partialTick, feather2")),
                 () -> assertTrue(blur.contains("NO_WAVE, axisX, axisY, glass, partialTick, 0f")),
                 () -> assertTrue(blur.contains("wave, 1f, 1f, GlassStyle.NONE, partialTick, 0f")),

@@ -40,7 +40,7 @@ class RecipeTypePatternBufferWildcardIntegrationTest {
         assertTrue(machine.contains("selectedWildcardPage"), "通配符配置页必须能切页");
         assertTrue(machine.contains("addWildcardPageControls"), "通配符界面必须提供翻页按钮");
         assertTrue(machine.contains("addWildcardMotherSlots"), "通配符槽必须按当前页铺格");
-        assertTrue(machine.contains("new WidgetGroup(0, 0, wildcardPanelWidth(), 168)")
+        assertTrue(machine.contains("new WidgetGroup(0, 0, wildcardPanelWidth(), 192)")
                         && machine.contains("() -> selectedWildcardPreviewPatterns()"),
                 "通配符配置页必须按当前母槽轮播预览");
         assertTrue(machine.contains("wildcardPreviewByMother")

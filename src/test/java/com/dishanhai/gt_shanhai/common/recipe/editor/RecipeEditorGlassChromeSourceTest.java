@@ -27,7 +27,7 @@ class RecipeEditorGlassChromeSourceTest {
                 () -> assertFalse(palette.contains("const val")),
                 () -> assertTrue(texture.contains(": IGuiTexture")),
                 () -> assertTrue(texture.contains("Spring(Spring.HOVER)")),
-                () -> assertTrue(texture.contains("enum class Style { ROOT, PANEL, DISPLAY, PAGE, BUTTON }"))
+                () -> assertTrue(texture.contains("enum class Style { ROOT, PANEL, DISPLAY, PAGE, BUTTON,"))
         );
     }
 

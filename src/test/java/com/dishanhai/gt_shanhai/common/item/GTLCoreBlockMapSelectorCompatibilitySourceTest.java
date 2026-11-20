@@ -13,12 +13,14 @@ class GTLCoreBlockMapSelectorCompatibilitySourceTest {
             "gt_shanhai", "common", "item", "ShanhaiUltimateTerminalBehavior.java");
 
     @Test
-    void usesTheGtlCore1231PositionAndSelectionCallbacks() throws Exception {
-        String source = Files.readString(SOURCE);
-
-        assertTrue(source.contains("0, root.getSizeHeight() + 4, settings.getSizeWidth(),"));
-        assertTrue(source.contains("(family, tier) -> family != null && tier != null"));
-        assertTrue(source.contains("family.equals(ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal))"));
-        assertTrue(source.contains("tier == ShanhaiUltimateTerminalConfig.getReplacementTier(terminal)"));
+    void terminalUsesGtlBlockFamiliesAndSendsTheSelectedTier() throws Exception {
+        String behavior = Files.readString(SOURCE);
+        String screen = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/terminal/UltimateTerminalScreen.java"));
+        assertTrue(behavior.contains("UltimateTerminalScreenOpener.open(hand)"));
+        assertTrue(screen.contains("BlockMap.tierBlockMap.get(key)"));
+        assertTrue(screen.contains("getReplacementFamily(copy)"));
+        assertTrue(screen.contains("getReplacementTier(copy, family)"));
+        assertTrue(screen.contains("cell.click = () -> selectTier(index)"));
+        assertTrue(screen.contains("send(Field.REPLACEMENT, index, family)"));
     }
 }

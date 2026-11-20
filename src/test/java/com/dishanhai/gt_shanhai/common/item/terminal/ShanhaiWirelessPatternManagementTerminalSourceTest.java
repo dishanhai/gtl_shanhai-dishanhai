@@ -223,7 +223,7 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(screen.contains("detail.stuckBroadcast()"));
         assertTrue(screen.contains("detail.hostCount()"));
         assertTrue(screen.contains("font.split(hit.tooltip(), DETAIL_TOOLTIP_WIDTH)"));
-        assertTrue(screen.contains("parts[index].replace(\" | \", \"\\n\")"));
+        assertTrue(screen.contains("StellarPatternWarningText.show(parts[index])"));
         assertTrue(screen.contains("detail.proxyCount()"));
         assertTrue(screen.contains("detail.proxyLines()"));
         assertTrue(packet.contains("Operation.TELEPORT"));

@@ -30,7 +30,7 @@ class RecipeTypeSharedSearchSetGuardSourceTest {
     void hostTypeGuardsHonorSharedSearchSets() throws IOException {
         String source = Files.readString(SEARCH_HELPER);
 
-        assertMethodContains(source, "private static boolean hostAllowsVirtualRecipeType",
+        assertMethodContains(source, "public static boolean hostAllowsVirtualRecipeType",
                 "RecipeTypeSharedSearchSets.isSharedWithAny(recipeType, hostTypes)",
                 "虚拟直跑前置校验必须放行与宿主同组的配方类型");
         assertMethodContains(source, "private static Set<GTRecipe> retainHostSupportedRecipes",

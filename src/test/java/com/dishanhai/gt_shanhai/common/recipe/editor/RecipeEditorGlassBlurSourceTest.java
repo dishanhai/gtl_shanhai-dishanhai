@@ -18,11 +18,14 @@ class RecipeEditorGlassBlurSourceTest {
         String libraryClient = java.nio.file.Files.readString(Path.of(
                 "../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/UiClient.java"));
 
+        String libraryRendering = java.nio.file.Files.readString(Path.of(
+                "../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/UiClientRendering.java"));
+
         assertAll(
                 () -> assertTrue(init.contains("GaussBlur.allowScreen(")),
                 // 消费端只登记业务画面，独立库持有唯一 Post 与关闭清理。
                 () -> assertFalse(init.contains("GaussBlur::onScreenRenderPost")),
-                () -> assertTrue(libraryClient.contains("GaussBlur.onScreenRenderPost(event)")),
+                () -> assertTrue(libraryClient.contains("GaussBlur.onScreenRenderPost(event.getScreen(), event.getGuiGraphics(), event.getPartialTick())")),
                 () -> assertTrue(libraryClient.contains("onScreenClosing(ScreenEvent.Closing event)")),
                 () -> assertTrue(init.contains("screen instanceof com.lowdragmc.lowdraglib.gui.modular.ModularUIGuiContainer")),
                 () -> assertTrue(init.contains("ShanhaiRecipeEditorFactory.INSTANCE")),
@@ -30,7 +33,8 @@ class RecipeEditorGlassBlurSourceTest {
                 () -> assertTrue(blur.contains("GaussBlur.requestDirectional(")),
                 () -> assertTrue(blur.contains("GlassStyle.SWAP")),
                 // 所有画面关闭均清请求；后处理没就绪就不登记请求。
-                () -> assertTrue(libraryClient.contains("GaussBlur.clear()")),
+                () -> assertTrue(libraryClient.contains("UiClientRendering.screenClosing(event.getScreen())")
+                        && libraryRendering.contains("GaussBlur.clear()")),
                 () -> assertTrue(blur.contains("!GaussBlur.isReady()")),
                 // 共用同一条 PostChain，不另分配渲染目标
                 () -> assertFalse(blur.contains("TextureTarget(")),

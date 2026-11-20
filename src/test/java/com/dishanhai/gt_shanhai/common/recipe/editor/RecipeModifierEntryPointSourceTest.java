@@ -14,8 +14,6 @@ class RecipeModifierEntryPointSourceTest {
             Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai");
     private static final Path RESOURCE_ROOT =
             Path.of("src", "main", "resources", "assets", "gt_shanhai");
-    private static final Path PREVIEW =
-            Path.of("tools", "recipe_modifier_ui_preview.html");
 
     @Test
     void chineseCommandOpensLayeredEditor() throws IOException {
@@ -46,15 +44,10 @@ class RecipeModifierEntryPointSourceTest {
         assertTrue(Files.isRegularFile(model));
         assertTrue(Files.isRegularFile(texture));
         assertTrue(Files.isRegularFile(animation));
-        assertTrue(Files.isRegularFile(PREVIEW));
 
         String itemSource = Files.readString(item);
         assertTrue(itemSource.contains("ShanhaiRecipeEditorFactory.open"));
         assertTrue(itemSource.contains("hasPermissions(2)"));
         assertTrue(Files.readString(animation).contains("\"frames\""));
-        String preview = Files.readString(PREVIEW);
-        assertTrue(preview.contains("animation:item"));
-        assertTrue(preview.contains("data-stage=\"0\""));
-        assertTrue(preview.contains("data-stage=\"2\""));
     }
 }

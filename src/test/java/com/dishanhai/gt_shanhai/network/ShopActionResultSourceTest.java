@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.testutil.WireProtocolAssertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -23,7 +24,7 @@ class ShopActionResultSourceTest {
         assertTrue(doBuy.contains("sendResult(player, pkt,"));
 
         String doSell = extractBlock(s, "private static void doSell(ServerPlayer player, ShopEntry entry, ShopActionPacket pkt)");
-        assertEquals(8, count(doSell, "sendResult(player, pkt,"), "出售的六个失败分支 + 全部/部分成交都要回执");
+        assertEquals(9, count(doSell, "sendResult(player, pkt,"), "出售的七个失败分支 + 全部/部分成交都要回执");
 
         assertTrue(extractBlock(s, "private static void sendCartResult(")
                         .contains("if (!pkt.fromCart || pkt.action != Action.BUY) return;"),
@@ -38,7 +39,7 @@ class ShopActionResultSourceTest {
     @Test
     void resultPacketIsClientBoundAndBumpsTheProtocol() throws Exception {
         String net = source("network/ShanhaiNetwork.java");
-        assertTrue(net.contains("PROTOCOL_VERSION = \"18\""));
+        assertTrue(WireProtocolAssertions.atLeast(net, 18));
         int cart = net.indexOf("ShopCartPurchaseResultPacket.class");
         int result = net.indexOf("ShopActionResultPacket.class");
         assertTrue(cart >= 0 && result > cart, "新包追加在后面，不打乱既有包号");

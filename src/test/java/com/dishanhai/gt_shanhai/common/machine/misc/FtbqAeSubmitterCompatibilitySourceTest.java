@@ -32,7 +32,8 @@ class FtbqAeSubmitterCompatibilitySourceTest {
         String submitter = Files.readString(SUBMITTER);
         String build = Files.readString(BUILD);
 
-        assertTrue(build.contains("ftb-quests-forge-2001.4.22.jar"),
+        assertTrue(build.contains("implementation fileTree(dir: 'libs', include: '*.jar',")
+                        && Files.isRegularFile(Path.of("libs", "ftb-quests-forge-2001.4.22.jar")),
                 "編譯依賴必須與遊戲端 FTBQ 1.4.22 一致");
         assertTrue(submitter.contains("data.markRewardAsClaimed(rewardPlayerId, reward"),
                 "AE 回网只能标记领取，不能再次调用会直接发奖的 claimReward");

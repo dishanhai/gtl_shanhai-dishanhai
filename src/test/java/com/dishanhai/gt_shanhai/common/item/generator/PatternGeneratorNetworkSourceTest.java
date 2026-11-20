@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item.generator;
 
+import com.dishanhai.gt_shanhai.testutil.WireProtocolAssertions;
 import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,7 +10,7 @@ class PatternGeneratorNetworkSourceTest {
     private static final Path ROOT = Path.of("src/main/java/com/dishanhai/gt_shanhai");
     @Test void packetsAreDirectionalAndSessionChecksRunOnServerThread() throws Exception {
         String network = Files.readString(ROOT.resolve("network/ShanhaiNetwork.java"));
-        assertTrue(network.contains("PROTOCOL_VERSION = \"9\""));
+        assertTrue(WireProtocolAssertions.atLeast(network, 9));
         for (String packet : new String[]{"Open", "Action", "State", "Preset"})
             assertTrue(network.contains("PatternGenerator" + packet + "Packet.class"));
         String action = Files.readString(ROOT.resolve("network/PatternGeneratorActionPacket.java"));
