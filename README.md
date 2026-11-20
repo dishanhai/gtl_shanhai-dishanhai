@@ -2,9 +2,9 @@
 
 [![Minecraft 1.20.1](https://img.shields.io/badge/Minecraft-1.20.1-green.svg)](https://www.minecraft.net/)
 [![Forge 47.4.16+](https://img.shields.io/badge/Forge-47.4.16%2B-orange.svg)](https://files.minecraftforge.net/)
-[![gt_shanhai 4.9.1](https://img.shields.io/badge/gt__shanhai-4.9.1-blue.svg)](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+[![gt_shanhai 4.9.4](https://img.shields.io/badge/gt__shanhai-4.9.4-blue.svg)](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.4)
 
-**山海的神人私货**是为 GregTech Leisure（GTL）整合包制作的 GTCEu 附属模组，由 **dishanhai（山海恒长在）**维护。内容覆盖格雷后期多方块与并行产线、AE2 样板自动化、阶段资源和商店。本文以公开发行版 **4.9.1** 为准。
+**山海的神人私货**是为 GregTech Leisure（GTL）整合包制作的 GTCEu 附属模组，由 **dishanhai（山海恒长在）**维护。内容覆盖格雷后期多方块与并行产线、AE2 样板自动化、阶段资源和商店。本文适用于公开发行的 **4.9.4 修正版（协议 23）**。
 
 [English](#english) · [主要内容](#主要内容) · [下载与安装](#下载与安装) · [运行环境](#运行环境) · [反馈与支持](#反馈与支持)
 
@@ -15,39 +15,43 @@
 - **山海商店与阶段资源**。携带山海钱包即可打开商店，使用星火或无线电网电力结算物品和流体。货币中心支持兑换和转账，银会中心提供会员折扣，银行支持存贷。阶段资源、无限盘和抽奖为整合包进度提供额外的资源获取途径。
 - **配方与游戏内指南**。模组加入简化配方、自定义配方和终局组件。携带配方修改器时可从配方页面调整适用配方。查找机器结构、配方规则与操作步骤时，请打开 GuideME 指南书「山海的神人私货引索」。
 
-### 4.9.1 更新
+### 4.9.4 更新
 
-原初模块支持同配方与跨配方批次合并，超限模式为适用模块启用独立配方并行池。AE2 样板编码终端与 JEI 可以将样板直接上传到星律云端样板库。更新还修复了无线样板管理终端的大包断连和专用服务端的玻璃界面崩溃。[游戏内更新公告源文](config/gt_shanhai/changelog/Update-4.9.1.md) · [GitHub Release](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+- 主机之间可以连同独立电路搬运样板，样板仓的溢出产物支持保存和恢复。修正版补齐样板生成器在 Forge 注册 ID 不连续时遗漏的白名单条目。
+- 商店批量下单基于同一份 AE 库存快照。归墟视界枢核显示实际发电速率，配方编辑器可恢复已删除的配方并保存结果。
+- 新增 Fumo 玩偶、世界时钟回溯和单人存档编辑。全息面板执行命令前会展示预览，供玩家再次确认。[4.9.4 更新公告](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.4)
 
 ## 下载与安装
 
-1. 下载山海完整包。完整包包含模组、配套前置和 KubeJS 脚本，用于安装到已有的 GTL 实例中。单独安装主模组 JAR 缺少完整玩法所需的脚本和资源。[下载 4.9.1 完整包](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.1/shanhai-complete-package-v4.9.1.zip) · [全部版本](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)
-2. 按压缩包内说明安装到对应的 GTL 游戏目录，核对实例内的前置版本。
-3. 启动游戏后查看更新公告。联机时请将客户端和服务端一并升级至 4.9.1，其网络协议为 **17**。
+- **已有 GTL 实例**。关闭游戏并备份存档与自定义配置，解压山海完整包，按包内说明安装。Windows 玩家也可以运行包内的「一键安装山海私货.bat」。[下载山海完整包](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.4/gt_shanhai-4.9.4-compact-protocol23.zip)
+- **新建 GTL 实例**。解压 GTL 3.9.3+ 整合包，用支持 Modrinth 整合包的启动器导入其中的 `modpack.mrpack`。[下载 GTL 3.9.3+ 整合包](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.4/GTL.v3.9.3%2B.v4.9.4-protocol23.zip)
+- **手动安装**。在现有 GTL 实例中安装修正版主模组、同版 KubeJS 内容、两款 Forge 共享库和山海工具模组 `shanhai_dev.jar`，并保留实例所需的其他前置。[下载主模组](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.4/gt_shanhai-4.9.4-protocol23.jar) · [配套附件](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.4)
 
-备用下载入口。[Google Drive](https://drive.google.com/drive/folders/1ko4R7haIh1tx_fAdHfrQbzPpyqoV0eub) · [123 网盘](https://1828543941.share.123pan.cn/123pan/1cwljv-9ZYmd)
+联机时请在客户端和服务端同时安装 **协议 23** 修正版及配套共享库。协议 **22** 和 **23** 的 4.9.4 构建无法互相连接。[全部版本](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)
+
+使用备用下载入口时，请核对附件名中的 `protocol23`。[Google Drive](https://drive.google.com/drive/folders/1ko4R7haIh1tx_fAdHfrQbzPpyqoV0eub) · [123 网盘](https://1828543941.share.123pan.cn/123pan/1cwljv-9ZYmd)
 
 ## 运行环境
 
-以下为 **4.9.1** 的运行依赖。完整包已随附 SH-Better-UI 和 Kotlin for Forge 运行时，其他整合包依赖请以对应的 GTL 实例为准。[4.9.1 模组依赖声明](https://github.com/dishanhai/gtl_shanhai-dishanhai/blob/gt-shanhai-v4.9.1/src/main/resources/META-INF/mods.toml) · [4.9.1 构建版本](https://github.com/dishanhai/gtl_shanhai-dishanhai/blob/gt-shanhai-v4.9.1/gradle.properties)
+以下要求适用于 **4.9.4 协议 23 修正版**。完整包附带两款 Forge 共享库，主模组内置 Kotlin for Forge。其他整合包依赖请以对应的 GTL 实例为准。
 
-| 模组或运行环境 | 4.9.1 要求 |
+| 模组或运行环境 | 4.9.4 修正版要求 |
 | --- | --- |
 | Minecraft | 1.20.1 |
+| Java | 21 |
 | Forge | 47.4.16 或更高 |
+| SH-Better-UI（Forge） | 1.0.12 或更高 |
+| SH-Common-Lib（Forge） | 0.4.1 或更高 |
 | GTCEu | 1.4.4 或更高 |
 | GTLCore | 1.2.2.9 或更高 |
 | GTLAdditions | 3.1 或更高 |
-| GTL-Extend（`gtl_extend`） | 4.9.1 的历史前置；4.9.4 已过时，非必装 |
+| GTL-Extend（`gtl_extend`） | 已弃用，可选 |
 | KubeJS | 2001.6.5-build.14 或更高 |
 | GuideME | 20.1.14 或更高 |
 | AE2 Wireless Terminals（`ae2wtlib`） | 15.3.3 或更高 |
-| SH-Better-UI（Forge） | 完整包附带 1.0.3，声明范围为 1.0.3（含）至 2.0.0（不含） |
-| Kotlin for Forge | 4.12（含）至 5.0（不含），主模组内置 |
+| Kotlin for Forge | `4.12 ≤ 版本 < 5.0`，主模组内置 4.12.0 |
 
-> ⚠️ **4.9.4：GTL-Extend 已过时。** 不再作为必装前置，新安装不建议添加。上表保留 4.9.1 的历史兼容信息。
-
-AE2、JEI、GTMThings、FTB Quests、FTB Teams、Curios、ExtendedAE 与 ExtendedAE Plus 用于对应的样板、商店、钱包等功能。整合包兼容性与已知冲突见版本发布页。[4.9.1 兼容性说明](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+AE2、JEI、GTMThings、FTB Quests、FTB Teams、Curios、ExtendedAE 与 ExtendedAE Plus 用于对应的样板、商店、钱包等功能。
 
 ## 反馈与支持
 
@@ -57,7 +61,7 @@ AE2、JEI、GTMThings、FTB Quests、FTB Teams、Curios、ExtendedAE 与 Extende
 
 ## English
 
-**Shanhai (gt_shanhai)** is a GTCEu addon by **dishanhai** for the GregTech Leisure (GTL) modpack on **Minecraft 1.20.1 and Forge 47.4.16 or later**. This guide covers the public **4.9.1** release.
+**Shanhai (gt_shanhai)** is a GTCEu addon by **dishanhai** for the GregTech Leisure (GTL) modpack on **Minecraft 1.20.1 and Forge 47.4.16 or later**. This guide covers the public **4.9.4 corrected build (protocol 23)**.
 
 [简体中文](#山海的神人私货--gt_shanhai) · [Features](#features) · [Installation](#installation) · [Requirements](#requirements) · [Feedback](#feedback)
 
@@ -68,23 +72,27 @@ AE2、JEI、GTMThings、FTB Quests、FTB Teams、Curios、ExtendedAE 与 Extende
 - **Shop and progression.** Carry a Shanhai Wallet to access the shop and trade items and fluids with Spark or wireless-grid power. Currency exchange, membership discounts, banking, progression resources, infinite storage cells, and a lottery offer additional ways to acquire resources.
 - **Recipes and in-game guide.** Shanhai adds simplified recipes, custom recipes, and endgame components. The recipe modifier can adjust supported recipes from their recipe pages. Open the Shanhai GuideME book for multiblock structures, recipe rules, and operating instructions.
 
-### What's new in 4.9.1
+### What's new in 4.9.4
 
-Primordial modules can merge same-recipe and cross-recipe batches, and supported modules gain independent per-recipe pools in overdrive mode. Upload patterns to the Stellar Cloud Pattern Library from the AE2 Pattern Encoding Terminal or JEI. The release also fixes large-payload disconnects in the wireless terminal and a glass UI crash on dedicated servers. [In-game changelog](config/gt_shanhai/changelog/Update-4.9.1.md) · [GitHub Release](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+- Move patterns and their independent circuits between hosts. Pattern storage now saves overflow for recovery. The corrected build fixes missing pattern generator allowlist entries when Forge registry IDs are sparse.
+- Batch shop orders share one AE inventory snapshot. The Guixu core shows actual power generation, and restored recipes stay available after a restart.
+- The release adds Fumo dolls, world-clock rewind, and single-player save editing. Hologram panels preview commands before asking for confirmation. [4.9.4 release notes](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.4)
 
 ### Installation
 
-1. Download the complete package. It includes the mod, bundled prerequisites, and KubeJS content for an existing GTL instance. The standalone mod JAR requires the matching scripts and resources. [Download the 4.9.1 complete package](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.1/shanhai-complete-package-v4.9.1.zip) · [All releases](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)
-2. Follow the package instructions and check the prerequisites in your GTL instance.
-3. Start the game and open the in-game changelog. For multiplayer, update the client and server together to 4.9.1, which uses protocol **17**.
+- **Existing GTL instance.** Close the game and back up your worlds and custom configuration. Extract the complete Shanhai package and follow the included instructions. Windows players can also use the bundled installer. [Download the complete Shanhai package](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.4/gt_shanhai-4.9.4-compact-protocol23.zip)
+- **New GTL instance.** Extract the GTL 3.9.3+ bundle and import `modpack.mrpack` into a launcher that supports Modrinth modpacks. [Download the GTL 3.9.3+ bundle](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.4/GTL.v3.9.3%2B.v4.9.4-protocol23.zip)
+- **Manual installation.** Install the corrected mod JAR, matching KubeJS content, both Forge shared libraries, and `shanhai_dev.jar` into your existing GTL instance. Keep the other prerequisites required by your instance. [Download the mod JAR](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/download/gt-shanhai-v4.9.4/gt_shanhai-4.9.4-protocol23.jar) · [Companion downloads](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.4)
 
-Download mirrors. [Google Drive](https://drive.google.com/drive/folders/1ko4R7haIh1tx_fAdHfrQbzPpyqoV0eub) · [123 Cloud Drive](https://1828543941.share.123pan.cn/123pan/1cwljv-9ZYmd)
+For multiplayer, install the corrected **protocol 23** build and its shared libraries on both client and server. The protocol **22** and **23** builds of 4.9.4 cannot connect to each other. [All releases](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)
+
+When using a mirror, check the package filename for `protocol23`. [Google Drive](https://drive.google.com/drive/folders/1ko4R7haIh1tx_fAdHfrQbzPpyqoV0eub) · [123 Cloud Drive](https://1828543941.share.123pan.cn/123pan/1cwljv-9ZYmd)
 
 ### Requirements
 
-Use the [4.9.1 requirements table](#运行环境) for exact versions. For 4.9.1, GTL-Extend was required, the complete package includes SH-Better-UI for Forge 1.0.3, and the mod JAR embeds Kotlin for Forge. Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE, and ExtendedAE Plus. [Modpack compatibility and known conflicts](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases/tag/gt-shanhai-v4.9.1)
+The corrected build requires Java 21. The complete package includes SH-Better-UI 1.0.12 and SH-Common-Lib 0.4.1 for Forge, and the mod JAR embeds Kotlin for Forge 4.12.0. GTL-Extend is deprecated and optional. [Full requirements table](#运行环境)
 
-> ⚠️ **4.9.4: GTL-Extend is deprecated.** It is no longer required. Do not add it to new installations.
+Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE, and ExtendedAE Plus.
 
 ### Feedback
 
