@@ -220,6 +220,7 @@ public class GTDishanhaiMod {
         // 在 InterModProcessEvent 中注册 PartAbility（此时方块已全部注册完成）
         bus.addListener((net.minecraftforge.fml.event.lifecycle.InterModProcessEvent event) -> {
             com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines.registerPartAbilities();
+            event.enqueueWork(com.dishanhai.gt_shanhai.integration.gtladditions.DraconicCollapseInputCompat::install);
         });
 
         // 网络通道初始化
