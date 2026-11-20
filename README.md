@@ -99,3 +99,9 @@ Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE,
 - Include your Shanhai and GTL versions, steps to reproduce, and relevant logs when reporting an issue. [GitHub Issues](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues) · [Feedback form](https://docs.qq.com/sheet/DYWFtSEtvTWVodkJn?tab=000002)
 - Suggest a feature or support the author. [Feature requests](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13) · [Afdian](https://afdian.com/a/dishanhai)
 - See the repository's license file. [LICENSE](LICENSE)
+
+## 自动构建 / CI builds
+
+向 `master` 提交或更新 PR、推送到 `master`，或在 [Actions](https://github.com/dishanhai/gtl_shanhai-dishanhai/actions) 手动运行 **Build GTSH**，会使用 JDK 21 和 Gradle 8.8 构建 Forge 1.20.1 主模组。成功后，在该次运行的 **Artifacts** 下载 `gt-shanhai-forge-1.20.1`。它只包含经校验的主模组 JAR，保留 14 天；不是完整整合包，不会自动发布 Release。
+
+The workflow builds the Forge mod (not the full modpack) on pull requests targeting `master`, pushes to `master`, and manual runs. Compatible SH-Better-UI and SH-Common-Lib source commits are pinned in the workflow and built in the same run. Update those pins deliberately when their APIs change. The verified runtime JAR is available in **Artifacts** for 14 days.
