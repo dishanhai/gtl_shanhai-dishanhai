@@ -102,6 +102,6 @@ Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE,
 
 ## 自动构建 / CI builds
 
-向 `master` 提交或更新 PR、推送到 `master`，或在 [Actions](https://github.com/dishanhai/gtl_shanhai-dishanhai/actions) 手动运行 **Build GTSH**，会使用 JDK 21 和 Gradle 8.8 构建 Forge 1.20.1 主模组。成功后，在该次运行的 **Artifacts** 下载 `gt-shanhai-forge-1.20.1`。它只包含经校验的主模组 JAR，保留 14 天；不是完整整合包，不会自动发布 Release。
+向 `master` 提交或更新 PR、推送到 `master`，或在 [Actions](https://github.com/dishanhai/gtl_shanhai-dishanhai/actions) 手动运行 **Build GTSH**，会使用 JDK 21 和 Gradle 8.8 构建 Forge 1.20.1 主模组。成功后，在该次运行的 **Artifacts** 下载 `gt-shanhai-forge-1.20.1`。它只包含经校验的主模组 JAR，保留 14 天；不是完整整合包，不会自动发布 Release。 回归测试在 JAR 校验与上传后执行；测试失败仍会标红并保留失败报告。此时已上传的 JAR 仅供验证，不是正式发行包。
 
-The workflow builds the Forge mod (not the full modpack) on pull requests targeting `master`, pushes to `master`, and manual runs. Compatible SH-Better-UI and SH-Common-Lib source commits are pinned in the workflow and built in the same run. Update those pins deliberately when their APIs change. The verified runtime JAR is available in **Artifacts** for 14 days.
+The workflow builds the Forge mod (not the full modpack) on pull requests targeting `master`, pushes to `master`, and manual runs. Compatible SH-Better-UI and SH-Common-Lib source commits are pinned in the workflow and built in the same run. Update those pins deliberately when their APIs change. The verified runtime JAR is available in **Artifacts** for 14 days. Packaging and JAR verification run before the regression suite. If regression tests fail, the run remains red and publishes the failure report alongside any previously verified JAR. Treat that JAR as a test build, not a release.

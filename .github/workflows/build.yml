@@ -69,3 +69,19 @@ jobs:
           path: GTSH/build/ci-artifacts/*.jar
           if-no-files-found: error
           retention-days: 14
+
+      - name: Run GTSH regression tests
+        id: regression
+        working-directory: GTSH
+        run: gradle --no-daemon --console=plain check
+
+      - name: Upload failed regression report
+        if: failure() && steps.regression.conclusion == 'failure'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: gt-shanhai-regression-report
+          path: |
+            GTSH/build/reports/tests/
+            GTSH/build/test-results/
+          if-no-files-found: warn
+          retention-days: 14

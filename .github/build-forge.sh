@@ -14,7 +14,7 @@ cp "$project/libs/kotlinforforge-4.12.0-all.jar" \
 
 gradle --no-daemon --console=plain -p "$ui" devJar
 gradle --no-daemon --console=plain -p "$common" build
-gradle --no-daemon --console=plain -p "$project" build
+gradle --no-daemon --console=plain -p "$project" assemble releaseJar
 
 # Select the reobfuscated release, never the raw, dev or sources JAR.
 version="$(sed -n 's/^mod_version=//p' "$project/gradle.properties" | tr -d '\r')"
