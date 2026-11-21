@@ -57,7 +57,7 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(fsh.contains("uniform float Smooth")),
                 () -> assertTrue(fsh.contains("uniform float CellRects")),
                 () -> assertTrue(fsh.contains("uniform int CellCount")),
-                () -> assertTrue(fsh.contains("uniform float WaveOrigin")),
+                () -> assertTrue(fsh.contains("uniform vec2 WaveOrigin")),
                 () -> assertTrue(fsh.contains("uniform float WaveRadius")),
                 () -> assertTrue(fsh.contains("uniform float WaveThickness")),
                 () -> assertTrue(fsh.contains("uniform float WaveRefract")),
@@ -65,7 +65,7 @@ class ShopGaussBlurSourceTest {
                 // 纯色面板只做高斯看不出效果：波必须真的位移采样坐标
                 () -> assertTrue(fsh.contains("baseUv -= dir * (WaveRefract * crest)")),
                 // 波峰处 radius 恰好归零，不能跟着它提前 return，否则折射位移被整段跳过
-                () -> assertTrue(fsh.contains("if (!waveActive && radius < 0.5)")),
+                () -> assertTrue(fsh.contains("if (!waveActive && k <= 0.0)")),
                 () -> assertTrue(program.contains("\"Smooth\"")),
                 () -> assertTrue(program.contains("\"CellRects\"")),
                 () -> assertTrue(program.contains("\"CellCount\"")),
@@ -83,7 +83,7 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(blur.contains("ScreenEvent.Render.Post")),
                 () -> assertFalse(clientInit.contains("GaussBlur::onScreenRenderPost")),
                 () -> assertTrue(read("../SH-Better-UI/src/main/java/com/dishanhai/sh_better_ui/client/UiClient.java")
-                        .contains("GaussBlur.onScreenRenderPost(event)")),
+                        .contains("GaussBlur.onScreenRenderPost(event.getScreen(), event.getGuiGraphics(), event.getPartialTick())")),
                 () -> assertTrue(fsh.contains("uniform vec4 Rect")),
                 () -> assertTrue(fsh.contains("uniform vec4 Hole")),
                 () -> assertTrue(fsh.contains("uniform float Progress")),
@@ -114,8 +114,8 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(blur.contains("\"GlassTint\"")),
                 () -> assertTrue(blur.contains("\"GlassParams\"")),
                 () -> assertTrue(blur.contains("\"GlassEdge\"")),
-                // 边缘折射只在第一趟，玻璃层叠加只在最后一趟，避免两趟各做一遍
-                () -> assertTrue(fsh.contains("if (firstPass && GlassEdge.x > 0.0)")),
+                // 矩形首趟折射，圆角末趟折射；玻璃层叠加只在最后一趟，避免两趟各做一遍
+                () -> assertTrue(fsh.contains("if ((rounded ? lastPass : firstPass) && GlassEdge.x > 0.0)")),
                 // 工作区按 core.autocrlf 可能是 CRLF，换行归一后再比
                 () -> assertTrue(fsh.replace("\r\n", "\n").contains("if (lastPass) {\n        rgb = applyGlass(")),
                 // scissor 必须成对：开在 process 前，关在 finally 里
@@ -149,8 +149,8 @@ class ShopGaussBlurSourceTest {
                 () -> assertFalse(renderTooltipsFinal.contains("renderComponentTooltip")),
                 () -> assertTrue(shop.contains("private void drawTooltipLayer(")),
                 // 先跑模糊，再画上层；上层在 finally 里，模糊失败也不丢 tooltip
-                () -> assertTrue(postFinal.indexOf("runBlurPasses(event)") >= 0),
-                () -> assertTrue(postFinal.indexOf("runBlurPasses(event)") < postFinal.indexOf("runTopLayer(event")),
+                () -> assertTrue(postFinal.indexOf("runBlurPasses(screen, graphics, partialTick)") >= 0),
+                () -> assertTrue(postFinal.indexOf("runBlurPasses(screen, graphics, partialTick)") < postFinal.indexOf("runTopLayer(screen, graphics")),
                 () -> assertTrue(postFinal.contains("finally")),
                 () -> assertTrue(blur.contains("public static void clearTopLayer()")),
                 () -> assertTrue(shop.contains("GaussBlur.clearTopLayer()")),
@@ -181,7 +181,7 @@ class ShopGaussBlurSourceTest {
                 () -> assertTrue(program.contains("\"MotionAxis\"")),
                 () -> assertTrue(blur.contains("\"MotionAxis\"")),
                 // 趟倍率在 radius<0.5 提前返回之后才乘，V 趟半径被压成 0 时玻璃层仍然执行
-                () -> assertTrue(fsh.indexOf("if (!waveActive && radius < 0.5)")
+                () -> assertTrue(fsh.indexOf("if (!waveActive && k <= 0.0)")
                         < fsh.indexOf("float axisRadius = radius * (firstPass ? MotionAxis.x : MotionAxis.y);")),
                 () -> assertTrue(blur.contains("public static void requestDirectional(")),
                 // 守衛可註冊，不再寫死商店界面

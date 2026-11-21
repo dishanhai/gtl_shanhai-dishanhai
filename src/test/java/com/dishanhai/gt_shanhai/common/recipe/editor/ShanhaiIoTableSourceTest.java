@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.testutil.VanillaTestBootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -7,6 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ShanhaiIoTableSourceTest {
+
+    @BeforeAll
+    static void bootstrapMinecraft() {
+        VanillaTestBootstrap.initialize();
+    }
+
 
     @Test
     void openingARecipeShowsOneFullPage() {

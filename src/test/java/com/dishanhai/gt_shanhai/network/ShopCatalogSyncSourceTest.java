@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.testutil.WireProtocolAssertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -24,7 +25,7 @@ class ShopCatalogSyncSourceTest {
                 () -> assertTrue(state > manifest),
                 () -> assertTrue(registration(network, manifest).contains("NetworkDirection.PLAY_TO_CLIENT")),
                 () -> assertTrue(registration(network, state).contains("NetworkDirection.PLAY_TO_CLIENT")),
-                () -> assertTrue(network.contains("PROTOCOL_VERSION = \"18\"")));
+                () -> assertTrue(WireProtocolAssertions.atLeast(network, 18)));
     }
 
     @Test

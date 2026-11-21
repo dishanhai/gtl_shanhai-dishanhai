@@ -78,7 +78,8 @@ class JeiBookmarkButtonSourceTest {
         String zhCn = Files.readString(ZH_CN);
         String enUs = Files.readString(EN_US);
 
-        assertTrue(buttons.contains("AEItems.CRAFTING_PATTERN.stack()"));
+        assertTrue(buttons.contains("new RecipeButtonIcon(GraphicIcon.RECIPE_TYPE)"));
+        assertTrue(buttons.contains("new Factory(recipeTypeIcon, true)"));
         assertTrue(buttons.contains("CONFIRMATION_WINDOW_MILLIS = 3000L"));
         assertTrue(buttons.contains("message.gt_shanhai.jei.quick_encode.recipe_type_confirm"));
         assertTrue(buttons.contains("tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm"));

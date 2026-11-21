@@ -23,7 +23,7 @@ class RecipeEditorGlassIoSourceTest {
                 () -> assertTrue(io.contains("getPhantomTargets")),
                 () -> assertTrue(io.contains("implements IGhostIngredientTarget")),
                 () -> assertTrue(cell.contains("object GlassCell")),
-                () -> assertTrue(cell.contains("GlassPalette.CELL_FILL"))
+                () -> assertTrue(cell.contains("material.fill(colors.CELL_FILL)"))
         );
     }
 

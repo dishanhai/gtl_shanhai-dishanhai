@@ -8,9 +8,8 @@ import appeng.api.stacks.GenericStack;
 import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
 import com.google.gson.JsonParser;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import net.minecraft.SharedConstants;
+import com.dishanhai.gt_shanhai.testutil.VanillaTestBootstrap;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
@@ -35,36 +34,13 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class GtlCoreGraphByproductOrderTest {
 
     private static final Path MIXINS = Path.of("src/main/java/com/dishanhai/gt_shanhai/mixin");
 
-    private static boolean registriesUnavailable;
-
     private static void requireVanillaRegistries() {
-        assumeTrue(!registriesUnavailable, "Minecraft registries failed to initialize earlier in this test worker");
-        SharedConstants.tryDetectVersion();
-        try {
-            Bootstrap.bootStrap();
-        } catch (NoClassDefFoundError error) {
-            // A test in this worker attempted to initialize ItemStack before bootstrapping Minecraft.
-            if (!error.getMessage().contains("net.minecraft.core.registries.BuiltInRegistries")
-                    || error.getCause() == null || !error.getCause().getMessage().contains("Not bootstrapped")) {
-                throw error;
-            }
-            registriesUnavailable = true;
-            assumeTrue(false, "Minecraft registries failed to initialize earlier in this test worker");
-        } catch (ExceptionInInitializerError error) {
-            // The plain Gradle test worker has no Forge EventBus transformer.
-            // Vanilla registration has already completed when NetworkHooks is initialized.
-            if (!(error.getCause() instanceof RuntimeException listenerFailure)
-                    || !(listenerFailure.getCause() instanceof NoSuchMethodException missingConstructor)
-                    || !missingConstructor.getMessage().equals("net.minecraftforge.network.NetworkEvent.<init>()")) {
-                throw error;
-            }
-        }
+        VanillaTestBootstrap.initialize();
     }
 
     @Test

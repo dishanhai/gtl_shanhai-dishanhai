@@ -43,7 +43,7 @@ class ShanhaiSteamGeneratorContractTest {
     @Test
     void controllerCanBeHandcraftedWithoutRegisteringExtraFluidHatches() throws Exception {
         Set<String> allowed = Set.of("gtceu:bronze_gearbox", "gtceu:bronze_pipe_casing",
-                "gtceu:bronze_machine_casing", "gtceu:bronze_firebox_casing");
+                "gtceu:hp_steam_solid_boiler", "gtceu:bronze_firebox_casing");
         for (String id : new String[]{"steam_generator"}) {
             JsonObject recipe = recipe("crafting_shaped/steam/" + id);
             assertEquals("minecraft:crafting_shaped", recipe.get("type").getAsString());

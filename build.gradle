@@ -83,15 +83,12 @@ dependencies {
     testImplementation(fg.deobf('local:appliedenergistics2-forge:15.4.10')) { transitive = false }
     // JUnit 使用开发映射的 Minecraft；生产 GTCEu JAR 中的 SRG 成员不可直接加载。
     testImplementation(fg.deobf('local:gtceu-1.20.1:1.4.4')) { transitive = false }
+    // The IO editor uses LDLib FluidStack; the test JVM sees Mojang-mapped Fluids.
+    testImplementation(fg.deobf('local:ldlib-forge-1.20.1:1.0.33.b')) { transitive = false }
     implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     compileOnly fileTree(dir: 'libs', include: 'spark-*.jar')
-    implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-quests-forge-2001.4.22.jar')
-    implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-teams-forge-2001.3.2.jar')
-    // cloth-config：模组列表「配置」按钮的 GUI（运行期整合包已提供，仅编译期引用）
-    compileOnly files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/cloth-config-11.1.136-forge.jar')
-    compileOnly files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ae2wtlib-15.3.3-forge.jar')
 
 
     implementation 'io.github.llamalad7:mixinextras-common:0.5.0-beta.2'
@@ -99,13 +96,15 @@ dependencies {
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
     // 主模組既有 AE2 file 依賴保留；單測使用同一原件的映射副本以執行 NBT 方法。
     classpath = classpath.filter { it.name != 'appliedenergistics2-forge-15.4.10.jar'
-            && it.name != 'gtceu-1.20.1-1.4.4.jar' }
+            && it.name != 'gtceu-1.20.1-1.4.4.jar'
+            && it.name != 'ldlib-forge-1.20.1-1.0.33.b.jar' }
 }
 
 tasks.withType(JavaCompile).configureEach {

@@ -14,7 +14,7 @@ class ShopUnlockAutoCraftSourceTest {
         String text = source("common/shop/ShopAutoCraft.java");
         assertTrue(text.contains("beginStagePlan("));
         assertTrue(text.contains("ShopStageConfig.get(stagePath)"));
-        assertTrue(text.contains("\"stage:\" + stagePath"));
+        assertTrue(text.contains("startIngredientPlan(player, null, Target.STAGE, stagePath, requirements, grid)"));
         assertTrue(text.contains("请先开启「AE模式」"));
     }
 
@@ -23,7 +23,7 @@ class ShopUnlockAutoCraftSourceTest {
         String text = source("common/shop/ShopAutoCraft.java");
         assertTrue(text.contains("beginEntrySubmissionPlan("));
         assertTrue(text.contains("entry.getSubmissionItems()"));
-        assertTrue(text.contains("\"entry:\" + entry.getStableId()"));
+        assertTrue(text.contains("startIngredientPlan(player, entry, Target.ENTRY_SUBMISSION, entry.getStableId(), entry.getSubmissionItems(), grid)"));
     }
 
     @Test

@@ -102,7 +102,8 @@ class ShopBatchOperationsSourceTest {
         String screen = source("client/gui/shop/ShopScreen.java");
         String packet = source("network/WalletAccountSyncPacket.java");
         String client = source("client/shop/ClientWalletAccount.java");
-        assertTrue(screen.contains("本周期已购") && screen.contains("ClientWalletAccount.getPeriodUsed(key)"),
+        assertTrue(screen.contains("本周期已用") && screen.contains("ClientWalletAccount.getPeriodUsed(selected)")
+                        && screen.contains("Math.max(0L, periodLimit - periodUsed)"),
                 "详情页应显示周期限购的已购/剩余具体次数");
         assertTrue(packet.contains("periodUsed") && client.contains("getPeriodUsed"),
                 "钱包同步应带上周期已用次数");

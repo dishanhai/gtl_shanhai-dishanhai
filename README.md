@@ -99,3 +99,12 @@ Integrations use AE2, JEI, GTMThings, FTB Quests, FTB Teams, Curios, ExtendedAE,
 - Include your Shanhai and GTL versions, steps to reproduce, and relevant logs when reporting an issue. [GitHub Issues](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues) · [Feedback form](https://docs.qq.com/sheet/DYWFtSEtvTWVodkJn?tab=000002)
 - Suggest a feature or support the author. [Feature requests](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13) · [Afdian](https://afdian.com/a/dishanhai)
 - See the repository's license file. [LICENSE](LICENSE)
+
+## 自动构建 / CI builds
+
+- **Build GTSH (Manual)**：在 [Actions](https://github.com/dishanhai/gtl_shanhai-dishanhai/actions) 选择工作流，点击 **Run workflow** 后选择分支。不需要创建 PR。工作流须先进入默认分支，旧分支须同步默认分支上的 CI 配置再运行。
+- **Build GTSH (Push)**：推送提交到本仓库任意分支时自动构建；本地提交或推送标签不会触发。Fork 提交到 `master` 的 PR 仍会检查，同仓库 PR 不重复构建。
+
+使用 JDK 21 和 Gradle 8.8 构建 Forge 1.20.1 主模组。成功后，在该次运行的 **Artifacts** 下载 `gt-shanhai-forge-1.20.1`。它只包含经校验的主模组 JAR，保留 14 天；不是完整整合包，不会自动发布 Release。回归测试在 JAR 校验与上传后执行；测试失败仍会标红并保留失败报告。此时已上传的 JAR 仅供验证，不是正式发行包。
+
+The workflow builds the Forge mod (not the full modpack) on pushes to any repository branch, fork pull requests targeting `master`, and manual runs from **Actions**. Manual runs do not need a PR; update older branches with the default branch's CI files first. Compatible SH-Better-UI and SH-Common-Lib source commits are pinned in the workflow and built in the same run. Update those pins deliberately when their APIs change. The verified runtime JAR is available in **Artifacts** for 14 days. Packaging and JAR verification run before the regression suite. If regression tests fail, the run remains red and publishes the failure report alongside any previously verified JAR. Treat that JAR as a test build, not a release.

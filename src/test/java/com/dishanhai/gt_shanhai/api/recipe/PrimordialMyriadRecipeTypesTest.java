@@ -53,10 +53,10 @@ class PrimordialMyriadRecipeTypesTest {
 
         String registrations = Files.readString(DISHANHAI_RECIPE_TYPES_SOURCE).replace("\r\n", "\n");
         assertTrue(registrations.contains(
-                "PRIMORDIAL_MYRIAD_ASCENSION_TIER_2 = GTRecipeTypes.register(\"primordial_myriad_ascension_tier_2\", \"multiblock\")\n" +
+                "PRIMORDIAL_MYRIAD_ASCENSION_TIER_2 = register(\"primordial_myriad_ascension_tier_2\", \"multiblock\")\n" +
                         "                .setMaxIOSize(4, 0, 4, 0)"));
         assertTrue(registrations.contains(
-                "PRIMORDIAL_MYRIAD_ASCENSION_TIER_1 = GTRecipeTypes.register(\"primordial_myriad_ascension_tier_1\", \"multiblock\")\n" +
+                "PRIMORDIAL_MYRIAD_ASCENSION_TIER_1 = register(\"primordial_myriad_ascension_tier_1\", \"multiblock\")\n" +
                         "                .setMaxIOSize(4, 0, 4, 0)"));
 
         String accessors = Files.readString(RECIPE_TYPES_SOURCE);

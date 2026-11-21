@@ -82,8 +82,12 @@ class PatternRecipeLookupPerformanceSourceTest {
         assertTrue(selectable.contains("protected boolean shouldInvalidateLookupCacheWhenNoRunnableRecipe()"));
         assertTrue(primordial.contains("protected boolean shouldInvalidateLookupCacheWhenNoRunnableRecipe()"));
         assertTrue(primordial.contains("return false;"));
-        assertTrue(primordial.contains("Set<GTRecipe> recipes = lookupRecipeIterator();"));
-        assertTrue(primordial.contains("findMaxMatchableScaledRecipe(recipe, totalParallel)"),
+        assertTrue(primordial.contains("threadCandidates(this::lookupRecipeIterator)"));
+        assertTrue(primordial.contains("priorityCandidates(this::lookupRecipeIterator)"));
+        assertTrue(primordial.contains("matchableScaledRecipeCache.clear();"),
+                "可并行数量与容量不得跨次分配缓存");
+        assertTrue(primordial.contains("getMaxParallel(recipe, recipeLimit)"));
+        assertTrue(primordial.contains("findMaxMatchableScaledRecipe(recipe, limit)"),
                 "并行和输入输出容量仍必须每轮实时计算，不能随 recipe 集合缓存一起缓存");
         assertFalse(primordial.contains("base.equals(cachedModuleConditionSource)"),
                 "模块等级过滤缓存不得每 tick 对大候选 Set 做 equals；应由基类合并阶段减少重复集合构造");

@@ -339,6 +339,19 @@ public final class DShanhaiConfigScreen {
 
         // ===== 山海商店 =====
         ConfigCategory shop = builder.getOrCreateCategory(Component.literal("商店"));
+        shop.addEntry(e.startBooleanToggle(Component.literal("停用商店"), cfg.shopDisabled.get())
+                .setDefaultValue(cfg.shopDisabled.getDefault())
+                .setTooltip(tip("停用后所有玩家均不能交易，管理员可重新启用"))
+                .setSaveConsumer(cfg.shopDisabled::set).build());
+        shop.addEntry(e.startLongField(Component.literal("货币兑换基础限额"), cfg.shopCurrencySaleLimit.get())
+                .setDefaultValue(cfg.shopCurrencySaleLimit.getDefault()).setMin(0L).setMax(Long.MAX_VALUE)
+                .setTooltip(tip("每位玩家各币种独立计数；设为 0 可禁止出售"))
+                .setSaveConsumer(cfg.shopCurrencySaleLimit::set).build());
+        shop.addEntry(e.startLongField(Component.literal("货币限额刷新周期（秒）"), cfg.shopCurrencySalePeriodSeconds.get())
+                .setDefaultValue(cfg.shopCurrencySalePeriodSeconds.getDefault()).setMin(1L)
+                .setMax(com.dishanhai.gt_shanhai.common.shop.CurrencySaleLimit.MAX_SECONDS)
+                .setTooltip(tip("从首次成功出售起算"))
+                .setSaveConsumer(cfg.shopCurrencySalePeriodSeconds::set).build());
         shop.addEntry(e.startLongField(Component.literal("SDA 打包阈值"), cfg.shopSdaPackThreshold.get())
                 .setDefaultValue(1000L).setMin(1L).setMax(Long.MAX_VALUE)
                 .setTooltip(tip("非 AE 模式下，单次购买货物总量 ≥ 此值时打包成超级磁盘阵列赠送（而非塞背包）",

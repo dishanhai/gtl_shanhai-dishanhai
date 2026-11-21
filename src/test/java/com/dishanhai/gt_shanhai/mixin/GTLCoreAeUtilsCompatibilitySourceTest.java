@@ -17,12 +17,12 @@ class GTLCoreAeUtilsCompatibilitySourceTest {
             "gt_shanhai", "mixin", "AeUtilsVirtualPatternInputsMixin.java");
 
     @Test
-    void usesTheGtlCore1231PatternDetailsDescriptor() throws Exception {
+    void usesThePinnedGtlCorePatternDetailsDescriptor() throws Exception {
         String build = Files.readString(BUILD);
         String quantumLogic = Files.readString(QUANTUM_LOGIC);
         String mixin = Files.readString(AE_UTILS_MIXIN);
 
-        assertTrue(build.contains("[GTLCore]gtlcore-1.2.3.1-fix9.jar"));
+        assertTrue(build.contains("libs/gtlcore-1.2.3.2-fix4.jar"));
         assertTrue(quantumLogic.contains("AEUtils.extractForProcessingPattern(details, inventory,"));
         assertFalse(quantumLogic.contains(
                 "AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory,"));

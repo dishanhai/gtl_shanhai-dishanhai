@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.testutil.WireProtocolAssertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -63,7 +64,7 @@ class ShopCatalogIdentitySourceTest {
     @Test
     void wireFormatUsesResourceFilterProtocolVersion() throws Exception {
         String network = source("network/ShanhaiNetwork.java");
-        assertTrue(network.contains("PROTOCOL_VERSION = \"18\""));
+        assertTrue(WireProtocolAssertions.atLeast(network, 18));
     }
 
     private static String source(String relative) throws Exception {

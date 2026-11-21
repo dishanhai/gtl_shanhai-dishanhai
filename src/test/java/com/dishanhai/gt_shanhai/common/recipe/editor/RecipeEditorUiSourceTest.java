@@ -77,12 +77,11 @@ class RecipeEditorUiSourceTest {
     void machineRecipeTypesUseOneExpandableSelector() throws IOException {
         String widget = Files.readString(JAVA_ROOT.resolve(Path.of(
                 "common", "recipe", "editor", "ShanhaiRecipeEditorWidget.java")));
-        String preview = Files.readString(Path.of("tools", "recipe_modifier_ui_preview.html"));
         assertTrue(widget.contains("SelectorWidget"));
         assertTrue(widget.contains("setCandidatesSupplier"));
         assertTrue(widget.contains("setOnChanged"));
-        assertTrue(preview.contains("<select"));
-        assertTrue(preview.contains("recipe-type-selector"));
+        assertTrue(widget.contains("new ShanhaiRecipeTypeSelector"));
+        assertTrue(widget.contains("shanhai_recipe_editor.recipe_type_selector"));
     }
 
     @Test
@@ -91,12 +90,11 @@ class RecipeEditorUiSourceTest {
                 "common", "recipe", "editor", "ShanhaiRecipeMachineMapping.java")));
         String names = Files.readString(JAVA_ROOT.resolve(Path.of(
                 "common", "recipe", "editor", "ShanhaiRecipeTypeNames.java")));
-        String preview = Files.readString(Path.of("tools", "recipe_modifier_ui_preview.html"));
         assertTrue(mapping.contains("ShanhaiRecipeTypeNames.display"));
         assertTrue(names.contains("Component.translatable"));
         assertTrue(names.contains("zh_cn.json"));
         assertTrue(names.contains("（"));
-        assertTrue(preview.contains("化学反应釜（gtceu:chemical_reactor）"));
+        assertTrue(names.contains("\"（\" + id + \"）\""));
     }
 
     @Test

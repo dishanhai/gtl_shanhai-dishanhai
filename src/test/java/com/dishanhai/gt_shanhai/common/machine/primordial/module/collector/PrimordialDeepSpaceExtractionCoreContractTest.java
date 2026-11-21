@@ -56,17 +56,28 @@ class PrimordialDeepSpaceExtractionCoreContractTest {
     }
 
     @Test
-    void sixteenRecipesStayInsideTheDeclaredIoAndKeepTheTailOutputs() throws Exception {
+    void extractionRecipesStayInsideDeclaredIoAndKeepLegacyTailOutputs() throws Exception {
         Path dir = Path.of("src", "main", "resources", "data", "gt_shanhai", "recipes",
                 "primordial_deep_space_extraction");
         try (Stream<Path> files = Files.list(dir)) {
             Path[] recipes = files.filter(path -> path.toString().endsWith(".json")).sorted().toArray(Path[]::new);
-            assertEquals(16, recipes.length);
+            assertEquals(17, recipes.length);
             int maxItems = 0;
             int maxFluids = 0;
             for (Path path : recipes) {
                 JsonObject json = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
                 assertEquals("gtceu:primordial_deep_space_extraction", json.get("type").getAsString());
+                if (path.getFileName().toString().equals("ultimate_world_fragment_miner_module_world_fragments_creation.json")) {
+                    // This is the separately added gated recipe, not a legacy one-tick fragment roll.
+                    assertEquals(100, json.get("duration").getAsInt());
+                    var inputs = json.getAsJsonObject("inputs").getAsJsonArray("item");
+                    assertEquals(2, inputs.size());
+                    assertTrue(inputs.toString().contains("dishanhai:ultimate_world_fragment_miner_module"));
+                    assertTrue(inputs.toString().contains("dishanhai:world_fragments_creation"));
+                    assertEquals(9, json.getAsJsonObject("outputs").getAsJsonArray("item").size());
+                    assertEquals(5, json.getAsJsonObject("outputs").getAsJsonArray("fluid").size());
+                    continue;
+                }
                 assertEquals(1, json.get("duration").getAsInt());
                 assertEquals(8, json.getAsJsonObject("tickInputs").getAsJsonArray("eu")
                         .get(0).getAsJsonObject().get("content").getAsInt());

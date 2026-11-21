@@ -13,13 +13,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class ShopKernelModuleTest {
     @Test
     void moduleDescriptorResolvesToAnOwnedNativeScreenConsumer() throws Exception {
-        var loader = getClass().getClassLoader();
-        String[] declaration;
-        try (var resource = loader.getResourceAsStream("META-INF/sh_better_ui.modules")) {
-            assertNotNull(resource, "商店内核模块须由模组 JAR 的资源描述符发现");
-            declaration = new String(resource.readAllBytes(), StandardCharsets.UTF_8).strip().split("\\s+");
-        }
-        assertEquals(2, declaration.length);
+        String[] declaration = java.nio.file.Files.readAllLines(java.nio.file.Path.of(
+                        "src/main/resources/META-INF/sh_better_ui.modules"), StandardCharsets.UTF_8)
+                .stream().map(String::strip).filter(line -> !line.isBlank() && !line.startsWith("#"))
+                .map(line -> line.split("\\s+"))
+                .filter(parts -> parts.length == 2 && parts[1].equals(ShopKernelModule.class.getName()))
+                .findFirst().orElseThrow(() -> new AssertionError("商店内核模块须有独立资源声明"));
         assertEquals("gt_shanhai", declaration[0]);
         var module = Class.forName(declaration[1]).asSubclass(UIModule.class).getConstructor().newInstance();
         var descriptor = module.descriptor();

@@ -3,6 +3,8 @@ package com.dishanhai.gt_shanhai.common.shop;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.resources.ResourceLocation;
+import com.dishanhai.gt_shanhai.testutil.VanillaTestBootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,6 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class ShopEntryJsonCodecLimitPersistenceTest {
+
+    @BeforeAll
+    static void bootstrapMinecraft() {
+        VanillaTestBootstrap.initialize();
+    }
+
 
     private ShopEntry entry(long limit) {
         return new ShopEntry(new ResourceLocation("minecraft", "stone"), 1,
