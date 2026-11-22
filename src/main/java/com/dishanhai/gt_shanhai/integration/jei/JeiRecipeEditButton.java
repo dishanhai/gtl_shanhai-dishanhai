@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.integration.jei;
 
-import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.item.RecipeModifierDevItem;
 import com.dishanhai.gt_shanhai.network.RecipeEditorJeiOpenPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
@@ -13,22 +12,18 @@ import mezz.jei.api.gui.buttons.IButtonState;
 import mezz.jei.api.gui.buttons.IIconButtonController;
 import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
-import mezz.jei.api.helpers.IGuiHelper;
 import mezz.jei.api.recipe.advanced.IRecipeButtonControllerFactory;
 import mezz.jei.api.registration.IAdvancedRegistration;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.ItemStack;
 
 public final class JeiRecipeEditButton {
 
     private JeiRecipeEditButton() {}
 
     public static void register(IAdvancedRegistration registration) {
-        IGuiHelper guiHelper = registration.getJeiHelpers().getGuiHelper();
-        IDrawable icon = guiHelper.createDrawableItemStack(
-                new ItemStack(GTDishanhaiMod.RECIPE_MODIFIER_DEV.get()));
+        IDrawable icon = new RecipeButtonSvgIcon("edit_recipe");
         registration.addRecipeButtonFactory(new Factory(icon));
     }
 
