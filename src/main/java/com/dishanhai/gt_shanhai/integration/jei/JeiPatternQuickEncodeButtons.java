@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.integration.jei;
 
 import appeng.api.stacks.GenericStack;
-import appeng.client.gui.Icon;
 import appeng.menu.me.common.MEStorageMenu;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
@@ -16,7 +15,6 @@ import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
-import com.dishanhai.sh_better_ui.client.gui.display.GraphicIcon;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.integration.jei.multipage.MultiblockInfoWrapper;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
@@ -77,46 +75,17 @@ public final class JeiPatternQuickEncodeButtons {
     }
 
     public static void register(IAdvancedRegistration registration) {
-        IDrawable patternIcon = new RecipeButtonIcon(GraphicIcon.QUICK_PATTERN_ENCODE);
+        IDrawable patternIcon = new RecipeButtonSvgIcon("quick_encode");
         registration.addRecipeButtonFactory(new Factory(patternIcon, false));
-        IDrawable cloudIcon = new RecipeButtonIcon(GraphicIcon.CLOUD_PATTERN_LIBRARY);
+        IDrawable cloudIcon = new RecipeButtonSvgIcon("cloud_upload");
         registration.addRecipeButtonFactory(new CloudUploadFactory(cloudIcon));
-        IDrawable recipeTypeIcon = new RecipeButtonIcon(GraphicIcon.RECIPE_TYPE);
+        IDrawable recipeTypeIcon = new RecipeButtonSvgIcon("recipe_batch");
         registration.addRecipeButtonFactory(new Factory(recipeTypeIcon, true));
-        IDrawable bookmarkIcon = new RecipeButtonIcon(GraphicIcon.BOOKMARK_FAVORITE);
+        IDrawable bookmarkIcon = new RecipeButtonSvgIcon("bookmark");
         registration.addRecipeButtonFactory(new BookmarkFactory(bookmarkIcon));
-        IDrawable byproductIcon = new RecipeButtonIcon(GraphicIcon.EXPORT);
+        IDrawable byproductIcon = new RecipeButtonSvgIcon("byproduct_upload");
         registration.addRecipeButtonFactory(new ByproductUploadFactory(byproductIcon));
         registration.addRecipeButtonFactory(new MultiblockFactory(patternIcon));
-    }
-
-    private record RecipeButtonIcon(GraphicIcon icon) implements IDrawable {
-        private static final int SIZE = 13; // JEI 配方侧栏按钮的尺寸
-        private static final float ICON_SCALE = (float) (SIZE - 2) / GraphicIcon.PIXELS;
-
-        @Override
-        public int getWidth() {
-            return SIZE;
-        }
-
-        @Override
-        public int getHeight() {
-            return SIZE;
-        }
-
-        @Override
-        public void draw(GuiGraphics graphics, int x, int y) {
-            Icon.TOOLBAR_BUTTON_BACKGROUND.getBlitter().dest(x, y, SIZE, SIZE).blit(graphics);
-            var pose = graphics.pose();
-            pose.pushPose();
-            try {
-                pose.translate(x + 1, y + 1, 0);
-                pose.scale(ICON_SCALE, ICON_SCALE, 1);
-                icon.draw(graphics, 0, 0, 1, 0xFF20252E);
-            } finally {
-                pose.popPose();
-            }
-        }
     }
 
     private static ResourceLocation extractRecipeId(Object recipeBase) {
@@ -331,12 +300,6 @@ public final class JeiPatternQuickEncodeButtons {
                     && mouseY >= area.getY()
                     && mouseY < area.getY() + area.getHeight()) {
                 drawNativeTransferHighlights(graphics, mouseX, mouseY);
-            }
-            if (wholeRecipeType) {
-                graphics.drawString(Minecraft.getInstance().font, "+",
-                        area.getX() + area.getWidth() - 6,
-                        area.getY() + area.getHeight() - 8,
-                        0xFFFFFF, true);
             }
         }
 
