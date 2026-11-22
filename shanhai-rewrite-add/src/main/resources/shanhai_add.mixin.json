@@ -6,9 +6,16 @@
   "refmap": "shanhai_add.refmap.json",
   "mixins": [
     "ShanhaiSetHealthGuardMixin",
+    "ShanhaiHealthWriteClampMixin",
+    "ShanhaiHealthPacketClampMixin",
+    "ShanhaiHealthReadClampMixin",
     "ShanhaiLivingEntityDieGuardMixin",
     "ShanhaiServerPlayerDieGuardMixin",
     "ShanhaiEntitySetRemovedGuardMixin",
+    "ShanhaiTickDeathGuardMixin",
+    "ShanhaiDeadJudgeReturnMixin",
+    "ShanhaiImmobileDeathGateMixin",
+    "ShanhaiPickupDeathGateMixin",
     "ShanhaiServerGamePacketListenerSelfInputMixin",
     "ShanhaiValueWriteProbeMixin",
     "ShanhaiServerLevelTickClockMixin",
@@ -44,6 +51,8 @@
     "ShanhaiGravityAntiKickMixin"
   ],
   "client": [
+    "client.ShanhaiSetScreenDeadJudgeMixin",
+    "client.ShanhaiCombatKillGuardMixin",
     "ShanhaiLevelRendererTickClockMixin",
     "ShanhaiLevelRendererTicksAccessor",
     "ShanhaiClientLevelTickTimeClockMixin",

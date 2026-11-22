@@ -5,19 +5,48 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /**
- * <b>硬白名单</b>（永不改）＋「类必须来自 {@code mods\} 目录」这一条来源判据。
+ * <b>黑名单式准入</b>：<b>默认任何类都可以当热改目标</b>，只排除三类。
  *
- * <h2>它是纯判定，不碰任何东西</h2>
- * 只有 {@code java.*}（含 {@code java.lang.reflect} / {@code java.nio.charset} / {@link Locale}）：
- * 没有 MC／Forge／日志框架、没有 ASM、<b>没有 {@code java.nio.file}</b>（原因见下面"为什么不再用 Path"）。
- * 这样它既能被游戏里的 {@link HotfixAutoCounter} 用，也能被<b>脱离游戏</b>的离线自检
- * （{@code temp\hotfix\modsdir\selfcheck\}、{@code temp\hotfix\offline-autocounter\}）直接加载 ——
- * 白名单判错是最贵的一种错（"改到了原版类"），所以这条判据必须能离线验、且有负对照。
+ * <h2>🔴 2026-11-20 改判据（用户当场点出盲区）</h2>
+ * <pre>
+ *   「你防止我们自己的agent，那是不是会漏掉敌人的agent？」
+ * </pre>
+ * 上一版的准入条件是「该类的 code source 必须落在 {@code mods\} 下的 jar 里」。那是一条
+ * <b>白名单式</b>判据，它挡得住 {@code mods\} 里的 jar，但<b>挡不住</b>：
+ * <ul>
+ *   <li>{@code -javaagent} 注入的类（{@code agentmain}/{@code premain} 里 {@code defineClass}）；</li>
+ *   <li>{@code Unsafe.defineAnonymousClass} / {@code MethodHandles.Lookup#defineClass}；</li>
+ *   <li>任何自建 {@code ClassLoader} 现算现用的类。</li>
+ * </ul>
+ * 这三类恰恰是"对手也会用"的手段，而它们的 {@code CodeSource} <b>很可能是 {@code null}</b>
+ * ⇒ 按旧判据一律 {@code no_code_source} 拒掉，等于"敌人换一种加载方式我们就废不掉它"。
  *
- * <h2>🔴 为什么不再把 code source 交给 {@code Paths.get(...)}（2026-11-08 现场定案）</h2>
+ * <p>所以判据改成<b>排除法</b>：先假设可改，再逐条排除。
+ *
+ * <h2>判据表（第一列命中即停；<b>拒绝优先于接受</b>）</h2>
+ * <pre>
+ *   拒 1  包名命中 {@link #NEVER_PATCH_PREFIXES}                   → whitelisted:&lt;前缀&gt;
+ *   拒 2  该类的 code source 与<b>我们自己</b>的相同（规范化后相等） → own_code_source
+ *   拒 3  code source 是 {@code jrt:}（JDK 运行时镜像）              → jdk_runtime
+ *   拒 4  code source 落在 {@code \libraries\}/\jars\}/版本 jar      → 不收也不拒（见下"环境类"）
+ *   ——
+ *   收 1  code source 拿得到（任何路径，含 libraries 与 agent 自建 jar）→ ok_code_source
+ *   收 2  code source 在 {@code mods\} 下（只是<b>标记</b>，不参与准入）  → ok_code_mods
+ *   收 3  code source 拿不到，且加载器<b>不是</b> JDK 三件套            → ok_code_none_loader
+ *   收 4  code source 拿不到，且加载器<b>不是</b> MC 那个模块加载器实例  → ok_code_none_foreign
+ *   拒 5  code source 拿不到 ＋ 两条二级信号都不成立                  → no_code_source_no_signal
+ * </pre>
+ *
+ * <h2>为什么"拒 3/拒 4"里的 libraries 改成"不拒"</h2>
+ * 用户的口径是「默认任何类都可以当目标」。{@code libraries\} 里装的是第三方库（ASM、log4j、
+ * fastutil…），它们<b>不是</b>"运行环境必须项"以外的东西 —— 而那些必须项已经逐条进了
+ * {@link #NEVER_PATCH_PREFIXES}。留一条"整段 libraries 拒掉"只会把"对手把自己的 jar 丢进
+ * libraries"这种玩法变成免死金牌。（{@code jrt:} 仍然拒：那是 JDK 自己的类。）
+ *
+ * <h2>为什么不再把 code source 交给 {@code Paths.get(...)}（2026-11-08 现场定案，仍然有效）</h2>
  * Forge／ModLauncher 给 mod 类的 code source 是 <b>union URL</b>，形如
  * <pre>
- *   union:/C:/…/versions/<实例目录>/mods/examplemod-1.2.3.jar%23326!/
+ *   union:/C:/…/versions/&lt;实例目录&gt;/mods/examplemod-1.2.3.jar%23326!/
  * </pre>
  * 老判据走 {@code Paths.get(url.toURI())}，而 {@code cpw.mods.niofs.union.UnionFileSystemProvider#getPath(URI)}
  * 的实现是「把 URI 的 path 按 {@code !} 切开，只要切出 2 段就返回<b>union 文件系统的根</b>」：
@@ -25,56 +54,37 @@ import java.util.Locale;
  *   uri.getPath() = /C:/…/mods/examplemod-1.2.3.jar#326!/   →   split("!") 得 2 段
  *   ⇒ provider 返回 union 根，toString() = "/"
  *   ⇒ 老判据拿到的"路径"是 "/"（Windows 上被解析成 C:\），永远不在 mods\ 下
- *   ⇒ 于是必然打出 gate_outside_mods_dir，jar 明明就在 mods\ 里也没用
  * </pre>
  * （离线用本机真实的 {@code securejarhandler-2.1.10.jar} 复现出逐字相同的结果，见
- * {@code temp\hotfix\modsdir\报告.md}。另一种形态——URL 里中文不编码——会在
- * {@code url.toURI()} 抛 {@code URISyntaxException}，老判据变成 {@code no_code_source}。）
+ * {@code temp\hotfix\modsdir\报告.md}。）
  *
  * <p>所以现在<b>只做字符串规范化</b>，从不把 code source 变成 {@link java.nio.file.Path}：
  * 原样的 URL 字符串里 {@code mods} 那一级是完好的，丢掉它的只有 {@code Paths.get} 那一步。
  *
- * <h2>判据表（第一列命中即停）</h2>
- * <pre>
- *   拒 1  类名命中 {@link #NEVER_PATCH_PREFIXES}            → whitelisted:&lt;前缀&gt;
- *   拒 2  code source 拿不到（null/空）                      → no_code_source
- *   拒 3  规范化之后是空串                                   → bad_code_source
- *   拒 4  原样或规范化后带 jrt:                              → refuse_jrt
- *   拒 5  规范化后含 \libraries\                             → refuse_libraries
- *   拒 6  规范化后含 \jars\                                  → refuse_jars
- *   拒 7  规范化后是 \versions\&lt;x&gt;\&lt;x&gt;.jar（原版版本 jar）    → refuse_version_jar
- *   收 1  规范化后以 mods 根 + "\" 开头                       → ok
- *   收 2  规范化后**按 {@code \} 切段**，有一段等于 {@code mods}      → ok_mods_path（mods 根拿不到时是 ok_mods_segment）
- *   收 3  类加载器类名含 Launch/SecureJarHandler/ModLauncher → ok_forge_loader
- *   收 4  jar 文件名出现在 ModList 的文件信息里（拿不到就跳过） → ok_modlist
- *   拒 8  以上都不成立                                       → outside_mods_dir
- * </pre>
- * <b>拒绝优先于接受</b>：拒 1–7 先跑，收 1–4 只在它们都没命中时才看。
+ * <h2>依赖面：只有 {@code java.*}</h2>
+ * 没有 MC／Forge／日志框架、没有 ASM、<b>没有 {@code java.nio.file}</b>。这样它既能被游戏里的
+ * {@link HotfixAutoCounter} 用，也能被<b>脱离游戏</b>的离线自检（{@code temp\hotfix\selfcheck\}、
+ * {@code temp\hotfix\agentblind\}）直接加载 —— 准入判错是最贵的一种错（"改到了原版类"），
+ * 所以这条判据必须能离线验、且有负对照。
  *
- * <h2>为什么要"来自 mods 目录"</h2>
- * 热改的目标永远是"某个第三方 mod 的方法"。而"某个 jar 是不是第三方 mod"在运行期只有两条
- * 便宜证据：① 它在 {@code mods\} 下；② 它不在 {@code net.minecraft.*}/{@code com.mojang.*}
- * 这些前缀里。①挡"改到 Forge 自己打进 libraries 的东西"，②挡"改到原版/我们"。两条都不成立才动手。
- *
- * <p>⚠️ 判据里<b>没有</b>"这个 mod 是谁"的白名单 —— 规格要求按"白名单外"判，不按包名猜。
- *
- * <p>⚠️ 收 2（{@code \mods\} 那一段）是一条<b>按路径分段</b>的判据：当 {@code modsRoot} 与这条路径
- * 对不上时（例如多实例、实例搬家），它仍然会放行。这是规格第 ① 条的字面要求，代价是
- * "modsRoot 不匹配"不再构成拒绝理由（离线自检 {@code a7.refuse_outside_mods} 那一条的期望值
- * 随之变化，见报告"没验到的"一节）。
+ * <h2>🔴 判据里没有"这个 mod 是谁"</h2>
+ * 规格要求按"白名单外 ＋ 不是我们自己 ＋ 不是 JDK"判，<b>不按包名猜 mod</b>。所以对手换包名、
+ * 换 mod id、换类名，判据一个字都不用改。
  */
 public final class HotfixPatchWhitelist {
 
     /**
-     * 永不改的类名前缀（规格逐条点名）。
+     * 永不改的类名前缀（"包名白名单"那一类）。
      *
      * <p>顺序无所谓（{@link #hitPrefix} 取第一个命中），但<b>不要删条目</b>：
-     * 每一条都对应一类"改了必出事"的东西（JDK／Mojang／原版／Forge／启动器／我们／主办方 mod）。
+     * 每一条都对应一类"改了必出事"的东西（JDK／Mojang／原版／Forge／启动器／我们／主办方 mod／
+     * 运行环境必须项）。
      *
-     * <p>🆕 2026-11-08：按规格补齐 {@code cpw.}（含 {@code cpw.mods.}）、{@code org.spongepowered.}、
-     * {@code org.gtlcore.}、{@code com.gtladd.}。
+     * <p>后 9 条是 2026-11-20 按"环境必须项"补齐的：<b>引擎自己就用 ASM 与 log4j</b>，
+     * 把 ASM 当目标改掉会在下一次 {@code retransform} 时自杀。
      */
     public static final String[] NEVER_PATCH_PREFIXES = {
+            // ---- 规格逐条点名的十二类
             "java.",
             "javax.",
             "jdk.",
@@ -85,15 +95,40 @@ public final class HotfixPatchWhitelist {
             "cpw.",
             "org.spongepowered.",
             "com.shanhai.",
+            "org.gregtechceu.",
             "org.gtlcore.",
-            "com.gtladd."
+            "com.gtladd.",
+            // ---- 运行环境必须项（改了会在下一次 retransform 时自杀，或把日志/网络搞坏）
+            "org.objectweb.asm.",        // 热改引擎自己就在用 ASM 解析/写字节
+            "org.apache.logging.log4j.", // 分诊订阅（appender）走这条日志管道
+            "org.apache.commons.",       // MC 内部大量使用（lang3 / io）
+            "org.slf4j.",                // 本体的日志门面
+            "io.netty.",                 // 网络层
+            "it.unimi.",                 // fastutil（同步字段容器的底层）
+            "com.google.",               // gson / guava / brigadier
+            "com.electronwill.",         // nightconfig（Forge 配置）
+            "org.joml.",                 // 向量数学
+            "org.lwjgl.",                // 图形/音频绑定
+            "oshi."                      // 系统信息（Forge 启动期）
     };
 
-    /** {@code mods\} 这一级目录的名字（大小写不敏感地比）。 */
+    /** {@code mods\} 这一级目录的名字（大小写不敏感地比；现在只用于<b>标记</b>，不用于准入）。 */
     public static final String MODS_SEGMENT = "mods";
 
     /** 规范化时先去掉的 scheme 前缀（长的在前：{@code jar:file:} 要先去掉 {@code jar:}）。 */
     private static final String[] SCHEME_PREFIXES = {"union:", "jar:", "file:"};
+
+    /**
+     * JDK 自带那三个类加载器的名字片段（命中 ⇒ 这是"JDK 自己的类"，不可能是敌人的 agent）。
+     *
+     * <p>三条一起看：类名以 {@code jdk.internal.} 或 {@code sun.misc.} 开头，且含下列片段。
+     * 这条判据<b>只用于"code source 拿不到时的二级信号"</b>与拒 4 —— code source 拿得到的类
+     * 一律按"默认可改"处理，不看加载器。
+     */
+    private static final String[] JDK_LOADER_MARKERS = {"AppClassLoader", "PlatformClassLoader"};
+
+    /** JDK 类加载器的包前缀（与 {@link #JDK_LOADER_MARKERS} 一起用）。 */
+    private static final String[] JDK_LOADER_PACKAGES = {"jdk.internal.loader.", "sun.misc."};
 
     /** 判「这是 Forge 的 mod 类加载器」用的类名片段（<b>大小写敏感</b>，见 {@link #hitForgeLoader}）。 */
     private static final String[] FORGE_LOADER_MARKERS = {"Launch", "SecureJarHandler", "ModLauncher"};
@@ -104,6 +139,84 @@ public final class HotfixPatchWhitelist {
     private HotfixPatchWhitelist() {
         // 纯判定类，没有实例
     }
+
+    // ═══════════════════════════════ 判据的输入 ═══════════════════════════════
+
+    /**
+     * 一次判定的全部输入（可变的小数据袋；每次判定新建一个，绝不复用）。
+     *
+     * <p>为什么不用 7 个参数：{%@code judge} 有 7 项输入，按位置传参最容易写反
+     * （{@code selfLoader} 与 {@code mcLoader} 都是 {@link ClassLoader}）。
+     */
+    public static final class Probe {
+
+        /** 源级类名（{@code examplemod.util.ExampleHelper}），允许 {@code $} 内部类。 */
+        public String className;
+
+        /**
+         * {@code getProtectionDomain().getCodeSource().getLocation().toString()} 的<b>原样字符串</b>
+         * （{@code union:/…}/{@code jar:file:/…}/{@code file:/…}）；{@code null}/空 = 拿不到。
+         */
+        public String codeSource;
+
+        /** {@code mods\} 的绝对路径；{@code null}/空 = 运行期拿不到（只影响 {@code code_source=} 标记）。 */
+        public String modsRoot;
+
+        /** 目标类的加载器；{@code null} = bootstrap。 */
+        public ClassLoader loader;
+
+        /**
+         * {@link #loader} 这一项<b>可不可信</b>。
+         *
+         * <p>为什么需要它：{@code null} 有两种完全不同的含义 ——
+         * ① <b>bootstrap 加载器</b>（真实值，只可能是 JDK 自己的类）；
+         * ② <b>调用方没告诉我们</b>（例如只给"类名 ＋ code source"的离线工具）。
+         * 把 ② 当成 ① 会把"code source 明明在 mods 里的第三方类"判成 {@code jdk_loader}。
+         * ⇒ 只有真的拿到了 {@code Class} 的调用方（{@link #withLoader}／
+         * {@code HotfixTargetResolver#resolve}／{@code HotfixAutoCounter#apply}）才把这一项置 true。
+         */
+        public boolean loaderKnown;
+
+        /** 补上目标类的加载器（<b>置 loaderKnown = true</b>：{@code null} 就是 bootstrap）。 */
+        public Probe withLoader(ClassLoader loader) {
+            this.loader = loader;
+            this.loaderKnown = true;
+            return this;
+        }
+
+        /** <b>我们自己</b>（{@code ShanhaiMod}）的加载器；{@code null} = 未知。 */
+        public ClassLoader selfLoader;
+
+        /** <b>我们自己</b>的 code source 原样字符串；{@code null}/空 = 未知。 */
+        public String selfCodeSource;
+
+        /**
+         * 一个<b>一定属于原版/MC 模块</b>的加载器实例（装配侧传 {@code Minecraft.class.getClassLoader()}）；
+         * {@code null} = 未知 ⇒ 二级信号 (b) 跳过。
+         */
+        public ClassLoader mcLoader;
+
+        /** 建一个只有类名与 code source 的最小探针（离线自检最常用）。 */
+        public static Probe of(String className, String codeSource, String modsRoot) {
+            final Probe p = new Probe();
+            p.className = className;
+            p.codeSource = codeSource;
+            p.modsRoot = modsRoot;
+            return p;
+        }
+
+        /** 补齐"我们自己"与 MC 的加载器（装配侧一行搞定）。 */
+        public Probe self(ClassLoader selfLoader, String selfCodeSource, ClassLoader mcLoader) {
+            this.selfLoader = selfLoader;
+            this.selfCodeSource = selfCodeSource;
+            this.mcLoader = mcLoader;
+            return this;
+        }
+
+
+    }
+
+    // ═══════════════════════════════ 入口 ═══════════════════════════════
 
     /**
      * 类名命中的白名单前缀。
@@ -128,67 +241,88 @@ public final class HotfixPatchWhitelist {
         return hitPrefix(className) != null;
     }
 
-    /** 完整判据（不带类加载器名；等价于 {@code loaderName == null}）。 */
+    /** 最小形态：只有类名 ＋ code source ＋ mods 根（离线自检、{@code first_external=} 用）。 */
     public static Decision judge(String className, String codeSource, String modsRoot) {
-        return judge(className, codeSource, modsRoot, null);
+        return judge(Probe.of(className, codeSource, modsRoot));
     }
 
     /**
-     * 完整判据：白名单 ＋ 来源 ＋（兜底）类加载器／ModList。
+     * 老签名的兼容重载（{@code loaderName} 只用来认 Forge 加载器；不参与"JDK 加载器"那条）。
      *
-     * @param className  源级类名（{@code examplemod.util.EntityUtil}），允许 {@code $} 内部类
-     * @param codeSource {@code getProtectionDomain().getCodeSource().getLocation().toString()} 的
-     *                   <b>原样字符串</b>（{@code union:/…}/{@code jar:file:/…}/{@code file:/…}）；
-     *                   {@code null}/空 = 拿不到
-     * @param modsRoot   {@code mods\} 的绝对路径；{@code null}/空 = 运行期拿不到
-     *                   （退化成"路径里必须有一级叫 mods"）
-     * @param loaderName {@code cls.getClassLoader().getClass().getName()}（可为 {@code null}）
+     * @deprecated 新代码请用 {@link Probe}：{@code loaderName} 是 {@link String}，认不出"同一个加载器实例"，
+     *             而二级信号 (b) 恰恰要实例比较。
+     */
+    @Deprecated
+    public static Decision judge(String className, String codeSource, String modsRoot, String loaderName) {
+        final Decision d = judge(Probe.of(className, codeSource, modsRoot));
+        if (d.allowed || loaderName == null || loaderName.isEmpty()) {
+            return d;
+        }
+        // 只有"被拒"时才让 Forge 加载器名当一次兜底（与旧版同口径）
+        if (hitForgeLoader(loaderName) != null) {
+            return new Decision(true, "ok_forge_loader", d.raw, d.normalized, d.modsRoot,
+                    d.loader, d.codeSourceToken);
+        }
+        return d;
+    }
+
+    /**
+     * 完整判据（排除法）。
+     *
+     * @param p 判定输入（{@code null} ⇒ 直接拒 {@code bad_probe}）
      * @return 判定结果（{@link Decision#allowed} ＋ 机器可判的 {@link Decision#reason}）
      */
-    public static Decision judge(String className, String codeSource, String modsRoot, String loaderName) {
-        final String raw = codeSource == null ? null : codeSource.trim();
-        // ---- 拒 1：硬白名单（类名层面，与来源无关）
-        final String hit = hitPrefix(className);
+    public static Decision judge(Probe p) {
+        if (p == null) {
+            return new Decision(false, "bad_probe", null, "", "", null, "none");
+        }
+        final String raw = p.codeSource == null ? null : p.codeSource.trim();
+        final String norm = raw == null ? "" : normalizeSource(raw);
+        final String selfNorm = p.selfCodeSource == null ? "" : normalizeSource(p.selfCodeSource);
+        final String have = raw == null || raw.isEmpty() ? "none" : (norm.isEmpty() ? "none" : "yes");
+
+        // ---- 拒 1：包名硬白名单（与来源无关）
+        final String hit = hitPrefix(p.className);
         if (hit != null) {
-            return new Decision(false, "whitelisted:" + hit, raw, normalizeSource(raw), modsRoot, loaderName);
+            return new Decision(false, "whitelisted:" + hit, raw, norm, p.modsRoot, p.loader, have);
         }
-        // ---- 拒 2：拿不到 code source（规格："拿不到就拒"，不猜、不降级）
-        if (raw == null || raw.isEmpty()) {
-            return new Decision(false, "no_code_source", raw, "", modsRoot, loaderName);
+        // ---- 拒 2：我们自己的 code source（"我们自己的 jar 与 agent 自己的 jar"）
+        //   ⚠️ 不写任何路径字面量：只比"规范化之后是否与我们自己这个类完全相同"。
+        if (!selfNorm.isEmpty() && !norm.isEmpty() && selfNorm.equals(norm)) {
+            return new Decision(false, "own_code_source", raw, norm, p.modsRoot, p.loader, have);
         }
-        final String norm = normalizeSource(raw);
-        // ---- 拒 3：规范化之后什么都没剩
-        if (norm.isEmpty()) {
-            return new Decision(false, "bad_code_source", raw, norm, modsRoot, loaderName);
+        // ---- 拒 3：JDK 运行时镜像
+        if (raw != null && raw.toLowerCase(Locale.ROOT).startsWith("jrt:")
+                || norm.startsWith("jrt:") || norm.contains("jrt:")) {
+            return new Decision(false, "jdk_runtime", raw, norm, p.modsRoot, p.loader, have);
         }
-        final Decision deny = refuseByPath(raw, norm, modsRoot, loaderName);
-        if (deny != null) {
-            return deny;
+        // ---- 拒 4：JDK 自带三个类加载器载入的类（code source 拿得到时也拒 —— 那是 JDK 自己的类）
+        //   ⚠️ 只在"加载器这一项真的可信"时才判：{@code loaderKnown=false} 意味着调用方没告诉我们
+        //   （例如只给"类名 ＋ code source"的离线工具），此时 null 不能当成 bootstrap。
+        if (p.loaderKnown && isJdkLoader(p.loader)) {
+            return new Decision(false, "jdk_loader", raw, norm, p.modsRoot, p.loader, have);
         }
-        // ---- 收 1：在 mods 根之下
-        final String rootNorm = normalizeSource(modsRoot);
-        if (!rootNorm.isEmpty() && underRoot(norm, rootNorm)) {
-            return new Decision(true, "ok", raw, norm, modsRoot, loaderName);
+        // ---- 收 1：code source 拿得到 ⇒ 默认可改（mods / libraries / agent 自建 jar 都算）
+        if ("yes".equals(have)) {
+            final String rootNorm = normalizeSource(p.modsRoot);
+            final boolean inMods = (!rootNorm.isEmpty() && underRoot(norm, rootNorm))
+                    || containsSegment(norm, MODS_SEGMENT);
+            // 🔴 mods\ 只是【标记】，不参与准入（旧版这里是准入条件，被用户当场指出有盲区）
+            return new Decision(true, inMods ? "ok_code_mods" : "ok_code_source",
+                    raw, norm, p.modsRoot, p.loader, have);
         }
-        // ---- 收 2：按 \ 切段后，有一段等于 mods（逐段比，不是 substring）
-        if (containsSegment(norm, MODS_SEGMENT)) {
-            // ① mods 根拿不到 ⇒ 这就是唯一的来源证据（沿用旧 token，日志口径不变）
-            // ② mods 根拿得到但对不上 ⇒ 按路径段放行（规格第 ① 条的字面要求，见类注释的告警）
-            return new Decision(true, rootNorm.isEmpty() ? "ok_mods_segment" : "ok_mods_path",
-                    raw, norm, modsRoot, loaderName);
+        // ---- 收 2/3：code source 拿不到 ⇒ 要一条二级信号（任一满足即可）
+        //
+        //   (a) 加载器存在、且不是 JDK 三件套 —— 前提是"我们知道它是谁"（loaderKnown）。
+        if (p.loaderKnown && p.loader != null && !isJdkLoader(p.loader)) {
+            return new Decision(true, "ok_code_none_loader", raw, norm, p.modsRoot, p.loader, have);
         }
-        // ---- 收 3：Forge 的 mod 类加载器（路径形态没见过时的兜底）
-        final String marker = hitForgeLoader(loaderName);
-        if (marker != null) {
-            return new Decision(true, "ok_forge_loader", raw, norm, modsRoot, loaderName);
+        //   (b) 加载器与"MC 那个模块加载器"不是同一个实例（对手自建加载器 / agent 的形态）
+        if (p.mcLoader != null && p.loader != p.mcLoader) {
+            return new Decision(true, "ok_code_none_foreign", raw, norm, p.modsRoot, p.loader, have);
         }
-        // ---- 收 4：jar 文件名出现在 ModList 的文件信息里（拿不到就跳过）
-        final String jar = jarFileName(norm);
-        if (jar != null && modListContains(jar)) {
-            return new Decision(true, "ok_modlist", raw, norm, modsRoot, loaderName);
-        }
-        // ---- 拒 8：都不成立
-        return new Decision(false, "outside_mods_dir", raw, norm, modsRoot, loaderName);
+        // ---- 拒 5：两条二级信号都不成立
+        return new Decision(false, "no_code_source_no_signal", raw, norm, p.modsRoot, p.loader, have);
     }
 
     // ------------------------------------------------------------------ 规范化（纯函数）
@@ -246,22 +380,44 @@ public final class HotfixPatchWhitelist {
 
     // ------------------------------------------------------------------ 判定小工具（包内可见，自证会用）
 
-    /** 拒 4–7（路径形态层面的硬拒绝）。命中返回 Decision，否则 {@code null}。 */
-    static Decision refuseByPath(String raw, String norm, String modsRoot, String loaderName) {
-        final String rawLower = raw == null ? "" : raw.toLowerCase(Locale.ROOT);
-        if (rawLower.startsWith("jrt:") || norm.startsWith("jrt:") || norm.contains("jrt:")) {
-            return new Decision(false, "refuse_jrt", raw, norm, modsRoot, loaderName);
+    /** 这个加载器是不是 JDK 自带的三个之一（{@code null} = bootstrap，<b>算</b> JDK）。 */
+    public static boolean isJdkLoader(ClassLoader loader) {
+        if (loader == null) {
+            return true;      // bootstrap 只加载 JDK 自己的类
         }
-        if (containsSegment(norm, "libraries")) {
-            return new Decision(false, "refuse_libraries", raw, norm, modsRoot, loaderName);
+        final String name = loader.getClass().getName();
+        if (name == null || name.isEmpty()) {
+            return false;
         }
-        if (containsSegment(norm, "jars")) {
-            return new Decision(false, "refuse_jars", raw, norm, modsRoot, loaderName);
+        boolean pkg = false;
+        for (int i = 0; i < JDK_LOADER_PACKAGES.length; i++) {
+            if (name.startsWith(JDK_LOADER_PACKAGES[i])) {
+                pkg = true;
+                break;
+            }
         }
-        if (looksLikeVersionJar(norm)) {
-            return new Decision(false, "refuse_version_jar", raw, norm, modsRoot, loaderName);
+        if (!pkg) {
+            return false;
         }
-        return null;
+        for (int i = 0; i < JDK_LOADER_MARKERS.length; i++) {
+            if (name.contains(JDK_LOADER_MARKERS[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 加载器的人类可读名字（{@code null} ⇒ {@code bootstrap}）。 */
+    public static String loaderName(ClassLoader loader) {
+        if (loader == null) {
+            return "bootstrap";
+        }
+        try {
+            final String n = loader.getClass().getName();
+            return n == null || n.isEmpty() ? "?" : n;
+        } catch (Throwable t) {
+            return "?";
+        }
     }
 
     /** 规范化后的路径里有没有 {@code \segment\} 这一级（{@code segment} 已是小写）。 */
@@ -305,9 +461,10 @@ public final class HotfixPatchWhitelist {
     }
 
     /**
-     * 是否形如 {@code …\versions\&lt;x&gt;\&lt;x&gt;.jar}（原版/Forge 的版本 jar，绝不许改）。
+     * 是否形如 {@code …\versions\&lt;x&gt;\&lt;x&gt;.jar}（原版/Forge 的版本 jar）。
      *
-     * <p>注意：{@code …\versions\&lt;x&gt;\mods\any.jar} 是<b>合法</b>的（版本隔离的实例），不命中。
+     * <p>⚠️ 2026-11-20 起这条<b>不再用于准入</b>（原版类由 {@code net.minecraft.} 前缀挡掉），
+     * 只保留给标记/诊断用。
      */
     static boolean looksLikeVersionJar(String norm) {
         if (norm == null || norm.isEmpty()) {
@@ -542,7 +699,13 @@ public final class HotfixPatchWhitelist {
         /** {@code true} = 允许自动改这一个类。 */
         public final boolean allowed;
 
-        /** 机器可判的原因：{@code ok}/{@code ok_mods_path}/{@code whitelisted:net.minecraft.}/{@code outside_mods_dir}/… */
+        /**
+         * 机器可判的原因：
+         * {@code ok_code_mods}／{@code ok_code_source}／{@code ok_code_none_loader}／
+         * {@code ok_code_none_foreign}／{@code ok_forge_loader}／
+         * {@code whitelisted:<前缀>}／{@code own_code_source}／{@code jdk_runtime}／
+         * {@code jdk_loader}／{@code no_code_source_no_signal}／{@code bad_probe}
+         */
         public final String reason;
 
         /** code source 的<b>原样</b>字符串（{@code union:/…} 就照抄；可能为 {@code null}）。 */
@@ -554,21 +717,30 @@ public final class HotfixPatchWhitelist {
         /** 规范化之后的 mods 根（可能为空串）。 */
         public final String modsRoot;
 
-        /** 类加载器类名（可能为 {@code null}）。 */
-        public final String loader;
+        /** 目标类的加载器（{@code null} = bootstrap）。 */
+        public final ClassLoader loader;
 
-        Decision(boolean allowed, String reason, String raw, String normalized, String modsRoot, String loader) {
+        /** 加载器类名（{@code bootstrap} = {@code null} 那个）。 */
+        public final String loaderName;
+
+        /** {@code yes} = code source 拿得到；{@code none} = 拿不到（进日志的 {@code code_source=}）。 */
+        public final String codeSourceToken;
+
+        Decision(boolean allowed, String reason, String raw, String normalized, String modsRoot,
+                 ClassLoader loader, String codeSourceToken) {
             this.allowed = allowed;
             this.reason = reason;
             this.raw = raw;
             this.normalized = normalized == null ? "" : normalized;
             this.modsRoot = modsRoot == null ? "" : modsRoot;
             this.loader = loader;
+            this.loaderName = loaderName(loader);
+            this.codeSourceToken = codeSourceToken == null ? "none" : codeSourceToken;
         }
 
         /** 一行日志用的摘要（不含空格，可直接塞进 {@code detail=}）。 */
         public String brief() {
-            return "allowed=" + allowed + " reason=" + reason;
+            return "allowed=" + allowed + " reason=" + reason + " code_source=" + codeSourceToken;
         }
 
         @Override
@@ -576,7 +748,7 @@ public final class HotfixPatchWhitelist {
             return brief() + " raw=" + (raw == null ? "?" : raw)
                     + " normalized=" + (normalized.isEmpty() ? "?" : normalized)
                     + " mods_root=" + (modsRoot.isEmpty() ? "?" : modsRoot)
-                    + " loader=" + (loader == null ? "?" : loader);
+                    + " loader=" + loaderName;
         }
     }
 }

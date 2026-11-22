@@ -1,6 +1,7 @@
 package com.shanhai.client.event;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.client.render.droplet.ShanhaiDropletDebugRenderer;
 import com.shanhai.common.crash.ShanhaiCrashBoltEntity;
 import com.shanhai.registry.ShanhaiEntities;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
@@ -39,7 +40,11 @@ public final class ShanhaiEntityRenderers {
         event.registerEntityRenderer(
                 ShanhaiEntities.CRASH_BOLT.get(),
                 context -> new ThrownItemRenderer<ShanhaiCrashBoltEntity>(context));
+        // 强相互作用水滴：占位调试渲染器（只有线框；外观另有一条线，审过之后才做真实渲染）
+        event.registerEntityRenderer(ShanhaiEntities.DROPLET.get(), ShanhaiDropletDebugRenderer::new);
         ShanhaiMod.LOGGER.info("{} renderer_registered id={}:crash_bolt renderer=vanilla:ThrownItemRenderer",
+                PREFIX, ShanhaiMod.MOD_ID);
+        ShanhaiMod.LOGGER.info("{} renderer_registered id={}:strong_interaction_droplet renderer=client:debug_lines",
                 PREFIX, ShanhaiMod.MOD_ID);
     }
 }

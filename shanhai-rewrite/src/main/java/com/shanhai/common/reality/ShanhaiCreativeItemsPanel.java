@@ -87,6 +87,14 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
 
     private TextFieldWidget nameField;
     /**
+     * 🔴 2026-11-22：名字框换成 {@link ShanhaiTokenField}（能插 {@code §} 码的文本框），
+     * 并把「最后点过的那个框」记下来给字体选择器用（与「提示」编辑器同一条口径）。
+     * 位置/宽度一个像素没动：仍然 {@code (40,184,290,16)}。
+     */
+    private ShanhaiTokenField nameTokenField;
+    private ShanhaiTokenField lastFocusedName;
+    private ShanhaiFontTokenOverlay fontOverlay;
+    /**
      * 🔴 2026-10-17 换掉 GTCEu 的 {@code IntInputWidget}：它的文本框是 private 字段、值只能靠
      * {@code Consumer} 回调进来，而 LDLib 的文本框回调在客户端这份上不一定被调（实测
      * 156 次保存全是 {@code stack=64}）⇒ 改成我们自己的「文本框 ＋ ＋/－/64 按钮」，
@@ -133,11 +141,18 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
 
         // ---- 名称 ----
         this.addWidget(new LabelWidget(6, 186, "§7名称"));
-        this.nameField = new TextFieldWidget(40, 184, 290, 16, () -> this.editName, value -> {
-            this.editName = value == null ? "" : value;
-        });
-        this.nameField.setMaxStringLength(ShanhaiRealityItemTable.MAX_NAME_CHARS);
+        // 🔴 2026-11-22：TextFieldWidget → ShanhaiTokenField（同样的位置/宽度，多一个"插到光标处"）。
+        //    普通 TextFieldWidget 的 § 打不进去（原版 isAllowedChatCharacter 硬排除，粘贴也被 filterText 吃掉）。
+        this.nameTokenField = new ShanhaiTokenField(40, 184, 290, 16, () -> this.editName,
+                value -> this.editName = value == null ? "" : value,
+                field -> this.lastFocusedName = field);
+        this.nameField = this.nameTokenField;
+        // 原始 char 上限（可见字符上限在保存/落盘时按 ShanhaiNameCaps 判：48 个可见字）
+        this.nameField.setMaxStringLength(ShanhaiRealityItemTable.MAX_NAME_RAW_CHARS);
         this.addWidget(this.nameField);
+        // 字体选择器的入口（只有 34px 宽，塞在「稀有度」按钮右边那块空处；不挤压名字框）
+        this.addWidget(new ShanhaiCreativeWidgets.TextButton(300, 202, 34, 18,
+                () -> "§f字体", this::openFontPicker));
 
         // ---- 堆叠 + 稀有度 ----
         this.addWidget(new LabelWidget(6, 206, "§7堆叠"));
@@ -203,6 +218,10 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
         this.addWidget(this.loreEditor);
         this.picker = new ShanhaiCreativeIconPicker(this);
         this.addWidget(this.picker);
+        // 🆕 2026-11-22：名字字体浮层（39 个色码/格式码/山海样式按钮，默认隐藏）
+        this.fontOverlay = new ShanhaiFontTokenOverlay(this.nameTokenField,
+                () -> this.editName, ShanhaiRealityItemTable.MAX_NAME_RAW_CHARS);
+        this.addWidget(this.fontOverlay);
 
         this.seenVersion = ShanhaiRealityItemTable.version();
         refreshCells();
@@ -250,6 +269,13 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
     private void openPicker() {
         if (this.picker != null) {
             this.picker.open();
+        }
+    }
+
+    /** 🆕 2026-11-22：打开「名字字体」浮层（点「字体」按钮）。 */
+    private void openFontPicker() {
+        if (this.fontOverlay != null) {
+            this.fontOverlay.open();
         }
     }
 
@@ -412,6 +438,17 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
         if (liveName != null) {
             this.editName = liveName;
         }
+        // 🔴 2026-11-22：名字按"可见字符 ≤ 48"截断（§f/&$neon- 不占可见长度），
+        //    否则加了样式码之后玩家看到的名字会被砍短。落盘与网络都收这一份。
+        final String cappedName = ShanhaiNameCaps.cap(this.editName,
+                ShanhaiRealityItemTable.MAX_NAME_CHARS, ShanhaiRealityItemTable.MAX_NAME_RAW_CHARS);
+        final boolean nameCapped = !cappedName.equals(this.editName);
+        if (nameCapped) {
+            this.editName = cappedName;
+            if (this.nameField != null) {
+                this.nameField.setCurrentString(cappedName);
+            }
+        }
         // 堆叠同理：文本框里此刻是什么就存什么（用户报"改堆叠数没用"就是这条读不到）
         final int fieldStack = this.stackField == null ? -1
                 : parseStack(this.stackField.getCurrentString());
@@ -419,17 +456,21 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
             this.editStack = fieldStack;
         }
         com.shanhai.ShanhaiMod.LOGGER.info(
-                "{} save_live slot={} field_name_len={} edit_name_len={} edit_lore_len={} field_stack={} edit_stack={}",
+                "{} save_live slot={} field_name_len={} edit_name_len={} name_visible={} edit_lore_len={} "
+                        + "field_stack={} edit_stack={}",
                 ShanhaiRealityItemTable.PREFIX, this.editSlot + 1,
                 liveName == null ? -1 : liveName.length(),
                 this.editName == null ? -1 : this.editName.length(),
+                ShanhaiNameCaps.visibleLength(this.editName),
                 this.editLore == null ? -1 : this.editLore.length(),
                 this.stackField == null ? "?" : this.stackField.getCurrentString(),
                 this.editStack);
         ShanhaiCreativeItemsNetwork.requestSave(this.editSlot, this.editName, this.editIcon,
                 this.editStack, this.editRarity, this.editLore);
         this.statusText = (this.editStack > ShanhaiRealityItemTable.DEFAULT_STACK
-                ? "§c⚠ >64 可能出现未知 bug §r" : "") + note + " §8→ 槽位 " + (this.editSlot + 1);
+                ? "§c⚠ >64 可能出现未知 bug §r" : "")
+                + (nameCapped ? "§e（名字按可见 48 字截断）§r" : "")
+                + note + " §8→ 槽位 " + (this.editSlot + 1);
     }
 
     /** 清空这一格的名字 ⇒ 退回默认壳（不删物品）。 */
@@ -503,12 +544,16 @@ public final class ShanhaiCreativeItemsPanel extends WidgetGroup {
         if (this.picker != null) {
             this.picker.close();
         }
+        if (this.fontOverlay != null) {
+            this.fontOverlay.close();
+        }
     }
 
     /** 本页的两个覆盖层有没有一个是开着的（切页时外层用它决定要不要拦一下）。 */
     public boolean anyOverlayOpen() {
         return (this.loreEditor != null && this.loreEditor.isVisible())
-                || (this.picker != null && this.picker.isVisible());
+                || (this.picker != null && this.picker.isVisible())
+                || (this.fontOverlay != null && this.fontOverlay.isOpen());
     }
 
     @Override

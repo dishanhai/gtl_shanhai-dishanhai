@@ -66,7 +66,7 @@ public final class HotfixTriageVerdict {
      */
     public final boolean fromViolation;
 
-    /** 违规现场的 {@code why}（{@code health|die|remove|motion|pos|attack}）；本体行 ⇒ {@code null}。 */
+    /** 违规现场的 {@code why}（{@code hurt|health|die|remove} 四类规范名，或 {@code motion|pos|motion_brake} 附加源）。本体行 ⇒ {@code null}。 */
     public final String whyOverride;
 
     private HotfixTriageVerdict(boolean solved, boolean r1, boolean r2, boolean r3, boolean r4,
@@ -98,7 +98,9 @@ public final class HotfixTriageVerdict {
      * @return 可用于 {@link HotfixTriageTap.Sink#onVerdict} 的实例
      */
     public static HotfixTriageVerdict ofViolation(String where, String player) {
-        final String w = where == null || where.isEmpty() ? "unknown" : where;
+        // 🆕 2026-11-20：四类规范名在这里落地（{@code attack⇒hurt}、{@code health_write⇒health}）。
+        //   规范化集中在 HotfixTrigger，别处一律用常量 —— 否则同一条链的读数会被拆成两栏。
+        final String w = HotfixTrigger.canonical(where);
         return new HotfixTriageVerdict(false, false, false, false, false, "?", "?", w, player,
                 "violation_stack where=" + w + " player=" + (player == null ? "?" : player),
                 true, w);

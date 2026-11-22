@@ -69,6 +69,25 @@ public final class HostFxState {
     public static final float HOLE_MAX_BLOCKS = 12.0F;
 
     // ═══════════════════════════════════════════════════════════════════════════════════
+    //  「环显示」三态（机器字段 hostRingVisualMode 的客户端副本；0/1/2 与机器侧
+    //  GuixuVisionCoreMachine.HOST_RING_VISUAL_* 必须【逐位相同】）
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 环显示 = <b>外缘吸积流与粗光柱环两条都画</b>（默认，= 用户决定里的「两条都保留」）。
+     *
+     * <p>数值必须与 {@code GuixuVisionCoreMachine.HOST_RING_VISUAL_BOTH} 相同：本类刻意<b>不 import</b>
+     * 机器包（零 MC 依赖的约束，见类注释），所以两边各存一份常量，靠这条注释钉住口径。
+     */
+    public static final byte RING_VISUAL_BOTH = 0;
+
+    /** 环显示 = <b>只画外缘吸积流</b>（{@code 51..57} 格那圈；粗光柱环不提交）。 */
+    public static final byte RING_VISUAL_ACCRETION_ONLY = 1;
+
+    /** 环显示 = <b>只画粗光柱环</b>（{@code r=54}、管径 {@code 6}；外缘吸积流不提交）。 */
+    public static final byte RING_VISUAL_BEAM_RING_ONLY = 2;
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
     //  默认值（= 改造前那三个常量与现行黑洞半径；"没有主机 / 值非法"时就退到这里）
     // ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -120,6 +139,34 @@ public final class HostFxState {
      * {@code HostFxGlassArModel} 决定（它同样零 MC 依赖 ⇒ 可以脱机出图自审）。
      */
     private static boolean arMaskEnabled = true;
+
+    /**
+     * <b>「环显示」三态</b>（机器字段 {@code hostRingVisualMode} 的客户端副本）。
+     *
+     * <p>取值口径 {@link #RING_VISUAL_BOTH} / {@link #RING_VISUAL_ACCRETION_ONLY} /
+     * {@link #RING_VISUAL_BEAM_RING_ONLY}；默认 = 两条都画 —— 与机器字段默认值逐位相同
+     * （两处不一致会让"刚读档那一帧"闪一下：面板显示两条、画面少一条）。
+     *
+     * <p>唯一写入点是 {@link #feedRingVisualMode(int)}（渲染入口每帧一次，与 {@link #feed} 同一节奏）；
+     * 判定在 {@code HostFxSwitch}（{@code beamRingOn()} / {@code accretionOn()}）。
+     */
+    private static byte ringVisualMode = RING_VISUAL_BOTH;
+
+    /**
+     * <b>星辰场（围绕黑洞的粒子）</b>面板开关（机器字段 {@code hostStarFieldEnabled} 的客户端副本，默认 {@code true}）。
+     *
+     * <p>⚠️ 它<b>不是</b>总闸：客户端配置 {@code [hostfx] starField} 仍是总闸，两者是「与」关系
+     * （见 {@code HostFxSwitch.starFieldOn(boolean)}）。这里只存"这一台机器上玩家点的是什么"。
+     */
+    private static boolean starFieldEnabled = true;
+
+    /**
+     * <b>结构闪电</b>面板开关（机器字段 {@code hostStructureLightningEnabled} 的客户端副本，默认 {@code true}）。
+     *
+     * <p>同上：与 {@code [hostfx] structureLightning} 是「与」关系，不是替换
+     * （见 {@code HostFxSwitch.structureLightningOn(boolean)}）。
+     */
+    private static boolean structureLightningEnabled = true;
 
     /**
      * 动画时钟（秒）：<b>只在 {@link #fxEnabled} 为真时累加</b>，关掉时冻结在最后一次的值。
@@ -192,6 +239,11 @@ public final class HostFxState {
         lensEnabled = true;
         // AR 遮罩回到默认（true）——与机器字段默认值一致；否则"主机拆了"之后遮罩会停在关闭态
         arMaskEnabled = true;
+        // 环显示回到默认（两条都画）——同上：否则拆掉主机之后渲染侧会停在"只画其中一条"的那一档
+        ringVisualMode = RING_VISUAL_BOTH;
+        // 星辰场 / 结构闪电回到默认（true）——与机器字段默认值一致
+        starFieldEnabled = true;
+        structureLightningEnabled = true;
         // 重新锚定：下一次 animSeconds() 的 dt 从 0 起，不会把"不在视野这段墙钟"算进去。
         lastNanos = 0L;
     }
@@ -236,6 +288,26 @@ public final class HostFxState {
     }
 
     /**
+     * 「环显示」三态：{@code 0} = 两条都画 / {@code 1} = 只画外缘吸积流 / {@code 2} = 只画粗光柱环。
+     *
+     * <p>🔴 这是"这一帧提交哪一条环"的<b>唯一读口</b>（{@code HostFxSwitch} 每帧把它抄进自己的静态 mode，
+     * 别处不许再读机器字段 —— 否则就成了第二套状态来源）。
+     */
+    public static byte ringVisualMode() {
+        return ringVisualMode;
+    }
+
+    /** 星辰场面板开关（机器字段 {@code hostStarFieldEnabled} 的副本；<b>不含</b>客户端配置总闸）。 */
+    public static boolean starFieldEnabled() {
+        return starFieldEnabled;
+    }
+
+    /** 结构闪电面板开关（机器字段 {@code hostStructureLightningEnabled} 的副本；<b>不含</b>客户端配置总闸）。 */
+    public static boolean structureLightningEnabled() {
+        return structureLightningEnabled;
+    }
+
+    /**
      * 喂进"AR 遮罩开关"（渲染侧每帧一次，与 {@link #feed} 同一个节奏）。
      *
      * <p>为什么不并进 {@link #feed} 那 6 个参数：那个方法的形参表被
@@ -244,6 +316,40 @@ public final class HostFxState {
      */
     public static void feedArMask(boolean enabled) {
         arMaskEnabled = enabled;
+    }
+
+    /**
+     * 喂进「环显示」三态（渲染侧每帧一次，与 {@link #feed}/{@link #feedArMask} 同一个节奏、同一次早退清空）。
+     *
+     * <p>越界值一律<b>夹到 0..2</b>（不只是忽略）：存档/网络包里的值不归 setter 管
+     * （{@code @Persisted} 是从 NBT 直接写字段的）⇒ 这里是"画面上永远看不到第 3 档"的最后一道。
+     * 非法值只报一次（沿用 {@link #feed} 那套"同类只报一次"的纪律），不刷屏。
+     *
+     * @param mode 0 = 两条都画 / 1 = 只画外缘吸积流 / 2 = 只画粗光柱环
+     */
+    public static void feedRingVisualMode(int mode) {
+        if (mode < RING_VISUAL_BOTH || mode > RING_VISUAL_BEAM_RING_ONLY) {
+            warnOnce("range:ringVisualMode", "[SHANHAI-HOSTFX] HostFxState WARN 字段 ringVisualMode 收到越界值 "
+                    + mode + " ⇒ 夹到 " + RING_VISUAL_BOTH + ".." + RING_VISUAL_BEAM_RING_ONLY + "（同类只报一次）");
+        }
+        ringVisualMode = (byte) (mode < RING_VISUAL_BOTH ? RING_VISUAL_BOTH
+                : (mode > RING_VISUAL_BEAM_RING_ONLY ? RING_VISUAL_BEAM_RING_ONLY : mode));
+    }
+
+    /**
+     * 喂进「星辰场」面板开关（渲染侧每帧一次，与 {@link #feed} / {@link #feedArMask} 同一个节奏）。
+     *
+     * <p>⚠️ 这里只存<b>面板值</b>；"配置总闸 × 面板值"的与运算在
+     * {@code HostFxSwitch.starFieldOn(boolean)} 一处做 —— 不要在喂料处提前合，否则日志分不清
+     * "面板关的"和"配置关的"。
+     */
+    public static void feedStarField(boolean enabled) {
+        starFieldEnabled = enabled;
+    }
+
+    /** 喂进「结构闪电」面板开关（同上：只存面板值，与总闸的合并只在 HostFxSwitch 一处）。 */
+    public static void feedStructureLightning(boolean enabled) {
+        structureLightningEnabled = enabled;
     }
 
     /**

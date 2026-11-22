@@ -10,11 +10,11 @@ import java.util.Map;
  * 本类<b>一个字都不碰</b> —— 前缀的唯一真源是 {@code ShanhaiGuardCore#CHAT_PREFIX}。
  *
  * <pre>
- *   PATCHED         examplemod EntityUtil#forceSetHealth -> RETURN (health)
- *   PATCHED         examplemod EntityUtil#playDamageSounds -> RETURN (die)
+ *   PATCHED         examplemod ExampleHelper#doHurt -> RETURN (health)
+ *   PATCHED         examplemod ExampleHelper#playHitFx -> RETURN (die)
  *   PATCHED         examplemod ExampleEntity#m_8119_ -> RETURN (motion)
- *   PATCH_REFUSED   examplemod EntityUtil#forceSetHealth (gate_already_patched)
- *   PATCH_REVERTED  examplemod EntityUtil#forceSetHealth (observed_only)
+ *   PATCH_REFUSED   examplemod ExampleHelper#doHurt (gate_already_patched)
+ *   PATCH_REVERTED  examplemod ExampleHelper#doHurt (observed_only)
  * </pre>
  * 接上前缀之后逐字就是用户给的那五条样例的<b>形态</b>（样例里的 modid／类名一律用中性占位
  * {@code examplemod}／{@code examplemod.util.…}，本类不认识任何具体 mod；
@@ -46,6 +46,14 @@ public final class HotfixPatchChatText {
     /** 动作词：被撤掉／没落地（括号里是 {@code reason} 原值；<b>只报不重打</b>）。 */
     public static final String WORD_REVERTED = "PATCH_REVERTED";
 
+    /**
+     * 🆕 动作词：<b>升级到强力档</b>（{@code attack=line ⇒ attack=method}）。
+     *
+     * <p>为什么单独一个词：普通攻击只让"那一行"失效（玩家几乎无感），强力档会把<b>整个方法</b>停摆。
+     * 这种副作用区别必须在聊天栏里一眼看出来，不能被当成"又一次普通补丁"。
+     */
+    public static final String WORD_ESCALATED = "PATCH_ESCALATED";
+
     /** 成功那条的固定中缀：动作词与目标之间是 {@code " -> RETURN "}（逐字，含两侧各一个空格）。 */
     public static final String ARROW_RETURN = " -> RETURN ";
 
@@ -65,7 +73,7 @@ public final class HotfixPatchChatText {
      * 成功那条的正文：{@code PATCHED <modid> <Simple>#<method> -> RETURN (<why>)}。
      *
      * @param modId     目标类所属 mod（{@code null}/空/非 ASCII ⇒ {@code unknown}）
-     * @param className 目标类全名（例：{@code examplemod.util.EntityUtil}；<b>只去包名</b>）
+     * @param className 目标类全名（例：{@code examplemod.util.ExampleHelper}；<b>只去包名</b>）
      * @param method    方法名（SRG 原样；例：{@code m_8119_}）
      * @param why       {@code why=} 原值（例：{@code health}／{@code die}／{@code motion}）
      * @return 正文（纯 ASCII）；拼不出来（类名/方法名缺失或含非 ASCII）⇒ {@code null}
@@ -93,6 +101,24 @@ public final class HotfixPatchChatText {
     }
 
     /**
+     * 🆕 升级那条的正文：{@code PATCH_ESCALATED <modid> <Simple>#<method> -> RETURN (<why>)}。
+     *
+     * @param why {@code why=} 原值（例：{@code still_hitting}／{@code line_no_site}／{@code health}）
+     */
+    public static String escalated(String modId, String className, String method, String why) {
+        return build(WORD_ESCALATED, modId, className, method, why, true);
+    }
+
+    /**
+     * 这个词的正文用不用 {@code " -> RETURN "} 那一形（成功／升级都用；拒绝／回退不用）。
+     *
+     * @param word 动作词
+     */
+    public static boolean usesArrow(String word) {
+        return WORD_PATCHED.equals(word) || WORD_ESCALATED.equals(word);
+    }
+
+    /**
      * 按动作词拼一条（{@link #patched}／{@link #refused}／{@link #reverted} 的共同实现）。
      *
      * @param word      动作词（只认三个常量；别的词 ⇒ {@code null}，免得把内部枚举漏给玩家）
@@ -105,7 +131,8 @@ public final class HotfixPatchChatText {
         if (word == null) {
             return null;
         }
-        final boolean known = WORD_PATCHED.equals(word) || WORD_REFUSED.equals(word) || WORD_REVERTED.equals(word);
+        final boolean known = WORD_PATCHED.equals(word) || WORD_REFUSED.equals(word)
+                || WORD_REVERTED.equals(word) || WORD_ESCALATED.equals(word);
         if (!known) {
             return null;
         }
@@ -143,9 +170,9 @@ public final class HotfixPatchChatText {
      * 类名 → <b>简单类名</b>（只去包名）。
      *
      * <pre>
-     *   examplemod.util.EntityUtil               ⇒ EntityUtil
-     *   examplemod.util.EntityUtil$Inner         ⇒ EntityUtil$Inner   （$ 后缀照旧保留）
-     *   EntityUtil                               ⇒ EntityUtil         （本来就没有包名）
+     *   examplemod.util.ExampleHelper               ⇒ ExampleHelper
+     *   examplemod.util.ExampleHelper$Inner         ⇒ ExampleHelper$Inner   （$ 后缀照旧保留）
+     *   ExampleHelper                               ⇒ ExampleHelper         （本来就没有包名）
      * </pre>
      *
      * @return 简单类名；{@code className} 为空或含非 ASCII ⇒ {@code null}
@@ -279,80 +306,80 @@ public final class HotfixPatchChatText {
     public static void main(String[] args) {
         System.out.println("=== [SHANHAI-HOTFIX] 热改播报正文拼装 · 离线自检（纯 JDK） ===");
         // 五条样例的形态（modid／类名用中性占位 examplemod：本类不认识任何具体 mod）
-        final String m1 = patched("examplemod", "examplemod.util.EntityUtil", "forceSetHealth", "health");
-        final String m2 = patched("examplemod", "examplemod.util.EntityUtil", "playDamageSounds", "die");
+        final String m1 = patched("examplemod", "examplemod.util.ExampleHelper", "doHurt", "health");
+        final String m2 = patched("examplemod", "examplemod.util.ExampleHelper", "playHitFx", "die");
         final String m3 = patched("examplemod", "examplemod.entity.ExampleEntity",
                 "m_8119_", "motion");
         expect("①PATCHED health 逐字", true,
-                "PATCHED examplemod EntityUtil#forceSetHealth -> RETURN (health)".equals(m1), "→ " + m1);
+                "PATCHED examplemod ExampleHelper#doHurt -> RETURN (health)".equals(m1), "→ " + m1);
         expect("①PATCHED die 逐字", true,
-                "PATCHED examplemod EntityUtil#playDamageSounds -> RETURN (die)".equals(m2), "→ " + m2);
+                "PATCHED examplemod ExampleHelper#playHitFx -> RETURN (die)".equals(m2), "→ " + m2);
         expect("①SRG 名 m_8119_ 原样（下划线不动）", true,
                 "PATCHED examplemod ExampleEntity#m_8119_ -> RETURN (motion)".equals(m3), "→ " + m3);
-        final String r1 = refused("examplemod", "examplemod.util.EntityUtil", "forceSetHealth",
+        final String r1 = refused("examplemod", "examplemod.util.ExampleHelper", "doHurt",
                 "gate_already_patched");
         expect("②PATCH_REFUSED 逐字", true,
-                "PATCH_REFUSED examplemod EntityUtil#forceSetHealth (gate_already_patched)".equals(r1), "→ " + r1);
-        final String v1 = reverted("examplemod", "examplemod.util.EntityUtil", "forceSetHealth",
+                "PATCH_REFUSED examplemod ExampleHelper#doHurt (gate_already_patched)".equals(r1), "→ " + r1);
+        final String v1 = reverted("examplemod", "examplemod.util.ExampleHelper", "doHurt",
                 "observed_only");
         expect("③PATCH_REVERTED 逐字", true,
-                "PATCH_REVERTED examplemod EntityUtil#forceSetHealth (observed_only)".equals(v1), "→ " + v1);
+                "PATCH_REVERTED examplemod ExampleHelper#doHurt (observed_only)".equals(v1), "→ " + v1);
 
         // ---- 负对照：同一组输入换一处，必须【不等】（证明上面那三条不是"怎么拼都过"）
-        final String wrongMod = patched("unknown", "examplemod.util.EntityUtil", "forceSetHealth", "health");
+        final String wrongMod = patched("unknown", "examplemod.util.ExampleHelper", "doHurt", "health");
         expect("负①换 modid ⇒ 与样例不等", true,
-                !"PATCHED examplemod EntityUtil#forceSetHealth -> RETURN (health)".equals(wrongMod), "→ " + wrongMod);
-        final String wrongWhy = patched("examplemod", "examplemod.util.EntityUtil", "forceSetHealth", "die");
+                !"PATCHED examplemod ExampleHelper#doHurt -> RETURN (health)".equals(wrongMod), "→ " + wrongMod);
+        final String wrongWhy = patched("examplemod", "examplemod.util.ExampleHelper", "doHurt", "die");
         expect("负②换 why ⇒ 与样例不等", true,
-                !"PATCHED examplemod EntityUtil#forceSetHealth -> RETURN (health)".equals(wrongWhy), "→ " + wrongWhy);
-        final String noBracket = "PATCH_REFUSED examplemod EntityUtil#forceSetHealth gate_already_patched";
+                !"PATCHED examplemod ExampleHelper#doHurt -> RETURN (health)".equals(wrongWhy), "→ " + wrongWhy);
+        final String noBracket = "PATCH_REFUSED examplemod ExampleHelper#doHurt gate_already_patched";
         expect("负③少了那对括号的写法 ⇒ 与样例不等", true,
-                !"PATCH_REFUSED examplemod EntityUtil#forceSetHealth (gate_already_patched)".equals(noBracket)
+                !"PATCH_REFUSED examplemod ExampleHelper#doHurt (gate_already_patched)".equals(noBracket)
                         && r1 != null && !r1.equals(noBracket),
                 "少括号那条=" + noBracket + " ｜ 真实读数=" + r1);
 
         // ---- 口径：纯 ASCII／查不到 mod ⇒ unknown／名字的边界
         expect("④非 ASCII 的 why ⇒ 整条不发（null）", true,
-                patched("examplemod", "examplemod.util.EntityUtil", "forceSetHealth", "血量") == null,
-                "→ " + patched("examplemod", "examplemod.util.EntityUtil", "forceSetHealth", "血量"));
+                patched("examplemod", "examplemod.util.ExampleHelper", "doHurt", "血量") == null,
+                "→ " + patched("examplemod", "examplemod.util.ExampleHelper", "doHurt", "血量"));
         expect("④非 ASCII 的类名 ⇒ null", true, patched("examplemod", "examplemod.util.实体", "m", "health") == null,
                 "→ " + patched("examplemod", "examplemod.util.实体", "m", "health"));
         expect("④查不到 mod ⇒ unknown（不猜）", true,
-                "PATCHED unknown EntityUtil#forceSetHealth -> RETURN (health)".equals(
-                        patched(null, "examplemod.util.EntityUtil", "forceSetHealth", "health")),
-                "→ " + patched(null, "examplemod.util.EntityUtil", "forceSetHealth", "health"));
+                "PATCHED unknown ExampleHelper#doHurt -> RETURN (health)".equals(
+                        patched(null, "examplemod.util.ExampleHelper", "doHurt", "health")),
+                "→ " + patched(null, "examplemod.util.ExampleHelper", "doHurt", "health"));
         expect("④非 ASCII 的 mod ⇒ 整条不发（不拿 unknown 顶替一个非 ASCII 的 mod 名）", true,
-                patched("敌方模组", "a.b.EntityUtil", "m", "health") == null,
-                "→ " + patched("敌方模组", "a.b.EntityUtil", "m", "health"));
+                patched("敌方模组", "a.b.ExampleHelper", "m", "health") == null,
+                "→ " + patched("敌方模组", "a.b.ExampleHelper", "m", "health"));
         expect("④mod 缺失（null）⇒ unknown", true,
-                "PATCHED unknown EntityUtil#m -> RETURN (health)".equals(
-                        patched(null, "a.b.EntityUtil", "m", "health")),
-                "→ " + patched(null, "a.b.EntityUtil", "m", "health"));
+                "PATCHED unknown ExampleHelper#m -> RETURN (health)".equals(
+                        patched(null, "a.b.ExampleHelper", "m", "health")),
+                "→ " + patched(null, "a.b.ExampleHelper", "m", "health"));
         expect("④括号里的原值缺失（null/空）⇒ ?", true,
-                "PATCH_REFUSED examplemod EntityUtil#m (?)".equals(
-                        refused("examplemod", "a.b.EntityUtil", "m", "")),
-                "→ " + refused("examplemod", "a.b.EntityUtil", "m", ""));
+                "PATCH_REFUSED examplemod ExampleHelper#m (?)".equals(
+                        refused("examplemod", "a.b.ExampleHelper", "m", "")),
+                "→ " + refused("examplemod", "a.b.ExampleHelper", "m", ""));
         final java.util.Map<String, String> table = new java.util.LinkedHashMap<>();
         table.put("examplemod.", "examplemod");
         table.put("com.other.", "other");
         expect("⑤前缀最长匹配 = examplemod", true,
-                "examplemod".equals(modIdOf("examplemod.util.EntityUtil", table)),
-                "→ " + modIdOf("examplemod.util.EntityUtil", table));
+                "examplemod".equals(modIdOf("examplemod.util.ExampleHelper", table)),
+                "→ " + modIdOf("examplemod.util.ExampleHelper", table));
         expect("⑤不在任何 mod 的命名空间 ⇒ unknown", true,
                 "unknown".equals(modIdOf("net.minecraft.world.entity.LivingEntity", table)),
                 "→ " + modIdOf("net.minecraft.world.entity.LivingEntity", table));
         table.put("examplemod.util.", "deep");
         expect("⑤更长的前缀优先（不按插入顺序）", true,
-                "deep".equals(modIdOf("examplemod.util.EntityUtil", table)),
-                "→ " + modIdOf("examplemod.util.EntityUtil", table));
-        final String[] split = splitTargetKey("examplemod.util.EntityUtil#m_8119_");
-        expect("⑥账本键拆两段", true, split != null && "examplemod.util.EntityUtil".equals(split[0])
+                "deep".equals(modIdOf("examplemod.util.ExampleHelper", table)),
+                "→ " + modIdOf("examplemod.util.ExampleHelper", table));
+        final String[] split = splitTargetKey("examplemod.util.ExampleHelper#m_8119_");
+        expect("⑥账本键拆两段", true, split != null && "examplemod.util.ExampleHelper".equals(split[0])
                 && "m_8119_".equals(split[1]), "→ " + (split == null ? "null" : split[0] + " ／ " + split[1]));
-        expect("⑥没有 # 的键 ⇒ null", true, splitTargetKey("EntityUtil") == null, "→ " + splitTargetKey("EntityUtil"));
+        expect("⑥没有 # 的键 ⇒ null", true, splitTargetKey("ExampleHelper") == null, "→ " + splitTargetKey("ExampleHelper"));
         expect("⑥<init> 原样保留", true,
-                "PATCHED examplemod EntityUtil#<init> -> RETURN (pos)".equals(
-                        patched("examplemod", "a.b.EntityUtil", "<init>", "pos")),
-                "→ " + patched("examplemod", "a.b.EntityUtil", "<init>", "pos"));
+                "PATCHED examplemod ExampleHelper#<init> -> RETURN (pos)".equals(
+                        patched("examplemod", "a.b.ExampleHelper", "<init>", "pos")),
+                "→ " + patched("examplemod", "a.b.ExampleHelper", "<init>", "pos"));
 
         System.out.println("=== 汇总：判据 " + checks + " 条，报红 " + reds + " 条 ⇒ "
                 + (reds == 0 ? "全绿" : "有红 ✗") + " ===");

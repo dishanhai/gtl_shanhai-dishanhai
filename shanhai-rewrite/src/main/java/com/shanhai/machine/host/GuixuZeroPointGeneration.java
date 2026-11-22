@@ -226,9 +226,22 @@ public final class GuixuZeroPointGeneration {
      */
     @NotNull
     public static Readings readingsFromParallelData(long baseEut, long parallel, int gateBonus) {
+        return readingsFromParallelData(baseEut, parallel, gateBonus, 0);
+    }
+
+    /**
+     * 同上，并带上<b>发电配方定义实例自己的时长</b>（{@code ParallelData#getOriginRecipeList()[i].duration}）。
+     *
+     * <p>🔴 这个时长是<b>未经面板地板、也未经批次拉长</b>的原值 —— 摊平口径的分子用它：
+     * {@code 本批计划总量 = 乘积 × 自身时长}（见 {@link #amortize}）。
+     *
+     * @param ownDuration 配方定义实例的 {@code duration}；{@code <=0} = 拿不到 ⇒ 摊平退回旧口径
+     */
+    @NotNull
+    public static Readings readingsFromParallelData(long baseEut, long parallel, int gateBonus, int ownDuration) {
         final long p = Math.max(1L, parallel);
         return new Readings(baseEut, p, 1L, p, product(baseEut, p, gateBonus), coefficient(gateBonus),
-                gateBonus, SOURCE_PARALLEL_DATA);
+                gateBonus, SOURCE_PARALLEL_DATA, ownDuration);
     }
 
     /** 并行读数来源①：多配方引擎的 {@code ParallelData#getParallels()}。 */
@@ -257,9 +270,16 @@ public final class GuixuZeroPointGeneration {
         public final int gateBonus;
         /** 并行是从哪个读数来的（{@link #SOURCE_PARALLEL_DATA} / {@link #SOURCE_LAST_RECIPE}）。 */
         public final String source;
+        /** 发电配方<b>定义实例</b>的时长（未经面板地板、未经批次拉长）；{@code <=0} = 拿不到。 */
+        public final int ownDuration;
 
         Readings(long baseEut, long realParallels, long batchSize, long parallel, BigInteger product,
                  BigDecimal coefficient, int gateBonus, @NotNull String source) {
+            this(baseEut, realParallels, batchSize, parallel, product, coefficient, gateBonus, source, 0);
+        }
+
+        Readings(long baseEut, long realParallels, long batchSize, long parallel, BigInteger product,
+                 BigDecimal coefficient, int gateBonus, @NotNull String source, int ownDuration) {
             this.baseEut = baseEut;
             this.realParallels = realParallels;
             this.batchSize = batchSize;
@@ -268,6 +288,7 @@ public final class GuixuZeroPointGeneration {
             this.coefficient = coefficient;
             this.gateBonus = gateBonus;
             this.source = source;
+            this.ownDuration = ownDuration;
         }
 
         /** 系数按<b>4 位小数</b>的显示形式（0.05 ⇒ {@code 0.0500}；1.0 ⇒ {@code 1.0000}）。 */
@@ -292,6 +313,609 @@ public final class GuixuZeroPointGeneration {
                     + " 并行来源=" + source
                     + (extra == null ? "" : " " + extra);
         }
+    }
+
+    // ═════════════════════════════ ②'' 分料：**耗电先分料、发电按耗电份数和封顶** ═════════════════════════════
+    //
+    //  <h2>🔴 2026-11-21 第一版（发电先分料）被【实机证伪】，原文留档</h2>
+    //  第一版假设"发电配方每份要吃 32 mB 流体 ⇒ 份数上限 ≤ Long.MAX/32 ⇒ 它吃不干预算"。
+    //  <b>这个前提在现场不成立</b>：预算是机器给的（现场 1024），而发电配方的份数上限远大于预算
+    //  ⇒ 份数 = 预算本身 ⇒ 预算归零 ⇒ 循环 break ⇒ <b>排在它后面的耗电配方一条都没被问过</b>。
+    //  用户现场日志（原文）：
+    //  <pre>
+    //    归墟分料顺序 … 新序=[…blackhole_engine_power, …decompression/new_recipe_1]
+    //    混合轮读数 入批=true 批次=[…blackhole_engine_power×1024] 并行=1024
+    //    ⇒ 用户：「现在归墟只会跑发电配方了，正常配方不跑了」
+    //  </pre>
+    //  ⇒ 结论：**只改顺序解决不了饥饿 —— 谁排第一谁吃干预算。** 顺序换向只是把饥饿换个方向。
+    //
+    //  <h2>✅ 第二版（现行）：顺序回到"耗电在前"，再给发电一条**按候选**的份数上限</h2>
+    //  <pre>
+    //    耗电份数和 ΣA = 本轮已被分掉的预算（= 预算 − 轮到发电时的 remain）
+    //    发电份数上限 = ΣA &lt;= 0 ? 不设限 : max(1, ΣA)      ← "你抽出来多少能量，我才发多少电"
+    //    ⇒ 发电永远拿不到"超过耗电份数和"的份数，且至少 1 份 ⇒ 两头都不会饿死；
+    //    ⇒ ΣA = 0（纯发电轮）⇒ 不设限 ⇒ 纯发电轮行为照旧（不变量 1）。
+    //  </pre>
+    //  上限的落点是<b>按候选</b>的份数出口（机型侧覆写 {@code calculateParallel} 的返回值），
+    //  不是机器级 {@code getMaxParallel}（那是全局的、会连坐纯耗电轮）。
+    //
+    //  <h2>③ 为什么要"耗电在前"（这条顺序不是为了抢料，是为了让上限可算）</h2>
+    //  ΣA 只能在"轮到发电时"从 {@code remain} 读出来 ⇒ 发电必须排在耗电之后。
+    //  现场自然顺序本来就是这条（{@code 原序=[…decompression, …energy_power]}），
+    //  所以这一步只是**把候选序保持成上游原样**（稳定分区：非发电型按原序在前，发电型按原序在后）。
+    //  纯发电轮 / 纯耗电轮 ⇒ 分区是恒等序 ⇒ 一个字节都不改。
+
+    /**
+     * <b>这条候选是不是"发电型视界能流抽取"</b> —— {@code 0} = 是（分料时排到最后并受上限约束），
+     * {@code 1} = 其它（按原序先分料）。
+     *
+     * <p>判据与 {@link #shouldConvert} <b>同一份</b>（类型 + 输出电 &gt; 0）：
+     * "要接管的"、"要加份数上限的"、"要排到最后的"必须是同一批配方，三处各写一份迟早分叉。
+     */
+    public static int allocationRank(@Nullable String typeId, long outputEut) {
+        return shouldConvert(typeId, outputEut, true) ? 0 : 1;
+    }
+
+    /**
+     * <b>发电配方的份数上限</b>（用户 2026-11-22 第二次拍板：**保预算**，不再无条件给到 ΣA）。
+     *
+     * <pre>
+     *   ΣA &lt;= 0（纯发电轮 / 本轮没有耗电配方被分到料）⇒ Long.MAX_VALUE = 不设限（照旧，一个字不改）
+     *   ΣA &gt;  0 ⇒ clamp( min(ΣA, max(0, 预算 − ΣA)), 1, ΣA )
+     *              ├─ 预算够（预算 ≥ 2×ΣA）⇒ ΣA      （两边都不挤，按"抽多少发多少"给满）
+     *              ├─ 预算被吃干（预算 − ΣA = 0）⇒ 1 （最多只超预算 1 份，发电始终活着）
+     *              └─ 半个预算（0 &lt; 预算−ΣA &lt; ΣA）⇒ 预算−ΣA
+     *   预算未知（&lt;=0，读不到）⇒ 不当成压力 ⇒ 也给 ΣA
+     * </pre>
+     *
+     * <p>为什么从"无条件 ΣA"改成这个（用户原话：「保预算，不保发电=耗电份数和」）：
+     * 预算是<b>电</b>，超 2 倍会让能源仓吃紧甚至整轮不动；只超 1 份可忽略，且发电始终"活着"。
+     *
+     * <p>🔴 纯发电轮必须**不设限**：若这里返回 0，纯发电轮会退化成"一份都不跑"（判据 ⑧ 负对照 C）。
+     *
+     * @param consumerParallelSum 同批耗电份数之和 ΣA
+     * @param budget              本轮并行预算（相 1 真实用掉的那个；{@code <=0} = 读不到 ⇒ 不钳）
+     */
+    public static long generationParallelCap(long consumerParallelSum, long budget) {
+        if (consumerParallelSum <= 0L) {
+            return Long.MAX_VALUE;                       // 纯发电轮：不设限
+        }
+        final long room = budget <= 0L ? Long.MAX_VALUE : Math.max(0L, budget - consumerParallelSum);
+        final long byRule = Math.min(consumerParallelSum, room);       // 能放下就 ΣA
+        final long floored = Math.max(1L, byRule);                     // 至少 1 份（发电始终活着）
+        return Math.min(consumerParallelSum, floored);                 // 且不许超过 ΣA
+    }
+
+    /**
+     * <b>稳定分区（耗电在前、发电在后）</b>：返回"新顺序里第 i 位应该取原序列的哪一个下标"。
+     *
+     * <p>为什么不是"发电在前"：见本节开头那段落档 —— 顺序只决定谁先吃预算，方向反过来就是镜像饥饿；
+     * 这里把发电放最后，是为了让 {@code 预算 − 轮到它时的 remain} 能直接读出"耗电已分掉的份数和"。
+     *
+     * @param ranks 每条候选的 {@link #allocationRank}（0 = 发电型）
+     */
+    @NotNull
+    public static int[] allocationOrderConsumerFirst(@NotNull int[] ranks) {
+        return allocationOrderConsumerFirstForTest(ranks, true);
+    }
+
+    /**
+     * {@link #allocationOrderConsumerFirst(int[])} 的<b>可注入版</b>（只给自检的负对照用）。
+     *
+     * @param consumerFirst {@code false} = <b>上一版</b>（发电在前）—— 那一支就是判据 ⑧ 负对照 A 要打红的形态
+     */
+    static int[] allocationOrderConsumerFirstForTest(@NotNull int[] ranks, boolean consumerFirst) {
+        if (ranks == null) {
+            throw new IllegalArgumentException("ranks 不能为 null");
+        }
+        final int n = ranks.length;
+        final int[] order = new int[n];
+        int at = 0;
+        if (consumerFirst) {
+            for (int i = 0; i < n; i++) {
+                if (ranks[i] != 0) {
+                    order[at++] = i;
+                }
+            }
+            for (int i = 0; i < n; i++) {
+                if (ranks[i] == 0) {
+                    order[at++] = i;
+                }
+            }
+        } else {
+            // 上一版：发电在前（= 已被实机证伪的形态；保留只为负对照能复现那个坏现象）
+            for (int i = 0; i < n; i++) {
+                if (ranks[i] == 0) {
+                    order[at++] = i;
+                }
+            }
+            for (int i = 0; i < n; i++) {
+                if (ranks[i] != 0) {
+                    order[at++] = i;
+                }
+            }
+        }
+        return order;
+    }
+
+    /** 这个顺序是不是"原样"（= 排序没改任何东西 ⇒ 调用方必须返回原集合本身，不做无谓的重建）。 */
+    public static boolean isIdentityOrder(@NotNull int[] order) {
+        for (int i = 0; i < order.length; i++) {
+            if (order[i] != i) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // ── ⑧ 分料结算的口径（自检据此复现每一个坏现象） ──
+
+    /** 生产口径：耗电先分料（贪心），发电再按 {@link #generationParallelCap} 封顶（含预算钳制）。 */
+    public static final int ALLOC_TWO_PASS = 0;
+    /** 负对照 A：<b>上一版</b>（发电先分料、不设限）⇒ 复现「只跑发电」。 */
+    public static final int ALLOC_GEN_FIRST = 1;
+    /** 负对照 B：<b>改动前</b>（耗电先分料、不设限）⇒ 复现「发电不跑」。 */
+    public static final int ALLOC_CONSUMER_FIRST_NO_CAP = 2;
+    /** 负对照 C：发电上限 = {@code ΣA}（**不论预算**，= 用户拍板前的旧写法）⇒ 复现「总份数超预算 2×」。 */
+    public static final int ALLOC_TWO_PASS_OLD_CAP = 3;
+    /** 负对照 D：上限里去掉「至少 1 份」地板（{@code cap = max(0, min(ΣA, 剩余预算))}）⇒ 复现「预算吃干时发电=0」。 */
+    public static final int ALLOC_TWO_PASS_NO_FLOOR = 4;
+
+    /**
+     * <b>分料结算的纯模型</b>：返回 {@code {耗电份数和, 发电份数}}。
+     *
+     * <p>用什么模拟"上游贪心"：<b>直接调本工程现成的那份对照实现</b>
+     * {@code ShanhaiFairAllocation#greedyShares}（逐句照抄上游循环骨架，含 {@code remain <= 0 就 break}，
+     * 生产代码从不调它、只给离线判据用）⇒ 不自造第二份模拟器。
+     *
+     * @param budget      本轮并行预算（现场实测 1024）
+     * @param consumerCap 耗电候选自己的份数上限（现场 = 无上限 ⇒ {@code Long.MAX_VALUE}）
+     * @param genCap      发电候选自己的份数上限（现场 = 无上限 ⇒ {@code Long.MAX_VALUE}）
+     * @param mode        {@code ALLOC_*} 之一
+     */
+    @NotNull
+    public static long[] simulatedSplit(long budget, long consumerCap, long genCap, int mode) {
+        if (budget <= 0L) {
+            return new long[]{0L, 0L};
+        }
+        switch (mode) {
+            case ALLOC_GEN_FIRST: {
+                final long[] shares = com.shanhai.common.thread.ShanhaiFairAllocation
+                        .greedyShares(new long[]{genCap, consumerCap}, budget);
+                return new long[]{shares[1], shares[0]};
+            }
+            case ALLOC_CONSUMER_FIRST_NO_CAP: {
+                final long[] shares = com.shanhai.common.thread.ShanhaiFairAllocation
+                        .greedyShares(new long[]{consumerCap, genCap}, budget);
+                return new long[]{shares[0], shares[1]};
+            }
+            case ALLOC_TWO_PASS_OLD_CAP:
+            case ALLOC_TWO_PASS_NO_FLOOR:
+            case ALLOC_TWO_PASS:
+            default: {
+                // 相 1：耗电先分料（同上游贪心）⇒ ΣA
+                final long[] cons = com.shanhai.common.thread.ShanhaiFairAllocation
+                        .greedyShares(new long[]{consumerCap}, budget);
+                final long consumerSum = cons[0];
+                // 相 2：发电按上限再分一次（上限 = 生产口径 2 参版 generationParallelCap）
+                final long cap;
+                switch (mode) {
+                    case ALLOC_TWO_PASS_OLD_CAP:
+                        cap = Math.max(1L, consumerSum);                       // 旧写法：不看预算
+                        break;
+                    case ALLOC_TWO_PASS_NO_FLOOR:
+                        cap = Math.max(0L, Math.min(consumerSum,
+                                budget <= 0L ? Long.MAX_VALUE : Math.max(0L, budget - consumerSum)));
+                        break;
+                    case ALLOC_TWO_PASS:
+                    default:
+                        cap = generationParallelCap(consumerSum, budget);       // 生产口径
+                        break;
+                }
+                final long[] gen = com.shanhai.common.thread.ShanhaiFairAllocation
+                        .greedyShares(new long[]{genCap}, cap);
+                return new long[]{consumerSum, gen[0]};
+            }
+        }
+    }
+
+    /**
+     * <b>判据 ⑧</b>：分料必须"两头都能跑"**且守住预算**。
+     *
+     * <p>同一份代码跑各口径 ⇒ 生产口径必须<b>空表</b>，每个负对照必须<b>非空</b>。三条场景：
+     * <pre>
+     *   A 预算充足（预算 4096、耗电无上限 ⇒ ΣA=1024）⇒ 发电 = 1024（= ΣA，能放下就给满）
+     *   B 预算吃干（预算 1024、ΣA=1024）              ⇒ 发电 = 1，且 总份数 ≤ 预算+1
+     *   C 半个预算（预算 1024、ΣA=600）               ⇒ 发电 = min(600, 424) = 424，总份数 = 预算
+     * </pre>
+     *
+     * @param mode 口径（见 {@code ALLOC_*}）
+     */
+    @NotNull
+    public static List<String> splitAllocationProblems(int mode) {
+        final List<String> problems = new ArrayList<>();
+        final long inf = Long.MAX_VALUE;           // 两边都「没有消耗型输入上限」（现场形状）
+        final String tag = "mode=" + mode;
+
+        // ── 场景 A：预算充足 ⇒ 发电 = ΣA ──
+        final long[] ample = simulatedSplit(4096L, 1024L, inf, mode);
+        check(problems, ample[0] == 1024L && ample[1] == 1024L,
+                "⑧【场景A·预算充足】预算 4096、ΣA=1024 ⇒ 发电必须=1024，实际 "
+                        + java.util.Arrays.toString(ample) + "（" + tag + "）");
+
+        // ── 场景 B：预算被耗电吃干 ⇒ 发电 = 1 份，且总份数只许超预算 1 ──
+        final long[] squeezed = simulatedSplit(1024L, inf, inf, mode);
+        check(problems, squeezed[0] >= 1L,
+                "⑧【场景B】耗电份数必须 ≥1（否则复现「只跑发电」），实际耗电=" + squeezed[0] + "（" + tag + "）");
+        check(problems, squeezed[1] == 1L,
+                "⑧【场景B·预算吃干】预算 1024、ΣA=1024 ⇒ 发电必须=1（否则超预算 2× / 或发电=0），实际 "
+                        + java.util.Arrays.toString(squeezed) + "（" + tag + "）");
+        check(problems, squeezed[0] + squeezed[1] <= 1024L + 1L,
+                "⑧【场景B·总份数】必须 ≤ 预算+1（=1025），实际 " + (squeezed[0] + squeezed[1]) + "（" + tag + "）");
+        check(problems, generationParallelCap(1024L, 1024L) <= 1L,
+                "⑧【场景B·生产入口】cap(ΣA=1024, 预算=1024) 必须 ≤1，实际 "
+                        + generationParallelCap(1024L, 1024L));
+
+        // ── 场景 C：半个预算 ⇒ 发电 = 剩余预算（424） ──
+        final long[] half = simulatedSplit(1024L, 600L, inf, mode);
+        check(problems, half[0] == 600L && half[1] == 424L,
+                "⑧【场景C·半个预算】预算 1024、ΣA=600 ⇒ 发电必须=424，实际 "
+                        + java.util.Arrays.toString(half) + "（" + tag + "）");
+        check(problems, half[0] + half[1] <= 1024L,
+                "⑧【场景C·总份数】必须 ≤ 预算 1024，实际 " + (half[0] + half[1]) + "（" + tag + "）");
+
+        // ── 场景 D：纯发电轮 ⇒ 不设限（照旧跑满） ──
+        final long[] pure = simulatedSplit(1024L, 0L, 1024L, mode);
+        check(problems, pure[0] == 0L && pure[1] == 1024L,
+                "⑧【场景D·纯发电轮】必须照旧跑满（期望 0/1024，实际 " + java.util.Arrays.toString(pure)
+                        + "；" + tag + "）");
+
+        // ── 场景 E：发电需求小于上限 ⇒ 原样（不许被放大） ──
+        final long[] small = simulatedSplit(4096L, 1024L, 7L, mode);
+        check(problems, small[0] == 1024L && small[1] == 7L,
+                "⑧【场景E】发电自身只要 7 份 ⇒ 必须原样 7（不许放大），实际 "
+                        + java.util.Arrays.toString(small) + "（" + tag + "）");
+        return problems;
+    }
+
+    /**
+     * <b>判据 ⑧ 打在生产入口上</b>：{@link #generationParallelCap} 本体 + 生产口径的模拟。
+     *
+     * <p>🔴 上一轮踩过的坑：只打"注入口径"的自检对生产代码没有分辨力（把生产入口改回旧写法它照样全绿）。
+     * 这里必须再打一遍，而且断言的是<b>函数本体</b>的返回值。
+     */
+    @NotNull
+    public static List<String> productionSplitProblems() {
+        final List<String> problems = new ArrayList<>();
+        check(problems, generationParallelCap(0L, 1024L) == Long.MAX_VALUE,
+                "⑧【生产入口】ΣA=0（纯发电轮）⇒ 上限必须 = Long.MAX_VALUE（不设限），实际 "
+                        + generationParallelCap(0L, 1024L));
+        check(problems, generationParallelCap(-5L, 1024L) == Long.MAX_VALUE,
+                "⑧【生产入口】ΣA<0 ⇒ 上限必须 = Long.MAX_VALUE，实际 " + generationParallelCap(-5L, 1024L));
+        // 三条现场档位（用户拍板时点名的三组数）
+        check(problems, generationParallelCap(1024L, 4096L) == 1024L,
+                "⑧【生产入口】预算充足(4096)、ΣA=1024 ⇒ 上限必须=1024，实际 "
+                        + generationParallelCap(1024L, 4096L));
+        check(problems, generationParallelCap(1024L, 1024L) == 1L,
+                "⑧【生产入口】预算吃干(1024)、ΣA=1024 ⇒ 上限必须=1，实际 "
+                        + generationParallelCap(1024L, 1024L));
+        check(problems, generationParallelCap(600L, 1024L) == 424L,
+                "⑧【生产入口】半个预算(1024)、ΣA=600 ⇒ 上限必须=424，实际 "
+                        + generationParallelCap(600L, 1024L));
+        // 边界
+        check(problems, generationParallelCap(1L, 1024L) == 1L,
+                "⑧【生产入口】ΣA=1 ⇒ 上限必须=1，实际 " + generationParallelCap(1L, 1024L));
+        check(problems, generationParallelCap(7L, 0L) == 7L,
+                "⑧【生产入口】预算读不到(0) ⇒ 不当成压力、给 ΣA=7，实际 " + generationParallelCap(7L, 0L));
+        check(problems, generationParallelCap(7L, -3L) == 7L,
+                "⑧【生产入口】预算<0 ⇒ 不当成压力、给 ΣA=7，实际 " + generationParallelCap(7L, -3L));
+        final long[] split = simulatedSplit(1024L, Long.MAX_VALUE, Long.MAX_VALUE, ALLOC_TWO_PASS);
+        check(problems, split[0] >= 1L && split[1] >= 1L,
+                "⑧【生产入口】现场形状（预算 1024）必须两头都能跑，实际 " + java.util.Arrays.toString(split));
+        check(problems, split[0] + split[1] <= 1024L + 1L,
+                "⑧【生产入口】现场形状总份数必须 ≤ 预算+1，实际 " + (split[0] + split[1]));
+        return problems;
+    }
+
+
+    // ═════════════════════════════ ②''' 结算口径：每批总量守恒的摊平 ═════════════════════════════
+    //
+    //  <h2>🔴 2026-11-22（用户选 ①「摊平，每批总量守恒」）</h2>
+    //  上一版的口径是"每 tick 入池 = 乘积"，批次一长就整批多发：
+    //  实测混合轮批次 3199 tick、发电配方自身 20 tick ⇒ 同一批燃料**多付 159.95 倍**。
+    //  用户定案：<b>每批总量 = 乘积 × 自身时长</b>，把它<b>摊到本批时长</b>上逐 tick 发，
+    //  余数在<b>最后一 tick</b> 补齐 ⇒ 总量严格守恒（不许多发也不许少发）。
+    //
+    //  <h2>三条硬不变量（离线自检 ⑦ 逐条断言，且有两条负对照）</h2>
+    //  <ol>
+    //    <li><b>本批时长 == 自身时长 ⇒ 逐 tick 与改动前逐位相同</b>
+    //        （{@code perTick = 乘积×自身 ÷ 自身 = 乘积}，余数恒 0）⇒ 纯发电轮零变化；</li>
+    //    <li>混合轮（本批 3199、自身 20）的<b>每批总量 == 纯发电轮每批总量</b>
+    //        （都是 {@code 乘积×20}），只是摊到更多 tick ⇒ 不再是 159.95 倍；</li>
+    //    <li>批次提前结束 ⇒ <b>余额不发</b>（只有"最后一 tick 补余数"这一条补发路径，
+    //        超出 {@code 本批时长} 的 tick 一律返回 0）。</li>
+    //  </ol>
+    //
+    //  <h2>⛔ 边界：本批时长 &lt;= 0 或 自身时长 &lt;= 0 ⇒ 退回改动前的每 tick 口径</h2>
+    //  拿不到时长就不许假装摊平（那会把总量算错），宁可退回旧行为并在日志里 WARN 说明原因。
+
+    /** 生产口径：摊平 + 最后一 tick 补余数。 */
+    public static final int AMORTIZE_NORMAL = 0;
+    /** 负对照口径：不摊平（= 改动前"每 tick 乘积"）⇒ 长批次必然多发 {@code 本批时长÷自身时长} 倍。 */
+    public static final int AMORTIZE_LEGACY = 1;
+    /** 负对照口径：摊平但**余数丢掉**（不补最后一 tick）⇒ 每批总量必然少 {@code 余数}。 */
+    public static final int AMORTIZE_NO_REMAINDER = 2;
+
+    /**
+     * 一次"按批摊平"的<b>不可变计划</b>（机型侧只读它；所有数都能离线复算）。
+     *
+     * <h2>字段口径</h2>
+     * <pre>
+     *   product       = readings.product（= baseEut × p ÷ 系数），本批的"每 tick 上限"；
+     *                   本批时长 == 自身时长时它就是每 tick 实发（= 不变量 1）
+     *   ownDuration   = 发电配方**定义实例**的 duration（未经面板地板、未经批次拉长）
+     *   batchDuration = 本批真正倒计时的 duration（{@code RecipeLogic#duration}，
+     *                   = 引擎尾链算出的时长再经面板地板 {@code max(engine, panel)}）
+     *   total         = product × ownDuration            ← 本批计划总量（守恒的那个数）
+     *   perTick       = total ÷ batchDuration（整除）
+     *   remainder     = total − perTick × batchDuration  ← 只在最后一 tick 补
+     *   fallback      = true ⇒ 退回改动前口径（每 tick 发 product，无上限）
+     * </pre>
+     */
+    public static final class Amortized {
+
+        /** 计划每 tick 上限（= {@link Readings#product}）。 */
+        public final BigInteger product;
+        /** 发电配方自身时长。 */
+        public final long ownDuration;
+        /** 本批真实倒计时时长（{@code RecipeLogic#duration}）。 */
+        public final long batchDuration;
+        /** 本批计划总量 = {@code product × ownDuration}。 */
+        public final BigInteger total;
+        /** 每 tick 实发 = {@code total ÷ batchDuration}（整除）。 */
+        public final BigInteger perTick;
+        /** 余数 = {@code total − perTick × batchDuration}（最后一 tick 补；{@code fallback} 时恒 0）。 */
+        public final BigInteger remainder;
+        /** {@code true} = 退回改动前口径（每 tick 发 {@link #product}，无上限、无余数）。 */
+        public final boolean fallback;
+        /** {@code true} = 最后一 tick 补 {@link #remainder}（生产恒 true；负对照用 false）。 */
+        public final boolean payRemainder;
+        /** 退回原因（{@code fallback == false} 时是空串）。 */
+        public final String reason;
+
+        Amortized(BigInteger product, long ownDuration, long batchDuration, BigInteger total,
+                  BigInteger perTick, BigInteger remainder, boolean fallback, boolean payRemainder,
+                  @NotNull String reason) {
+            this.product = product;
+            this.ownDuration = ownDuration;
+            this.batchDuration = batchDuration;
+            this.total = total;
+            this.perTick = perTick;
+            this.remainder = remainder;
+            this.fallback = fallback;
+            this.payRemainder = payRemainder;
+            this.reason = reason;
+        }
+
+        /** 本批还剩多少 tick 没发（{@code <=0} = 批次已走完；提前结束也可能 &gt;0 —— 那时余额不发）。 */
+        public long ticksLeft(long paidTicks) {
+            return batchDuration - paidTicks;
+        }
+
+        /** 一行读数（日志/自检共用同一份字段名）。 */
+        @NotNull
+        public String line(long paidTicks) {
+            return line(paidTicks, null);
+        }
+
+        /**
+         * 一行读数（日志/自检共用同一份字段名）。
+         *
+         * @param paidTicks 本批已走过的 tick 数
+         * @param paidTotal 本批已入池合计（{@code null} = 调用方没记 ⇒ 打印 {@code ?}；绝不拿计划量冒充）
+         */
+        @NotNull
+        public String line(long paidTicks, @Nullable BigInteger paidTotal) {
+            return TAG + " 归墟零点能摊平"
+                    + " 自身时长=" + ownDuration
+                    + " 本批时长=" + batchDuration
+                    + " 每tick=" + perTick
+                    + " 余数=" + remainder
+                    + " 本批计划总量=" + total
+                    + " 本批已发=" + paidTicks + "/" + (batchDuration < 0L ? "?" : String.valueOf(batchDuration))
+                    + " tick"
+                    + " 本批已发合计=" + (paidTotal == null ? "?" : paidTotal)
+                    + (fallback ? " 口径=退回旧口径（" + reason + "）" : " 口径=摊平+最后一tick补余数");
+        }
+    }
+
+    /**
+     * 生成"按批摊平"的计划（生产入口，恒 {@link #AMORTIZE_NORMAL}）。
+     *
+     * @param product       本次读数 {@link Readings#product}（{@code ≤0} ⇒ 返回一个全零计划）
+     * @param ownDuration   发电配方定义实例的 duration
+     * @param batchDuration 本批真实倒计时时长（{@code RecipeLogic#duration}）
+     */
+    @NotNull
+    public static Amortized amortize(@Nullable BigInteger product, int ownDuration, long batchDuration) {
+        return amortizeForTest(product, ownDuration, batchDuration, AMORTIZE_NORMAL);
+    }
+
+    /**
+     * {@link #amortize} 的<b>可注入版</b>（只给自检的负对照用）。
+     *
+     * @param mode {@link #AMORTIZE_NORMAL}（生产）/ {@link #AMORTIZE_LEGACY} / {@link #AMORTIZE_NO_REMAINDER}
+     */
+    @NotNull
+    public static Amortized amortizeForTest(@Nullable BigInteger product, int ownDuration, long batchDuration,
+                                            int mode) {
+        final BigInteger p = product == null || product.signum() <= 0 ? BigInteger.ZERO : product;
+        if (p.signum() <= 0) {
+            return new Amortized(BigInteger.ZERO, ownDuration, batchDuration, BigInteger.ZERO,
+                    BigInteger.ZERO, BigInteger.ZERO, true, false, "乘积<=0（不产，也不误产）");
+        }
+        if (ownDuration <= 0) {
+            // 拿不到自身时长 ⇒ 不许假装摊平（会把总量算错）⇒ 退回改动前行为
+            return new Amortized(p, ownDuration, batchDuration, p.multiply(BigInteger.valueOf(Math.max(1L, batchDuration))),
+                    p, BigInteger.ZERO, true, false, "自身时长<=0（读不到配方定义时长）");
+        }
+        if (batchDuration <= 0L) {
+            return new Amortized(p, ownDuration, batchDuration, p.multiply(BigInteger.valueOf(ownDuration)),
+                    p, BigInteger.ZERO, true, false, "本批时长<=0（读不到 RecipeLogic#duration）");
+        }
+        if (mode == AMORTIZE_LEGACY) {
+            // 负对照：不摊平（= 改动前"每 tick 乘积"）⇒ 长批次会按 tick 数多发
+            return new Amortized(p, ownDuration, batchDuration,
+                    p.multiply(BigInteger.valueOf(batchDuration)), p, BigInteger.ZERO, true, false,
+                    "负对照：摊平被关掉（每 tick 都发乘积）");
+        }
+        final BigInteger total = p.multiply(BigInteger.valueOf(ownDuration));
+        final BigInteger perTick = total.divide(BigInteger.valueOf(batchDuration));
+        final BigInteger remainder = total.subtract(perTick.multiply(BigInteger.valueOf(batchDuration)));
+        if (mode == AMORTIZE_NO_REMAINDER) {
+            // 负对照：余数不补 ⇒ 每批总量少 remainder
+            return new Amortized(p, ownDuration, batchDuration, total, perTick, remainder, false, false,
+                    "");
+        }
+        return new Amortized(p, ownDuration, batchDuration, total, perTick, remainder, false, true, "");
+    }
+
+    /**
+     * <b>本批第 {@code tickIndex} 个 tick（0-based）该发多少</b> —— 唯一的分发算式。
+     *
+     * <ul>
+     *   <li>{@code fallback} ⇒ 每 tick 都发 {@code product}（= 改动前行为，不看下标）；</li>
+     *   <li>{@code tickIndex ∈ [0, 本批时长)} ⇒ 中间 tick 发 {@code perTick}，
+     *       <b>最后一 tick</b> 发 {@code perTick + 余数}（{@code payRemainder == false} 时不补）；</li>
+     *   <li>{@code tickIndex >= 本批时长} 或 {@code < 0} ⇒ <b>0</b>
+     *       （🔴 批次提前结束时余额就是不发 —— 这是"不许有第二条补发路径"的落点）。</li>
+     * </ul>
+     */
+    @NotNull
+    public static BigInteger payoutAt(@Nullable Amortized a, long tickIndex) {
+        if (a == null || a.product.signum() <= 0) {
+            return BigInteger.ZERO;
+        }
+        if (a.fallback) {
+            return a.product;
+        }
+        if (tickIndex < 0L || tickIndex >= a.batchDuration) {
+            return BigInteger.ZERO;                     // ← 超出批次：不发（不补发余额）
+        }
+        if (a.payRemainder && tickIndex == a.batchDuration - 1L) {
+            return a.perTick.add(a.remainder);          // ← 唯一的补余数点
+        }
+        return a.perTick;
+    }
+
+    /** 这个下标是不是"本批最后一 tick"（日志用它决定要不要再打一行收尾读数）。 */
+    public static boolean isLastTick(@Nullable Amortized a, long tickIndex) {
+        return a != null && !a.fallback && a.batchDuration > 0L && tickIndex == a.batchDuration - 1L;
+    }
+
+    /**
+     * <b>判据 ⑦ 的同一份代码</b>（正向 = 生产口径，负向 = 两种错口径），形制照抄
+     * {@link #otherTypeProblems(boolean)} / {@link #splitAllocationProblems(int)}。
+     *
+     * <p>三条不变量逐条断言；{@code mode != AMORTIZE_NORMAL} 时<b>必须</b>报红 ⇒ 证明这三条有分辨力。
+     */
+    @NotNull
+    public static List<String> amortizationProblems(int mode) {
+        return amortizationProblems(mode, false);
+    }
+
+    /**
+     * <b>判据 ⑦ 打在【生产入口】上</b>（{@link #amortize} 本体，不注入任何 mode）。
+     *
+     * <p>🔴 为什么必须另有一条：{@link #amortizationProblems(int)} 是"把 mode 当参数传进去"的自检，
+     * 它对 {@link #amortize} 本体<b>没有分辨力</b> —— 把生产入口改回旧口径，它照样全绿（本轮实踩：
+     * 负对照跑了仍报"全绿"）。所以生产口径必须有一条断言<b>直接</b>打在生产入口上。
+     */
+    @NotNull
+    public static List<String> productionAmortizationProblems() {
+        return amortizationProblems(AMORTIZE_NORMAL, true);
+    }
+
+    /**
+     * @param mode             注入口径（只对 {@code useProductionEntry == false} 有效）
+     * @param useProductionEntry {@code true} = 走生产入口 {@link #amortize}（不看 {@code mode}）
+     */
+    @NotNull
+    private static List<String> amortizationProblems(int mode, boolean useProductionEntry) {
+        final List<String> problems = new ArrayList<>();
+        // 用已知样本：2^53（= 2^47 × 64），自身时长 20（现场那条配方就是 20）
+        final BigInteger p = BigInteger.valueOf(9_007_199_254_740_992L);
+        final int own = 20;
+        final String tag = useProductionEntry ? "生产入口" : ("mode=" + mode);
+
+        // ── 不变量 1：本批时长 == 自身时长 ⇒ 每 tick 与改动前逐位相同 ──
+        final Amortized same = pick(p, own, own, mode, useProductionEntry);
+        check(problems, !same.fallback, "⑦ 本批时长==自身时长 时不许退回旧口径（" + tag + "）");
+        check(problems, same.perTick.equals(p),
+                "⑦【不变量1】本批时长==自身时长 ⇒ 每tick 必须逐位 = 乘积 " + p + "，实际 " + same.perTick
+                        + "（" + tag + "）");
+        check(problems, same.remainder.signum() == 0, "⑦【不变量1】等长批次的余数必须为 0，实际 " + same.remainder);
+        boolean everyTickSame = true;
+        BigInteger sumSame = BigInteger.ZERO;
+        for (long i = 0L; i < own; i++) {
+            final BigInteger paid = payoutAt(same, i);
+            if (!paid.equals(p)) {
+                everyTickSame = false;
+            }
+            sumSame = sumSame.add(paid);
+        }
+        check(problems, everyTickSame, "⑦【不变量1】等长批次里每个 tick 都必须发 " + p + "（逐位相同）");
+        check(problems, sumSame.equals(p.multiply(BigInteger.valueOf(own))),
+                "⑦【不变量1】等长批次总量必须 = 乘积×自身时长，实际 " + sumSame);
+
+        // ── 不变量 2：混合轮（3199）每批总量 == 纯发电轮（20）每批总量 ──
+        final long longBatch = 3199L;
+        final Amortized mixed = pick(p, own, longBatch, mode, useProductionEntry);
+        BigInteger sumMixed = BigInteger.ZERO;
+        for (long i = 0L; i < longBatch; i++) {
+            sumMixed = sumMixed.add(payoutAt(mixed, i));
+        }
+        check(problems, sumMixed.equals(sumSame),
+                "⑦【不变量2】长批次(" + longBatch + ")每批总量必须 = 纯发电轮每批总量 " + sumSame
+                        + "，实际 " + sumMixed + "（" + tag + "）");
+        check(problems, mixed.remainder.compareTo(BigInteger.valueOf(longBatch)) < 0,
+                "⑦【不变量2】余数必须 &lt; 本批时长（否则说明摊平算式写错了），实际 " + mixed.remainder);
+
+        // ── 不变量 3：批次提前结束 ⇒ 余额不发；超出批次一律 0 ──
+        final BigInteger atEnd = payoutAt(mixed, longBatch);
+        check(problems, atEnd.signum() == 0,
+                "⑦【不变量3】超出本批时长的 tick 必须发 0（不许补发余额），实际 " + atEnd);
+        check(problems, payoutAt(mixed, longBatch + 5L).signum() == 0,
+                "⑦【不变量3】批次结束后再调也不许发（不许第二条补发路径）");
+        BigInteger sumHalf = BigInteger.ZERO;
+        for (long i = 0L; i < longBatch / 2L; i++) {
+            sumHalf = sumHalf.add(payoutAt(mixed, i));
+        }
+        check(problems, sumHalf.compareTo(sumMixed) < 0,
+                "⑦【不变量3】只跑一半时必须【少发】（= 余额不发），实际 " + sumHalf + " vs 完整 " + sumMixed);
+
+        // ── 边界：时长拿不到 ⇒ 退回旧口径（每 tick 乘积），且必须带原因 ──
+        final Amortized badOwn = pick(p, 0, longBatch, mode, useProductionEntry);
+        check(problems, badOwn.fallback && !badOwn.reason.isEmpty(),
+                "⑦ 边界：自身时长<=0 必须退回旧口径并给原因");
+        check(problems, payoutAt(badOwn, 0L).equals(p),
+                "⑦ 边界：退回旧口径时每 tick 必须发乘积");
+        final Amortized badBatch = pick(p, own, 0L, mode, useProductionEntry);
+        check(problems, badBatch.fallback && !badBatch.reason.isEmpty(),
+                "⑦ 边界：本批时长<=0 必须退回旧口径并给原因");
+        return problems;
+    }
+
+    /**
+     * 取一个摊平计划：生产入口（{@link #amortize}）或注入口径（{@link #amortizeForTest}）。
+     * <p>🔴 判据 ⑦ 必须能在<b>两条入口</b>上跑：只打注入口径 = 对生产代码没有分辨力。
+     */
+    @NotNull
+    private static Amortized pick(@NotNull BigInteger product, int ownDuration, long batchDuration,
+                                  int mode, boolean useProductionEntry) {
+        return useProductionEntry
+                ? amortize(product, ownDuration, batchDuration)
+                : amortizeForTest(product, ownDuration, batchDuration, mode);
     }
 
     // ═════════════════════════════ ③ 判据自检（离线可跑） ═════════════════════════════
@@ -327,6 +951,9 @@ public final class GuixuZeroPointGeneration {
      *   ④A 负对照：把类型判断去掉 ⇒ ③ 必须【红】（不允许仍然全绿）
      *   ④B 并行开关：把 FORCE_SINGLE_PARALLEL 打开 ⇒ 产量回到 2^47（一行开关的语义证明）
      *   ⑤ BigInteger 判据：p = Long.MAX_VALUE 也【不许】出现负数 / 9.22e18 饱和值（含 long 路饱和的负对照）
+     *   ⑥ 分料顺序：混合轮里发电配方必须被提到第 1 位（含负对照：改回旧写法 ⇒ 必红）
+     *   ⑦ 结算口径：每批总量 = 乘积×自身时长，摊到本批时长、余数最后一 tick 补
+     *      （含三条不变量 + 两条负对照：摊平关掉 ⇒ 长批次 159.95 倍必红；余数不补 ⇒ 总量少必红）
      * </pre>
      */
     @NotNull
@@ -446,6 +1073,127 @@ public final class GuixuZeroPointGeneration {
         check(problems, effectiveParallel(0L, 1L) == 1L, "②' 读不到并行时必须取 1（不许产出 0）");
         check(problems, effectiveParallel(-5L, 1L) == 1L, "②' 并行 &lt; 0 时必须取 1");
         log.append("②' 并行：64/1 ⇒ 64 ；128/2 ⇒ 64 ；0/1 ⇒ 1 ✔\n");
+
+        // ── ⑧ 分料结算：**耗电先分料 + 发电按「ΣA 与剩余预算」封顶**（预算优先，用户 2026-11-22 拍板）──
+        final List<String> splitProblemsProd = productionSplitProblems();
+        problems.addAll(splitProblemsProd);
+        final List<String> splitProblems = splitAllocationProblems(ALLOC_TWO_PASS);
+        problems.addAll(splitProblems);
+        // 顺序（耗电在前、发电在后）：现场自然顺序就是它 ⇒ 分区是恒等序（不改老路径）
+        final int[] liveRanks = {allocationRank(OTHER_TYPE_MATTER_DECOMPRESSION, 2_147_483_648L),
+                allocationRank(TYPE_ID, RECIPE_BASE_EUT)};
+        final int[] liveOrder = allocationOrderConsumerFirst(liveRanks);
+        check(problems, isIdentityOrder(liveOrder),
+                "⑧ 现场自然顺序（耗电在前）下分区必须是恒等序（老路径一个字节都不改），实际 "
+                        + java.util.Arrays.toString(liveOrder));
+        check(problems, isIdentityOrder(allocationOrderConsumerFirst(new int[]{0})), "⑧ 只有发电一条候选 ⇒ 恒等序");
+        check(problems, isIdentityOrder(allocationOrderConsumerFirst(new int[]{1, 1})), "⑧ 全是耗电 ⇒ 恒等序");
+        check(problems, isIdentityOrder(allocationOrderConsumerFirst(new int[0])), "⑧ 空候选 ⇒ 恒等序");
+        // 发电被排在前面时（= 上一版的形态）必须真的换了向 —— 这是负对照 A 的前提
+        final int[] genFirstOrder = allocationOrderConsumerFirstForTest(liveRanks, false);
+        check(problems, !isIdentityOrder(genFirstOrder),
+                "⑧ 负对照前提不成立：\"发电在前\"的分区竟然与自然顺序相同 ⇒ 负对照 A 复现不了那个坏现象");
+        // 三条场景读数（用户点名的三组数）
+        final long[] scAmple = simulatedSplit(4096L, 1024L, Long.MAX_VALUE, ALLOC_TWO_PASS);
+        final long[] scSqueezed = simulatedSplit(1024L, Long.MAX_VALUE, Long.MAX_VALUE, ALLOC_TWO_PASS);
+        final long[] scHalf = simulatedSplit(1024L, 600L, Long.MAX_VALUE, ALLOC_TWO_PASS);
+        final long[] scPure = simulatedSplit(1024L, 0L, 1024L, ALLOC_TWO_PASS);
+        log.append("⑧ 分料结算（生产口径；cap = clamp(min(ΣA, max(0,预算−ΣA)),1,ΣA)）：\n")
+                .append("         A 预算充足 预算=4096 ΣA=1024 ⇒ 发电=").append(scAmple[1])
+                .append("（应 =1024 =ΣA；总份数=").append(scAmple[0] + scAmple[1]).append(" ≤ 预算）")
+                .append(scAmple[1] == 1024L ? " ✔" : " ✗").append("\n")
+                .append("         B 预算吃干 预算=1024 ΣA=1024 ⇒ 发电=").append(scSqueezed[1])
+                .append("（应 =1；总份数=").append(scSqueezed[0] + scSqueezed[1])
+                .append(" = 预算+").append(scSqueezed[0] + scSqueezed[1] - 1024L).append("）")
+                .append(scSqueezed[1] == 1L && scSqueezed[0] + scSqueezed[1] <= 1025L ? " ✔" : " ✗").append("\n")
+                .append("         C 半个预算 预算=1024 ΣA=600 ⇒ 发电=").append(scHalf[1])
+                .append("（应 =min(600,424)=424；总份数=").append(scHalf[0] + scHalf[1]).append(" = 预算）")
+                .append(scHalf[1] == 424L && scHalf[0] + scHalf[1] <= 1024L ? " ✔" : " ✗").append("\n")
+                .append("         D 纯发电轮 ΣA=0 ⇒ 发电=").append(scPure[1]).append("（应 =1024，不设限）")
+                .append(scPure[1] == 1024L ? " ✔" : " ✗").append("\n");
+        // ⑧ 负对照 A：上一版（发电先分料、不设限）⇒ 必须复现「只跑发电」
+        final List<String> redGenFirst = splitAllocationProblems(ALLOC_GEN_FIRST);
+        check(problems, !redGenFirst.isEmpty(),
+                "⑧ 负对照A失败：上一版口径（发电先分料）竟然全绿 ⇒ 检查器没有分辨力");
+        // ⑧ 负对照 B：改动前（耗电先、不设限）⇒ 必须复现「发电不跑」
+        final List<String> redNoCap = splitAllocationProblems(ALLOC_CONSUMER_FIRST_NO_CAP);
+        check(problems, !redNoCap.isEmpty(),
+                "⑧ 负对照B失败：改动前口径（耗电先、不设限）竟然全绿 ⇒ 检查器没有分辨力");
+        // ⑧ 负对照 C：上限 = ΣA（不看预算，= 拍板前旧写法）⇒ 必须报「总份数超预算 2×」
+        final List<String> redOldCap = splitAllocationProblems(ALLOC_TWO_PASS_OLD_CAP);
+        check(problems, !redOldCap.isEmpty(),
+                "⑧ 负对照C失败：把上限改回「不看预算的 ΣA」后仍然全绿 ⇒ 检查器没有分辨力");
+        // ⑧ 负对照 D：去掉「至少 1 份」地板 ⇒ 预算吃干时发电=0（复现只跑耗电）
+        final List<String> redNoFloor = splitAllocationProblems(ALLOC_TWO_PASS_NO_FLOOR);
+        check(problems, !redNoFloor.isEmpty(),
+                "⑧ 负对照D失败：去掉「至少 1 份」地板后仍然全绿 ⇒ 检查器没有分辨力");
+        final long[] oldCapSplit = simulatedSplit(1024L, Long.MAX_VALUE, Long.MAX_VALUE,
+                ALLOC_TWO_PASS_OLD_CAP);
+        final long[] noFloorSplit = simulatedSplit(1024L, Long.MAX_VALUE, Long.MAX_VALUE,
+                ALLOC_TWO_PASS_NO_FLOOR);
+        log.append("⑧ 负对照：C 旧写法(上限=ΣA、不看预算) ⇒ 总份数=")
+                .append(oldCapSplit[0] + oldCapSplit[1]).append(" = 预算的 ")
+                .append(String.format(java.util.Locale.ROOT, "%.2f",
+                        (double) (oldCapSplit[0] + oldCapSplit[1]) / 1024.0D))
+                .append(" 倍 ⇒ 报红 ").append(redOldCap.size()).append(" 条（复现「超预算 2×」）\n")
+                .append("           D 去掉「至少 1 份」 ⇒ 预算吃干时 发电份数=").append(noFloorSplit[1])
+                .append(" ⇒ 报红 ").append(redNoFloor.size()).append(" 条（复现「只跑耗电」）\n")
+                .append("           A/B 另两条负对照报红条数=").append(redGenFirst.size()).append("/")
+                .append(redNoCap.size()).append("\n");
+        // ── ⑦ 结算口径（每批总量守恒的摊平）：三条硬不变量 + 两条负对照 ──
+        // 🔴 先打【生产入口】（amortize 本体）：把生产代码改回旧口径必须在这里报红
+        //    （本轮实踩：只打注入口径的自检对生产代码没有分辨力 —— 生产入口改回旧口径它照样全绿）
+        final List<String> amProduction = productionAmortizationProblems();
+        problems.addAll(amProduction);
+        final List<String> amProblems = amortizationProblems(AMORTIZE_NORMAL);
+        problems.addAll(amProblems);
+        final BigInteger amP = BigInteger.valueOf(9_007_199_254_740_992L);   // 2^53（= 2^47 × 64）
+        final Amortized amSame = amortize(amP, 20, 20);
+        final Amortized amMixed = amortize(amP, 20, 3199);
+        BigInteger amPureTotal = BigInteger.ZERO;
+        for (long i = 0L; i < 20L; i++) {
+            amPureTotal = amPureTotal.add(payoutAt(amSame, i));
+        }
+        BigInteger amMixedTotal = BigInteger.ZERO;
+        for (long i = 0L; i < 3199L; i++) {
+            amMixedTotal = amMixedTotal.add(payoutAt(amMixed, i));
+        }
+        // 不变量 1（直接打在生产入口上）：等长批次每 tick 逐位 = 乘积、余数 0
+        final boolean inv1 = amSame.perTick.equals(amP) && amSame.remainder.signum() == 0;
+        check(problems, inv1, "⑦【不变量1·生产入口】本批时长==自身时长 ⇒ 每tick 必须逐位 = 乘积 " + amP
+                + " 且余数 0，实际 每tick=" + amSame.perTick + " 余数=" + amSame.remainder);
+        // 不变量 2（直接打在生产入口上）：长批次总量 == 纯发电轮总量
+        final boolean inv2 = amMixedTotal.equals(amPureTotal);
+        check(problems, inv2, "⑦【不变量2·生产入口】长批次每批总量必须 = 纯发电轮每批总量 " + amPureTotal
+                + "，实际 " + amMixedTotal + "（差 " + amMixedTotal.subtract(amPureTotal) + "）");
+        // 不变量 3（直接打在生产入口上）：超出批次一律 0
+        final boolean inv3 = payoutAt(amMixed, 3199L).signum() == 0 && payoutAt(amMixed, 5000L).signum() == 0;
+        check(problems, inv3, "⑦【不变量3·生产入口】超出/结束后的 tick 必须发 0（不许第二条补发路径）");
+        final BigInteger amLegacyMixed = amP.multiply(BigInteger.valueOf(3199L));
+        log.append("⑦ 摊平（每批总量守恒）：乘积=").append(amP).append("\n")
+                .append("         纯发电轮（本批 20 = 自身 20）：每tick=").append(amSame.perTick)
+                .append(" 余数=").append(amSame.remainder).append(" 总量=").append(amPureTotal)
+                .append("（与改动前逐位相同 ").append(inv1 ? "✔" : "✗").append("）\n")
+                .append("         混合轮（本批 3199、自身 20）：每tick=").append(amMixed.perTick)
+                .append(" 余数=").append(amMixed.remainder).append(" 总量=").append(amMixedTotal)
+                .append("（= 纯发电轮总量 ").append(inv2 ? "✔" : "✗ 差 " + amMixedTotal.subtract(amPureTotal))
+                .append("；超出批次一率 0 ").append(inv3 ? "✔" : "✗").append("）\n")
+                .append("         旧口径同批总量=").append(amLegacyMixed)
+                .append("（= 混合轮总量的 ").append(String.format(java.util.Locale.ROOT, "%.2f",
+                        (double) 3199L / 20.0D)).append(" 倍 ⇒ 这就是本轮的负对照 A）\n");
+        // ⑦ 负对照 A：把摊平关掉（旧口径）⇒ 混合轮总量必须变成 159.95 倍 ⇒ 判据必须报红
+        final List<String> redLegacy = amortizationProblems(AMORTIZE_LEGACY);
+        check(problems, !redLegacy.isEmpty(),
+                "⑦ 负对照A失败：把摊平关掉后 ⑦ 仍然全绿 ⇒ 检查器没有分辨力");
+        // ⑦ 负对照 B：摊平但余数不补 ⇒ 每批总量少 余数 ⇒ 判据必须报红
+        final List<String> redNoRemainder = amortizationProblems(AMORTIZE_NO_REMAINDER);
+        check(problems, !redNoRemainder.isEmpty(),
+                "⑦ 负对照B失败：把\"最后一 tick 补余数\"去掉后 ⑦ 仍然全绿 ⇒ 检查器没有分辨力");
+        log.append("⑦ 负对照：摊平关掉 ⇒ ⑦ 报红 ").append(redLegacy.size())
+                .append(" 条（第一条：").append(redLegacy.isEmpty() ? "空=坏了" : redLegacy.get(0)).append("）\n")
+                .append("           余数不补 ⇒ ⑦ 报红 ").append(redNoRemainder.size())
+                .append(" 条（第一条：").append(redNoRemainder.isEmpty() ? "空=坏了" : redNoRemainder.get(0))
+                .append("）✔\n");
 
         // ── ④B 并行开关（一行开关的语义；门控 0 时系数 1 ⇒ 与 p=1 那一档逐位相同） ──
         final long forced = effectiveParallel(64L, 1L, true);
@@ -591,6 +1339,9 @@ public final class GuixuZeroPointGeneration {
      *   java -cp &lt;temp/zpg-out;libs/*;...&gt; …               --holder        ⇒ 追加字段 holder 的两条对照
      *                                                       --break-type-gate ⇒ 负对照：去掉类型判断后 ③ 的原文
      *                                                       --break-holder    ⇒ 负对照：从 holder 拿掉 uuid 后的原文
+     *                                                       --break-order     ⇒ 负对照：分料顺序改回旧写法后 ⑥ 的原文
+     *                                                       --break-amortize-legacy     ⇒ 负对照：摊平关掉（每 tick 乘积）后 ⑦ 的原文
+     *                                                       --break-amortize-remainder  ⇒ 负对照：余数不补后 ⑦ 的原文
      * </pre>
      */
     public static void main(String[] args) {
@@ -598,6 +1349,9 @@ public final class GuixuZeroPointGeneration {
         final boolean breakTypeGate = has(args, "--break-type-gate");
         final boolean breakHolder = has(args, "--break-holder");
         final boolean breakCoefficient = has(args, "--break-coefficient");
+        final boolean breakOrder = has(args, "--break-order");
+        final boolean breakAmortizeLegacy = has(args, "--break-amortize-legacy");
+        final boolean breakAmortizeRemainder = has(args, "--break-amortize-remainder");
 
         System.out.println("==== " + TAG + " 归墟·零点能发电 离线自检 ====");
         System.out.println("类型 = " + TYPE_ID + "；并行开关 FORCE_SINGLE_PARALLEL = " + FORCE_SINGLE_PARALLEL
@@ -622,6 +1376,69 @@ public final class GuixuZeroPointGeneration {
             System.out.println("③ 判据①的判定结果（期望：3/3 报红）= " + red + "/3");
             System.out.println();
             System.out.println("==== 判定：负对照生效（把系数改成 1.0 ⇒ 判据①报红）====");
+            return;
+        }
+
+        if (breakAmortizeLegacy || breakAmortizeRemainder) {
+            // 🔴 负对照（判据 ⑦ 的两条）：摊平关掉 / 余数不补 ⇒ 判据 ⑦ 必须报红。红的那几行【原文】打出来。
+            final int mode = breakAmortizeLegacy ? AMORTIZE_LEGACY : AMORTIZE_NO_REMAINDER;
+            final String name = breakAmortizeLegacy
+                    ? "A：把摊平关掉（每 tick 都发乘积 = 改动前口径）"
+                    : "B：摊平但余数不补（去掉最后一 tick 补齐）";
+            System.out.println("---- 负对照 E" + name + " ----");
+            final List<String> red = amortizationProblems(mode);
+            System.out.println("⑦ 的判定结果（期望：非空，即报红）= "
+                    + (red.isEmpty() ? "空（= 检查器坏了）" : red.size() + " 条"));
+            for (final String line : red) {
+                System.out.println("   ✗ " + line);
+            }
+            final BigInteger p = BigInteger.valueOf(9_007_199_254_740_992L);
+            final Amortized a = amortizeForTest(p, 20, 3199L, mode);
+            BigInteger sum = BigInteger.ZERO;
+            for (long i = 0L; i < 3199L; i++) {
+                sum = sum.add(payoutAt(a, i));
+            }
+            System.out.println("   mode=" + mode + " 每tick=" + a.perTick + " 余数=" + a.remainder
+                    + " 计划总量=" + a.total + " 实发合计(3199 tick)=" + sum
+                    + " ；纯发电轮总量=" + p.multiply(BigInteger.valueOf(20L)));
+            System.out.println();
+            System.out.println("==== 判定：负对照生效（⑦ 变红）====");
+            return;
+        }
+
+        if (breakOrder) {
+            // 🔴 负对照（判据 ⑧）：四种错口径必须各自复现一个坏现象（只跑发电 / 发电不跑 / 超预算2× / 吃干时0）。
+            System.out.println("---- 负对照 D：分料结算的四种错口径（判据 ⑧）----");
+            final String[] names = {
+                    "A 上一版（发电先分料、不设限）⇒ 只跑发电",
+                    "B 改动前（耗电先、不设限）⇒ 发电不跑",
+                    "C 上限=ΣA（不看预算，拍板前写法）⇒ 超预算 2×",
+                    "D 去掉「至少 1 份」地板 ⇒ 预算吃干时发电=0"};
+            final int[] modes = {ALLOC_GEN_FIRST, ALLOC_CONSUMER_FIRST_NO_CAP,
+                    ALLOC_TWO_PASS_OLD_CAP, ALLOC_TWO_PASS_NO_FLOOR};
+            for (int i = 0; i < modes.length; i++) {
+                final List<String> red = splitAllocationProblems(modes[i]);
+                final long[] split = simulatedSplit(1024L, Long.MAX_VALUE, Long.MAX_VALUE, modes[i]);
+                System.out.println("   " + names[i] + " ⇒ 耗电=" + split[0] + " 发电=" + split[1]
+                        + " 总份数=" + (split[0] + split[1])
+                        + " ；⑧ 报红 " + (red.isEmpty() ? "0 条（= 检查器坏了）" : red.size() + " 条"));
+                for (final String line : red) {
+                    System.out.println("      ✗ " + line);
+                }
+            }
+            final List<String> redProd = productionSplitProblems();
+            System.out.println("   生产入口（应 0 条）= " + (redProd.isEmpty() ? "0 条 ✔" : redProd.size() + " 条 ✗"));
+            System.out.println("   生产口径三档 cap：4096/ΣA1024 ⇒ " + generationParallelCap(1024L, 4096L)
+                    + " ；1024/ΣA1024 ⇒ " + generationParallelCap(1024L, 1024L)
+                    + " ；1024/ΣA600 ⇒ " + generationParallelCap(600L, 1024L)
+                    + " ；纯轮 ΣA0 ⇒ " + generationParallelCap(0L, 1024L));
+            final int[] ranks = {allocationRank(OTHER_TYPE_MATTER_DECOMPRESSION, 2_147_483_648L),
+                    allocationRank(TYPE_ID, RECIPE_BASE_EUT)};
+            System.out.println("   生产口径 顺序 = " + java.util.Arrays.toString(allocationOrderConsumerFirst(ranks))
+                    + " ；上一版 顺序 = " + java.util.Arrays.toString(
+                    allocationOrderConsumerFirstForTest(ranks, false)));
+            System.out.println();
+            System.out.println("==== 判定：负对照生效（⑧ 变红）====");
             return;
         }
 

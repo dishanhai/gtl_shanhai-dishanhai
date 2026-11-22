@@ -1,82 +1,84 @@
 package com.shanhai.common.saveedit.audit;
 
-import com.shanhai.common.saveedit.ShanhaiEntityEdit;
 import com.shanhai.common.saveedit.ShanhaiSaveEditFlow;
 import com.shanhai.common.saveedit.ShanhaiSaveEditStorage;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 /**
- * 「双份登记」的两个修改动作 —— <b>都必须在停服窗口里跑</b>。
+ * 「存档体检」的<b>唯一动作</b>：把白名单之外的一条异常（文件 / 目录）<b>删掉</b>。
  *
- * <h2>一、两个动作（缺一不可）</h2>
- * <ol>
- *   <li>{@link #dropEntity} —— 把<b>区块文件里</b>那条实体删掉。复用既有的实体删除能力
- *       （{@link ShanhaiEntityEdit#applyToFile}）：它只摘目标实体、同区块其它条目<b>连对象都不换</b>，
- *       其它区块的压缩字节原样搬，写完还会自己回读校验一次。</li>
- *   <li>{@link #dropSidecar} —— 把<b>纯文本旁挂文件</b>里"含该 UUID（或匹配坐标）的整行"删掉。
- *       做法是<b>字节级删行</b>（按 {@code \n} 切区间，只去掉命中的那几段），
- *       于是行尾风格（{@code \r\n} / {@code \n}）、其余行的每一个字节、末尾有没有换行都原样保留。</li>
- * </ol>
- * 🔴 只做一半是不行的：只删区块那份 ⇒ 旁挂文件里的登记还在（再扫一次会以
- * {@link ShanhaiSaveEditAuditScan#KIND_SIDECAR_ONLY} 报回来）；只删旁挂那行 ⇒ 区块里那条实体还在
- * （再扫一次还是 {@link ShanhaiSaveEditAuditScan#KIND_DOUBLE}）。这就是判据里那条负对照。
+ * <h2>一、语义（用户 2026-11-15 拍板）</h2>
+ * 「若不是白名单中的数据，全部列为异常数据，并且允许玩家删除」⇒ 本类只做删除：
+ * <ul>
+ *   <li>文件 ⇒ 直接删；</li>
+ *   <li>目录 ⇒ <b>递归删</b>（先把"将删 N 个文件 / M 字节"算出来，再删）；</li>
+ *   <li>🔴 <b>不弹二次确认</b>（用户明确讨厌自加的确认弹窗）；</li>
+ *   <li>🔴 <b>必须可撤回</b>：删之前把原件<b>复制</b>到
+ *       {@code <游戏根>/config/shanhai/audit-trash/<存档名>-<时间戳>/<相对路径>}
+ *       （<b>不在存档里</b> —— 否则回收副本自己又变成一条异常数据）；</li>
+ *   <li>🔴 <b>只在停服窗口里执行</b>（窗口判据沿用 {@link ShanhaiSaveEditFlow#tryApply(String)}，
+ *       {@link ShanhaiSaveEditWindow} 那条既有路径）；</li>
+ *   <li>🔴 删完<b>回读</b>：目标路径必须真的不存在（否则如实报失败）。</li>
+ * </ul>
  *
- * <h2>二、🔴 窗口语义</h2>
- * {@link #dropEntity} / {@link #dropSidecar} 是<b>带闸</b>的入口：先
- * {@link ShanhaiSaveEditFlow#tryApply(String)}，没放行就<b>一个字节都不写</b>，并回报
- * {@code window_closed=true}、{@code bytes_written=0}。
- * 另外两个 {@code …InWindow} 入口<b>不带闸</b>，留给"已经在窗口里、并且已经由调用方过了闸"的场合
- * （面板页就是这样：它挂在既有的停服流程后面，闸在上一层）。两条路径都调用同一段实现。
+ * <h2>二、🔴 白名单是硬闸门（负对照就靠它）</h2>
+ * {@link ShanhaiSaveEditAuditScan#whitelisted(String)} 为真 ⇒ 一律拒绝（{@code reason=whitelisted}），
+ * 且<b>一个字节都不动</b>。探针的负对照就是"删 {@code region/r.0.0.mca} 必须被拒"。
  *
- * <h2>三、备份与原子写</h2>
- * 一律走 {@link ShanhaiSaveEditStorage}：备份 → 同目录 {@code .tmp} → ATOMIC_MOVE → 回读哈希。
- * 本类自己再加两道回读：① 盘上字节必须等于"我算出来的新字节"；② 新文件里那条 UUID/坐标
- * 必须<b>再也找不到</b>（否则用备份盖回去，并如实报失败）。
- *
- * <h2>四、二进制旁挂只报不改</h2>
- * 命中的旁挂文件是二进制/NBT ⇒ 一个字都不动，回报 {@code reason=sidecar_binary_skipped} 并写明
- * "需你手动处理"，同时把命中的 tagPath 列出来，方便人去文件里定位那一处。
+ * <h2>三、两个入口（窗口语义各一半）</h2>
+ * <ul>
+ *   <li>{@link #drop}：<b>带闸</b>（命令/探针自己开窗）—— 先 {@code tryApply}，没放行就零字节拒绝；</li>
+ *   <li>{@link #dropInWindow} / {@link #applyRequestInWindow}：<b>不带闸</b>（面板页挂在既有停服流程后面，
+ *       闸在上一层已经过）。</li>
+ * </ul>
  */
 public final class ShanhaiSaveEditAuditFix {
 
-    /** 动作名（进日志，形如 {@code audit_drop_entity}）。 */
-    public static final String KIND_DROP_ENTITY = "drop-entity";
-    public static final String KIND_DROP_SIDECAR = "drop-sidecar";
+    /** 动作名（进日志，形如 {@code audit_drop}）。 */
+    public static final String KIND_DROP = "drop";
 
-    /** 窗口没开 ⇒ 拒绝（零字节写入）。 */
+    /** 唯一动作的名字（{@link Request} 里也用它，判据/日志直接对字面串）。 */
+    public static final String ACTION_DROP = KIND_DROP;
+
+    /** 窗口没开 ⇒ 拒绝（零字节变更）。 */
     public static final String REASON_WINDOW_CLOSED = "window_closed";
-    /** 命中的旁挂是二进制/NBT ⇒ 只报不改。 */
-    public static final String REASON_BINARY = "sidecar_binary_skipped";
-    /** 找不到要删的东西。 */
+    /** 白名单内的原版布局 ⇒ 拒绝。 */
+    public static final String REASON_WHITELISTED = "whitelisted";
+    /** 存档里已经没有这条了。 */
     public static final String REASON_NOT_FOUND = "not_found";
+    /** 相对路径不合法（绝对路径 / 含 {@code ..} / 空）。 */
+    public static final String REASON_BAD_PATH = "bad_path";
+    /** 符号链接 / 特殊文件 ⇒ 不动它。 */
+    public static final String REASON_SPECIAL = "special_file";
+    /** 复制到回收目录失败 ⇒ 一个字节都没删。 */
+    public static final String REASON_COPY_FAILED = "trash_copy_failed";
+    /** 删到一半失败 ⇒ 已用回收副本盖回去。 */
+    public static final String REASON_DELETE_FAILED = "delete_failed";
 
     /** 闸门上记的"谁在请求"（进 {@link ShanhaiSaveEditFlow.ApplyAttempt}）。 */
-    public static final String WHO_ENTITY = "audit:drop-entity";
-    public static final String WHO_SIDECAR = "audit:drop-sidecar";
+    public static final String WHO = "audit:drop";
+
+    /** 一次最多数多少个子文件（防"异常目录里躺着几十万个小文件"）。 */
+    public static final int MAX_PLAN_ENTRIES = 200_000;
+
+    /** 回收目录的段：{@code <游戏根>/config/shanhai/audit-trash}。 */
+    public static final String TRASH_DIR = "audit-trash";
 
     private ShanhaiSaveEditAuditFix() {}
 
     // ================================================================== 结果
 
-    /** 一次修改的读数（每一位都是观察出来的）。 */
+    /** 一次删除的读数（每一位都是观察出来的）。 */
     public record Result(String kind, boolean ok, boolean windowClosed, String reason, String message,
-                         List<String> files, List<String> notes, int removedEntities, int removedLines,
-                         long bytesWritten, String shaBefore, String shaAfter,
-                         List<ShanhaiSaveEditStorage.WriteResult> writes) {
-
-        public ShanhaiSaveEditStorage.WriteResult write() {
-            return this.writes == null || this.writes.isEmpty() ? null : this.writes.get(0);
-        }
+                         List<String> files, List<String> notes, int plannedFiles, long plannedBytes,
+                         int deletedFiles, long deletedBytes, Path trashDir) {
 
         /** 一行机器可判的读数（命令/探针/日志都打它）。 */
         public String logLine() {
@@ -85,11 +87,11 @@ public final class ShanhaiSaveEditAuditFix {
                     + " window_closed=" + this.windowClosed
                     + " reason=" + (this.reason == null || this.reason.isEmpty() ? "-" : this.reason)
                     + " files=" + this.files
-                    + " removed_entities=" + this.removedEntities
-                    + " removed_lines=" + this.removedLines
-                    + " bytes_written=" + this.bytesWritten
-                    + " sha_before=" + shortSha(this.shaBefore)
-                    + " sha_after=" + shortSha(this.shaAfter)
+                    + " planned_files=" + this.plannedFiles
+                    + " planned_bytes=" + this.plannedBytes
+                    + " deleted_files=" + this.deletedFiles
+                    + " deleted_bytes=" + this.deletedBytes
+                    + " trash=" + (this.trashDir == null ? "-" : this.trashDir)
                     + (this.notes == null || this.notes.isEmpty() ? "" : " notes=" + this.notes);
         }
 
@@ -99,324 +101,241 @@ public final class ShanhaiSaveEditAuditFix {
         }
     }
 
-    // ================================================================== 动作一：删区块里那份（带闸）
+    // ================================================================== 请求（面板暂存 / 命令参数共用）
 
     /**
-     * 删掉区块文件里的那条实体（<b>必须先在窗口里</b>）。
+     * 一条删除请求：<b>相对存档根</b>的路径（{@code /} 分隔）。
      *
-     * @param flow 当前运行；{@code null} 也视为"窗口没开"（照样拒绝、零字节写入）
+     * <p>旧版本这里是 {@code (动作, UUID)} 两件套（删区块里那份 / 删旁挂那行）；
+     * 双份登记判据删掉之后只剩"删这一条"，所以请求也只剩一个字段。
      */
-    public static Result dropEntity(Path worldDir, String uuid, ShanhaiSaveEditFlow flow,
-                                    Path backupRoot, String stamp) {
-        final String canonical = ShanhaiSaveEditAuditUuid.canonical(uuid);
-        if (canonical == null) {
-            return fail(KIND_DROP_ENTITY, "bad_uuid", "UUID 写法不认识：" + uuid);
-        }
-        final ShanhaiSaveEditFlow.ApplyAttempt attempt = flow == null ? null : flow.tryApply(WHO_ENTITY);
-        if (attempt == null || !attempt.permitted()) {
-            return new Result(KIND_DROP_ENTITY, false, true, REASON_WINDOW_CLOSED,
-                    "窗口没开（" + (flow == null ? "当前没有 saveedit 运行"
-                            : "现在在 " + flow.phase() + " 阶段") + "）⇒ 一个字节都没写，已拒绝",
-                    List.of(), List.of("闸门未放行：" + (attempt == null ? "no_flow" : attempt.toString())),
-                    0, 0, 0L, null, null, List.of());
-        }
-        final Result r = dropEntityInWindow(worldDir, canonical, backupRoot, stamp);
-        if (r.ok()) {
-            flow.markApplied();
-        }
-        return r;
-    }
+    public record Request(String rel) {
 
-    /**
-     * 同 {@link #dropEntity}，但<b>不带闸</b>：调用方必须已经过
-     * {@link ShanhaiSaveEditFlow#tryApply(String)}（面板页下一轮就是这样接）。
-     */
-    public static Result dropEntityInWindow(Path worldDir, String uuid, Path backupRoot, String stamp) {
-        final String canonical = ShanhaiSaveEditAuditUuid.canonical(uuid);
-        if (canonical == null) {
-            return fail(KIND_DROP_ENTITY, "bad_uuid", "UUID 写法不认识：" + uuid);
-        }
-        if (worldDir == null || !Files.isDirectory(worldDir)) {
-            return fail(KIND_DROP_ENTITY, "no_world", "存档目录不存在：" + worldDir);
-        }
-        final ShanhaiSaveEditAuditScan.EntityRef target = ShanhaiSaveEditAuditScan.findEntity(worldDir, canonical);
-        if (target == null) {
-            return fail(KIND_DROP_ENTITY, "entity_not_found",
-                    "区块文件里找不到这条实体（可能已经删过了）：uuid=" + canonical);
-        }
-        final Path file = worldDir.resolve(target.file());
-        if (!Files.isRegularFile(file)) {
-            return fail(KIND_DROP_ENTITY, "entity_file_missing", "实体文件不在了：" + target.file());
-        }
-        final int[] rz = regionCoordsOf(target.file());
-        final String shaBefore = ShanhaiSaveEditStorage.sha256(file);
-        final ShanhaiEntityEdit.Result r;
-        try {
-            r = ShanhaiEntityEdit.applyToFile(file, new ShanhaiEntityEdit.Request(target.dim(), rz[0], rz[1],
-                    null, canonical), backupRoot, stamp);
-        } catch (Throwable t) {
-            return fail(KIND_DROP_ENTITY, "exception", "删实体时抛了（未写盘）：" + t);
-        }
-        final String shaAfter = ShanhaiSaveEditStorage.sha256(file);
-        final List<String> notes = new ArrayList<>();
-        if (r.notes() != null) {
-            notes.addAll(r.notes());
-        }
-        notes.add("目标：" + target.line());
-        final List<ShanhaiSaveEditStorage.WriteResult> writes = r.write() == null ? List.of() : List.of(r.write());
-        if (!r.ok()) {
-            return new Result(KIND_DROP_ENTITY, false, false, "drop_failed", "没删成：" + r.error(),
-                    List.of(target.file()), notes, 0, 0, 0L, shaBefore, shaAfter, writes);
-        }
-        return new Result(KIND_DROP_ENTITY, true, false, "", "§f已删区块文件里那条实体（" + target.file()
-                + "）；同区块其它实体逐字段等价、其它区块压缩字节 SHA 不变",
-                List.of(target.file()), notes, 1, 0, sizeOf(file), shaBefore, shaAfter, writes);
-    }
-
-    // ================================================================== 动作二：删旁挂那行（带闸）
-
-    /**
-     * 把文本旁挂文件里"含该 UUID（或匹配坐标）的整行"删掉（<b>必须先在窗口里</b>）。
-     *
-     * <p>二进制/NBT 旁挂<b>只报不改</b>（回报 {@code sidecar_binary_skipped} + "需你手动处理"）。
-     */
-    public static Result dropSidecar(Path worldDir, String uuid, ShanhaiSaveEditFlow flow,
-                                     Path backupRoot, String stamp) {
-        final String canonical = ShanhaiSaveEditAuditUuid.canonical(uuid);
-        if (canonical == null) {
-            return fail(KIND_DROP_SIDECAR, "bad_uuid", "UUID 写法不认识：" + uuid);
-        }
-        final ShanhaiSaveEditFlow.ApplyAttempt attempt = flow == null ? null : flow.tryApply(WHO_SIDECAR);
-        if (attempt == null || !attempt.permitted()) {
-            return new Result(KIND_DROP_SIDECAR, false, true, REASON_WINDOW_CLOSED,
-                    "窗口没开（" + (flow == null ? "当前没有 saveedit 运行"
-                            : "现在在 " + flow.phase() + " 阶段") + "）⇒ 一个字节都没写，已拒绝",
-                    List.of(), List.of("闸门未放行：" + (attempt == null ? "no_flow" : attempt.toString())),
-                    0, 0, 0L, null, null, List.of());
-        }
-        final Result r = dropSidecarInWindow(worldDir, canonical, backupRoot, stamp);
-        if (r.ok()) {
-            flow.markApplied();
-        }
-        return r;
-    }
-
-    /** 同 {@link #dropSidecar}，但<b>不带闸</b>（调用方已经过 {@code tryApply}）。 */
-    public static Result dropSidecarInWindow(Path worldDir, String uuid, Path backupRoot, String stamp) {
-        final String canonical = ShanhaiSaveEditAuditUuid.canonical(uuid);
-        if (canonical == null) {
-            return fail(KIND_DROP_SIDECAR, "bad_uuid", "UUID 写法不认识：" + uuid);
-        }
-        if (worldDir == null || !Files.isDirectory(worldDir)) {
-            return fail(KIND_DROP_SIDECAR, "no_world", "存档目录不存在：" + worldDir);
-        }
-        // 区块里可能已经删掉了 ⇒ 坐标拿不到就只按 UUID 匹配
-        final ShanhaiSaveEditAuditScan.EntityRef target = ShanhaiSaveEditAuditScan.findEntity(worldDir, canonical);
-        final double[] pos = target == null ? null : target.pos();
-        final List<ShanhaiSaveEditAuditScan.SidecarHit> hits =
-                ShanhaiSaveEditAuditScan.sidecarHits(worldDir, canonical, pos);
-        if (hits.isEmpty()) {
-            return fail(KIND_DROP_SIDECAR, "no_match",
-                    "旁挂文件里没有含这个 UUID/坐标的整行（uuid=" + canonical + "）");
-        }
-        final List<ShanhaiSaveEditAuditScan.SidecarHit> text = new ArrayList<>();
-        final List<ShanhaiSaveEditAuditScan.SidecarHit> binary = new ArrayList<>();
-        for (ShanhaiSaveEditAuditScan.SidecarHit h : hits) {
-            (h.binary() ? binary : text).add(h);
-        }
-        if (text.isEmpty()) {
-            return new Result(KIND_DROP_SIDECAR, false, false, REASON_BINARY,
-                    "命中的旁挂文件是二进制/NBT（只报不改）⇒ 需你手动处理：" + describe(binary),
-                    rels(binary), List.of(REASON_BINARY + "=" + binary.size() + "（需你手动处理）"),
-                    0, 0, 0L, null, null, List.of());
-        }
-
-        final List<String> files = new ArrayList<>();
-        final List<String> notes = new ArrayList<>();
-        final List<ShanhaiSaveEditStorage.WriteResult> writes = new ArrayList<>();
-        int removedLines = 0;
-        long bytes = 0L;
-        String shaBefore = null;
-        String shaAfter = null;
-        for (ShanhaiSaveEditAuditScan.SidecarHit h : text) {
-            final byte[] before;
-            try {
-                before = Files.readAllBytes(h.file());
-            } catch (Throwable t) {
-                notes.add("读不了，跳过：" + h.rel() + "（" + t + "）");
-                continue;
-            }
-            final String fileShaBefore = ShanhaiSaveEditStorage.sha256(before);
-            final byte[] after = removeLines(before, h.lines());
-            if (after == null || after.length == before.length) {
-                notes.add("没有可删的行：" + h.rel());
-                continue;
-            }
-            final ShanhaiSaveEditStorage.WriteResult w =
-                    ShanhaiSaveEditStorage.writeAtomic(h.file(), after, backupRoot, stamp);
-            if (w == null || !w.ok()) {
-                return new Result(KIND_DROP_SIDECAR, false, false, "write_failed",
-                        "写旁挂文件失败（" + h.rel() + "）：" + (w == null ? "-" : w.error()),
-                        files, notes, 0, removedLines, bytes, shaBefore, shaAfter, writes);
-            }
-            writes.add(w);
-            // 回读①：盘上的字节必须就是"我算出来的新字节"
-            final byte[] disk;
-            try {
-                disk = Files.readAllBytes(h.file());
-            } catch (Throwable t) {
-                ShanhaiSaveEditStorage.restore(w.backupPath(), h.file());
-                return new Result(KIND_DROP_SIDECAR, false, false, "readback_failed",
-                        "写完读不回来（已用备份盖回）：" + h.rel(), files, notes, 0, removedLines, bytes,
-                        shaBefore, shaAfter, writes);
-            }
-            if (!Arrays.equals(disk, after)) {
-                ShanhaiSaveEditStorage.restore(w.backupPath(), h.file());
-                return new Result(KIND_DROP_SIDECAR, false, false, "readback_mismatch",
-                        "写完回读的字节和预期不一致（已用备份盖回）：" + h.rel(), files, notes, 0,
-                        removedLines, bytes, shaBefore, shaAfter, writes);
-            }
-            // 回读②：这条 UUID / 这组坐标在新文件里必须再也匹配不到
-            final String afterText = ShanhaiSaveEditAuditScan.decodeText(disk);
-            final List<Integer> left = afterText == null ? List.of()
-                    : ShanhaiSaveEditAuditScan.matchingLines(afterText, canonical, pos);
-            if (!left.isEmpty()) {
-                ShanhaiSaveEditStorage.restore(w.backupPath(), h.file());
-                return new Result(KIND_DROP_SIDECAR, false, false, "still_matched",
-                        "删完整行后还剩 " + left.size() + " 行含这个 UUID/坐标（已用备份盖回）：" + h.rel()
-                                + " 行=" + left, files, notes, 0, removedLines, bytes, shaBefore, shaAfter, writes);
-            }
-            // 回读③：行数必须正好少掉删掉的那几行，其余行逐字节不变（= 上面的 Arrays.equals）
-            final int linesBefore = countLines(before);
-            final int linesAfter = countLines(disk);
-            if (linesAfter != linesBefore - h.lines().size()) {
-                ShanhaiSaveEditStorage.restore(w.backupPath(), h.file());
-                return new Result(KIND_DROP_SIDECAR, false, false, "line_count_mismatch",
-                        "行数对不上（" + linesBefore + "→" + linesAfter + "，期望 −" + h.lines().size()
-                                + "）⇒ 已用备份盖回", files, notes, 0, removedLines, bytes, shaBefore,
-                        shaAfter, writes);
-            }
-            if (shaBefore == null) {
-                shaBefore = fileShaBefore;
-                shaAfter = ShanhaiSaveEditStorage.sha256(disk);
-            }
-            removedLines += h.lines().size();
-            bytes += after.length;
-            files.add(h.rel());
-            notes.add(h.rel() + "：删 " + h.lines().size() + " 行（" + linesBefore + "→" + linesAfter
-                    + "，其余行逐字节不变）；备份 " + (w.backupPath() == null ? "-"
-                            : w.backupPath().getFileName().toString())
-                    + " 备份哈希=原文件哈希 " + (w.originalSha256() != null
-                            && w.originalSha256().equals(w.backupSha256())));
-        }
-        if (files.isEmpty()) {
-            return new Result(KIND_DROP_SIDECAR, false, false, "no_effective_change",
-                    "没找到能删的整行（旁挂命中都读不了/超上限）", rels(hits), notes, 0, 0, 0L,
-                    shaBefore, shaAfter, writes);
-        }
-        if (!binary.isEmpty()) {
-            notes.add(REASON_BINARY + "=" + binary.size() + "（二进制旁挂只报不改，需你手动处理）："
-                    + describe(binary));
-        }
-        return new Result(KIND_DROP_SIDECAR, true, false, "", "§f已删旁挂文件里的 " + removedLines
-                + " 行（" + String.join(", ", files) + "）" + (binary.isEmpty() ? ""
-                        : "；另有 " + binary.size() + " 个二进制旁挂需你手动处理"),
-                files, notes, 0, removedLines, bytes, shaBefore, shaAfter, writes);
-    }
-
-    // ================================================================== 字节级删行
-
-    /**
-     * 按行号删掉几行，<b>其余字节一个不动</b>。
-     *
-     * <p>行号口径与 {@link ShanhaiSaveEditAuditScan#matchingLines} 完全一致：按 {@code \n} 切段、
-     * 1 起计数、行尾的 {@code \n} 属于该行（{@code \r\n} 因此天然保留）。
-     *
-     * @return 新字节；没有可删 ⇒ 原样返回（{@code ==} 同一个数组，调用方能按长度判"没变"）
-     */
-    public static byte[] removeLines(byte[] data, Collection<Integer> lineNos) {
-        if (data == null || lineNos == null || lineNos.isEmpty()) {
-            return data;
-        }
-        final Set<Integer> drop = new HashSet<>(lineNos);
-        final ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(32, data.length));
-        int lineNo = 0;
-        int start = 0;
-        for (int i = 0; i <= data.length; i++) {
-            if (i == data.length || data[i] == '\n') {
-                lineNo++;
-                final int end = (i == data.length) ? data.length : i + 1;
-                if (!drop.contains(lineNo) && end > start) {
-                    out.write(data, start, end - start);
-                }
-                start = end;
-            }
-        }
-        return out.toByteArray();
-    }
-
-    /** 与 {@link #removeLines} 同一口径的行数（最后那个可能为空的段也计一行）。 */
-    public static int countLines(byte[] data) {
-        if (data == null || data.length == 0) {
-            return 0;
-        }
-        int n = 0;
-        for (int i = 0; i <= data.length; i++) {
-            if (i == data.length || data[i] == '\n') {
-                n++;
-            }
-        }
-        return n;
-    }
-
-    // ================================================================== 面板请求（第 ⑦ 页）
-
-    /**
-     * 面板页暂存的一次动作（<b>一次只做一件事</b>）。
-     *
-     * <p>为什么做成"动作 + UUID"两条：面板上选中的是一条 finding，而 finding 有两个可选动作；
-     * 把"选哪条"和"动哪一份"分开，暂存与回退都只是换一个请求对象，不会出现"删了一半"。
-     */
-    public record Request(String action, String uuid) {
-
-        /** 删区块文件里那份。 */
-        public static final String DROP_ENTITY = KIND_DROP_ENTITY;
-        /** 删旁挂文本文件里那一行。 */
-        public static final String DROP_SIDECAR = KIND_DROP_SIDECAR;
+        /** 唯一动作名（老调用方还能用 {@code Request.ACTION_DROP} 写日志）。 */
+        public static final String ACTION_DROP = ShanhaiSaveEditAuditFix.ACTION_DROP;
 
         /** 什么都没选。 */
         public boolean isEmpty() {
-            return this.action == null || this.action.isEmpty()
-                    || this.uuid == null || this.uuid.trim().isEmpty();
+            return this.rel == null || this.rel.trim().isEmpty();
         }
 
-        /** 归一后的 UUID（非法 ⇒ {@code null}）。 */
-        public String normalizedUuid() {
-            return ShanhaiSaveEditAuditUuid.canonical(this.uuid);
+        /** 归一路径（{@code \} → {@code /}、去掉首尾 {@code /} 与 {@code .} 段）；非法 ⇒ {@code null}。 */
+        public String normalizedRel() {
+            return normalize(this.rel);
         }
 
         /**
-         * 校验（面板暂存前 + 落盘前各一次）。
+         * 校验（面板暂存前 + 停服前 + 落盘前各一次）。
          *
          * @throws IllegalArgumentException 说清楚哪里不对（面板直接回显）
          */
         public void validate() {
             if (isEmpty()) {
-                throw new IllegalArgumentException("体检页：先在清单里选一条，再点动作");
+                throw new IllegalArgumentException("体检页：先在清单里选一条，再点「删除选中项」");
             }
-            if (!DROP_ENTITY.equals(this.action) && !DROP_SIDECAR.equals(this.action)) {
-                throw new IllegalArgumentException("体检页的动作只有「删区块里那份 / 删旁挂那行」，现在是「"
-                        + this.action + "」");
-            }
-            if (normalizedUuid() == null) {
-                throw new IllegalArgumentException("UUID 写法不认识：" + this.uuid);
+            final String rel = normalizedRel();
+            if (rel == null || rel.isEmpty()) {
+                throw new IllegalArgumentException("相对路径不合法（不许绝对路径 / 不许含 ..）：" + this.rel);
             }
         }
 
         public String line() {
-            return "action=" + this.action + " uuid=" + normalizedUuid();
+            return "action=" + ACTION_DROP + " rel=" + this.rel;
         }
     }
+
+    // ================================================================== 路径
+
+    /**
+     * 归一成"相对存档根的 {@code /} 路径"。
+     *
+     * @return {@code null} = 非法（绝对路径 / 含 {@code ..} / 空）
+     */
+    public static String normalize(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        final String s = raw.trim().replace('\\', '/');
+        if (s.isEmpty()) {
+            return "";
+        }
+        // 绝对路径：盘符（C:/）或前导 /
+        if (s.length() >= 2 && s.charAt(1) == ':') {
+            return null;
+        }
+        if (s.startsWith("/")) {
+            return null;
+        }
+        final List<String> parts = new ArrayList<>();
+        for (String part : s.split("/")) {
+            if (part.isEmpty() || ".".equals(part)) {
+                continue;
+            }
+            if ("..".equals(part)) {
+                return null;
+            }
+            parts.add(part);
+        }
+        return String.join("/", parts);
+    }
+
+    /** 回收目录：{@code <游戏根>/config/shanhai/audit-trash/<存档名>-<时间戳>}。 */
+    public static Path trashRoot(Path worldDir, String stamp) {
+        final Path world = worldDir == null ? Paths.get("world").toAbsolutePath() : worldDir.toAbsolutePath().normalize();
+        Path base = world.getParent();
+        if (base != null && base.getFileName() != null && "saves".equalsIgnoreCase(base.getFileName().toString())) {
+            base = base.getParent();                      // 客户端：<游戏根>/saves/<世界> ⇒ 退两层
+        }
+        if (base == null) {
+            base = Paths.get("").toAbsolutePath();
+        }
+        final String name = world.getFileName() == null ? "world" : world.getFileName().toString();
+        final String when = stamp == null || stamp.isEmpty() ? "nostamp" : stamp;
+        return base.resolve("config").resolve("shanhai").resolve(TRASH_DIR).resolve(name + "-" + when);
+    }
+
+    // ================================================================== 动作（带闸：命令/探针）
+
+    /**
+     * 删掉白名单之外的这条（<b>必须先在停服窗口里</b>）。
+     *
+     * @param flow 当前运行；{@code null} 也视为"窗口没开"（照样拒绝、零字节变更）
+     */
+    public static Result drop(Path worldDir, String relative, ShanhaiSaveEditFlow flow, String stamp) {
+        final ShanhaiSaveEditFlow.ApplyAttempt attempt = flow == null ? null : flow.tryApply(WHO);
+        if (attempt == null || !attempt.permitted()) {
+            return new Result(KIND_DROP, false, true, REASON_WINDOW_CLOSED,
+                    "窗口没开（" + (flow == null ? "当前没有 saveedit 运行"
+                            : "现在在 " + flow.phase() + " 阶段") + "）⇒ 一个字节都没动，已拒绝",
+                    List.of(), List.of("闸门未放行：" + (attempt == null ? "no_flow" : attempt.toString())),
+                    0, 0L, 0, 0L, null);
+        }
+        final Result r = dropInWindow(worldDir, relative, stamp);
+        if (r.ok()) {
+            flow.markApplied();
+        }
+        return r;
+    }
+
+    // ================================================================== 动作（不带闸：面板在窗口里）
+
+    /**
+     * 同 {@link #drop}，但<b>不带闸</b>：调用方必须已经在窗口里（面板页就是这条）。
+     */
+    public static Result dropInWindow(Path worldDir, String relative, String stamp) {
+        final String rel = normalize(relative);
+        if (rel == null || rel.isEmpty()) {
+            return fail(REASON_BAD_PATH, "相对路径不合法（不许绝对路径 / 不许含 ..）：" + relative);
+        }
+        // 🔴 白名单闸门先于一切 IO：判据只看路径，所以"删 region/r.0.0.mca"在任何环境下都必须被拒
+        if (ShanhaiSaveEditAuditScan.whitelisted(rel)) {
+            return fail(REASON_WHITELISTED, "这是白名单里的原版布局，不允许删：" + rel);
+        }
+        if (worldDir == null || !Files.isDirectory(worldDir)) {
+            return fail("no_world", "存档目录不存在：" + worldDir);
+        }
+        final Path root = worldDir.toAbsolutePath().normalize();
+        final Path target = root.resolve(rel).normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            return fail(REASON_BAD_PATH, "解析出来的路径跑到存档外面了：" + target);
+        }
+        final boolean isDir = Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS);
+        final boolean isFile = Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS);
+        if (!isDir && !isFile) {
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                return fail(REASON_SPECIAL, "这条不是普通文件/目录（符号链接或特殊文件），不动它：" + rel);
+            }
+            return fail(REASON_NOT_FOUND, "存档里已经没有这条了（可能已经删过）：" + rel);
+        }
+        final Plan plan;
+        try {
+            plan = isDir ? planTree(root, target, rel) : planFile(target, rel);
+        } catch (Throwable t) {
+            return fail("plan_failed", "数不清这条要删多少东西（未动手）：" + rel + "（" + t + "）");
+        }
+        if (!plan.ok()) {
+            return fail(REASON_SPECIAL, "这条目录里有符号链接/特殊文件（不跟链接、不动手）："
+                    + plan.blocked());
+        }
+        // ── ① 复制到回收目录（复制任何一份失败 ⇒ 一个字节都不删）
+        final Path trash = trashRoot(root, stamp);
+        try {
+            for (String childRel : plan.files()) {
+                final Path src = root.resolve(childRel);
+                final Path dst = trash.resolve(childRel);
+                Files.createDirectories(dst.getParent());
+                Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+                final String a = ShanhaiSaveEditStorage.sha256(src);
+                final String b = ShanhaiSaveEditStorage.sha256(dst);
+                if (a == null || !a.equals(b)) {
+                    return fail(REASON_COPY_FAILED, "回收副本校验不过（未删任何东西）：" + childRel);
+                }
+            }
+            for (String dirRel : plan.dirs()) {
+                Files.createDirectories(trash.resolve(dirRel));   // 空目录也留一份，撤回才完整
+            }
+        } catch (Throwable t) {
+            return fail(REASON_COPY_FAILED, "复制到回收目录失败（未删任何东西）：" + rel + "（" + t + "）");
+        }
+        // ── ② 删（目录先子后父）
+        final List<String> done = new ArrayList<>();
+        int deletedFiles = 0;
+        long deletedBytes = 0L;
+        try {
+            for (String childRel : plan.files()) {
+                final Path child = root.resolve(childRel);
+                final long size = sizeOf(child);
+                Files.deleteIfExists(child);
+                done.add(childRel);
+                deletedFiles++;
+                deletedBytes += size;
+            }
+            for (int i = plan.dirs().size() - 1; i >= 0; i--) {
+                Files.deleteIfExists(root.resolve(plan.dirs().get(i)));
+            }
+        } catch (Throwable t) {
+            final int back = restoreFromTrash(root, trash, done);
+            return new Result(KIND_DROP, false, false, REASON_DELETE_FAILED,
+                    "删到一半失败（已用回收副本盖回 " + back + " 个文件）：" + rel + "（" + t + "）",
+                    List.of(rel), List.of("删前计划：将删 " + plan.files().size() + " 个文件 / " + plan.bytes()
+                            + " 字节；回收目录=" + trash), plan.files().size(), plan.bytes(),
+                    deletedFiles, deletedBytes, trash);
+        }
+        // ── ③ 回读：必须真的没了
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            final int back = restoreFromTrash(root, trash, done);
+            return new Result(KIND_DROP, false, false, "readback_present",
+                    "删完回读还在（已用回收副本盖回 " + back + " 个文件）：" + rel,
+                    List.of(rel), List.of("回收目录=" + trash), plan.files().size(), plan.bytes(),
+                    0, 0L, trash);
+        }
+        final String what = isDir
+                ? "将删 " + plan.files().size() + " 个文件 / " + plan.bytes() + " 字节 ⇒ 递归删完，回读确认已消失"
+                : "1 个文件 / " + plan.bytes() + " 字节 ⇒ 已删，回读确认已消失";
+        return new Result(KIND_DROP, true, false, "",
+                "§f已删「" + rel + "」：" + what + "；删前的原件在回收目录 " + trash + "（可撤回）",
+                List.of(rel), planNotes(plan, trash), plan.files().size(), plan.bytes(),
+                plan.files().size(), plan.bytes(), trash);
+    }
+
+    /**
+     * 面板页把暂存的删除请求交给停服窗口。
+     *
+     * <p>🔴 这里<b>不再</b>过闸 —— 闸在上一层 {@code tryApply} 已经过了。
+     */
+    public static Result applyRequestInWindow(Path worldDir, Request request, String stamp) {
+        if (request == null || request.isEmpty()) {
+            return fail("empty_request", "体检页没有任何动作");
+        }
+        try {
+            request.validate();
+        } catch (IllegalArgumentException iae) {
+            return fail("bad_request", iae.getMessage());
+        }
+        return dropInWindow(worldDir, request.normalizedRel(), stamp);
+    }
+
+    // ================================================================== 预检（停服之前）
 
     /**
      * 🔴 <b>停服之前的预检</b>（能提前知道的失败，绝不等到停完服才发现）。
@@ -425,7 +344,7 @@ public final class ShanhaiSaveEditAuditFix {
      */
     public static String precheck(Path worldDir, Request request) {
         if (request == null || request.isEmpty()) {
-            return null;                            // 这一页不参与
+            return null;                                  // 这一页不参与
         }
         try {
             request.validate();
@@ -435,102 +354,156 @@ public final class ShanhaiSaveEditAuditFix {
         if (worldDir == null || !Files.isDirectory(worldDir)) {
             return "存档目录不存在：" + worldDir;
         }
-        final String uuid = request.normalizedUuid();
-        if (Request.DROP_ENTITY.equals(request.action())) {
-            final ShanhaiSaveEditAuditScan.EntityRef target =
-                    ShanhaiSaveEditAuditScan.findEntity(worldDir, uuid);
-            return target == null ? "区块文件里找不到这条实体（可能已经删过了）：uuid=" + uuid : null;
+        final String rel = request.normalizedRel();
+        if (ShanhaiSaveEditAuditScan.whitelisted(rel)) {
+            return REASON_WHITELISTED + "：这是白名单里的原版布局，不允许删（" + rel + "）";
         }
-        final ShanhaiSaveEditAuditScan.EntityRef target =
-                ShanhaiSaveEditAuditScan.findEntity(worldDir, uuid);
-        final List<ShanhaiSaveEditAuditScan.SidecarHit> hits = ShanhaiSaveEditAuditScan.sidecarHits(
-                worldDir, uuid, target == null ? null : target.pos());
-        if (hits.isEmpty()) {
-            return "旁挂文件里没有含这个 UUID/坐标的整行：uuid=" + uuid;
+        final Path target = worldDir.toAbsolutePath().normalize().resolve(rel).normalize();
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            return "存档里已经没有这条了（可能已经删过）：" + rel;
         }
-        boolean anyText = false;
-        for (ShanhaiSaveEditAuditScan.SidecarHit h : hits) {
-            anyText |= !h.binary();
+        if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+            return REASON_SPECIAL + "：不是普通文件/目录（符号链接或特殊文件），不动它：" + rel;
         }
-        return anyText ? null : REASON_BINARY + "（命中的旁挂是二进制/NBT，只报不改 ⇒ 需你手动处理）";
+        return null;
+    }
+
+    // ================================================================== 计划（数清"将删 N 个文件 / M 字节"）
+
+    /** 一条删除的计划：要删哪些文件（相对存档根）、哪些目录（子先父后）、共多少字节。 */
+    public record Plan(List<String> files, List<String> dirs, long bytes, String blocked) {
+
+        boolean ok() {
+            return this.blocked == null;
+        }
+    }
+
+    private static Plan planFile(Path target, String rel) {
+        long size = 0L;
+        try {
+            size = Files.size(target);
+        } catch (Throwable ignored) {
+            // 读不到大小就不计（不是失败条件）
+        }
+        return new Plan(List.of(rel), List.of(), size, null);
+    }
+
+    private static Plan planTree(Path root, Path target, String rel) {
+        final List<String> files = new ArrayList<>();
+        final List<String> dirs = new ArrayList<>();
+        final long[] bytes = new long[] {0L};
+        final String[] blocked = new String[] {null};
+        collect(root, target, rel, files, dirs, bytes, blocked, 0);
+        return new Plan(List.copyOf(files), List.copyOf(dirs), bytes[0], blocked[0]);
     }
 
     /**
-     * 面板页把暂存的请求交给停服窗口：按 {@code action} 分派到两个 {@code …InWindow}
-     * （🔴 那里<b>不再</b>过闸 —— 闸在上一层 {@code tryApply} 已经过了）。
+     * 递归数一条目录的子树。
+     *
+     * <p>🔴 撞到<b>符号链接 / 特殊文件</b>就整条拒绝（{@code blocked} 记下是谁）：
+     * 复制副本时 Windows 会顺着链接把目标内容拷进来（可能很大、也可能在存档外），
+     * 而删掉链接本身又救不回来 —— 这种"说不清"的东西一律不动。
      */
-    public static Result applyRequestInWindow(Path worldDir, Request request, Path backupRoot, String stamp) {
-        if (request == null || request.isEmpty()) {
-            return fail("audit", "empty_request", "体检页没有任何动作");
+    private static void collect(Path root, Path dir, String rel, List<String> files, List<String> dirs,
+                                long[] bytes, String[] blocked, int depth) {
+        if (blocked[0] != null || depth > 64 || files.size() >= MAX_PLAN_ENTRIES) {
+            return;
         }
-        try {
-            request.validate();
-        } catch (IllegalArgumentException iae) {
-            return fail("audit", "bad_request", iae.getMessage());
-        }
-        if (Request.DROP_ENTITY.equals(request.action())) {
-            return dropEntityInWindow(worldDir, request.normalizedUuid(), backupRoot, stamp);
-        }
-        return dropSidecarInWindow(worldDir, request.normalizedUuid(), backupRoot, stamp);
-    }
-
-    // ================================================================== 小工具
-
-    /** {@code entities/r.<x>.<z>.mca} → {@code [x,z]}（读不出来 ⇒ {@code [0,0]}）。 */
-    private static int[] regionCoordsOf(String relativeFile) {
-        final String rel = relativeFile == null ? "" : relativeFile.replace('\\', '/');
-        final int slash = rel.lastIndexOf('/');
-        final String n = slash >= 0 ? rel.substring(slash + 1) : rel;
-        try {
-            if (n.startsWith("r.") && n.toLowerCase(Locale.ROOT).endsWith(".mca")) {
-                final String[] parts = n.substring(2, n.length() - 4).split("\\.");
-                if (parts.length == 2) {
-                    return new int[] {Integer.parseInt(parts[0]), Integer.parseInt(parts[1])};
-                }
+        dirs.add(rel);
+        for (Path c : list(dir)) {
+            final String name = c.getFileName() == null ? "" : c.getFileName().toString();
+            final String childRel = rel + "/" + name;
+            if (Files.isSymbolicLink(c)) {
+                blocked[0] = childRel;
+                return;
             }
-        } catch (Throwable ignored) {
-            // 落到 [0,0]
+            if (Files.isDirectory(c, LinkOption.NOFOLLOW_LINKS)) {
+                collect(root, c, childRel, files, dirs, bytes, blocked, depth + 1);
+                continue;
+            }
+            if (!Files.isRegularFile(c, LinkOption.NOFOLLOW_LINKS)) {
+                blocked[0] = childRel;
+                return;
+            }
+            files.add(childRel);
+            try {
+                bytes[0] += Files.size(c);
+            } catch (Throwable ignored) {
+                // 读不到大小就不计（不是失败条件）
+            }
         }
-        return new int[] {0, 0};
     }
 
-    private static long sizeOf(Path file) {
+    private static long sizeOf(Path p) {
         try {
-            return Files.size(file);
+            return Files.size(p);
         } catch (Throwable t) {
             return 0L;
         }
     }
 
-    private static List<String> rels(List<ShanhaiSaveEditAuditScan.SidecarHit> hits) {
-        final List<String> out = new ArrayList<>();
-        for (ShanhaiSaveEditAuditScan.SidecarHit h : hits) {
-            out.add(h.rel());
+    private static List<Path> list(Path dir) {
+        final List<Path> out = new ArrayList<>();
+        try (java.nio.file.DirectoryStream<Path> ds = Files.newDirectoryStream(dir)) {
+            for (Path p : ds) {
+                out.add(p);
+            }
+        } catch (Throwable t) {
+            return out;
         }
+        out.sort(java.util.Comparator.comparing(p -> p.getFileName() == null ? "" : p.getFileName().toString()));
         return out;
     }
 
-    /** 二进制命中的位置（{@code file#tagPath}），供人手动处理。 */
-    private static String describe(List<ShanhaiSaveEditAuditScan.SidecarHit> binary) {
-        final List<String> parts = new ArrayList<>();
-        for (ShanhaiSaveEditAuditScan.SidecarHit h : binary) {
-            parts.add(h.rel() + "#" + String.join("|", h.tagPaths()));
+    /** 用回收副本把已经删掉的那几个盖回去（尽力而为；返回成功条数）。 */
+    private static int restoreFromTrash(Path root, Path trash, List<String> done) {
+        int n = 0;
+        if (done == null) {
+            return 0;
         }
-        return String.join(", ", parts);
+        for (String rel : done) {
+            final Path src = trash.resolve(rel);
+            final Path dst = root.resolve(rel);
+            if (!Files.isRegularFile(src)) {
+                continue;
+            }
+            try {
+                if (dst.getParent() != null) {
+                    Files.createDirectories(dst.getParent());
+                }
+                Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
+                n++;
+            } catch (Throwable ignored) {
+                // 盖不回去也不改结论（结论已经是失败）
+            }
+        }
+        return n;
     }
 
-    private static String shortSha(String sha) {
-        return sha == null ? "-" : (sha.length() <= 12 ? sha : sha.substring(0, 12));
+    private static List<String> planNotes(Plan plan, Path trash) {
+        final List<String> notes = new ArrayList<>();
+        notes.add("回收目录=" + trash);
+        notes.add("计划/已完成：" + plan.files().size() + " 个文件 / " + plan.bytes() + " 字节");
+        int shown = 0;
+        for (String rel : plan.files()) {
+            if (shown >= 20) {
+                notes.add("…还有 " + (plan.files().size() - shown) + " 个文件（见回收目录）");
+                break;
+            }
+            notes.add("  - " + rel);
+            shown++;
+        }
+        return notes;
     }
 
-    /** 失败（不写盘）；{@code bytesWritten=0}。 */
-    public static Result fail(String kind, String reason, String message) {
-        return new Result(kind, false, false, reason, message, List.of(), List.of(), 0, 0, 0L,
-                null, null, List.of());
+    /** 失败（不动盘）的通用构造。 */
+    public static Result fail(String reason, String message) {
+        return new Result(KIND_DROP, false, false, reason, message, List.of(), List.of(), 0, 0L, 0, 0L, null);
     }
 
     @Override
     public String toString() {
-        return "ShanhaiSaveEditAuditFix[]";
+        return "ShanhaiSaveEditAuditFix[action=" + ACTION_DROP + "]";
     }
 }

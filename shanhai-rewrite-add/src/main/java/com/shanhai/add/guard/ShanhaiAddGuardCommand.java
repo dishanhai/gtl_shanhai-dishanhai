@@ -169,12 +169,10 @@ public final class ShanhaiAddGuardCommand {
             source.sendFailure(Component.literal(denied));
             return 0;
         }
-        if (!ShanhaiGuardSwitches.attackSide()) {
-            source.sendFailure(Component.literal(
-                    "§c攻击端开关是关的（/shanhai guard attack on 打开后才能抹除）"));
-            ShanhaiMod.LOGGER.info("{} add_purge_rejected reason=attack_side_off", PREFIX);
-            return 0;
-        }
+        // 🔴 2026-11-20（任务 1）：命令路径【不判 attackSide】（用户原话：「我打那个抹除的指令都不生效了」）。
+        //    attack_side 只关自动反制两样：① 受击后自动抹除攻击者 ② 持续压制（enroll ＋ 每 5 tick 复查）。
+        //    这里只把它的当前值当背景读数打进日志，绝不拿它拦命令。
+        final boolean attackSideNow = ShanhaiGuardSwitches.attackSide();
         final MinecraftServer server = source.getServer();
         final ServerPlayer owner = source.getPlayer();
         if (server == null) {
@@ -188,6 +186,10 @@ public final class ShanhaiAddGuardCommand {
                 : ShanhaiPurge.purgeAll(server, owner, dryRun);
         // 维度数不在这里再数一遍：purgeAll 自己那行 `purge_start … levels=<n>` 才是权威读数
         // （在这里另数一次就成了"同一件事两个来源"，早晚会不一致）。
+        // 🔴 2026-11-20 任务 1 的判读行：`purge via=command` = "命令路径没被 attackSide 挡住"的证据。
+        ShanhaiMod.LOGGER.info("{} purge via=command count={} dry_run={} legacy={} attack_side={}"
+                        + "（命令路径不判 attackSide）",
+                PREFIX, "legacy".equals(r.mode) ? r.removed : r.killed, dryRun, legacy, attackSideNow);
         ShanhaiMod.LOGGER.info("{} add_purge_via={} dry_run={} swept={} killed={} stuck={}"
                         + " skipped_not_living={} skipped_players={} removed={} unresolved={} channels={}",
                 PREFIX, r.mode, dryRun, r.scanned, r.killed, r.stuck,

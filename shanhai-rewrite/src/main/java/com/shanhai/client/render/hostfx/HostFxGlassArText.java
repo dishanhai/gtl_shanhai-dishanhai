@@ -411,10 +411,23 @@ public final class HostFxGlassArText {
                             final float pulse = clamp01(0.92F + wave + breath);
                             final int color = withAlphaMul(txt.argb, pulse);
                             // ① 荧光晕（4 个方向的低 alpha 副本，垫在底下）
-                            for (float[] off : HALO_OFFSETS) {
-                                font.drawInBatch(txt.text, txt.x + off[0], txt.y + off[1],
-                                        withAlphaMul(color, HALO_ALPHA), false, m, buffers,
-                                        Font.DisplayMode.NORMAL, 0, LIGHT_FULL);
+                            // 🔴 2026-11-18（用户：「像是同一位置画了两份文本」）：
+                            //    **晕只在 face 0 提交一份**，不再随"双面两遍"各画一遍。
+                            //    取证（本文件类注释 §朝向 + 下面 face 循环的 scale）：
+                            //      · 两遍的差别**只有 z 的符号**（diag(s,−s,−s) 与 diag(s,−s,+s)）
+                            //        ⇒ 字形四边形的 z 是 0（{@code BakedGlyph.render} 把 4 个顶点都
+                            //        写在 z=0）⇒ 两遍在**同一个平面、同一像素位置**，
+                            //        唯一的判别手段是【绕序 + 剔除】：开着剔除 = 每侧只看见一份；
+                            //        关着剔除（光影/别人的 mixin）= **两份重合**，晕的 alpha 也从
+                            //        0.18 叠到 ~0.33 ⇒ 密集汉字（「读不到」这种）边缘发糊、像被盖住。
+                            //      · 主字两面都要（去掉任一面，另一侧就一个字都没有）⇒ 只砍晕这一半：
+                            //        晕是装饰，剔除开着时它本来就有一份被剔掉 ⇒ **房间这一侧像素不变**。
+                            if (face == 0) {
+                                for (float[] off : HALO_OFFSETS) {
+                                    font.drawInBatch(txt.text, txt.x + off[0], txt.y + off[1],
+                                            withAlphaMul(color, HALO_ALPHA), false, m, buffers,
+                                            Font.DisplayMode.NORMAL, 0, LIGHT_FULL);
+                                }
                             }
                             // ② 主字
                             font.drawInBatch(txt.text, txt.x, txt.y, color, false, m, buffers,
@@ -1023,12 +1036,15 @@ public final class HostFxGlassArText {
         // 🆕 2026-11-17：这一行同时把【面板上那两格的原样文字】打出来（发电功率 / 能源仓 / 动力仓）
         //   ⇒ 不用盯屏幕也能判"发电功率有没有数、能源仓还是不是 9.22E"。
         logOnce("snapseq", "[SHANHAI-HOSTSNAP] client seq={} 到手：installed={} 总耗能功率={} EU/t"
-                        + " 进度={}% | 产能={} | 能源仓={} | 动力仓={}（原文，与 AR 面板逐字相同）",
+                        + " 进度={}% | 产能={} | 能源仓={} | 动力仓={} | 并行={} 线程={}"
+                        + "（原文，与 AR 面板逐字相同；并行/线程 应与 Jade 抬头那两行一致）",
                 seq, STATE.installedModules, STATE.totalEuUsedPerTick,
                 STATE.hostProgressPct,
                 HostFxGlassArModel.generationPowerText(STATE),
                 HostFxGlassArModel.energyCellText(STATE, false),
-                HostFxGlassArModel.energyCellText(STATE, true));
+                HostFxGlassArModel.energyCellText(STATE, true),
+                HostFxGlassArModel.hostParallelText(STATE.hostParallel),
+                HostFxGlassArModel.hostCountText(STATE.hostThreads));
         // 输出：服务端同步的是**物品注册表数值 id**（LDLib 的 syncdata 没有可用的 String 通道），
         // 客户端按 id 反查自己这一侧同一个注册表 ⇒ 名字。查不到（id<0 / byId 为 null / air）
         // ⇒ 那个条目就是"未知"，不编名字、不写 0。

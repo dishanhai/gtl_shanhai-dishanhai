@@ -11,7 +11,7 @@ import java.security.ProtectionDomain;
  *
  * <h2>它回答的那个问题</h2>
  * 2026-11-08 的现场：我们的账本写着 {@code auto_counter … result=patched}，可是
- * 血量照样被写、栈里 {@code EntityUtil#forceSetHealth:375} 照样在调 {@code setHealth}。
+ * 血量照样被写、栈里 {@code ExampleHelper#doHurt:375} 照样在调 {@code setHealth}。
  * ⇒ 「改成功了」这件事<b>从来没有人验过</b>，而用户的假设是
  * <b>它自己带的 agent 又把类织回去了</b>。
  *

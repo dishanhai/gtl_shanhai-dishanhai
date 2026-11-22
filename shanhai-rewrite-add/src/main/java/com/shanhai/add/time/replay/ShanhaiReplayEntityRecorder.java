@@ -418,14 +418,30 @@ public final class ShanhaiReplayEntityRecorder {
             final int deathTime = living.deathTime;
             final boolean wasDead = before <= 0.0F || deathTime > 0;
             final float want = before > 0.0F ? before : max;
-            living.setHealth(Math.min(want, max));
+            final float target = Math.min(want, max);
+            living.setHealth(target);
             living.deathTime = 0;
             living.hurtTime = 0;
             living.invulnerableTime = 0;
-            ++revived;
+            // 🔴 2026-11-21（口径统一）：「调了 setHealth」不等于「救活成功」—— 记账改成【回读字段真值】。
+            //    判据是"字段 == 目标"（不是"字段变了"）：before > 0 时这次写的是同一个值，变了才算会假红。
+            //    生物不受值层兜底保护（那条线只管玩家），但记账口径仍与守卫同源：先字段，读不到才退化并标出来。
+            final float field = com.shanhai.common.guard.ShanhaiGuardValueLayer.readHealthField(living);
+            final boolean fieldProof = !Float.isNaN(field);
+            final float proofValue = fieldProof ? field : living.getHealth();
+            final boolean landed =
+                    Math.abs(proofValue - target) <= com.shanhai.common.guard.ShanhaiGuardCore.EPS;
+            if (landed) {
+                ++revived;
+            }
             ShanhaiMod.LOGGER.info("[SHANHAI-REPLAY] entity_revive uuid={} health={}/{} deathTime=0 "
-                            + "nbt_health={} nbt_death_time={} was_dead={}",
-                    entity.getUUID(), living.getHealth(), max, before, deathTime, wasDead);
+                            + "nbt_health={} nbt_death_time={} was_dead={}"
+                            + " landed={} proof={} field={} read={} want={}",
+                    entity.getUUID(), proofValue, max, before, deathTime, wasDead,
+                    landed, fieldProof ? "field" : "read_degraded", field, living.getHealth(), target);
+            if (!landed) {
+                warnThrottled("重建出来的生物血量没写到目标值（这一只可能还是假活）", null);
+            }
             return wasDead;
         } catch (Throwable t) {
             warnThrottled("救活重建出来的生物失败（这一只可能假死）", t);

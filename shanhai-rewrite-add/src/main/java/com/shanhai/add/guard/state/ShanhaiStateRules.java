@@ -269,6 +269,148 @@ public final class ShanhaiStateRules {
         return lostCount >= minLost ? Verdict.RESTORE : Verdict.KEEP;
     }
 
+    // ═══════════════════════════════ ③b 🔴 2026-11-20：血 / 死亡态（新纳入第二层） ═══════════════════════════════
+
+    /**
+     * 🔴 <b>血：应当值 vs 实际值</b>（第二层新增的第一项）。
+     *
+     * <h2>这一项以前完全不在第二层里（用户 2026-11-20 点破的架构缺口）</h2>
+     * <pre>
+     *   「我们当时的第二层是不是还没做好」
+     * </pre>
+     * 旧版第二层只管<b>动量 / 位置 / 物品栏</b>；血只靠 {@code ShanhaiGuardEvents.guardOne}
+     * （{@code ServerTickEvent.END}，<b>1 次/tick</b>）补 ⇒ 追不上对手 20 次/秒的写。
+     *
+     * <h2>判据（只看值，不看是谁）</h2>
+     * <pre>
+     *   开关关                                  → KEEP
+     *   应当值不可用（NaN / ±∞ / ≤0）           → KEEP（写不了就不写，绝不硬写出 NaN）
+     *   实际值 是 NaN / ±∞ / ≤0（＝读成死的）   → RESTORE（写回应当值）
+     *   其余                                    → KEEP（正常受伤不归这一项管：事件层已经拦了）
+     * </pre>
+     *
+     * <p>⚠️ 与"补血到满"的区别：本判据<b>只在会读成死的那个带里</b>动手
+     * （{@code <=0 / NaN / ±∞}），不做"血少了就回满"（那是本体 {@code guardOne} 的活）。
+     * 这样第二层不会跟正常回血/吸血/上限变化打架。
+     *
+     * @param enabled  这一项开着吗
+     * @param expected 应当值（{@code getMaxHealth()}，不可用时由调用方换成基线）
+     * @param now      实际读到的血
+     * @return {@link Verdict#RESTORE} ⇒ 调用方把血写回 {@code expected}
+     */
+    public static Verdict healthVerdict(boolean enabled, float expected, float now) {
+        if (!enabled) {
+            return Verdict.KEEP;
+        }
+        if (!healthUsable(expected)) {
+            return Verdict.KEEP;      // 应当值本身不可用 ⇒ 写不了（调用方如实记 via=failed）
+        }
+        if (readsAsDead(now)) {
+            return Verdict.RESTORE;
+        }
+        return Verdict.KEEP;
+    }
+
+    /** 这个血量值能不能当"应当值"写下去（NaN / ±∞ / ≤0 都不行 —— 硬写会把字段写成 NaN，比 0 更糟）。 */
+    public static boolean healthUsable(float value) {
+        return value > 0.0F && !Float.isInfinite(value);   // NaN > 0 == false ⇒ 被这一条兜住
+    }
+
+    /** 这个血量值会不会被原版读成"死"（{@code isDeadOrDying()} 就是 {@code getHealth() <= 0}，javap 已证）。 */
+    public static boolean readsAsDead(float value) {
+        return Float.isNaN(value) || Float.isInfinite(value) || value <= 0.0F;
+    }
+
+    /**
+     * 🔴 <b>死亡态：应当值 vs 实际值</b>（第二层新增的第二项）。
+     *
+     * <h2>白烟的真正机理（2026-11-20 javap 实证，父代理已独立复核）</h2>
+     * <pre>
+     *   net.minecraft.world.entity.LivingEntity#tickDeath  (srg: m_6153_)
+     *      偏移 0..10   ++deathTime
+     *      偏移 14..16  bipush 20 / if_icmplt 53      ← 只有 deathTime &gt;= 20 才往下走
+     *      偏移 36..41  aload_0 / level() / bipush 60  ← 就是这一下：60 = POOF 白烟
+     *      偏移 43      Level#broadcastEntityEvent(this, (byte)60)
+     *      偏移 46..50  remove(RemovalReason.KILLED)
+     *   LivingEntity#tick (srg: m_6075_) 偏移 651 才调 tickDeath（且只在 isDeadOrDying() 时）
+     * </pre>
+     * ⇒ <b>白烟 = 死态计时器攒满 20 tick（1 秒）</b>，不是 {@code die()} 发的。
+     * 所以第二层要做两件事（两件都不需要新 mixin）：
+     * <ol>
+     *   <li>{@code deathTime} <b>每 tick 归零</b>（永不到 20 ⇒ 压根不广播）——
+     *       见 {@link #deathTimerNeedsZero(int, int)}；</li>
+     *   <li>血/死态被写坏时<b>当场掰正</b>（{@link #deathStateVerdict}）⇒
+     *       {@code isDeadOrDying()} 变 false ⇒ {@code tickDeath} 连调都不会被调。</li>
+     * </ol>
+     *
+     * <h2>判据</h2>
+     * <pre>
+     *   开关关                                     → KEEP
+     *   isDeadOrDying()=true                       → RESTORE（含 getHealth() 被加偏移的情形）
+     *   deathTime &gt; 0                              → RESTORE
+     *   同步血量字段真值 &lt;= 0（读得到的话）        → RESTORE
+     *   其余                                       → KEEP
+     * </pre>
+     *
+     * @param enabled      这一项开着吗
+     * @param deadOrDying  {@code isDeadOrDying()}
+     * @param deathTime    {@code deathTime}
+     * @param hurtTime     {@code hurtTime}（只进读数；正常挨打时它 &gt; 0，<b>不</b>单独触发复位）
+     * @param fieldHealth  同步血量字段真值（{@code NaN} = 这一条不参与）
+     * @return {@link Verdict#RESTORE} ⇒ 调用方执行"两条腿补血 ＋ deathTime/hurtTime 归零"
+     */
+    public static Verdict deathStateVerdict(boolean enabled, boolean deadOrDying, int deathTime,
+                                            int hurtTime, float fieldHealth) {
+        if (!enabled) {
+            return Verdict.KEEP;
+        }
+        if (deadOrDying) {
+            return Verdict.RESTORE;
+        }
+        if (deathTime > 0) {
+            return Verdict.RESTORE;
+        }
+        if (!Float.isNaN(fieldHealth) && fieldHealth <= 0.0F) {
+            return Verdict.RESTORE;
+        }
+        return Verdict.KEEP;
+    }
+
+    /**
+     * 🔴 <b>{@code deathTime} 要不要归零</b>（第二层每 tick 对受保护玩家无条件判这一条）。
+     *
+     * <p>与 {@link #deathStateVerdict} 分开的理由：那个是"要不要做完整复位（补血）"，
+     * 这个是"<b>要不要掐掉白烟与处决</b>"。后者必须<b>无条件</b>成立
+     * —— 因为对手可以做到"血是满的、但 {@code deathTime} 被写到 19"，
+     * 下一 tick {@code tickDeath} 一加就够 20 ⇒ 白烟 ＋ {@code remove(KILLED)}。
+     *
+     * <p>归零的代价为零（原版只在 {@code isDeadOrDying()} 时才读它），
+     * 所以这里<b>不设阈值</b>：只要不是 0 就归零。
+     *
+     * @param deathTime 现在的 {@code deathTime}
+     * @param hurtTime  现在的 {@code hurtTime}
+     * @return true = 这一拍要写 {@code deathTime = 0}
+     */
+    public static boolean deathTimerNeedsZero(int deathTime, int hurtTime) {
+        return deathTime != 0;
+    }
+
+    /**
+     * 🔴 <b>「曾经持有」的宽限窗口长度</b>（模块被清空时保护不许立刻失效）。
+     *
+     * <p>用户实测过的破防形态：<b>模块被清空 ⇒ {@code isGuarded} 判 false ⇒ 全套防护一起失效</b>。
+     * 判据本体住在<b>本体</b> {@code ShanhaiGuardEvents#isGuarded}（那边要读登记表与 tick 源），
+     * 本常量只用于两件事：
+     * <ol>
+     *   <li>扩展这边的开机自证把两个数一起打出来 ⇒ <b>漂了看得见</b>；</li>
+     *   <li>文档锚点（改一处必须改两处）。</li>
+     * </ol>
+     *
+     * <p>⚠️ 与本体 {@code ShanhaiGuardEvents#HOLD_GRACE_TICKS} <b>必须同值</b>
+     * （两个模块不能互相 import 常量：add 编译期依赖 body，body 不认识 add）。
+     */
+    public static final int HOLD_GRACE_TICKS = 100;
+
     // ═══════════════════════════════ ④ 豁免（一处口径） ═══════════════════════════════
 
     /**
@@ -276,6 +418,17 @@ public final class ShanhaiStateRules {
      *
      * <p>四类豁免与用户列的一致：<b>旁观 / 载具里 / 鞘翅飞行 / 刚传送（含换维度、复活、刚加入）</b>，
      * 另加<b>死亡中</b>（死亡流程本来就会动量归零、位置交给重生）。
+     *
+     * <h2>🔴 2026-11-20：豁免只豁免这三项，<b>不豁免</b>血 / 死亡态 / 被移除</h2>
+     * 用户 2026-11-20 点破的缺口：「我们当时的第二层是不是还没做好」——
+     * 旧版把 {@code deadOrDying} 当<b>豁免条件</b>，于是"血被写死 / 正在死"这件事
+     * <b>恰好落在所有判据之外</b>（最该管的时候不管）。
+     * ⇒ 现在口径是：
+     * <pre>
+     *   {@link #momentumVerdict} / {@link #positionVerdict} / {@link #inventoryVerdict} → 可能被本方法豁免
+     *   {@link #healthVerdict} / {@link #deathStateVerdict} / {@link #deathTimerNeedsZero} → <b>永不</b>豁免
+     * </pre>
+     * 判据本身没变一个字（只是调用点不再拿 {@code exempt} 去闸那两项）。
      *
      * @param spectator       旁观者
      * @param passenger       在载具/别的实体上（被载具带着走，动量不是他的）

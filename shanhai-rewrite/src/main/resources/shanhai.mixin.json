@@ -17,13 +17,17 @@
     "ShanhaiQuickUploadMultiTypeMixin",
     "ShanhaiSlotTypeGateMixin",
     "ShanhaiPatternEncodingTermMenuAccessor",
-    "ShanhaiCreationUploadChainBMixin"
+    "ShanhaiCreationUploadChainBMixin",
+    "ShanhaiPackFinderRetryMixin"
   ],
   "client": [
     "ShanhaiFontStyleMixin",
     "ShanhaiJeiRecipeOrderMixin",
     "ShanhaiJeiBookmarkMixin",
-    "ShanhaiBlackHoleGameRendererMixin"
+    "ShanhaiBlackHoleGameRendererMixin",
+    "ShanhaiWindowTitleMixin",
+    "ShanhaiLoadingOverlayMixin",
+    "ShanhaiLoaderHeartbeatMixin"
   ],
   "injectors": {
     "defaultRequire": 1

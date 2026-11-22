@@ -644,6 +644,15 @@ public final class ShanhaiCreativeModeTabs {
         if (guixuVisionCore != null) {
             output.accept(guixuVisionCore.asStack());
         }
+        // 🆕 2026-11-21：3 只「静态 Fumo 玩偶」（用户点单，方案 C）。
+        //    🔴 追加在本栏最末 —— 上面每一段的顺序一个字节都没动（那几段有"逐位未变"的冻结约定）。
+        //    🔴 为什么必须在这里显式 accept：本栏的 displayItems 同时是 JEI 物品表的来源
+        //       （见本类开头 ItemStackListFactory 的取证）⇒ 不列进来 = 创造栏和 JEI 都搜不到。
+        //    ⚠️ Registrate 的 defaultCreativeTab 只影响它自己的生成器；本栏走的是显式列举
+        //       （已用 javap 核 ItemBuilder：只有显式 .tab(...) 才会把物品塞进某个栏）⇒ 这里不会重复。
+        output.accept(ShanhaiItems.DISHANHAI_FUMO.asStack());
+        output.accept(ShanhaiItems.BEIBEIPUO_FUMO.asStack());
+        output.accept(ShanhaiItems.DGYJH02804_FUMO.asStack());
     }
 
     /** 最近一次构建本栏用的参数（{@link #refreshContents()} 拿它重建）。 */

@@ -47,7 +47,7 @@ import java.util.Locale;
  *   view.setSize(new Size(widget.getWidth() + border * 2,                     // 宽 = 面板宽 + 8
  *                         widget.getHeight() + button.getHeight() + border)); // 高 = 面板高 + 24 + 4
  * </pre>
- * ⇒ 本面板 {@code 150 × 146} ⇒ 弹出面板 <b>158 × 170</b>（比它替换掉的「角速度」面板 158×144 高 26px）。
+ * ⇒ 本面板 {@code 150 × 168} ⇒ 弹出面板 <b>158 × 192</b>（比它替换掉的「角速度」面板 158×144 高 48px）。
  * 每一行都是逐像素排的（控件越过 {@code PANEL_H} 时 LDLib <b>不报错、只被父容器裁掉</b> ⇒ 静默消失）：
  * <pre>
  *   y=3    标题「渲染参数（°/s · 洞径 ×0.1 格）」               底 11
@@ -58,16 +58,30 @@ import java.util.Locale;
  *   y=105  引力透镜 Button(4,105,72,16)+Label(10,109)           底 121
  *          AR遮罩   Button(74,105,72,16)+Label(80,109)
  *   y=125  特效渲染 Button(4,125,72,16)+Label(10,129)           底 141
- *   → 141 + 5 = 146（{@link #PANEL_H}）
+ *          环显示   Button(74,125,72,16)+Label(80,129)           ← 2026-11-21 新增，只占右半格那个空位
+ *   y=147  星辰场   Button(4,147,72,16)+Label(10,151)            底 163  ← 2026-11-22 新增
+ *          结构闪电 Button(74,147,72,16)+Label(80,151)
+ *   → 163 + 5 = 168（{@link #PANEL_H}）
  * </pre>
- * 输入框内部布局由 {@code NumberInputWidget.buildUI} 算：{@code buttonWidth = clamp(w/5,15,40)}
+ * 🔴 2026-11-21 新增「环显示」三态时<b>面板尺寸一个字都没改</b>：它落在 {@code y=125} 那一行
+ * <b>原本空着的右半格</b>（{@code x=74..146}）。
+ * <p>🔴 2026-11-22 新增「星辰场 / 结构闪电」时<b>只把 {@code PANEL_H} 从 146 抬到 168</b>
+ * （= 行高 16 + 行距 6 = 22px）：{@code PANEL_W=150} 与既有 6 行的坐标<b>一个都没动</b>，
+ * 新行落在 {@code y=147}（按钮底 163，留 5px）。
+ *
+ * <p>输入框内部布局由 {@code NumberInputWidget.buildUI} 算：{@code buttonWidth = clamp(w/5,15,40)}
  * ⇒ 82 宽 ⇒ 两个 ± 各 16、文本框 <b>50 px</b>（三位数「120」= 18 px，够）。
  *
- * <h2>🔴 三个开关为什么是「铺满按钮 + 上面盖一行字」</h2>
+ * <h2>🔴 六个控件为什么都是「铺满按钮 + 上面盖一行字」</h2>
  * LDLib 的 {@code ButtonWidget} <b>没有 setText</b>（javap 全量方法表里没有）
  * ⇒ 沿用本 GUI 已有的写法（同列「并行数」面板的「电力自动」开关、上一轮的黑洞面板）。
  * ⚠️ 盖上去的 {@code LabelWidget} 必须用 <b>Supplier 构造器</b>，否则开关状态在界面上不会变
  * （活的界面放死数据是本工程红线）。
+ * <p>第四件「环显示」是<b>三态</b>（不是开关）：同一套写法 + 点击循环 0→1→2→0，
+ * 标签文字直接读机器字段 {@code hostRingVisualMode}（同样是 Supplier，不是 build 期快照）。
+ * <p>第五、第六件（星辰场 / 结构闪电）是普通开关，🔴 但它们的<b>客户端配置</b>
+ * （{@code [hostfx] starField / structureLightning}）<b>仍然是总闸</b>：配置关 ⇒ 强制不画，
+ * 面板关 ⇒ 这一台机器不画；两者是「与」关系（口径在 {@code HostFxSwitch} 一处）。
  *
  * <h2>为什么这里可以在 common 包里 new {@code GuiTextures}</h2>
  * 本类的方法只会在<b>客户端 GUI 打开时</b>被调用（{@code attachConfigurators} 的那一支），
@@ -80,12 +94,14 @@ public final class HostFxConfigurators {
     private static final int PANEL_W = 150;
 
     /**
-     * 面板高 = <b>146</b>（弹出面板 158×170）。
+     * 面板高 = <b>168</b>（弹出面板 158×192）。
      *
-     * <p>逐行算的，见类注释那张表：最后一个控件（特效渲染按钮）底边 {@code y=141}，留 5 px。
+     * <p>逐行算的，见类注释那张表：最后一个控件（结构闪电按钮）底边 {@code y=163}，留 5 px。
      * <b>再加一行就需要同步加高</b>，否则那一行会被静默裁掉。
+     * <p>2026-11-21 之前是 146（最后一行 141+5）；2026-11-22 加「星辰场 / 结构闪电」那一行时
+     * 一次性 +22（= 行高 16 + 行距 6），既有 6 行坐标一个都没动。
      */
-    private static final int PANEL_H = 146;
+    private static final int PANEL_H = 168;
 
     /** 输入框的 x/宽（与标签列 4..60 不重叠）。 */
     private static final int INPUT_X = 64;
@@ -143,7 +159,10 @@ public final class HostFxConfigurators {
                                     + GuixuVisionCoreMachine.HOST_HOLE_RADIUS_TENTHS_MAX
                                     + "§7（×0.1 格，§f52§7 = §f5.2§7 格）")
                             .withStyle(ChatFormatting.GRAY),
-                    Component.literal("§7三个开关：引力透镜 / AR 遮罩 / 特效渲染")
+                    Component.literal("§7六个开关：引力透镜 / AR 遮罩 / 特效渲染 / 环显示（三态） / 星辰场 / 结构闪电")
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.literal("§8星辰场 / 结构闪电：客户端的 [hostfx] 配置仍是总闸，"
+                                    + "配置关 ⇒ 强制不画，面板关 ⇒ 本机不画")
                             .withStyle(ChatFormatting.GRAY),
                     Component.literal("改的是机器状态，").withStyle(ChatFormatting.GRAY)
                             .append(Component.literal("所有人都会看到").withStyle(ChatFormatting.GOLD))
@@ -249,6 +268,49 @@ public final class HostFxConfigurators {
                             Component.literal("§8只管渲染特效：机壳/贴图的工作态外观不受它影响")));
             group.addWidget(new LabelWidget(10, 129, this::fxLabelText));
 
+            // ── 第 6 行右半格：「环显示」三态（外缘吸积流 ⇄ 粗光柱环）──────────────
+            // 🔴 2026-11-21：这一格原本空着（第 6 行只有左边那个「特效渲染」）
+            //    ⇒ 面板尺寸（PANEL_W/PANEL_H）与所有既有控件坐标一个字节都没改。
+            group.addWidget(new ButtonWidget(74, 125, 72, 16, GuiTextures.BUTTON,
+                    clickData -> host.setHostRingVisualMode(nextRingVisualMode()))
+                    .setHoverTooltips(
+                            Component.literal("§b环显示：两条 / 只吸积流 / 只光柱环"),
+                            Component.literal("§7外缘吸积流：§f51..57 格§7那圈等离子流（外缘、薄盘）"),
+                            Component.literal("§7粗光柱环：§fr=54、管径 6§7 那圈很粗的光柱环"),
+                            Component.literal("§8两条不是「换掉一条」：默认两条都画，这里只选显示哪一条"),
+                            Component.literal("§8· 这是玩家自己的选择，会随存档保存；所有人都会看到"),
+                            Component.literal("§8默认 §f两条")));
+            group.addWidget(new LabelWidget(80, 129, this::ringVisualLabelText));
+
+            // ── 第 7 行（y=147）：星辰场 + 结构闪电（2026-11-22 新增）──────────────────
+            // 🔴 用户原话：「这里我让你加的开关你怎么没加，就是结构闪电还有这个围绕黑洞的粒子的开关」
+            //    ⇒ 这两个以前只能在客户端配置 [hostfx] 里关，现在面板上也能点。
+            //    ⚠️ 配置**仍然是总闸**（配置关 ⇒ 强制不画），面板关 ⇒ 本机不画；两者是「与」关系。
+            //    面板尺寸：只把 PANEL_H 从 146 抬到 168（+22），既有 6 行坐标一个都没动。
+            group.addWidget(new ButtonWidget(4, 147, 72, 16, GuiTextures.BUTTON,
+                    clickData -> host.setHostStarFieldEnabled(!host.isHostStarFieldEnabled()))
+                    .setHoverTooltips(
+                            Component.literal("§b星辰场（围绕黑洞的那些粒子）"),
+                            Component.literal("§7开：围绕黑洞的星尘/星空粒子照画（≤1256 quads）"),
+                            Component.literal("§7关：这一层整段不提交 —— 黑洞、环、光柱都不受影响"),
+                            Component.literal("§8· 客户端配置 [hostfx] starField 仍是总闸："
+                                    + "配置关 ⇒ 强制不画（面板打开也没用）"),
+                            Component.literal("§8· 改的是机器状态，会随存档保存；所有人都会看到"),
+                            Component.literal("§8默认 §f开")));
+            group.addWidget(new LabelWidget(10, 151, this::starFieldLabelText));
+
+            group.addWidget(new ButtonWidget(74, 147, 72, 16, GuiTextures.BUTTON,
+                    clickData -> host.setHostStructureLightningEnabled(!host.isHostStructureLightningEnabled()))
+                    .setHoverTooltips(
+                            Component.literal("§b结构闪电（机器表面跳来跳去的电弧）"),
+                            Component.literal("§7开：结构表面逐格核对后画 ≤12 条电弧（第二次核对 250 ms 一次）"),
+                            Component.literal("§7关：整件不提交 —— 不再做世界核对，也不建结构模型"),
+                            Component.literal("§8· 客户端配置 [hostfx] structureLightning 仍是总闸："
+                                    + "配置关 ⇒ 强制不画（面板打开也没用）"),
+                            Component.literal("§8· 改的是机器状态，会随存档保存；所有人都会看到"),
+                            Component.literal("§8默认 §f开")));
+            group.addWidget(new LabelWidget(80, 151, this::lightningLabelText));
+
             return group;
         }
 
@@ -268,9 +330,47 @@ public final class HostFxConfigurators {
         private String fxLabelText() {
             return host.isHostFxEnabled() ? "§a特效渲染：开" : "§8特效渲染：关";
         }
+
+        /**
+         * 第 6 行右侧标签：<b>环显示三态</b>（与机器字段 {@code hostRingVisualMode} 一一对应）。
+         *
+         * <p>三行字互为一一映射，面板上看到什么就是渲染侧 {@code HostFxSwitch} 会读到什么
+         * （Supplier ⇒ 每帧现读；点击后同一帧就变）。
+         */
+        private String ringVisualLabelText() {
+            switch (host.getHostRingVisualMode()) {
+                case GuixuVisionCoreMachine.HOST_RING_VISUAL_ACCRETION_ONLY:
+                    return "§a环：吸积流";
+                case GuixuVisionCoreMachine.HOST_RING_VISUAL_BEAM_RING_ONLY:
+                    return "§a环：光柱环";
+                default:
+                    return "§a环：两条";
+            }
+        }
+
+        /** 点击一次走一格：0 → 1 → 2 → 0（越界由机器侧 setter 再夹一次）。 */
+        private int nextRingVisualMode() {
+            return (host.getHostRingVisualMode() + 1) % 3;
+        }
+
+        /**
+         * 第 7 行左侧标签：<b>星辰场</b>（与机器字段 {@code hostStarFieldEnabled} 一一对应）。
+         *
+         * <p>⚠️ 它只显示<b>面板值</b>；客户端配置总闸（{@code [hostfx] starField}）关掉时画面照样不画，
+         * 但标签仍显示面板选的是什么 —— 否则玩家会以为"点了没生效"（配置在客户端，机器侧不可见）。
+         * tooltip 与类注释已写明这条「与」关系。
+         */
+        private String starFieldLabelText() {
+            return host.isHostStarFieldEnabled() ? "§a星辰场：开" : "§8星辰场：关";
+        }
+
+        /** 第 7 行右侧标签：<b>结构闪电</b>（与机器字段 {@code hostStructureLightningEnabled} 一一对应）。 */
+        private String lightningLabelText() {
+            return host.isHostStructureLightningEnabled() ? "§a结构闪电：开" : "§8结构闪电：关";
+        }
     }
 
-    /** 供外部（报告/自检）读的尺寸，避免"文档里写 150×146、代码里改了常量却没人知道"。 */
+    /** 供外部（报告/自检）读的尺寸，避免"文档里写 150×168、代码里改了常量却没人知道"。 */
     public static List<String> layoutTable() {
         final List<String> rows = new ArrayList<>(8);
         rows.add("面板 " + PANEL_W + "×" + PANEL_H + "（弹出面板 " + (PANEL_W + 8) + "×" + (PANEL_H + 24) + "）");
@@ -281,6 +381,8 @@ public final class HostFxConfigurators {
         rows.add("洞径 Label(4,86) + IntInput(" + INPUT_X + ",83," + INPUT_W + "," + INPUT_H + ")");
         rows.add("引力透镜 Button(4,105,72,16)+Label(10,109) ／ AR遮罩 Button(74,105,72,16)+Label(80,109)");
         rows.add("特效渲染 Button(4,125,72,16)+Label(10,129)");
+        rows.add("环显示 Button(74,125,72,16)+Label(80,129)（三态：两条 / 吸积流 / 光柱环）");
+        rows.add("星辰场 Button(4,147,72,16)+Label(10,151) ／ 结构闪电 Button(74,147,72,16)+Label(80,151)");
         return rows;
     }
 }

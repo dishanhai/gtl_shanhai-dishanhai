@@ -179,7 +179,10 @@ public final class HostFxDraw {
                 + "（md主柱 " + HostFxSwitch.mdMainBeamCount() + "/" + HostFxGeometry.MD_COUNT
                 + "、小束 " + HostFxSwitch.thinBeamCount() + "、光柱环 "
                 + (HostFxSwitch.beamRingOn() ? "开" : "关") + "、中央两束 "
-                + HostFxGeometry.rgbText(HostFxSwitch.centralBeamRgb()) + "）"
+                + HostFxGeometry.rgbText(HostFxSwitch.centralBeamRgb())
+                // 🔴 2026-11-21：「环显示」三态 + 外缘吸积流这一帧画不画（跳段时两处读数都必须是 0/关）
+                + "、环显示 " + HostFxSwitch.ringVisualModeText()
+                + "（吸积流 " + (HostFxSwitch.accretionOn() ? "画" : "不画") + "）" + "）"
                 + " blackholeFallback=" + HostFxBlackHole.lastState();
     }
 
@@ -377,6 +380,10 @@ public final class HostFxDraw {
         //     「粗光柱环（HostFxBeamRing）算"主光束" ⇒ 降级态一起消失」。
         //     颜色也一起接好了（HostFxSwitch.beamRingGlowRgb() 在降级态返回红色）：
         //     若以后要改成"变红而不是消失"，把 HostFxSwitch.beamRingOn() 翻成 true 即可，这里不用动。
+        //
+        //  🔴 2026-11-21：「环显示」三态也收在【同一个 if】里 —— mode=1（只画外缘吸积流）时
+        //     HostFxSwitch.beamRingOn() 自己返回 false。⚠️ 这里<b>不许</b>再判一次 mode，
+        //     否则两处口径会分叉；drawFallback 那条回落路在同一个 if 里面 ⇒ 一起受控。
         if (HostFxSwitch.beamRingOn()) {
             poseStack.pushPose();
             try {
@@ -396,7 +403,10 @@ public final class HostFxDraw {
                 poseStack.popPose();
             }
         } else {
-            // 降级态：粗光柱环（shader 两遍 + CPU rim 回落）一遍都不提交；计数归零，日志不撒谎。
+            // 降级态 / 「环显示=只吸积流」：粗光柱环（shader 两遍 + CPU rim 回落）一遍都不提交；
+            // 计数归零（HostFxBeamRing.markSkipped 把 passes 与回落自绘都清成 0），日志不撒谎。
+            lastRingPasses = 0;
+            lastFallbackRingQuads = 0;
             HostFxBeamRing.markSkipped();
         }
     }

@@ -270,7 +270,29 @@ jar {
                 //    AE2 是本 mod 的运行期常客、但仍是**可选**目标 ⇒ 一律 required:false + defaultRequire:0，
                 //    注入点写死 require = 0（AE2 不在 / 方法漂了 ⇒ 安静跳过，不打崩启动）。
                 //    ③ 同样不许塞进 shanhai.mixin.json（那份 required:true）。
+                // 🔴 2026-11-22 追加：第七份 shanhai.pump.mixin.json
+                //    只装「节流消息泵」那两条插点（ShanhaiSyncExecutorPumpMixin / ShanhaiGtRecipePumpMixin），
+                //    目标 = Forge 自己的主线程任务执行器 net.minecraftforge.fml.ModWorkManager$SyncExecutor#driveOne()Z
+                //           + GT 的配方索引入口 com.gregtechceu.gtceu.api.recipe.lookup.GTRecipeLookup#addRecipe(GTRecipe)Z
+                //    （后者是 gtceu 的类，本 mod 的硬依赖；两个方法都已 javap 核过：public）。
+                //    ⚠️ 这里说的「第七份」与上面 2026-11-20 那条「刻意不新增第 7 份配置」不冲突：
+                //       那条拒绝的是「为窗口标题那个补丁再开一份」，本条是另一件事（加载期窗口消息泵）。
+                //    一律 required:false + defaultRequire:0 + 注入点写死 require = 0：
+                //      ① 目标改名 / 被别的 coremod 动过 ⇒ 只记一行 WARN，不打崩启动
+                //         （失败现象 = latest.log 里没有 [SHANHAI-PUMP] 读数行，不是起不来）；
+                //      ② 泵自己的失败也被关在客户端那个类的 try/catch(Throwable) 里
+                //         （JNA 不可用 = 一行 [SHANHAI-PUMP] disabled 日志，然后 uninstall）；
+                //      ③ 同样不许塞进 shanhai.mixin.json —— 那份是 required:true，
+                //         混进去就等于「加载泵插不进去 ⇒ 整个 mod 起不来」。
                 'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json,shanhai.probe.mixin.json,shanhai.meinfinitycell.mixin.json,shanhai.extendedaeplus.mixin.json,shanhai.appeng.mixin.json',
+                // 🔴 2026-11-20：窗口标题「加载期一直是原版」的补丁（ShanhaiWindowTitleMixin，
+                //    目标 = 原版 net.minecraft.client.Minecraft#createTitle，SRG m_91270_）
+                //    刻意【不】新增第 7 份配置，而是并进 shanhai.mixin.json 的 "client" 数组：
+                //      ① 目标是原版类，永远存在（不是可选 mod）⇒ 不需要「缺装就安静」那套 required:false；
+                //      ② 注入点显式写死 require = 0（方法名漂 ⇒ 只记 WARN，标题退回原版，不打崩启动）；
+                //      ③ 它只在 "client" 数组里 ⇒ 专用服务端根本不会加载这个 mixin 类。
+                //    为什么不新开一份：多一份配置就多一个「MANIFEST 漏注册 ⇒ 静默不生效」的失败面，
+                //    而这里要修的正是「静默不生效」这一类 bug。
         ])
     }
     // The refmap must sit at the JAR ROOT: shanhai.mixin.json references it by

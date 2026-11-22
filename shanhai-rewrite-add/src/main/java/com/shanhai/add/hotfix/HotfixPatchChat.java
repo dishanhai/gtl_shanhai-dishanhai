@@ -76,7 +76,7 @@ public final class HotfixPatchChat implements HotfixAutoCounter.PatchChat {
                 }
                 final String modId = modIdOf(note.className);
                 final String body = HotfixPatchChatText.build(note.word, modId, note.className,
-                        note.method, note.arg, HotfixPatchChatText.WORD_PATCHED.equals(note.word));
+                        note.method, note.arg, HotfixPatchChatText.usesArrow(note.word));
                 if (body == null) {
                     continue;   // 这一条拼不出来（非 ASCII／缺名字）⇒ 不发它，别的照发
                 }
@@ -92,6 +92,64 @@ public final class HotfixPatchChat implements HotfixAutoCounter.PatchChat {
             warn("chat_announce failed detail=" + t.getClass().getSimpleName());
             return 0;
         }
+    }
+
+    /**
+     * 🆕 2026-11-21（P2 追加）：<b>播一行成品正文</b>（走同一条通道/闸门/收件人）。
+     *
+     * <p>用它的是两条"聚合事实"播报：{@code WIPED <owner> <N> 类 <M> 方法（整链抹除）} 与
+     * {@code GIVEUP <类名>（…）} —— 它们塞不进 {@link HotfixAutoCounter.PatchNote} 的四元组。
+     * 前缀（{@code [创始现实修改模块] }）由 {@link ShanhaiGuardEvents#chatRawBodies} 统一加，
+     * 所以这里传的 {@code body} <b>不带</b>前缀。
+     */
+    @Override
+    public int say(String playerName, String body) {
+        if (playerName == null || playerName.isEmpty() || body == null || body.isEmpty()) {
+            return 0;   // 控制台／无玩家上下文 ⇒ 一条都不发
+        }
+        try {
+            final ServerPlayer holder = findPlayer(playerName);
+            if (holder == null) {
+                return 0;   // 玩家不在线 ⇒ 不发，也不假装发了
+            }
+            return ShanhaiGuardEvents.chatRawBodies(holder, java.util.Collections.singletonList(body));
+        } catch (Throwable t) {
+            warn("chat_say failed detail=" + t.getClass().getSimpleName());
+            return 0;
+        }
+    }
+
+    /**
+     * 🆕 2026-11-21（最终版）：<b>一次投多行</b>（合并后的 {@code PATCHED} 一波多类 ⇒ 多行）。
+     *
+     * <p>必须一次交给通道：分多次 {@code say} 会被"每秒一行"的闸门压掉后几行。
+     */
+    @Override
+    public int sayLines(String playerName, java.util.List<String> bodies) {
+        if (playerName == null || playerName.isEmpty() || bodies == null || bodies.isEmpty()) {
+            return 0;
+        }
+        try {
+            final ServerPlayer holder = findPlayer(playerName);
+            if (holder == null) {
+                return 0;
+            }
+            return ShanhaiGuardEvents.chatRawBodies(holder, bodies);
+        } catch (Throwable t) {
+            warn("chat_say_lines failed detail=" + t.getClass().getSimpleName());
+            return 0;
+        }
+    }
+
+    /**
+     * 🆕 2026-11-21（最终版）：这个类属于哪个 mod（合并后 {@code PATCHED} 行里的 {@code <owner>}）。
+     *
+     * <p>引擎是纯 JDK 的、拿不到 {@code ModList} ⇒ 这件事实只在装配这一侧算得出来。
+     * 拿不到 ⇒ {@code unknown}（绝不猜）。
+     */
+    @Override
+    public String ownerOf(String className) {
+        return modIdOf(className);
     }
 
     /**
@@ -115,7 +173,7 @@ public final class HotfixPatchChat implements HotfixAutoCounter.PatchChat {
     /**
      * 目标类属于哪个 mod（<b>前缀最长匹配</b>；查不到 {@code unknown}，绝不猜）。
      *
-     * @param className 目标类全名（例：{@code examplemod.util.EntityUtil}）
+     * @param className 目标类全名（例：{@code examplemod.util.ExampleHelper}）
      */
     static String modIdOf(String className) {
         if (className == null || className.isEmpty()) {

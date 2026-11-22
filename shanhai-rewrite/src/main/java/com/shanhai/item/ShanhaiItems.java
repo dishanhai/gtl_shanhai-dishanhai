@@ -1,9 +1,13 @@
 package com.shanhai.item;
 
+import com.shanhai.common.fumo.FumoBlock;
+import com.shanhai.common.fumo.FumoHeadItem;
 import com.shanhai.registry.ShanhaiRegistration;
+import com.tterrag.registrate.util.entry.BlockEntry;
 import com.tterrag.registrate.util.entry.ItemEntry;
 import com.tterrag.registrate.util.nullness.NonNullBiConsumer;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.SoundType;
 
 /**
  * 阶段 1 的 <b>18 个物品</b> + <b>B1a 批次的 131 个私货物品</b>，全部直接注册进 jar（不经 KubeJS）。
@@ -16,8 +20,11 @@ import net.minecraft.world.item.Item;
  * → <b>284</b>（<b>2026-11-16 加入 95 件「现实/剧情物品」</b>：7 剧情 + 7 大类 + 65 {@code mc_*} + 16 {@code ex_*}，
  *   全部纯 {@link Item}、无行为；见桶 ⑭）。
  * → <b>298</b>（<b>2026-11-16 加入 14 件「底层技术 · 时序与改写」</b>：全是纯 {@link Item}、无行为；见桶 ⑮）。
+ * → <b>301</b>（<b>2026-11-21 加入 3 只「静态 Fumo 玩偶」</b>：走桶 ⑯ 的 {@code fumo(...)} 形状，
+ *   3 个 {@link BlockEntry} 的 BlockItem；不计入下面那条公式，但同样占物品注册序）。
  * 现有字段数 = {@code module("} 217 + {@code eventInput("} 65 + {@code crashBolt("} 16 = <b>298</b>
- * （另有 128 个 {@code reality_item_N} 壳与 {@code host_pattern_mover} 走独立形状，不计入 298）。
+ * （另有 128 个 {@code reality_item_N} 壳、{@code host_pattern_mover} 与 3 个 Fumo 方块物品走独立形状，
+ * 不计入 298；本类经手的物品注册总数 = 298 + 128 + 1 + 3 = <b>430</b>）。
  * ⚠️ 旧版本写的是「可用 {@code Select-String -Pattern 'module\("'} 直接数出来」——
  * 实测 {@code module("} 只数得到 217（另有 65 + 16 走的不是 module），那条口径自 284 那时起就不准。
  *
@@ -717,7 +724,7 @@ public final class ShanhaiItems {
     public static final ItemEntry<Item> PRIMORDIAL_DIVERGENCE_HEART = module("primordial_divergence_heart");
 
     /** dishanhai:strong_interaction_droplet（§b§l强相互作用水滴）· 贴图 strong_interaction_droplet.png */
-    public static final ItemEntry<Item> STRONG_INTERACTION_DROPLET = module("strong_interaction_droplet");
+    public static final ItemEntry<com.shanhai.common.droplet.ShanhaiDropletItem> STRONG_INTERACTION_DROPLET = ShanhaiRegistration.REGISTRATE.item("strong_interaction_droplet", com.shanhai.common.droplet.ShanhaiDropletItem::new).model(NonNullBiConsumer.noop()).register();
 
     /** dishanhai:time_reversal_protocol（世线信标（+静态随机配色））· 贴图 time.png */
     public static final ItemEntry<Item> TIME_REVERSAL_PROTOCOL = module("time_reversal_protocol");
@@ -1047,6 +1054,51 @@ public final class ShanhaiItems {
     /** shanhai:probability_field_sampler（概率场采样器）· 贴图 textures/item/probability_field_sampler.png */
     public static final ItemEntry<Item> PROBABILITY_FIELD_SAMPLER = module("probability_field_sampler");
 
+
+    // ==================================================================
+    // 桶 ⑯ · 🆕 2026-11-21：3 只「静态 Fumo 玩偶」（用户点单，方案 C）
+    //    🔴 范围（用户原话）：「只做静态玩偶 ＋ 头饰，不跳舞、不音效」
+    //       ⇒ 只做：静态装饰方块（4 向朝向）+ 它的物品形态 + 该物品能放进原版头盔格。
+    //       ⇒ 不做：方块实体/BER、跳舞挤压、持物姿势（_holding）、音效、Curios 饰品槽、右键抽奖。
+    //    🔴 注册形状：{@link #fumo(String)}（Registrate 的 block + 自定义 BlockItem）。
+    //       三只共用同一套 Java、同一套 blockstate/item 模型生成规则，只有 id / 几何 / 贴图不同。
+    //    🔴 位置纪律：本段追加在【全部既有物品字段之后】（下一个成员是辅助方法 realityItems()），
+    //       既有 298 个物品的字段顺序一个都没动 ⇒ 注册顺序里它们仍排在最后，
+    //       既有物品的数字 id 一个都不移位（存档安全）。理由与桶 ⑫/⑬/⑭ 逐字相同。
+    //    ⚠️ 这三个字段的类型是 {@link BlockEntry}（不是 ItemEntry），但它们的 BlockItem
+    //       同样消耗物品注册序，所以同样必须放最后 —— 不要挪到上面的物品之间。
+    //    📄 几何（MIT）见 assets/shanhai/models/block/fumo/CREDITS.txt 与
+    //       temp/fumo-recon/CREDITS-shanhai-fumo.md；dgyjh02804 的皮肤逐字节复制自上游发行 jar
+    //       gt_shanhai-4.9.4.jar（LGPL-3.0，许可统一为未结事项 / 另案处理）。
+    // ==================================================================
+
+    /**
+     * {@code shanhai:dishanhai_fumo}（dishanhai Fumo 玩偶）。
+     * <p>几何 = 上游 {@code sh_common_lib:block/dishanhai_fumo}（24 elements，双贴图 {@code #skin} + {@code #details}）；
+     * 贴图 = {@code textures/block/fumo/dishanhai_fumo.png}(64×64) + {@code _details.png}(32×32)；自带 {@code display.head}。
+     */
+    public static final BlockEntry<FumoBlock> DISHANHAI_FUMO = fumo("dishanhai_fumo");
+
+    /**
+     * {@code shanhai:beibeipuo_fumo}（BeiBeiPuo Fumo 玩偶）。
+     * <p>几何 = 上游 {@code sh_common_lib:block/beibeipuo_fumo}（12 elements，parent 通用模板 {@code fumo/skin_64}）；
+     * 贴图 = {@code textures/block/fumo/beibeipuo_fumo.png}(64×64)；
+     * {@code display.head} 由父模型 {@code shanhai:block/fumo/skin_64} 逐 context 回退提供。
+     */
+    public static final BlockEntry<FumoBlock> BEIBEIPUO_FUMO = fumo("beibeipuo_fumo");
+
+    /**
+     * {@code shanhai:dgyjh02804_fumo}（dgyjh02804 Fumo 玩偶）。
+     * <p>几何 = {@code dishanhai_fumo} 那套 24 elements（上游 dgyjh02804 也只覆盖了 {@code skin}，几何本来就是这套）；
+     * 贴图 = <b>上游原皮肤</b> {@code textures/block/fumo/dgyjh02804_fumo.png}（1,025 B，逐字节复制自
+     * {@code gt_shanhai-4.9.4.jar}，sha256 {@code AECCB87C…}，未修改）；
+     * {@code #details} 按上游行为继承 {@code shanhai:block/fumo/dishanhai_fumo_details}
+     * （所以会带 dishanhai 的金色徽章）。
+     * <p>🔴 许可以上游仓库为准（{@code dishanhai/gtl_shanhai-dishanhai} 是 LGPL-3.0）；本重制版本来就是
+     * 该仓库的派生分支，LICENSE / {@code mods.toml} 的许可统一是<b>未结事项</b>（另案处理）。
+     */
+    public static final BlockEntry<FumoBlock> DGYJH02804_FUMO = fumo("dgyjh02804_fumo");
+
     /** 建 128 个壳：每个都是普通 {@link Item} + 静态模型（模型 json 见 resources/models/item）。 */
     private static ItemEntry<RealityShellItem>[] realityItems() {
         final int n = com.shanhai.common.reality.ShanhaiRealityItemTable.SLOT_COUNT;
@@ -1122,6 +1174,50 @@ public final class ShanhaiItems {
         return ShanhaiRegistration.REGISTRATE
                 .item(id, properties -> new com.shanhai.common.crash.ShanhaiCrashBoltItem(index, properties))
                 .model(NonNullBiConsumer.noop())
+                .register();
+    }
+
+    /**
+     * 🆕 2026-11-21：<b>静态 Fumo 玩偶</b>的注册形状 —— 一个 4 向朝向的装饰方块 + 它的
+     * {@link FumoHeadItem}（能进原版头盔格的那个 {@code BlockItem}）。
+     *
+     * <h4>为什么走 {@code .block(...).item(...)}，而不是先注册 block 再单独注册 item</h4>
+     * {@code BlockItem} 的构造器需要一个 {@code Block} 实例，而 {@code BlockEntry.get()}
+     * 在注册表就绪之前拿不到真方块。Registrate 的 {@code .item((block, properties) -> ...)}
+     * 交进来的就是<b>懒加载</b>的那个 block，这是它存在的理由（同 {@code HOST_PATTERN_MOVER}
+     * 直接 new 自定义类的写法，只是这里多要一个 block 参数）。
+     *
+     * <h4>链式调用的语义（已用 {@code javap -c} 核实 Registrate 1.3.3）</h4>
+     * <ul>
+     *   <li>{@code Builder#build()} 是接口<b>默认方法</b>：先调 {@code register()} 再返回 parent
+     *       ⇒ {@code .item(...).build()} 会把 {@link FumoHeadItem} <b>注册掉</b>，
+     *       {@code .register()} 再注册方块并返回 {@link BlockEntry}；</li>
+     *   <li>{@code BlockBuilder.create(...)} 默认挂了 {@code defaultBlockstate()/defaultLoot()/defaultLang()}，
+     *       而 {@code BlockBuilder#item()} 又给 item 默认挂了自动 item 模型生成器 —— 这些都是
+     *       <b>datagen</b> 用的，本工程不跑 datagen，也不依赖它们生成文件；
+     *       这里显式 {@code .blockstate(noop())} / {@code .model(noop())} 与全工程其余物品的
+     *       {@code .model(NonNullBiConsumer.noop())} 是同一个口径：模型/方块状态 JSON 已随包提供。</li>
+     * </ul>
+     *
+     * <h4>方块属性</h4>
+     * {@code noOcclusion()}（模型是镂空的，必须；否则相邻面会被当成被遮挡而剔除）、
+     * {@code strength(0.8F)}（与羊毛同档）、{@code sound(SoundType.WOOL)}（玩偶的手感）。
+     *
+     * @param id 注册路径，必须与 {@code assets/shanhai/blockstates/<id>.json}、
+     *           {@code assets/shanhai/models/block/<id>.json}、{@code assets/shanhai/models/item/<id>.json}、
+     *           {@code data/shanhai/loot_tables/blocks/<id>.json}、语言键 {@code block/item.shanhai.<id>} 完全同名
+     */
+    private static BlockEntry<FumoBlock> fumo(String id) {
+        return ShanhaiRegistration.REGISTRATE
+                .block(id, FumoBlock::new)
+                .properties(properties -> properties
+                        .noOcclusion()
+                        .strength(0.8F)
+                        .sound(SoundType.WOOL))
+                .blockstate(NonNullBiConsumer.noop())
+                .item((block, properties) -> new FumoHeadItem(block, properties))
+                .model(NonNullBiConsumer.noop())
+                .build()
                 .register();
     }
 

@@ -63,17 +63,21 @@ public final class ShanhaiSaveEditBootstrap {
                         ShanhaiSaveEditFactory.Holder.LINES,
                         ShanhaiSaveEditDimension.REGION_DIR, ShanhaiSaveEditDimension.ENTITIES_DIR,
                         ShanhaiSaveEditDimension.DIMENSIONS_DIR);
-                // 第五期：第 ⑦ 页（存档体检 · 双份登记）的版式读数 —— 这一行就是"面板页真的接上了"的判据
-                ShanhaiMod.LOGGER.info("{} fifth_phase audit_page widgets={} lines={}x{}@{} sel_y={} "
-                                + "btns_y={} btns_w=[{},{},{},{},{}] hint_y={} tabs={} tab_w={}",
+                // 第 ⑦ 页（存档体检 · 白名单之外一律算异常）的版式读数 —— 这一行就是"面板页真的接上了"的判据
+                ShanhaiMod.LOGGER.info("{} fifth_phase audit_page widgets={} rows={}x{}@{} h={} "
+                                + "filter_y={} summary_y={} pager_y={}/{} sel_y={} "
+                                + "btns=[rescan({},{}) drop({},{})] slots={} tabs={} tab_w={}",
                         ShanhaiSaveEditFlow.PREFIX,
                         ShanhaiSaveEditLayout.pageWidgetCount(ShanhaiSaveEditLayout.PAGE_AUDIT),
-                        ShanhaiSaveEditLayout.AU_LINES, ShanhaiSaveEditLayout.AU_LINE_STEP,
-                        ShanhaiSaveEditLayout.AU_LINE_Y0, ShanhaiSaveEditLayout.AU_SEL_Y,
-                        ShanhaiSaveEditLayout.AU_BTN_Y, ShanhaiSaveEditLayout.AU_PREV_W,
-                        ShanhaiSaveEditLayout.AU_NEXT_W, ShanhaiSaveEditLayout.AU_DROP_ENTITY_W,
-                        ShanhaiSaveEditLayout.AU_DROP_SIDECAR_W, ShanhaiSaveEditLayout.AU_RESCAN_W,
-                        ShanhaiSaveEditLayout.AU_HINT_Y0, ShanhaiSaveEditLayout.PAGE_COUNT,
+                        ShanhaiSaveEditLayout.AU_ROWS, ShanhaiSaveEditLayout.AU_ROW_STEP,
+                        ShanhaiSaveEditLayout.AU_ROW_Y0, ShanhaiSaveEditLayout.AU_ROW_H,
+                        ShanhaiSaveEditLayout.AU_FILTER_Y, ShanhaiSaveEditLayout.AU_SUMMARY_Y,
+                        ShanhaiSaveEditLayout.AU_PAGER_Y, ShanhaiSaveEditLayout.AU_PAGER_H,
+                        ShanhaiSaveEditLayout.AU_SEL_Y,
+                        ShanhaiSaveEditLayout.AU_RESCAN_X, ShanhaiSaveEditLayout.AU_RESCAN_W,
+                        ShanhaiSaveEditLayout.AU_DROP_X, ShanhaiSaveEditLayout.AU_DROP_W,
+                        ShanhaiSaveEditLayout.auditSlots().size(),
+                        ShanhaiSaveEditLayout.PAGE_COUNT,
                         ShanhaiSaveEditLayout.TAB_W);
                 if (!ShanhaiSaveEditLayout.layoutProblems().isEmpty()) {
                     // 版式自检不通过 = "一定会画坏"的预警：进日志，但不许因为它把功能弄挂

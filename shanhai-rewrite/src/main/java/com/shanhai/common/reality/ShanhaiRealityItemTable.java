@@ -93,6 +93,16 @@ public final class ShanhaiRealityItemTable {
     /** 名字 / 提示的字符上限（写盘与网络包共用一套口径）。 */
     public static final int MAX_NAME_CHARS = 48;
     /**
+     * 🆕 2026-11-22：名字的<b>原始 char</b> 上限。
+     *
+     * <p>为什么要有第二条上限：名字里现在可以带原版色码（{@code §f}，2 char）与山海样式码
+     * （{@code &$neon-}，7..20 char），所以"48 个可见字"可能对应 150+ 个 char。
+     * {@link #MAX_NAME_CHARS} 从此是<b>可见字符</b>口径（见 {@link ShanhaiNameCaps}），
+     * 这一条只是防止"48 可见字 + 一堆码"把网络包/JSON 撑爆。
+     * <p>两者同时生效，先到者为准；截断只切可见字符，<b>绝不把码切成半截</b>。
+     */
+    public static final int MAX_NAME_RAW_CHARS = 192;
+    /**
  * 提示的总字符上限。🔴 2026-10-17 用户点单「不要有最大 10 行的限制」⇒ 行数不再受限（编辑器分页），
  * 总长从 96 抬到 512（一整段描述够用，tooltip 也是多行渲染）。
  */
@@ -146,14 +156,48 @@ public final class ShanhaiRealityItemTable {
     /** 文件是否已经读过（避免每次取名字都打一次盘）。 */
     private static volatile boolean loaded;
 
+    /**
+     * 测试用的数据根目录覆盖（{@code null} = 用真实 {@code GAMEDIR}）。
+     *
+     * <p>🔴 只为<b>离线探针</b>存在：验收要求"把 {@code §f红色文字} 写进名字 ⇒ 经 {@code apply()}
+     * ＋落盘＋读回逐字符相同"，而那条断言不许启动游戏。生产路径永远是 {@code null}，
+     * 行为与"没有这个字段"逐字节一致（开机日志会印 {@code data_root=game|override}）。
+     */
+    private static volatile java.nio.file.Path dataRootOverride;
+
     private ShanhaiRealityItemTable() {}
 
     // ------------------------------------------------------------------ 路径与时间
 
     /** {@code <gameDir>/config/shanhai/creative_items.json}。 */
     public static Path path() {
-        return net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get()
+        final Path root = dataRootOverride;
+        return (root != null ? root : GameDir.ROOT())
                 .resolve(RELATIVE_PATH).toAbsolutePath().normalize();
+    }
+
+    /** 只给离线探针用的数据根目录（{@code null} = 恢复真实 GAMEDIR）。 */
+    public static void useDataRootForProbe(Path root) {
+        dataRootOverride = root;
+        loaded = false;
+    }
+
+    /** 现在是不是走"探针根目录"（读数里印出来，免得有人以为生产也在用）。 */
+    public static String dataRootWord() {
+        return dataRootOverride == null ? "game" : "override";
+    }
+
+    /**
+     * 只有这里碰 {@code FMLPaths}：放进<b>独立嵌套类</b> ⇒ 设了探针根目录的离线 JVM
+     * <b>永远不会加载它</b>（{@code FMLPaths.GAMEDIR} 在没有 FML 的裸 JVM 里不可用）。
+     */
+    private static final class GameDir {
+
+        private GameDir() {}
+
+        static Path ROOT() {
+            return net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get();
+        }
     }
 
     public static String nowTs() {
@@ -216,7 +260,8 @@ public final class ShanhaiRealityItemTable {
                     continue;
                 }
                 final Entry entry = new Entry(
-                        str(o, "name", MAX_NAME_CHARS),
+                        ShanhaiNameCaps.cap(str(o, "name", MAX_NAME_RAW_CHARS),
+                                MAX_NAME_CHARS, MAX_NAME_RAW_CHARS),
                         sanitizeIcon(str(o, "icon", MAX_ICON_CHARS)),
                         clampStack(o.has("max_stack") ? o.get("max_stack").getAsInt() : DEFAULT_STACK),
                         sanitizeRarity(str(o, "rarity", 16)),
@@ -332,7 +377,7 @@ public final class ShanhaiRealityItemTable {
             ShanhaiMod.LOGGER.warn("{} apply_rejected reason=slot_out_of_range idx={}", PREFIX, index);
             return false;
         }
-        final String cleanName = cap(name, MAX_NAME_CHARS);
+        final String cleanName = ShanhaiNameCaps.cap(name, MAX_NAME_CHARS, MAX_NAME_RAW_CHARS);
         final Entry next = new Entry(cleanName, sanitizeIcon(cap(icon, MAX_ICON_CHARS)),
                 clampStack(maxStack), sanitizeRarity(rarity), cap(lore, MAX_LORE_CHARS));
         final Entry[] nextTable = slots.clone();
@@ -537,7 +582,9 @@ public final class ShanhaiRealityItemTable {
     /** 一行读数（开机日志 + 面板标题都用它）。 */
     public static String statsLine() {
         return "path=" + RELATIVE_PATH + " slots=" + SLOT_COUNT + " builtin_icons=" + BUILTIN_ICON_COUNT
-                + " defined=" + definedCount() + " version=" + version;
+                + " defined=" + definedCount() + " version=" + version
+                + " name_visible_max=" + MAX_NAME_CHARS + " name_raw_max=" + MAX_NAME_RAW_CHARS
+                + " data_root=" + dataRootWord();
     }
 
     /**

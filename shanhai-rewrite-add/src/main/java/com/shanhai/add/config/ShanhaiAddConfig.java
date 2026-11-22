@@ -31,6 +31,31 @@ public final class ShanhaiAddConfig {
     /** 本配置在 {@code config/} 下的文件名（只用于日志/文档；真值由 Forge 按 modid 生成）。 */
     public static final String FILE_NAME = "shanhai_add-common.toml";
 
+    // ═══════════════════════════════ 全键名（唯一一份字面量） ═══════════════════════════════
+    //   🔴 日志（cfg_write / cfg_load）与命令回显只用这几个常量拼字符串 —— 键名只要有两处写法，
+    //      迟早会出现"日志说写了 hotfix.auto、实际写的是 hotfix.auto_enabled"这种假判据。
+    //   ⚠️ HotfixChainWipe / HotfixAutoCounter 是纯 JDK 引擎（离线自检要能直接加载），
+    //      它们【不】引用本类；那边各自留一份同值常量，注释里指回这里。
+
+    /** {@code [gravity] multiplier}。 */
+    public static final String KEY_GRAVITY = "gravity.multiplier";
+    /** {@code [guard_module] momentum_guard}。 */
+    public static final String KEY_MOMENTUM = "guard_module.momentum_guard";
+    /** {@code [guard_module] pos_guard}。 */
+    public static final String KEY_POS = "guard_module.pos_guard";
+    /** {@code [guard_module] inv_guard}。 */
+    public static final String KEY_INV = "guard_module.inv_guard";
+    /** {@code [guard_module] stack_radar}。 */
+    public static final String KEY_STACK_RADAR = "guard_module.stack_radar";
+    /** {@code [guard_module] stack_radar_interval_ms}。 */
+    public static final String KEY_STACK_RADAR_INTERVAL = "guard_module.stack_radar_interval_ms";
+    /** {@code [guard_module] stack_radar_depth}。 */
+    public static final String KEY_STACK_RADAR_DEPTH = "guard_module.stack_radar_depth";
+    /** {@code [hotfix] chain_wipe}（与 {@code HotfixChainWipe#KEY} 同值）。 */
+    public static final String KEY_CHAIN_WIPE = "hotfix.chain_wipe";
+    /** 🆕 {@code [hotfix] auto}（与 {@code HotfixAutoCounter#DEFAULT_AUTO} 同族；本键 2026-11-22 新增）。 */
+    public static final String KEY_HOTFIX_AUTO = "hotfix.auto";
+
     /** 重力倍率的默认值（= 原版手感）。迁移判定与"没加载时的兜底"共用这一个常量。 */
     public static final double DEFAULT_GRAVITY_MULTIPLIER = 1.0D;
 
@@ -69,6 +94,23 @@ public final class ShanhaiAddConfig {
     /** 🆕 每次采样只看栈顶前几帧（越深越贵，且远处的帧离"谁在 tick"已经很远）。 */
     public static final int DEFAULT_STACK_RADAR_DEPTH = 32;
 
+    /**
+     * 🆕 2026-11-21 整链抹除的默认值：<b>开</b>。
+     *
+     * <p>用户口径（2026-11-21 拍板）：整链抹除默认开；{@code /shanhai_add hotfix chainwipe off} 可关。
+     * 默认值只此一处；{@code HotfixChainWipe.DEFAULT_ENABLED} 与它同值（那个类要能被离线自检加载，
+     * 所以不引用本类）。
+     */
+    public static final boolean DEFAULT_CHAIN_WIPE = true;
+
+    /**
+     * 🆕 2026-11-22 主动热改（{@code hotfix.auto}）的默认值：<b>开</b>。
+     *
+     * <p>用户口径（2026-11-20 拍板）：热改线路默认开。默认值只此一处；
+     * {@code HotfixAutoCounter.DEFAULT_AUTO} 与它同值（那个类要能被离线自检加载，所以不引用本类）。
+     */
+    public static final boolean DEFAULT_HOTFIX_AUTO = true;
+
     /** 已构建的配置规格（扩展的 {@code @Mod} 构造器里注册到 Forge）。 */
     public static final ForgeConfigSpec COMMON_SPEC;
 
@@ -76,6 +118,11 @@ public final class ShanhaiAddConfig {
     public static final ConfigValues COMMON = new ConfigValues();
 
     static {
+        // 🔴 第一句，且必须在 builder.build() 之前：
+        //   cfg_load 的 source=file|default 依据的是【Forge 加载/修复这份 toml 之前】的原文。
+        //   本类的静态块由 {@code ShanhaiAdd.registerConfig()} 里那次 COMMON_SPEC 引用触发，
+        //   那一刻 Forge 还没加载 COMMON 配置（它要等所有 mod 构造完才 loadConfigs）。
+        AddConfigFiles.snapshotBeforeLoad("class_init");
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
         COMMON.init(builder);
         COMMON_SPEC = builder.build();
@@ -171,6 +218,120 @@ public final class ShanhaiAddConfig {
         }
     }
 
+    /**
+     * 🆕 2026-11-21：整链抹除开没开（读不到给兜底值，<b>不抛异常</b>）。
+     *
+     * <p>只在装配点读一次（{@code HotfixAutoCounterGlue#bind} → {@code HotfixChainWipe#applyConfiguredDefault}）
+     * —— 配置只是<b>启动默认值</b>，之后由 {@code /shanhai_add hotfix chainwipe on|off} 运行期覆盖。
+     *
+     * @param fallback 配置未加载/取值失败时用的值（生产调用传 {@link #DEFAULT_CHAIN_WIPE}）
+     */
+    public static boolean chainWipeOr(boolean fallback) {
+        if (!isLoaded()) {
+            return fallback;
+        }
+        try {
+            return COMMON.chainWipe.get();
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    /**
+     * 🆕 2026-11-22：主动热改（{@code hotfix.auto}）现在是什么值（读不到给兜底值，<b>不抛异常</b>）。
+     *
+     * <p>只在装配点读一次（{@code HotfixAutoCounterGlue#bind} → {@code HotfixAutoCounter#setAuto}）
+     * —— 配置是<b>启动默认值</b>，之后由 {@code /shanhai_add hotfix auto on|off} 覆盖
+     * （那条命令会同时改写本文件，所以两边不会再分叉）。
+     */
+    public static boolean hotfixAutoOr(boolean fallback) {
+        if (!isLoaded()) {
+            return fallback;
+        }
+        try {
+            return COMMON.hotfixAuto.get();
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    /** {@code guard_module.momentum_guard} 的当前值（读不到给兜底值，不抛异常）。 */
+    public static boolean momentumOr(boolean fallback) {
+        if (!isLoaded()) {
+            return fallback;
+        }
+        try {
+            return COMMON.momentumGuard.get();
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    /** {@code guard_module.pos_guard} 的当前值（读不到给兜底值，不抛异常）。 */
+    public static boolean posOr(boolean fallback) {
+        if (!isLoaded()) {
+            return fallback;
+        }
+        try {
+            return COMMON.posGuard.get();
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    /** {@code guard_module.inv_guard} 的当前值（读不到给兜底值，不抛异常）。 */
+    public static boolean invOr(boolean fallback) {
+        if (!isLoaded()) {
+            return fallback;
+        }
+        try {
+            return COMMON.invGuard.get();
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    // ═══════════════════════════════ 写入口（唯一一份：配置 + 落盘 + 回读） ═══════════════════════════════
+    //   🔴 2026-11-22（用户报"重开游戏配置重置为默认"）：从此以后命令【只许】调下面这几个方法写字，
+    //      不许在命令类里自己写 `X.set(v); SPEC.save();` —— 那样就没有 cfg_write 日志、也没有回读校验。
+
+    /**
+     * 写 {@code gravity.multiplier}（{@code /shanhai_add gravity <倍率>|reset}）。
+     *
+     * @return {@code true} = 盘上重新读出来就是 {@code want}（调用方回显只许用它）
+     */
+    public static boolean setGravityMultiplier(double want) {
+        return AddConfigFiles.writeDouble(KEY_GRAVITY, COMMON.gravityMultiplier, want);
+    }
+
+    /**
+     * 写 {@code guard_module.momentum_guard} / {@code pos_guard} / {@code inv_guard}。
+     *
+     * @param key 必须是 {@link #KEY_MOMENTUM} / {@link #KEY_POS} / {@link #KEY_INV} 之一
+     */
+    public static boolean setGuardSwitch(String key, boolean want) {
+        if (KEY_MOMENTUM.equals(key)) {
+            return AddConfigFiles.writeBoolean(key, COMMON.momentumGuard, want);
+        }
+        if (KEY_POS.equals(key)) {
+            return AddConfigFiles.writeBoolean(key, COMMON.posGuard, want);
+        }
+        if (KEY_INV.equals(key)) {
+            return AddConfigFiles.writeBoolean(key, COMMON.invGuard, want);
+        }
+        return false;
+    }
+
+    /** 写 {@code hotfix.chain_wipe}（{@code /shanhai_add hotfix chainwipe on|off}）。 */
+    public static boolean setChainWipe(boolean want) {
+        return AddConfigFiles.writeBoolean(KEY_CHAIN_WIPE, COMMON.chainWipe, want);
+    }
+
+    /** 写 {@code hotfix.auto}（{@code /shanhai_add hotfix auto on|off}）—— 2026-11-22 新增的键。 */
+    public static boolean setHotfixAuto(boolean want) {
+        return AddConfigFiles.writeBoolean(KEY_HOTFIX_AUTO, COMMON.hotfixAuto, want);
+    }
+
     /** 配置值容器。 */
     public static class ConfigValues {
         /**
@@ -221,6 +382,27 @@ public final class ShanhaiAddConfig {
 
         /** 🆕 每次采样只看栈顶前几帧（默认 32）：越深越贵，且远处的帧离"谁在 tick"已经很远。 */
         public ForgeConfigSpec.IntValue stackRadarDepth;
+
+        /**
+         * 🆕 整链抹除（默认 {@link #DEFAULT_CHAIN_WIPE} = <b>开</b>）。
+         *
+         * <p>做什么：一条违规现场往上溯源到"最顶端发起者"，把链上<b>没有白名单</b>的外部类逐个
+         * <b>整类</b>废掉（方法体换安全默认返回）；每类一份子计划、每类只 {@code retransform} 一次。
+         * 白名单类（原版类）上的外部 handler <b>不在这里动</b> —— 交交接给关键类恢复那条线。
+         */
+        public ForgeConfigSpec.BooleanValue chainWipe;
+
+        /**
+         * 🆕 2026-11-22 <b>主动热改</b>（默认 {@link #DEFAULT_HOTFIX_AUTO} = <b>开</b>）。
+         *
+         * <p>为什么补这个键：{@code HotfixAutoCounter} 里只有一个静态 {@code AtomicBoolean AUTO}
+         * —— {@code /shanhai_add hotfix auto off} 改完，文件里<b>没有一处记着它</b>
+         * ⇒ 重开游戏必然回到默认（用户 2026-11-22 报的就是这一条）。
+         *
+         * <p>🔴 现在的口径：本键是唯一真相，{@code HotfixAutoCounter.AUTO} 是它的<b>影子</b>
+         * （启动时按本键应用一次，命令改值时两处同时改）。
+         */
+        public ForgeConfigSpec.BooleanValue hotfixAuto;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("gravity");
@@ -314,6 +496,33 @@ public final class ShanhaiAddConfig {
                             "  离「谁在 tick」已经太远，看了也只是把 String[] 撑大",
                             "过白名单后每个样本最多留 8 帧（写死在 ShanhaiStackRadarSampler.MAX_FRAMES）")
                     .defineInRange("stack_radar_depth", DEFAULT_STACK_RADAR_DEPTH, 1, 256);
+            builder.pop();
+
+            // ============================================================ 🆕 2026-11-21 整链抹除（1 键）
+            //   用户口径：检测到关键类/原版写入点被改 ⇒ 往上溯源到"最顶端发起者"，把这条链上
+            //   【没有白名单】的外部类逐个整类废掉（默认开）。开关 = /shanhai_add hotfix chainwipe on|off。
+            builder.push("hotfix");
+            chainWipe = builder
+                    .comment("整链抹除（默认 true = 开）：2026-11-21 用户拍板 —— 整链抹除默认开；",
+                            "  /shanhai_add hotfix chainwipe off 可关（off ⇒ 只记录不写字节，日志 chain_wipe_refused）",
+                            "做什么：违规现场往上溯源到最顶端发起者，把链上【没有白名单】的外部类逐个整类废掉",
+                            "  （方法体换成安全默认返回）；每类一份子计划、每类只 retransform 一次，条数不设上限",
+                            "唯一例外（防崩服，不是数量上限）：某个类若存在返回引用类型的方法 ⇒ 只废三个方法",
+                            "  （它的写入方法 ＋ tick 方法 m_8119_/tick ＋ 入口方法），不整类 RETURN",
+                            "白名单类（原版类）上的外部 handler 不在这里动：交接给关键类恢复那条线",
+                            "  （日志 chain_wipe_handoff … target=keyclass_restore；我们绝不在原版类上做抹除）",
+                            "🔴 本键是【唯一真相】：/shanhai_add hotfix chainwipe on|off 会立刻写回本文件",
+                            "  （2026-11-22 修：以前那条命令只改内存里的开关，重开游戏就回到默认 —— 用户报的就是这一条）")
+                    .define("chain_wipe", DEFAULT_CHAIN_WIPE);
+            hotfixAuto = builder
+                    .comment("主动热改（默认 true = 开；2026-11-20 用户拍板「热改线路默认开」）",
+                            "做什么：抓到一条违规现场之后，自动把「最顶端发起者」那个方法体换成安全默认返回",
+                            "  （只动链上没有白名单的外部类；我们自己的类与原版类都不在这一步里动）",
+                            "关掉之后：一个字节都不写（日志仍是 auto_switch auto=false），已经改过的要还原用 undoall",
+                            "🔴 本键是【唯一真相】：/shanhai_add hotfix auto on|off 会立刻写回本文件",
+                            "  （2026-11-22 补这个键：以前只有一个静态开关，文件里没有任何一处记着它 ⇒ 重开必回到默认）",
+                            "  HotfixAutoCounter.AUTO 是它的【影子】：启动时按本键应用一次，命令改值时两处同时改")
+                    .define("auto", DEFAULT_HOTFIX_AUTO);
             builder.pop();
         }
 

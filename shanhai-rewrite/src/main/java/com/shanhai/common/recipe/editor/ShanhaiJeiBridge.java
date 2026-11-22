@@ -556,6 +556,50 @@ public final class ShanhaiJeiBridge {
     private static final java.util.concurrent.atomic.AtomicInteger REPLAYED_FLUSHES =
             new java.util.concurrent.atomic.AtomicInteger();
 
+    // ------------------------------------------------------ 频率护栏（2026-11-22）
+    //
+    // 【要治的】进世界时 87 条配方被完整回放约 38 轮，每轮每条都会：
+    //   (1) 登记一次（noteReplayedConditions）-> 立刻试一次"马上补发"；
+    //   (2) 补发时给每条造一遍正文 + 发一次 -> 发失败每条打一行 ERROR。
+    //   20 秒里这就是 3313 行，而那个时点（配方加载期，客户端还没连上）本来就发不出去。
+    //
+    // 【只改频率与日志量，不改语义】pending 表、发送路径、成功判据一个都不动：
+    //   - 登记那一下的"立刻补发"改成去抖动（1.5 秒最多一次）；
+    //   - 每轮失败改成一行汇总（不再每条一行）；
+    //   - replayed_body_built 降为 debug，且每轮最多 3 行（条数仍在汇总行的 bodies= 里）；
+    //   - 连续 3 轮"一条都没发出去"之后，自动补发只每 30 秒试一次（登录 / 开服两条入口不受影响）。
+    //
+    // 【为什么"失败"不能当成"要马上再试"的理由】那个时点的失败是"客户端还没连上"，
+    //   不是"网络抖了一下"：同一拍重试 87 次不会变好，只会把日志刷满。所以退避的只是
+    //   **自动补发这一路**；pending 语义保持原样（下次登录 / 开服 / 退避窗口到点还会再试）。
+
+    /** 自动补发的去抖动间隔（毫秒）：登记时最多每这么久试一次"立刻补发"。 */
+    private static final long REPLAYED_AUTO_FLUSH_MIN_GAP_MS = 1500L;
+
+    /** 上一次自动补发的时间戳（毫秒；0 = 还没发过）。 */
+    private static final java.util.concurrent.atomic.AtomicLong REPLAYED_LAST_AUTO_FLUSH_MS =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+
+    /** 连续"一条都没发出去"的补发轮数（达到 {@link #REPLAYED_BACKOFF_ROUNDS} 进入退避）。 */
+    private static final java.util.concurrent.atomic.AtomicInteger REPLAYED_FAILED_ROUNDS =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 退避闸门：连续失败轮数达到它之后，自动补发只每 {@link #REPLAYED_BACKOFF_MS} 试一次。 */
+    private static final int REPLAYED_BACKOFF_ROUNDS = 3;
+
+    /** 退避间隔（毫秒）。 */
+    private static final long REPLAYED_BACKOFF_MS = 30_000L;
+
+    /** 上一轮"一条都没发出去"的时间戳（毫秒；0 = 当前没有失败轮）。 */
+    private static final java.util.concurrent.atomic.AtomicLong REPLAYED_LAST_FAILED_ROUND_MS =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+
+    /** 每轮最多打几行 {@code replayed_body_built}（多出来的只计入汇总行的 bodies=）。 */
+    private static final int REPLAYED_BODY_BUILT_LOG_PER_ROUND = 3;
+
+    /** 本轮（一次 flush）已经打过几行 {@code replayed_body_built}（每轮开头归零；只在补发线程上读写）。 */
+    private static int bodyBuiltLoggedThisRound;
+
     /** 已发出去过几条（自检判据）。 */
     public static int replayedSentCount() {
         return REPLAYED_SENT.get();
@@ -590,11 +634,45 @@ public final class ShanhaiJeiBridge {
                     + "（没有条件就没什么可补推的）", PREFIX, recipeId);
             return;
         }
-        REPLAYED.put(recipeId, new ReplayedEntry(recipeId, typeId, conditionsJson));
-        ShanhaiMod.LOGGER.info("{} replayed_conditions_queued id={} type={} cond_bytes={} pending={} "
-                        + "（重放把条件装上了服务端 ⇒ 这条还要补一次 JEI 推送："
-                        + "客户端此刻可能还没进世界，补发时点 = 登录 / reload / 立刻有玩家在线）",
-                PREFIX, recipeId, typeId, conditionsJson.length(), REPLAYED.size());
+        final ReplayedEntry previous = REPLAYED.put(recipeId, new ReplayedEntry(recipeId, typeId, conditionsJson));
+        // 2026-11-22（频率护栏）：同一条被"原样又登记一次"时不再打 INFO
+        //    （进世界时 87 条 x 38 轮 = 3306 行，绝大多数是内容一模一样地又登记了一遍）。
+        //    第一次登记、或者条件变了 —— 那两行才有信息量，仍打 INFO；原样重登记降到 debug。
+        final boolean unchanged = previous != null
+                && previous.typeId.equals(typeId)
+                && previous.conditionsJson.equals(conditionsJson);
+        if (unchanged) {
+            ShanhaiMod.LOGGER.debug("{} replayed_conditions_requeued id={} type={} cond_bytes={} pending={}",
+                    PREFIX, recipeId, typeId, conditionsJson.length(), REPLAYED.size());
+        } else {
+            ShanhaiMod.LOGGER.info("{} replayed_conditions_queued id={} type={} cond_bytes={} pending={} "
+                            + "（重放把条件装上了服务端 ⇒ 这条还要补一次 JEI 推送："
+                            + "客户端此刻可能还没进世界，补发时点 = 登录 / reload / 立刻有玩家在线）",
+                    PREFIX, recipeId, typeId, conditionsJson.length(), REPLAYED.size());
+        }
+        tryFlushReplayedDebounced();
+    }
+
+    /**
+     * <b>登记完顺手补发一次，但去抖动</b>（2026-11-22：进世界刷屏）。
+     *
+     * <p>原来每条登记都直接调 {@link #tryFlushReplayedToOnlinePlayers()}：87 条 x 38 轮 = 3300+ 次，
+     * 而那个时点（配方加载期，客户端还没连上）本来就发不出去 -> 每次都是"整轮 87 条全失败"。
+     *
+     * <p>去抖动只影响"自动补发"这一路；玩家登录（{@code PlayerLoggedInEvent}）与服务端启动
+     * （{@code ServerStartedEvent}）两个入口<b>不经过这里</b>，仍然立刻发（且不受退避闸门约束）。
+     *
+     * <p>用 {@code CAS} 抢本轮：多线程同时登记时只放行一个，其余按"刚发过"跳过。
+     */
+    private static void tryFlushReplayedDebounced() {
+        final long now = System.currentTimeMillis();
+        final long last = REPLAYED_LAST_AUTO_FLUSH_MS.get();
+        if (last != 0L && (now - last) < REPLAYED_AUTO_FLUSH_MIN_GAP_MS) {
+            return;                     // 1.5 秒内已经试过 -> 这一条并进下一轮
+        }
+        if (!REPLAYED_LAST_AUTO_FLUSH_MS.compareAndSet(last, now)) {
+            return;                     // 别的线程刚抢到这一轮
+        }
         tryFlushReplayedToOnlinePlayers();
     }
 
@@ -625,14 +703,26 @@ public final class ShanhaiJeiBridge {
     }
 
     /**
-     * <b>把登记过的重放条件补推出去</b>（{@code only == null} ⇒ 发给所有在线玩家）。
+     * <b>把登记过的重放条件补推出去</b>（{@code only == null} -> 发给所有在线玩家）。
      *
-     * <p>每一处都能安全跳过：没有 server / 通道没建起来 ⇒ 记一行并返回 0（不抛、不刷屏）；
-     * 单个条目发失败 ⇒ 只记这一条的 ERROR，继续发下一条。
+     * <p>每一处都能安全跳过：没有 server / 通道没建起来 -> 记一行并返回 0（不抛、不刷屏）；
+     * 单条发失败 -> 只记<b>这一轮的一行汇总</b>（2026-11-22 起不再每条一行），继续发下一条。
+     *
+     * <p> 本方法受<b>退避闸门</b>约束（连续 3 轮"一条都没发出去"之后，自动补发只每 30 秒试一次）。
+     * 真正"需要立刻发"的两个入口（玩家登录 / 服务端启动）走 {@code forced = true} 的那条，不受闸门影响。
      *
      * @return 真的发出去了几条
      */
     public static int flushReplayedConditions(MinecraftServer server, ServerPlayer only) {
+        return flushReplayedConditions(server, only, false);
+    }
+
+    /**
+     * 同 {@link #flushReplayedConditions(MinecraftServer, ServerPlayer)}，但可以指定"无视退避闸门"。
+     *
+     * @param forced {@code true} = 玩家登录 / 服务端启动那两条"新信息"入口（不受退避约束；计数器照常记账）
+     */
+    private static int flushReplayedConditions(MinecraftServer server, ServerPlayer only, boolean forced) {
         if (REPLAYED.isEmpty()) {
             return 0;
         }
@@ -647,9 +737,17 @@ public final class ShanhaiJeiBridge {
                     PREFIX, REPLAYED.size());
             return 0;
         }
+        // 2026-11-22（频率护栏）：退避闸门只挡"自动补发"这一路；登录 / 开服走 forced = true。
+        if (!forced && !replayedBackoffAllows()) {
+            return 0;
+        }
+        bodyBuiltLoggedThisRound = 0;
         int sent = 0;
         int bodies = 0;
         int bodyFailed = 0;
+        int failed = 0;
+        String firstFailedId = "-";
+        String firstFailedErr = "-";
         long buildNanos = 0L;
         // 🔴 2026-11-01（本轮：JEI 显示旧版）：账本<b>只读一次</b>，用来判"这一条要不要带完整正文"。
         //    判据不在本类里，在纯核 ShanhaiJeiReplayBodyPlan（可离线跑 A/B/C + 负对照）。
@@ -697,11 +795,26 @@ public final class ShanhaiJeiBridge {
                         e.conditionsJson == null ? 0 : e.conditionsJson.length(),
                         only == null ? "all" : only.getName().getString());
             } catch (Throwable t) {
-                ShanhaiMod.LOGGER.error("{} replayed_conditions_send_failed id={} type={} err={} "
-                                + "（这一条没推出去 ⇒ 那个客户端的 JEI 上看不到它的槽；下次登录会再推一次）",
-                        PREFIX, e.recipeId, e.typeId, t.toString());
+                // 2026-11-22（频率护栏）：不再每条打一行 ERROR（87 条 x 38 轮 = 3300 行），
+                //   这里只累计；这一轮结束后打一行汇总（带第一条 id 与异常类名）。
+                failed++;
+                if (failed == 1) {
+                    firstFailedId = e.recipeId;
+                    firstFailedErr = t.getClass().getName();
+                }
             }
         }
+        // 2026-11-22（频率护栏）：失败改成<b>每轮一行汇总</b>（原来每条一行 ERROR）。
+        //    字段格式固定：sent= / failed= / bodies= / first= / err=（first = 第一条失败的 recipe id，
+        //    err = 第一条失败的异常类名；这一族通常是"客户端还没连上"）。
+        if (failed > 0) {
+            ShanhaiMod.LOGGER.error("{} replayed_conditions_send_failed sent={} failed={} bodies={} first={} err={} "
+                            + "（这一轮有这么多条没推出去 -> 那个客户端的 JEI 上看不到它们；"
+                            + "pending 语义不变：下次登录 / 开服 / 退避窗口到点还会再试；"
+                            + "err 是第一条失败的异常类名，不是每条的完整栈）",
+                    PREFIX, sent, failed, bodies, firstFailedId, firstFailedErr);
+        }
+        noteReplayedRoundOutcome(sent, failed);
         if (sent > 0) {
             REPLAYED_SENT.addAndGet(sent);
             REPLAYED_FLUSHES.incrementAndGet();
@@ -715,6 +828,50 @@ public final class ShanhaiJeiBridge {
                     REPLAYED_FLUSHES.get(), buildNanos / 1_000_000L, overlay.size());
         }
         return sent;
+    }
+
+    /**
+     * 退避闸门：连续 3 轮"一条都没发出去"之后，自动补发只每 30 秒试一次。
+     *
+     * <p>窗口内的那些轮次<b>安静跳过</b>（不打日志 —— 它们每 1.5 秒就来一次，打了等于没退避）；
+     * 每允许一次（= 每 30 秒）打一行 {@code replayed_flush_backoff rounds=N}，
+     * 让人知道"补发为什么变稀疏了"，而不是以为功能悄悄坏了。
+     *
+     * @return {@code true} = 这一轮可以发
+     */
+    private static boolean replayedBackoffAllows() {
+        final int failedRounds = REPLAYED_FAILED_ROUNDS.get();
+        if (failedRounds < REPLAYED_BACKOFF_ROUNDS) {
+            return true;
+        }
+        final long last = REPLAYED_LAST_FAILED_ROUND_MS.get();
+        final long now = System.currentTimeMillis();
+        if (last != 0L && (now - last) < REPLAYED_BACKOFF_MS) {
+            return false;
+        }
+        ShanhaiMod.LOGGER.warn("{} replayed_flush_backoff rounds={} pending={} since_last_ms={} "
+                        + "（连续这么多轮一条都没发出去 -> 自动补发改成每 {} 秒试一次；"
+                        + "登录 / 开服这两条入口不受影响）",
+                PREFIX, failedRounds, REPLAYED.size(), last == 0L ? -1L : (now - last),
+                REPLAYED_BACKOFF_MS / 1000L);
+        return true;
+    }
+
+    /**
+     * 这一轮的成败记账（只影响"下一轮要不要退避"，<b>不改 pending 语义</b>）。
+     *
+     * <p>口径：{@code sent == 0 && failed > 0} = 失败轮（实机形态就是 {@code sent=0 failed=87}：
+     * 那个时点客户端还没连上，同一拍再试一次不可能变好）。
+     * 只要有一条发成功（哪怕别的失败）就算"有进展" -> 计数清零，不退避。
+     */
+    private static void noteReplayedRoundOutcome(int sent, int failed) {
+        if (sent == 0 && failed > 0) {
+            REPLAYED_FAILED_ROUNDS.incrementAndGet();
+            REPLAYED_LAST_FAILED_ROUND_MS.set(System.currentTimeMillis());
+            return;
+        }
+        REPLAYED_FAILED_ROUNDS.set(0);
+        REPLAYED_LAST_FAILED_ROUND_MS.set(0L);
     }
 
     /**
@@ -803,13 +960,18 @@ public final class ShanhaiJeiBridge {
                         PREFIX, e.recipeId, msg.typeId);
                 return null;
             }
-            ShanhaiMod.LOGGER.info("{} replayed_body_built id={} type={} why={} recipe_bytes={} "
-                            + "in_bytes={} out_bytes={} cond_n={} dur={} eu={} "
-                            + "（★这条重放补丁带上了【完整正文】：客户端解回来就是服务端这一条 ⇒ "
-                            + "JEI 上的输入/产物/电压与 live 逐项一致）",
-                    PREFIX, e.recipeId, msg.typeId, plan.reason(), msg.recipeBytes.length,
-                    inJson.length(), outJson.length(), conds == null ? -1 : conds.size(),
-                    msg.duration, msg.eut);
+            // 2026-11-22（频率护栏）：这一行原来是每条一次 INFO（87 条 x 38 轮 = 3300 行）。
+            //    现在 = debug + 每轮最多 3 行；完整条数在 replayed_conditions_flushed 的 bodies= 里。
+            if (bodyBuiltLoggedThisRound < REPLAYED_BODY_BUILT_LOG_PER_ROUND) {
+                bodyBuiltLoggedThisRound++;
+                ShanhaiMod.LOGGER.debug("{} replayed_body_built id={} type={} why={} recipe_bytes={} "
+                                + "in_bytes={} out_bytes={} cond_n={} dur={} eu={} "
+                                + "（这条重放补丁带上了完整正文：客户端解回来就是服务端这一条；"
+                                + "每轮最多打 {} 行，全部条数见 replayed_conditions_flushed 的 bodies=）",
+                        PREFIX, e.recipeId, msg.typeId, plan.reason(), msg.recipeBytes.length,
+                        inJson.length(), outJson.length(), conds == null ? -1 : conds.size(),
+                        msg.duration, msg.eut, REPLAYED_BODY_BUILT_LOG_PER_ROUND);
+            }
             return msg;
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.warn("{} replayed_body_skipped id={} type={} why=serialize_failed:{} err={} "
@@ -864,7 +1026,7 @@ public final class ShanhaiJeiBridge {
                 if (!(event.getEntity() instanceof ServerPlayer sp)) {
                     return;                     // 防呆：这个事件理论上只会带 ServerPlayer
                 }
-                flushReplayedConditions(sp.getServer(), sp);
+                flushReplayedConditions(sp.getServer(), sp, true);
             } catch (Throwable t) {
                 ShanhaiMod.LOGGER.warn("{} replayed_conditions_login_flush_failed err={}", PREFIX, t.toString());
             }
@@ -881,7 +1043,7 @@ public final class ShanhaiJeiBridge {
         public static void onServerStarted(net.minecraftforge.event.server.ServerStartedEvent event) {
             try {
                 currentServer = event.getServer();
-                flushReplayedConditions(currentServer, null);
+                flushReplayedConditions(currentServer, null, true);
             } catch (Throwable t) {
                 ShanhaiMod.LOGGER.warn("{} replayed_conditions_server_started_flush_failed err={}",
                         PREFIX, t.toString());

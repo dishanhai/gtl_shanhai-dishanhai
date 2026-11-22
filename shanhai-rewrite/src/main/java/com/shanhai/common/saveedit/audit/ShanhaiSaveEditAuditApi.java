@@ -7,29 +7,27 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * 「双份登记」给<b>面板</b>用的极简门面（下一个 agent 只要照这个接线）。
+ * 「存档体检」给<b>面板/命令/探针</b>用的极简门面（一个存档 = 一个对象）。
  *
- * <h2>一、为什么要有这一层</h2>
- * 面板页需要的东西只有四件：
+ * <h2>一、这一层只做四件事</h2>
  * <pre>
- *   ① 扫一遍（可带进度回调与上限）      → {@link ShanhaiSaveEditAuditScan.Report}
- *   ② 拿清单（每行一个可显示的字符串）  → {@link #findings()} / {@link ShanhaiSaveEditAuditScan.Report#panelLines(int)}
- *   ③ 删区块里那份                     → {@link #dropEntity(String)}
- *   ④ 删旁挂那行                       → {@link #dropSidecar(String)}
+ *   ① 扫一遍（只读）            → {@link #scan()} / {@link #scan(ShanhaiSaveEditAuditScan.Options)}
+ *   ② 拿清单与摘要              → {@link #items()} / {@link #summary()} / {@link #items(String)}
+ *   ③ 删一条（面板：窗口已开）  → {@link #drop(String)}
+ *   ④ 删一条（命令/探针：带闸） → {@link #dropGated(String, ShanhaiSaveEditFlow)}
  * </pre>
- * 把"世界目录 + 备份根"绑在这一个对象上，页面就<b>不用</b>再散着传路径、也不用知道白名单、
- * 不收 UUID 归一化、不碰 NBT。
+ * 白名单、回收目录、回读校验都关在 {@link ShanhaiSaveEditAuditScan} / {@link ShanhaiSaveEditAuditFix}
+ * 里，面板不用知道它们。
  *
- * <h2>二、🔴 两种动作入口的区别（面板一定要用对的那一个）</h2>
+ * <h2>二、🔴 两个删除入口别用错</h2>
  * <ul>
- *   <li><b>面板页</b>挂在既有的停服流程后面（那一层已经调过
- *       {@link ShanhaiSaveEditFlow#tryApply(String)}）⇒ 用 {@link #dropEntity(String)} /
- *       {@link #dropSidecar(String)}（<b>不带闸</b>，内部走 {@code …InWindow}）。</li>
- *   <li><b>命令 / 离线判据</b>是"自己开窗"的 ⇒ 用
- *       {@link #dropEntityGated(String, ShanhaiSaveEditFlow)}（<b>带闸</b>，窗口没开就零字节写入并拒绝）。</li>
+ *   <li><b>面板页</b>挂在既有停服流程后面（那一层已经调过 {@link ShanhaiSaveEditFlow#tryApply(String)}）
+ *       ⇒ 用 {@link #drop(String)}；</li>
+ *   <li><b>命令 / 离线判据</b>是"自己开窗"的 ⇒ 用 {@link #dropGated(String, ShanhaiSaveEditFlow)}
+ *       （窗口没开就零字节拒绝）。</li>
  * </ul>
  * 用错会得到两种都很"像 bug"的结果：面板里用带闸的那个 ⇒ 永远 {@code window_closed}；
- * 命令里用不带闸的那个 ⇒ 绕过了红线。所以这里把名字写死成两组，别混。
+ * 命令里用不带闸的那个 ⇒ 绕过了红线。
  *
  * <h2>三、线程</h2>
  * 全部方法都是<b>同步阻塞 IO</b>（扫一遍几百 KB 到几 MB）。面板请把它放在"点按钮 → 服务端执行"
@@ -37,38 +35,22 @@ import java.util.List;
  */
 public final class ShanhaiSaveEditAuditApi {
 
-    /** 面板清单一次最多显示多少行（超出由 {@code ...共 N 条} 收尾）。 */
-    public static final int PANEL_LINES = 9;
+    /** 面板清单一页几行（= {@code ShanhaiSaveEditLayout.AU_ROWS}；改一处必须改两处）。 */
+    public static final int PANEL_LINES = 7;
 
     private final Path worldDir;
-    private final Path backupRoot;
 
-    private ShanhaiSaveEditAuditApi(Path worldDir, Path backupRoot) {
+    private ShanhaiSaveEditAuditApi(Path worldDir) {
         this.worldDir = worldDir;
-        this.backupRoot = backupRoot;
     }
 
-    /**
-     * 绑定一个存档（只读扫描随时可跑；两个删除动作另需窗口）。
-     *
-     * @param worldDir   存档根目录
-     * @param backupRoot 备份根目录（生产 = {@code <游戏根>/temp/saveedit-backup}）
-     */
-    public static ShanhaiSaveEditAuditApi of(Path worldDir, Path backupRoot) {
-        return new ShanhaiSaveEditAuditApi(worldDir, backupRoot);
-    }
-
-    /** 没有备份根时也行（扫描不需要它；删除动作会失败并如实报原因）。 */
+    /** 绑定一个存档（扫描随时可跑；删除另需停服窗口）。 */
     public static ShanhaiSaveEditAuditApi of(Path worldDir) {
-        return new ShanhaiSaveEditAuditApi(worldDir, null);
+        return new ShanhaiSaveEditAuditApi(worldDir);
     }
 
     public Path worldDir() {
         return this.worldDir;
-    }
-
-    public Path backupRoot() {
-        return this.backupRoot;
     }
 
     // ================================================================== 扫描
@@ -78,38 +60,45 @@ public final class ShanhaiSaveEditAuditApi {
         return ShanhaiSaveEditAuditScan.scan(this.worldDir);
     }
 
-    /** 扫一遍（可带进度回调/上限/对照集）。 */
+    /** 扫一遍（可带进度回调/上限）。 */
     public ShanhaiSaveEditAuditScan.Report scan(ShanhaiSaveEditAuditScan.Options opts) {
         return ShanhaiSaveEditAuditScan.scan(this.worldDir, opts);
     }
 
-    /** 只要清单（面板清单区用；每行格式见 {@link ShanhaiSaveEditAuditScan.Finding#panelLine()}）。 */
-    public List<ShanhaiSaveEditAuditScan.Finding> findings() {
-        return scan().findings();
+    /** 白名单之外的全部条目（面板清单的原料）。 */
+    public List<ShanhaiSaveEditAuditScan.Item> items() {
+        return scan().items();
     }
 
-    // ================================================================== 修改（面板：窗口已开）
-
-    /** 删区块文件里那条实体（<b>调用方必须已经在窗口里</b>）。 */
-    public ShanhaiSaveEditAuditFix.Result dropEntity(String uuid) {
-        return ShanhaiSaveEditAuditFix.dropEntityInWindow(this.worldDir, uuid, this.backupRoot, stamp());
+    /** 同上，但按子串过滤（面板搜索框）。 */
+    public List<ShanhaiSaveEditAuditScan.Item> items(String needle) {
+        return scan().filter(needle);
     }
 
-    /** 删旁挂文件里含该 UUID/坐标的整行（<b>调用方必须已经在窗口里</b>；二进制只报不改）。 */
-    public ShanhaiSaveEditAuditFix.Result dropSidecar(String uuid) {
-        return ShanhaiSaveEditAuditFix.dropSidecarInWindow(this.worldDir, uuid, this.backupRoot, stamp());
+    /** 面板顶部那一行：{@code 共 N 条 · 文件 a · 目录 b · 文本 c · 二进制 d}。 */
+    public String summary() {
+        return scan().panelSummary();
     }
 
-    // ================================================================== 修改（命令/探针：自己开窗过闸）
+    // ================================================================== 删除（面板：窗口已开）
 
-    /** 删区块里那份（带闸：窗口没开 ⇒ 零字节写入 + 拒绝）。 */
-    public ShanhaiSaveEditAuditFix.Result dropEntityGated(String uuid, ShanhaiSaveEditFlow flow) {
-        return ShanhaiSaveEditAuditFix.dropEntity(this.worldDir, uuid, flow, this.backupRoot, stamp());
+    /** 删掉白名单之外的这一条（<b>调用方必须已经在窗口里</b>）。 */
+    public ShanhaiSaveEditAuditFix.Result drop(String rel) {
+        return ShanhaiSaveEditAuditFix.dropInWindow(this.worldDir, rel, stamp());
     }
 
-    /** 删旁挂那行（带闸：窗口没开 ⇒ 零字节写入 + 拒绝）。 */
-    public ShanhaiSaveEditAuditFix.Result dropSidecarGated(String uuid, ShanhaiSaveEditFlow flow) {
-        return ShanhaiSaveEditAuditFix.dropSidecar(this.worldDir, uuid, flow, this.backupRoot, stamp());
+    // ================================================================== 删除（命令/探针：自己开窗过闸）
+
+    /** 删掉这一条（带闸：窗口没开 ⇒ 零字节拒绝）。 */
+    public ShanhaiSaveEditAuditFix.Result dropGated(String rel, ShanhaiSaveEditFlow flow) {
+        return ShanhaiSaveEditAuditFix.drop(this.worldDir, rel, flow, stamp());
+    }
+
+    /** 回收目录的<b>根</b>（不含本次时间戳）；面板提示"可撤回"时用它。 */
+    public Path trashBase() {
+        final Path root = ShanhaiSaveEditAuditFix.trashRoot(this.worldDir, "x");
+        final Path parent = root.getParent();
+        return parent == null ? root : parent;
     }
 
     private static String stamp() {
@@ -118,6 +107,6 @@ public final class ShanhaiSaveEditAuditApi {
 
     @Override
     public String toString() {
-        return "ShanhaiSaveEditAuditApi[world=" + this.worldDir + " backup=" + this.backupRoot + "]";
+        return "ShanhaiSaveEditAuditApi[world=" + this.worldDir + "]";
     }
 }

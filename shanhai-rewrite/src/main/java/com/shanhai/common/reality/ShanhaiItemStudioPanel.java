@@ -12,8 +12,8 @@ import net.minecraft.world.entity.player.Player;
  *
  * <h2>它做的事只有四件</h2>
  * <ol>
- *   <li>顶上画一排三个页签（{@code 新增 / 修改 / 删除}），当前那个金色边框；</li>
- *   <li>把三个页各自装进一个 340×300 的页组，<b>同一时刻只显示一个</b>；</li>
+ *   <li>顶上画一排页签（{@code 新增 / 修改 / 删除} ＋ 🆕{@code 流体}），当前那个金色边框；</li>
+ *   <li>把各页各自装进一个 340×300 的页组，<b>同一时刻只显示一个</b>；</li>
  *   <li>切页时把上一页的两层覆盖（提示编辑器 / 图标选择器 / 描述编辑器）关掉；</li>
  *   <li>把"关掉整个面板"的动作递给「修改」「删除」两页（它们拿不到 player 引用）。</li>
  * </ol>
@@ -40,13 +40,19 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
 
     private static final int TAB_Y = 2;
     private static final int TAB_H_BTN = 16;
-    private static final int TAB_W = 64;
-    private static final int[] TAB_X = {6, 74, 142};
-    private static final String[] TAB_NAMES = {"新增", "修改", "删除"};
+    /**
+     * 页签宽度。🔴 2026-11-22 由 64 收到 60：加了第 ④ 页「流体」之后 4×64 = 256 会把
+     * 右边的提示标签顶出面板（340 宽）⇒ 4×60 = 240 + 间隙，提示标签落在 x=262 起。
+     * 前三页签的 y / 高 / 顺序一个都没动。
+     */
+    private static final int TAB_W = 60;
+    private static final int[] TAB_X = {6, 70, 134, 198};
+    private static final String[] TAB_NAMES = {"新增", "修改", "删除", "流体"};
     private static final String[] TAB_HINTS = {
-            "§8现实物品槽位 1–128",
-            "§8任意已存在物品：名字 / 描述 / 堆叠",
-            "§8藏起来 / 抹除 / 撤回（看影响面）"};
+            "§8槽位 1–128",
+            "§8任意物品改名",
+            "§8藏起来 / 抹除",
+            "§8流体 1–32"};
 
     private final Player player;
     private final boolean remote;
@@ -54,8 +60,10 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
     private final ShanhaiCreativeItemsPanel creativePanel;
     private final ShanhaiItemOverridePage overridePage;
     private final ShanhaiItemRemovalPage removalPage;
-    private final WidgetGroup[] pages = new WidgetGroup[3];
-    private final ShanhaiCreativeWidgets.TextButton[] tabs = new ShanhaiCreativeWidgets.TextButton[3];
+    /** 🆕 2026-11-22：第 ④ 页「现实流体」。 */
+    private final ShanhaiFluidEditorPage fluidPage;
+    private final WidgetGroup[] pages = new WidgetGroup[4];
+    private final ShanhaiCreativeWidgets.TextButton[] tabs = new ShanhaiCreativeWidgets.TextButton[4];
 
     private LabelWidget hintLabel;
     private int tab;
@@ -67,25 +75,28 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
         this.setBackground(GuiTextures.BACKGROUND);
 
         // ---- 页签 ----
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             final int which = i;
             this.tabs[i] = new ShanhaiCreativeWidgets.TextButton(TAB_X[i], TAB_Y, TAB_W, TAB_H_BTN,
                     () -> "§f" + TAB_NAMES[which], () -> selectTab(which));
             this.addWidget(this.tabs[i]);
         }
-        this.hintLabel = new LabelWidget(214, TAB_Y + 5, TAB_HINTS[0]);
+        this.hintLabel = new LabelWidget(262, TAB_Y + 5, TAB_HINTS[0]);
         this.addWidget(this.hintLabel);
 
-        // ---- 三个页（每个都是一整块 340×300，摆在自己那个页组里；页组自己下移 TAB_H）----
+        // ---- 四个页（每个都是一整块 340×300，摆在自己那个页组里；页组自己下移 TAB_H）----
         this.creativePanel = new ShanhaiCreativeItemsPanel(holder, player);
         this.overridePage = new ShanhaiItemOverridePage(this.remote);
         this.removalPage = new ShanhaiItemRemovalPage(this.remote);
         this.overridePage.onClose(this::closeWhole);
         this.removalPage.onClose(this::closeWhole);
+        // 🆕 2026-11-22：第 ④ 页「现实流体」（32 个占位流体的名字 / tint / 贴图）
+        this.fluidPage = new ShanhaiFluidEditorPage(this.remote, player);
 
         this.pages[0] = pageGroup(this.creativePanel);
         this.pages[1] = pageGroup(this.overridePage);
         this.pages[2] = pageGroup(this.removalPage);
+        this.pages[3] = pageGroup(this.fluidPage);
 
         this.selectTab(0);
 
@@ -130,8 +141,8 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
     // ------------------------------------------------------------------ 切页
 
     private void selectTab(int which) {
-        this.tab = Math.max(0, Math.min(which, 2));
-        for (int i = 0; i < 3; i++) {
+        this.tab = Math.max(0, Math.min(which, 3));
+        for (int i = 0; i < 4; i++) {
             final boolean on = i == this.tab;
             this.pages[i].setVisible(on);
             this.pages[i].setActive(on);
@@ -143,6 +154,7 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
         // 离开某一页时，把它上面开着的覆盖层关掉（否则回来时还会盖着）
         this.creativePanel.closeOverlays();
         this.overridePage.closeOverlays();
+        this.fluidPage.closeOverlays();
         com.shanhai.ShanhaiMod.LOGGER.info("{} studio_tab tab={} name={}",
                 ShanhaiRealityItemTable.PREFIX, this.tab, TAB_NAMES[this.tab]);
     }
@@ -156,7 +168,7 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
 
     // ------------------------------------------------------------------ 读数
 
-    /** 当前页（0=新增 1=修改 2=删除）。 */
+    /** 当前页（0=新增 1=修改 2=删除 3=流体）。 */
     public int currentTab() {
         return this.tab;
     }
@@ -165,11 +177,18 @@ public final class ShanhaiItemStudioPanel extends WidgetGroup {
         return this.creativePanel;
     }
 
+    /** 🆕 2026-11-22：第 ④ 页（现实流体）。命令/自检读它。 */
+    public ShanhaiFluidEditorPage fluidPage() {
+        return this.fluidPage;
+    }
+
     /** 供命令 / 自检读的一行版式读数。 */
     public static String layoutLine() {
-        return "studio " + W + "x" + H + " tab_h=" + TAB_H + " pages=3 tabs=[新增|修改|删除]"
+        return "studio " + W + "x" + H + " tab_h=" + TAB_H + " pages=4 tabs=[新增|修改|删除|流体]"
                 + " " + ShanhaiItemSearchPane.layoutLine()
                 + " " + ShanhaiItemOverridePage.layoutLine()
-                + " " + ShanhaiItemRemovalPage.layoutLine();
+                + " " + ShanhaiItemRemovalPage.layoutLine()
+                + " " + ShanhaiFluidEditorPage.layoutLine()
+                + " " + ShanhaiFluidTexturePicker.layoutLine();
     }
 }

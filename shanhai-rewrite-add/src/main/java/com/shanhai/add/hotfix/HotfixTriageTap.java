@@ -150,18 +150,82 @@ public final class HotfixTriageTap {
         /** 违规现场用的序号（负数 ⇒ 与本体 1..3 天然区分开，日志里一眼看得出）。 */
         public static final int VIOLATION_INDEX = -1;
 
+        /**
+         * 🆕 2026-11-21（④）：这条 strike 的<b>来源</b>（进日志 {@code strike_source=}）。
+         *
+         * <p>为什么是个字段而不是"从 {@code fromViolation} 推"：现在有<b>第三个生产者</b>
+         * {@code judge_watch}（关键类监控发现 Code 与基线不符）。它和违规现场走<b>同一条</b>通道，
+         * 但来源必须分得开 —— 否则现场看到 {@code strike_source=violation} 会误判成"原版写入点抓的栈"。
+         *
+         * <p>取值：{@link #SOURCE_TRIAGE}／{@link #SOURCE_VIOLATION}／{@link #SOURCE_JUDGE_WATCH}／
+         * {@link #SOURCE_HEALTH_CLAMP}／空串（空串 ⇒ 按 {@link #fromViolation} 老口径推，
+         * 行为与改动前逐字相同）。
+         */
+        public final String source;
+
+        /** 来源：本体分诊（{@code strike_caller#N} 那一行）。 */
+        public static final String SOURCE_TRIAGE = "triage";
+
+        /** 来源：我们在原版写入点抓的违规现场。 */
+        public static final String SOURCE_VIOLATION = "violation";
+
+        /** 来源：关键类监控（{@code HotfixJudgeWatch}）判 {@code foreign} 时喂进来的合成样本。 */
+        public static final String SOURCE_JUDGE_WATCH = "judge_watch";
+
+        /**
+         * 来源：<b>写侧钳制命中</b>（{@code health_clamp}）时喂进来的现场
+         * （{@link HotfixHealthClampStrike#SOURCE} 逐字引用本常量）。
+         *
+         * <p>为什么要单开：现场 {@code health_clamp} 命中 284 次而 {@code where=health} 的违规源 0 条
+         * ⇒ 那条路以前<b>根本没喂</b>；现在喂了，就必须能在 {@code strike_source=} 上把它与
+         * {@code violation}／{@code judge_watch} 分开 —— 否则现场会误判成"原版写入点抓的栈"。
+         */
+        public static final String SOURCE_HEALTH_CLAMP = "health_clamp";
+
+        /**
+         * 🆕 2026-11-21（②）：<b>违规现场那一拍抓的整链</b>（深度 {@link HotfixChainCapture#DEPTH}，
+         * <b>最里层在前</b>＝栈数组顺序）。
+         *
+         * <p>为什么要单开一条：守卫那 16 帧是<b>日志格式</b>（{@code top=} 的条数），
+         * 改它会动守卫、动现成的现场判读；而"整链抹除"要的是从顶端（靠框架）到最低端（写点）
+         * 的<b>全部</b>外部段。这一条只在 {@link #submitViolation} 那一拍抓（就在原版写入点的调用链上），
+         * 与那 16 帧互不影响。
+         *
+         * <p>可以为空（没抓到／老路径），消费方必须能接受空表并退回 {@link #frames}。
+         */
+        public final List<HotfixTargetResolver.Frame> chain;
+
         Strike(int index, List<HotfixTargetResolver.Frame> frames, long atMillis, String player, String raw) {
-            this(index, frames, atMillis, player, raw, false);
+            this(index, frames, atMillis, player, raw, false, null, "");
         }
 
         Strike(int index, List<HotfixTargetResolver.Frame> frames, long atMillis, String player, String raw,
               boolean fromViolation) {
+            this(index, frames, atMillis, player, raw, fromViolation, null, "");
+        }
+
+        Strike(int index, List<HotfixTargetResolver.Frame> frames, long atMillis, String player, String raw,
+              boolean fromViolation, List<HotfixTargetResolver.Frame> chain) {
             this.index = index;
             this.frames = frames == null ? new ArrayList<>(0) : frames;
             this.atMillis = atMillis;
             this.player = player;
             this.raw = raw == null ? "" : raw;
             this.fromViolation = fromViolation;
+            this.chain = chain == null ? new ArrayList<HotfixTargetResolver.Frame>(0) : chain;
+            this.source = "";
+        }
+
+        Strike(int index, List<HotfixTargetResolver.Frame> frames, long atMillis, String player, String raw,
+               boolean fromViolation, List<HotfixTargetResolver.Frame> chain, String source) {
+            this.index = index;
+            this.frames = frames == null ? new ArrayList<>(0) : frames;
+            this.atMillis = atMillis;
+            this.player = player;
+            this.raw = raw == null ? "" : raw;
+            this.fromViolation = fromViolation;
+            this.chain = chain == null ? new ArrayList<HotfixTargetResolver.Frame>(0) : chain;
+            this.source = source == null ? "" : source;
         }
 
         /** 距现在多久（毫秒）。 */
@@ -176,7 +240,10 @@ public final class HotfixTriageTap {
 
         /** 来源的机器名（日志用）。 */
         public String sourceToken() {
-            return fromViolation ? "violation" : "triage";
+            if (source != null && !source.isEmpty()) {
+                return source;
+            }
+            return fromViolation ? SOURCE_VIOLATION : SOURCE_TRIAGE;
         }
     }
 
@@ -384,6 +451,19 @@ public final class HotfixTriageTap {
      * @return {@code true} = 真的投递出去了（{@code false} = 没接上/无帧且无目标）
      */
     public static boolean submitViolation(String where, String player, List<String> frames, long atMillis) {
+        return submitViolation(where, player, frames, atMillis, Strike.SOURCE_VIOLATION);
+    }
+
+    /**
+     * 🆕 2026-11-21（④）：带<b>来源</b>的重载（第三个生产者 {@code judge_watch} 走这里）。
+     *
+     * <p>只多一个字段：{@link Strike#source} ⇒ 日志里的 {@code strike_source=} 不再总是 {@code violation}。
+     * 通道本身（appender／配对／保鲜期／门槛链）<b>一个字都没改</b>。
+     *
+     * @param source {@link Strike#SOURCE_JUDGE_WATCH} 等；{@code null}/空 ⇒ 按老口径（violation）
+     */
+    public static boolean submitViolation(String where, String player, List<String> frames, long atMillis,
+                                          String source) {
         VIOLATIONS.incrementAndGet();
         final List<HotfixTargetResolver.Frame> parsed = new ArrayList<>(
                 frames == null ? 0 : Math.min(frames.size(), VIOLATION_MAX_FRAMES));
@@ -396,12 +476,26 @@ public final class HotfixTriageTap {
             }
         }
         final String key = player == null || player.isEmpty() ? GLOBAL_KEY : player;
+        // 🆕 2026-11-21（②）：在**违规现场这一拍**抓整链（深度 64）。只有这里有意义 ——
+        //   调用方（守卫）就是在原版写入点的调用链上调进来的；晚一拍再抓就只剩我们自己的帧。
+        //   代价：一次 Thread#getStackTrace（≤64 帧，几十微秒级），而守卫那条路本来就有 1/s 限流。
+        List<HotfixTargetResolver.Frame> chain;
+        try {
+            chain = HotfixChainCapture.live();
+        } catch (Throwable ignored) {
+            chain = new ArrayList<HotfixTargetResolver.Frame>(0);
+        }
+        if (chain == null) {
+            chain = new ArrayList<HotfixTargetResolver.Frame>(0);
+        }
         final StringBuilder raw = new StringBuilder(160);
         raw.append("violation_stack where=").append(where == null ? "?" : where)
                 .append(" player=").append(player == null ? "?" : player)
-                .append(" frames=").append(parsed.size());
+                .append(" frames=").append(parsed.size())
+                .append(" chain=").append(chain.size())
+                .append(" source=").append(source == null || source.isEmpty() ? Strike.SOURCE_VIOLATION : source);
         final Strike record = new Strike(Strike.VIOLATION_INDEX, parsed, atMillis, player,
-                raw.toString(), true);
+                raw.toString(), true, chain, source);
         synchronized (STRIKES) {
             STRIKES.put(key, record);
         }

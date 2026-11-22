@@ -2,6 +2,7 @@ package com.shanhai.add.guard;
 
 import com.shanhai.ShanhaiMod;
 import com.shanhai.common.guard.ShanhaiGuardCore;
+import com.shanhai.common.guard.ShanhaiGuardSwitches;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -102,6 +103,14 @@ public final class ShanhaiGuardSuppression {
     public static void noteRemoved(EntityType<?> type, ServerPlayer owner, String source) {
         if (type == null || type == EntityType.PLAYER) {
             return;   // 🔴 fail-closed：玩家永不上榜
+        }
+        // 🔴 2026-11-20（任务 1）：持续压制属于【自动反制】⇒ attack_side=false 时一个类型都不许上榜。
+        //    为什么这一道必须在这里（而不是只在事件回调里）：来源① 是 purgeLegacy（命令路径）。
+        //    命令照常能抹（用户要的），但绝不顺带把"每 5 tick 再抹一次"这个自动行为打开 ——
+        //    否则一条手动命令就等于替用户把压制打开了，那正是他反对的那个形态
+        //    （原话：「不要有那个压制」）。
+        if (!ShanhaiGuardSwitches.attackSide()) {
+            return;
         }
         try {
             final long now = System.currentTimeMillis();

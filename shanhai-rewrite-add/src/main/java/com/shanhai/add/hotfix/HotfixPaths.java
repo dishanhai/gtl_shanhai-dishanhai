@@ -14,7 +14,7 @@ import java.nio.file.StandardOpenOption;
  * 这条不是洁癖，是实测事故（{@code temp/u1-attach\报告.md} §3.2 有逐字原文）：
  * 把中文路径经 <b>agent 的 options 通道</b>传给目标 JVM 时，字符串会被<b>截断 + 变成 {@code ???}</b>
  * <pre>
- *   agentmain called args=C:\Users\david\Desktop\???¨\shanhai???\temp/u1-attach\smoke-agent-evidenc
+ *   agentmain called args=<本机中文目录>\<模组目录>\temp/u1-attach\smoke-agent-evidenc
  *   evidence-write-failed: java.io.FileNotFoundException: …\smoke-agent-evidenc (系统找不到指定的路径。)
  * </pre>
  * 注意尾部字符被吃掉了 —— 典型的"字符数 / 字节数口径不一致"（JVM 侧 {@code file.encoding=UTF-8}

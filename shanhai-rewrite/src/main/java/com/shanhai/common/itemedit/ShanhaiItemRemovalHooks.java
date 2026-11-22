@@ -52,9 +52,14 @@ public final class ShanhaiItemRemovalHooks {
      *
      * <p>🔴 先收集再删：{@code MutableHashedLinkedMap} 在迭代中删除会打乱链表游标，
      * 所以遍历与删除分两拍（这也是 {@code remove()} 只接受 key 的原因）。
+     *
+     * <p>🔴 <b>本方法不在这里注册</b>：本类挂在 FORGE 总线，而
+     * {@code BuildCreativeModeTabContentsEvent} 是 <b>MOD 总线</b>事件（{@code implements IModBusEvent}）。
+     * 挂错总线不会崩，只会<b>永不触发</b> —— 2026-11-22 被静态尺子
+     * （{@code temp\bus-check\check-bus.mjs}）抓出来，此前这一半一直是死代码。
+     * 真正的 {@code @SubscribeEvent} 在 {@link ShanhaiItemRemovalModHooks}（MOD 总线），它转调本方法。
      */
-    @SubscribeEvent
-    public static void onBuildTabContents(BuildCreativeModeTabContentsEvent event) {
+    static void onBuildTabContentsImpl(BuildCreativeModeTabContentsEvent event) {
         try {
             ShanhaiItemOverrideTable.refresh();
             if (!ShanhaiItemOverrideTable.active()) {

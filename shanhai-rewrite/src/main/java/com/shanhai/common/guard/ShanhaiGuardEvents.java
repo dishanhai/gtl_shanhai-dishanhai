@@ -19,6 +19,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -353,6 +354,8 @@ public final class ShanhaiGuardEvents {
         ME_GATES.keySet().retainAll(present);
         TOSSED_AT.keySet().retainAll(present);
         KB_STATES.keySet().retainAll(present);
+        LAST_HELD_TICK.keySet().retainAll(present);   // 🆕 2026-11-20：宽限锚点也随名单回收（防泄漏）
+        GROUND_DROP.keySet().retainAll(present);      // 🆕 2026-11-20：地面补件的引用也随名单回收
     }
 
     /**
@@ -383,55 +386,10 @@ public final class ShanhaiGuardEvents {
         }
 
         // ── ②⑤ 被移除检测：两套名单（PlayerList vs ServerLevel.players()）＋ isRemoved ＋ isAddedToWorld ──
-        final ShanhaiGuardCore.Decision removed = ShanhaiGuardCore.removalDecision(
-                player.isRemoved(), player.isAddedToWorld(), true, inLevelRoster(player));
-        if (removed.yes) {
-            // 🔴 2026-10-10：判出来之后**真的动手救**（原来只打一行 warning ⇒ 永远回不来）。
-            //    三条硬约束全在核里执行：① 顺序 = 放回位置 → revive() → addFreshEntity()
-            //    ② 判 addFreshEntity 的返回值（false ⇒ 报警，不当成功）
-            //    ③ 先过滤「正常离开」：只有【被外力移除】才动手 —— 换维度／登出／正常死亡／区块卸载一律不碰
-            //    ⚠️ 玩家实体本轮**只做实体层**：四套名单（PlayerList／连接／tab／level.players()）的完整重建不做。
-            final Entity.RemovalReason rr = player.getRemovalReason();
-            final ShanhaiGuardCore.Decision rescue = ShanhaiGuardCore.rescueRemovedEntity(
-                    ShanhaiGuardCore.enabled,
-                    rr == null ? null : rr.name(),
-                    rr != null && rr.shouldDestroy(),
-                    player.isAddedToWorld(),
-                    true, // 这就是玩家实体（ServerPlayer）⇒ 原因串里必须写清"只做实体层"
-                    new ShanhaiGuardCore.RescueOps() {
-
-                        @Override
-                        public void restorePosition() {
-                            // ① 先把位置放回去（重挂是按"当前位置"挑区块的）；只动实体层坐标，不碰连接
-                            if (track.hasLastSane()) {
-                                player.setPos(track.lastSaneX(), track.lastSaneY(), track.lastSaneZ());
-                            }
-                        }
-
-                        @Override
-                        public void revive() {
-                            player.revive(); // ② 实体层复活（必须在 addFreshEntity 之前）
-                        }
-
-                        @Override
-                        public boolean addFreshEntity() {
-                            final ServerLevel level = player.serverLevel();
-                            if (level == null) {
-                                return false; // 没有世界 ⇒ 明确报失败，不当成功
-                            }
-                            return level.addFreshEntity(player); // ③ 返回值照原样上报
-                        }
-                    });
-            if (rescue.yes) {
-                logDetail(KIND_RESCUED, rescue.reason);
-                chat(player, KIND_RESCUED);   // 🆕 聊天栏
-                noteIntercept(player);        // 🆕 反击退：拦到"被移除"也算窗口内的一次拦截
-            } else {
-                // 没救回来（或按规矩不动手）⇒ 一定留一行原因，绝不静默
-                logDetail(KIND_REMOVED, removed.reason + " ｜ 救回：" + rescue.reason);
-                chat(player, KIND_REMOVED);   // 🆕 聊天栏（只报"你被移除了"这件事，不报救回结果）
-            }
-        }
+        //    🔴 2026-11-20：整段抽成【公开方法】{@link #rescueRemovedNow(ServerPlayer)} ——
+        //       第二层（扩展 {@code ShanhaiStateAuthority}）在它自己的采样点上也调<b>同一个</b>方法，
+        //       按用户口径「把它挪进/复用第二层，别写两套」：判据与三步动作只有这一份实现。
+        rescueRemovedNow(player);
 
         // ── ③ 回血（两条腿）＋ 当场自证（两条腿都失败 ⇒ 核里记一次失败，不静默） ──
         //    🔴 2026-10-17：有的第三方 mod 的杀人链不过 setHealth、还会把别人的 setHealth 取消掉
@@ -499,6 +457,9 @@ public final class ShanhaiGuardEvents {
                 TRACKS.remove(id);
                 TOSSED_AT.remove(id);
                 ME_GATES.remove(id);
+                // 🔴 2026-11-20：宽限窗口的锚点也必须一起清 —— 否则"主动丢掉模块"会被宽限窗口复活 5 秒
+                LAST_HELD_TICK.remove(id);
+                GROUND_DROP.remove(id);   // 主动放手 ⇒ 地面补件的记账也一起清（他不是"被清空"那一类）
                 logDetail(KIND_DISARM, disarm.reason);
                 chat(player, KIND_DISARM);   // 🆕 聊天栏（用户样例③：你把模块交了出去，保护已卸下）
                 return;
@@ -516,19 +477,107 @@ public final class ShanhaiGuardEvents {
                 true, inInventory, viaDrop, inOpenContainer, meGate.outcome());
         if (restore.yes) {
             logDetail(KIND_RESTORE, "要补回了（先给提示）：" + restore.reason); // 🔴 先给一条提示（走同一套日志闸门）
-            final boolean ok = giveModule(player);
+            final String placement = giveModule(player);
+            final boolean ok = placement != null;
             ShanhaiGuardCore.noteRestoreResult(ok);
-            logDetail(KIND_RESTORE, ok ? "已补回一件（原因：" + restore.reason + "）"
-                    : "补回失败（背包满 或 物品未注册），不假装成功");
             if (ok) {
-                // 🆕 聊天栏：只有【真放回背包了】才告诉玩家（失败那一条只进日志，不跟玩家说"补回失败"）
+                // 🔴 2026-11-20 用户点名的那一行：`module_restored slot=…`
+                logDetail(KIND_RESTORE, "module_restored " + placement + " ｜ 原因：" + restore.reason);
+                // 🆕 聊天栏：只有【真放回背包/脚下】才告诉玩家（失败那一条只进日志，不跟玩家说"补回失败"）
                 chat(player, KIND_RESTORE);
+            } else {
+                // 🔴 补不回来 = 保护即将失效 ⇒ 这是**一级故障**，用 WARN 打明（不假装成功）
+                logDetail(KIND_RESTORE, "module_restore_failed（背包满 ＋ 落地也失败 ／ 物品未注册）"
+                        + " ⇒ 保护会在宽限窗口（" + HOLD_GRACE_TICKS + " tick）之后失效 ｜ 原因："
+                        + restore.reason);
             }
         }
 
         // ── 原有兜底：🔴 无条件每 tick 复位（不是「只在血未满时复位」） ──
         player.deathTime = 0;
         player.hurtTime = 0;
+    }
+
+    /**
+     * 🔴 <b>「见 {@code isRemoved()} 就救回」—— 全工程唯一一份实现</b>（2026-11-20 从 {@link #guardOne} 抽出来）。
+     *
+     * <h2>为什么必须抽成公开方法（用户口径）</h2>
+     * <pre>
+     *   「把它挪进/复用第二层，别写两套」
+     * </pre>
+     * 第二层的采样点（扩展 {@code ShanhaiStateAuthority} 的 {@code ServerTickEvent.START} 与
+     * {@code PlayerTickEvent.START}）要判"被移除"这件事 —— 而"被移除的玩家<b>不再 tick</b>"
+     * ⇒ 那两条路里只有 {@code ServerTickEvent.START} 还看得到他。
+     * 把动作<b>复制</b>一份到扩展里是不允许的（判据/顺序一旦漂移就是两套行为），
+     * ⇒ 现在两边调<b>同一个</b>方法，判据与三步动作都还住在这一个方法里。
+     *
+     * <h2>原来的三条硬约束（一个字都没改，只是搬了位置）</h2>
+     * <ol>
+     *   <li><b>顺序死</b>：放回位置 → {@code revive()} → {@code addFreshEntity()}（核里 {@code rescueRemovedEntity} 保证）；</li>
+     *   <li><b>判返回值</b>：{@code addFreshEntity} 返回 false ⇒ 报警，不当成功；</li>
+     *   <li><b>先过滤「正常离开」</b>：换维度／登出／正常死亡／区块卸载一律不碰。</li>
+     * </ol>
+     *
+     * @param player 受保护玩家（调用方负责判）
+     * @return true = 这一次<b>真的救回来了</b>（{@code rescue.yes}）；false = 没救回来 / 按规矩不动手
+     */
+    public static boolean rescueRemovedNow(ServerPlayer player) {
+        if (player == null) {
+            return false;
+        }
+        final ShanhaiGuardCore.Decision removed = ShanhaiGuardCore.removalDecision(
+                player.isRemoved(), player.isAddedToWorld(), true, inLevelRoster(player));
+        if (!removed.yes) {
+            return false;   // 三条都正常 ⇒ 一条日志都不打（每 tick 都会走到这里）
+        }
+        final ShanhaiGuardCore.PositionTrack track =
+                TRACKS.computeIfAbsent(player.getUUID(), k -> new ShanhaiGuardCore.PositionTrack());
+        // 🔴 判出来之后**真的动手救**（原来只打一行 warning ⇒ 永远回不来）。
+        //    三条硬约束全在核里执行：① 顺序 = 放回位置 → revive() → addFreshEntity()
+        //    ② 判 addFreshEntity 的返回值（false ⇒ 报警，不当成功）
+        //    ③ 先过滤「正常离开」：只有【被外力移除】才动手 —— 换维度／登出／正常死亡／区块卸载一律不碰
+        //    ⚠️ 玩家实体本轮**只做实体层**：四套名单（PlayerList／连接／tab／level.players()）的完整重建不做。
+        final Entity.RemovalReason rr = player.getRemovalReason();
+        final ShanhaiGuardCore.Decision rescue = ShanhaiGuardCore.rescueRemovedEntity(
+                ShanhaiGuardCore.enabled,
+                rr == null ? null : rr.name(),
+                rr != null && rr.shouldDestroy(),
+                player.isAddedToWorld(),
+                true, // 这就是玩家实体（ServerPlayer）⇒ 原因串里必须写清"只做实体层"
+                new ShanhaiGuardCore.RescueOps() {
+
+                    @Override
+                    public void restorePosition() {
+                        // ① 先把位置放回去（重挂是按"当前位置"挑区块的）；只动实体层坐标，不碰连接
+                        if (track.hasLastSane()) {
+                            player.setPos(track.lastSaneX(), track.lastSaneY(), track.lastSaneZ());
+                        }
+                    }
+
+                    @Override
+                    public void revive() {
+                        player.revive(); // ② 实体层复活（必须在 addFreshEntity 之前）
+                    }
+
+                    @Override
+                    public boolean addFreshEntity() {
+                        final ServerLevel level = player.serverLevel();
+                        if (level == null) {
+                            return false; // 没有世界 ⇒ 明确报失败，不当成功
+                        }
+                        return level.addFreshEntity(player); // ③ 返回值照原样上报
+                    }
+                });
+        if (rescue.yes) {
+            logDetail(KIND_RESCUED, rescue.reason);
+            chat(player, KIND_RESCUED);   // 🆕 聊天栏
+            noteIntercept(player);        // 🆕 反击退：拦到"被移除"也算窗口内的一次拦截
+            return true;
+        }
+        // 没救回来（或按规矩不动手）⇒ 一定留一行原因，绝不静默
+        logDetail(KIND_REMOVED, removed.reason + " ｜ 救回：" + rescue.reason);
+        chat(player, KIND_REMOVED);   // 🆕 聊天栏（只报"你被移除了"这件事，不报救回结果）
+        return false;
     }
 
     // ═══════════════════════════════ ③c 🆕 2026-10-17 反击退 / 反挤压（只刹车，不搬人） ═══════════════════════════════
@@ -768,17 +817,100 @@ public final class ShanhaiGuardEvents {
     // ═══════════════════════════════ 补五件用的取值/执行助手 ═══════════════════════════════
 
     /**
-     * 🔴 <b>「他算不算受保护」的总入口</b>＝ 当前持有 ＋ <b>登记过（曾持有）</b>。
+     * 🔴 <b>「他算不算受保护」的总入口</b>＝ 当前持有 ＋ <b>登记过（曾持有）</b> ＋ <b>宽限窗口</b>。
      *
      * <p>后者的必要性：补件④ 的场景是"背包被掏空" ⇒ 那一刻 {@link #holdsGuard} 已是 false；
      * 若四个事件都只认"当前持有"，掏空背包就等于<b>一招破防</b>（伤害/死亡/死亡界面全部放行）。
+     *
+     * <h2>🆕 2026-11-20：补一条<b>宽限窗口</b>（用户实测过的破防形态）</h2>
+     * <pre>
+     *   「创始现实修改模块被清空 ⇒ isGuarded 变 false ⇒ 全套防护失效」
+     * </pre>
+     * 登记表（{@link #REMEMBERED}）只在两个地方减人：玩家离开名单、以及<b>他自己按键丢出</b>
+     * （那是主动放手，必须减）。但"被外力清空一帧"与"他主动丢出"在<b>物品栏读数上长得一模一样</b>，
+     * 而这两件事的正确反应完全相反。⇒ 再加一条与登记表<b>无关</b>的、按 tick 计时的宽限：
+     * 距 {@link #LAST_HELD_TICK}（最后一次<b>确认</b>持有的 tick）不超过
+     * {@link #HOLD_GRACE_TICKS} ⇒ 仍然按受保护对待。
+     *
+     * <p>⚠️ 宽限<b>不会</b>让"主动丢出"复活：那条路会把 {@link #LAST_HELD_TICK} 一起清掉
+     * （见 {@link #guardOne} 的 disarm 分支），所以卸下保护仍然是<b>当场</b>生效。
+     *
+     * <p>⚠️ 客户端也会调本方法（那边没有 {@code ServerTickEvent} 在维护登记表）
+     * ⇒ 拿 {@code player.level().getGameTime()} 当 tick 源，两侧都能算。
      */
     public static boolean isGuarded(Player player) {
         if (player == null) {
             return false;
         }
-        return holdsGuard(player) || REMEMBERED.contains(player.getUUID());
+        if (holdsGuard(player)) {
+            noteHeld(player);       // 记下"最后一次确认持有的 tick"（宽限窗口的锚点）
+            return true;
+        }
+        if (REMEMBERED.contains(player.getUUID())) {
+            return true;
+        }
+        return inHoldGrace(player);
     }
+
+    /**
+     * 模块丢了之后的宽限窗口（tick）。<b>20 tick = 1 秒；这里取 100 tick = 5 秒。</b>
+     *
+     * <p>⚠️ 与扩展模块 {@code com.shanhai.add.guard.state.ShanhaiStateRules#HOLD_GRACE_TICKS}
+     * <b>必须同值</b>（两个模块不能互相 import 常量）；开机自证那一行会把两个数都打出来 ⇒ 漂了看得见。
+     */
+    public static final int HOLD_GRACE_TICKS = 100;
+
+    /** 每个玩家「最后一次<b>确认</b>持有模块的 tick」（宽限窗口的锚点；<b>表里没这条</b> = 从没持有过）。 */
+    private static final Map<UUID, Long> LAST_HELD_TICK = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 🔴 每个玩家「我们丢在脚下的那一件模块」—— <b>防复制物品</b>的唯一判据（2026-11-20）。
+     *
+     * <p>{@link #guardOne} 每 tick 跑；背包满的时候它会一直想补回。
+     * 只要脚下那一件还 {@code !isRemoved()} 就<b>不再丢第二件</b>
+     * （否则就是 20 件/秒的凭空造物 —— 比"模块被清"更糟；项目纪律：
+     * "「缺了就补」会造出复制物品，那是原版刷物品漏洞级别"）。
+     * 被捡起／消失（{@code isRemoved()} 变 true）之后才允许再补。
+     *
+     * <p>只在服务端线程读写 ⇒ 与其它几张表同生命周期（{@code ServerTickEvent} 里随名单回收）。
+     */
+    private static final Map<UUID, ItemEntity> GROUND_DROP = new HashMap<>();
+
+    /** 记一次"确认持有"（只在 {@link #isGuarded} 命中当前持有时调，成本 = 一次 map put）。 */
+    private static void noteHeld(Player player) {
+        try {
+            final long now = player.level() == null ? 0L : player.level().getGameTime();
+            LAST_HELD_TICK.put(player.getUUID(), Long.valueOf(now));
+        } catch (Throwable ignored) {
+            // 记不上只意味着"宽限窗口不生效"，不影响当前持有的判断
+        }
+    }
+
+    /** 现在还在不在宽限窗口内（模块刚丢但还没超时）。 */
+    private static boolean inHoldGrace(Player player) {
+        try {
+            final Long last = LAST_HELD_TICK.get(player.getUUID());
+            if (last == null) {
+                return false;
+            }
+            final long now = player.level() == null ? 0L : player.level().getGameTime();
+            final long elapsed = now - last.longValue();
+            if (elapsed < 0L || elapsed > (long) HOLD_GRACE_TICKS) {
+                return false;
+            }
+            // 只在【真的靠宽限保住】的时候留一行（限流在 DETAIL 闸门里：同类合并 ＋ 每秒最多一行）
+            logDetail(KIND_HOLD_GRACE, "player=" + player.getName().getString()
+                    + " since_last_held_ticks=" + elapsed + " grace_ticks=" + HOLD_GRACE_TICKS
+                    + " ⇒ 仍按受保护对待（等补件动作把模块放回去）");
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** 宽限窗口那一条的日志类别（诊断类：只进日志，不进聊天栏）。 */
+    private static final String KIND_HOLD_GRACE = "guard_hold_grace";
+
 
     /**
      * 🔴 <b>④ 拒绝死亡</b>（2026-10-17 新增）：mixin 在 {@code die(DamageSource)} 的 {@code HEAD} 判出
@@ -943,23 +1075,69 @@ public final class ShanhaiGuardEvents {
     /**
      * 补件④：补回一件模块（有人反射直调 {@code dropAllDeathLoot} 把背包掏空）。
      *
-     * @return 真的放进去了才 true；物品没注册 / 背包满 ⇒ false（由核记账，<b>不假装成功</b>）
+     * <h2>🔴 2026-11-20：把"模块被清"当成一级故障（用户实测的破防形态）</h2>
+     * <pre>
+     *   「创始现实修改模块被清空 ⇒ isGuarded 变 false ⇒ 全套防护失效」
+     * </pre>
+     * 旧版：{@code inventory.add(...)} 返回 false（<b>背包满</b>）就只打一行"补回失败" ⇒
+     * 玩家永远拿不回来 ⇒ 保护永久失效。现在改成<b>两级落点</b>：
+     * <pre>
+     *   ① 背包有空位 → 放回去，日志 slot=&lt;n&gt; placed=inventory
+     *   ② 背包满了   → 【丢在脚下】并记一行 WARN，日志 slot=feet placed=ground warn=inventory_full
+     * </pre>
+     * ⚠️ 落地点<b>刻意不用</b> {@code Player#drop(...)}：那条路会发 {@code ItemTossEvent} ⇒
+     * 被本类自己的 {@link #onItemToss} 记成"他按键丢出去了" ⇒ 下一拍判成<b>主动放手</b> ⇒
+     * <b>反而把保护卸掉</b>（正是要修的那个 bug 的加强版）。所以这里直建 {@code ItemEntity} 挂进世界。
+     *
+     * <h2>🔴 防复制物品（实现时自己踩到的坑，写死在这里）</h2>
+     * {@code guardOne} 是<b>每 tick</b> 跑的，而"背包满"这件事不会因为丢了一件就变好 ⇒
+     * 天真的写法会<b>每 tick 往脚下丢一个模块</b>（20 个/秒的凭空造物，比原 bug 更糟）。
+     * ⇒ 判据：<b>同一时刻脚下最多存在一件我们丢的模块</b>（{@link #GROUND_DROP} 持有那个实例，
+     * 只要它 {@code !isRemoved()} 就不再丢）；它被捡起/消失之后才允许再补。
+     *
+     * @return {@code null} = 没补上（物品没注册 ／ 落地也失败）；否则是一段可判读的放置说明
+     *         （形如 {@code slot=12 placed=inventory} ／ {@code slot=feet placed=ground warn=inventory_full}）
      */
-    private static boolean giveModule(ServerPlayer player) {
+    private static String giveModule(ServerPlayer player) {
         final Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(
                 ShanhaiGuardCore.MODULE_NAMESPACE, ShanhaiGuardCore.MODULE_PATH));
         if (item == null || item == Items.AIR) {
-            return false; // 物品根本没注册 ⇒ 明确报失败，不无中生有
+            return null; // 物品根本没注册 ⇒ 明确报失败，不无中生有
         }
         final Inventory inventory = player.getInventory();
         if (inventory == null) {
-            return false;
+            return null;
         }
-        final boolean added = inventory.add(new ItemStack(item));
-        if (added) {
+        final int free = inventory.getFreeSlot();
+        final ItemStack stack = new ItemStack(item);
+        if (inventory.add(stack)) {
             player.inventoryMenu.broadcastChanges(); // 立刻同步给客户端，否则玩家看不见补回来的模块
+            GROUND_DROP.remove(player.getUUID());    // 回到背包 ⇒ 这一局的地面补件结束
+            // slot = 我们**事先**探测到的空位（-1 表示并进了已有的同类堆叠）
+            return "slot=" + free + " placed=inventory";
         }
-        return added;
+        // ── 背包满了：丢在脚下（🔴 不走 Player#drop —— 那会发 ItemTossEvent ⇒ 被当成主动放手）──
+        final UUID id = player.getUUID();
+        final ItemEntity alive = GROUND_DROP.get(id);
+        if (alive != null && !alive.isRemoved() && alive.level() == player.level()) {
+            // 脚下那一件还在 ⇒ 不再丢第二件（防复制物品；这一条是"每 tick 跑"逼出来的硬约束）
+            return "slot=ground placed=ground_alive warn=inventory_full drop_once=true";
+        }
+        try {
+            final ItemEntity dropped = new ItemEntity(
+                    player.level(), player.getX(), player.getY() + 0.5D, player.getZ(), new ItemStack(item));
+            dropped.setPickUpDelay(0);   // 落地就能捡回来（这是我们的补件，不该像玩家丢的那样延后）
+            final boolean ok = player.level().addFreshEntity(dropped);
+            if (!ok) {
+                return null;             // 挂进世界也失败 ⇒ 如实报失败，不假装成功
+            }
+            GROUND_DROP.put(id, dropped);
+            return "slot=feet placed=ground warn=inventory_full drop_once=true";
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn(ShanhaiGuardCore.LOG_PREFIX
+                    + "module_restore_drop_failed player=" + player.getName().getString() + " err=" + t);
+            return null;
+        }
     }
 
     // ═══════════════════════════════ 日志 ═══════════════════════════════

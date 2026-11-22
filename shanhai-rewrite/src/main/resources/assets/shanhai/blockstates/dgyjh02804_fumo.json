@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "shanhai:block/dgyjh02804_fumo"
+    },
+    "facing=east": {
+      "model": "shanhai:block/dgyjh02804_fumo",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "shanhai:block/dgyjh02804_fumo",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "shanhai:block/dgyjh02804_fumo",
+      "y": 270
+    }
+  }
+}

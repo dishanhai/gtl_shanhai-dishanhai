@@ -1,0 +1,166 @@
+{
+  "credit": "Model by dishanhai, skin by BeiBeiPuo (SH-Common-Lib, MIT). Namespace ported to shanhai 2026-11-21; provenance: assets/shanhai/models/block/fumo/CREDITS.txt",
+  "parent": "shanhai:block/fumo/skin_64",
+  "render_type": "minecraft:cutout",
+  "textures": {"skin": "shanhai:block/fumo/beibeipuo_fumo"},
+  "display": {
+    "ground": {"translation": [0, 3, 0], "scale": [0.4, 0.4, 0.4]},
+    "gui": {"rotation": [22, -145, 0], "translation": [0, -0.5, 0], "scale": [0.8, 0.8, 0.8]}
+  },
+  "elements": [
+    {
+      "name": "Head",
+      "from": [4.18, 9.03, 5.22],
+      "to": [11.82, 16.67, 12.86],
+      "faces": {
+        "north": {"uv": [2, 2, 4, 4], "texture": "#skin"},
+        "east": {"uv": [0, 2, 2, 4], "texture": "#skin"},
+        "south": {"uv": [6, 2, 8, 4], "texture": "#skin"},
+        "west": {"uv": [4, 2, 6, 4], "texture": "#skin"},
+        "up": {"uv": [4, 2, 2, 0], "texture": "#skin"},
+        "down": {"uv": [6, 0, 4, 2], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Hat Layer",
+      "from": [3.99, 8.87, 5],
+      "to": [12.01, 16.83, 13.08],
+      "faces": {
+        "north": {"uv": [10, 2, 12, 4], "texture": "#skin"},
+        "east": {"uv": [8, 2, 10, 4], "texture": "#skin"},
+        "south": {"uv": [14, 2, 16, 4], "texture": "#skin"},
+        "west": {"uv": [12, 2, 14, 4], "texture": "#skin"},
+        "up": {"uv": [12, 2, 10, 0], "texture": "#skin"},
+        "down": {"uv": [14, 0, 12, 2], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Body",
+      "from": [5.43, 0.72, 7],
+      "to": [10.57, 9.04, 11],
+      "faces": {
+        "north": {"uv": [5, 5, 7, 8], "texture": "#skin"},
+        "east": {"uv": [4, 5, 5, 8], "texture": "#skin"},
+        "south": {"uv": [8, 5, 10, 8], "texture": "#skin"},
+        "west": {"uv": [7, 5, 8, 8], "texture": "#skin"},
+        "up": {"uv": [7, 5, 5, 4], "texture": "#skin"},
+        "down": {"uv": [9, 4, 7, 5], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Body Layer",
+      "from": [5.34, 0.67, 6.83],
+      "to": [10.66, 9.09, 11.17],
+      "faces": {
+        "north": {"uv": [5, 9, 7, 12], "texture": "#skin"},
+        "east": {"uv": [4, 9, 5, 12], "texture": "#skin"},
+        "south": {"uv": [8, 9, 10, 12], "texture": "#skin"},
+        "west": {"uv": [7, 9, 8, 12], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Left Arm",
+      "from": [3.66, 2.45, 7.53],
+      "to": [5.58, 8.25, 9.8],
+      "rotation": {"angle": 22.5, "axis": "x", "origin": [4.62, 8.15, 8.7]},
+      "faces": {
+        "north": {"uv": [9, 13, 9.75, 16], "texture": "#skin"},
+        "east": {"uv": [8, 13, 9, 16], "texture": "#skin"},
+        "south": {"uv": [10.75, 13, 11.5, 16], "texture": "#skin"},
+        "west": {"uv": [9.75, 13, 10.75, 16], "texture": "#skin"},
+        "up": {"uv": [9.75, 13, 9, 12], "texture": "#skin"},
+        "down": {"uv": [10.5, 12, 9.75, 13], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Left Arm Layer",
+      "from": [3.605, 2.405, 7.465],
+      "to": [5.635, 8.295, 9.865],
+      "rotation": {"angle": 22.5, "axis": "x", "origin": [4.62, 8.15, 8.7]},
+      "faces": {
+        "north": {"uv": [13, 13, 13.75, 16], "texture": "#skin"},
+        "east": {"uv": [12, 13, 13, 16], "texture": "#skin"},
+        "south": {"uv": [14.75, 13, 15.5, 16], "texture": "#skin"},
+        "west": {"uv": [13.75, 13, 14.75, 16], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Left Leg",
+      "from": [5.29, 0, 3.67],
+      "to": [7.55, 2.45, 9.1],
+      "rotation": {"angle": 22.5, "axis": "y", "origin": [6.42, 0, 8]},
+      "faces": {
+        "north": {"uv": [6, 13, 7, 12], "texture": "#skin"},
+        "east": {"uv": [5, 16, 4, 13], "rotation": 90, "texture": "#skin"},
+        "south": {"uv": [6, 13, 5, 12], "texture": "#skin"},
+        "west": {"uv": [6, 13, 7, 16], "rotation": 90, "texture": "#skin"},
+        "up": {"uv": [6, 16, 5, 13], "texture": "#skin"},
+        "down": {"uv": [7, 13, 8, 16], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Left Leg Layer",
+      "from": [5.245, 0, 3.625],
+      "to": [7.595, 2.495, 9.145],
+      "rotation": {"angle": 22.5, "axis": "y", "origin": [6.42, 0, 8]},
+      "faces": {
+        "north": {"uv": [2, 13, 3, 12], "texture": "#skin"},
+        "east": {"uv": [1, 16, 0, 13], "rotation": 90, "texture": "#skin"},
+        "west": {"uv": [2, 13, 3, 16], "rotation": 90, "texture": "#skin"},
+        "up": {"uv": [2, 16, 1, 13], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Right Arm",
+      "from": [10.42, 2.45, 7.53],
+      "to": [12.34, 8.25, 9.8],
+      "rotation": {"angle": 22.5, "axis": "x", "origin": [11.38, 8.15, 8.7]},
+      "faces": {
+        "north": {"uv": [11, 5, 11.75, 8], "texture": "#skin"},
+        "east": {"uv": [10, 5, 11, 8], "texture": "#skin"},
+        "south": {"uv": [12.75, 5, 13.5, 8], "texture": "#skin"},
+        "west": {"uv": [11.75, 5, 12.75, 8], "texture": "#skin"},
+        "up": {"uv": [11.75, 5, 11, 4], "texture": "#skin"},
+        "down": {"uv": [12.5, 4, 11.75, 5], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Right Arm Layer",
+      "from": [10.365, 2.405, 7.465],
+      "to": [12.395, 8.295, 9.865],
+      "rotation": {"angle": 22.5, "axis": "x", "origin": [11.38, 8.15, 8.7]},
+      "faces": {
+        "north": {"uv": [11, 9, 11.75, 12], "texture": "#skin"},
+        "east": {"uv": [10, 9, 11, 12], "texture": "#skin"},
+        "south": {"uv": [12.75, 9, 13.5, 12], "texture": "#skin"},
+        "west": {"uv": [11.75, 9, 12.75, 12], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Right Leg",
+      "from": [8.45, 0, 3.67],
+      "to": [10.71, 2.45, 9.1],
+      "rotation": {"angle": -22.5, "axis": "y", "origin": [9.58, 0, 8]},
+      "faces": {
+        "north": {"uv": [2, 5, 3, 4], "texture": "#skin"},
+        "east": {"uv": [1, 8, 0, 5], "rotation": 90, "texture": "#skin"},
+        "south": {"uv": [2, 5, 1, 4], "texture": "#skin"},
+        "west": {"uv": [2, 5, 3, 8], "rotation": 90, "texture": "#skin"},
+        "up": {"uv": [2, 8, 1, 5], "texture": "#skin"},
+        "down": {"uv": [3, 5, 4, 8], "texture": "#skin"}
+      }
+    },
+    {
+      "name": "Right Leg Layer",
+      "from": [8.405, 0, 3.625],
+      "to": [10.755, 2.495, 9.145],
+      "rotation": {"angle": -22.5, "axis": "y", "origin": [9.58, 0, 8]},
+      "faces": {
+        "north": {"uv": [2, 9, 3, 8], "texture": "#skin"},
+        "east": {"uv": [1, 12, 0, 9], "rotation": 90, "texture": "#skin"},
+        "west": {"uv": [2, 9, 3, 12], "rotation": 90, "texture": "#skin"},
+        "up": {"uv": [2, 12, 1, 9], "texture": "#skin"}
+      }
+    }
+  ]
+}

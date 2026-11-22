@@ -146,13 +146,15 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
         lastDrawMs = now;
         ShanhaiMod.LOGGER.info(
                 "[SHANHAI-HOSTFX] draw ships={} formed(ctrl)={} formed(sync)={} | 视界 {} | 喂料 {} | 时钟 {}s"
-                        + " | {} | {} | {} | {} | 审计 {} | {}",
+                        + " | {} | {} | {} | {} | 审计 {} | {} | {}",
                 ships, formedByController, formedBySync, hostFxLine, feedLine(),
                 String.format(java.util.Locale.ROOT, "%.2f", HostFxState.animSeconds()),
                 HostFxRingGroups.summary(),
                 HostFxDraw.stats(), HostFxGlassArText.stats(), HostFxGeometry.budget(), auditLine,
                 // 🔴 2026-10-25 第二十改：开关语义（fx / degraded / lens / holeR / ring / ships）
-                HostFxSwitch.statusFragment());
+                HostFxSwitch.statusFragment(),
+                // 🔴 2026-11-22：四件移植的读数（①吸积流 ③星辰 ④闪电 的 quads/上限 + ②白边波浪状态）
+                HostFxExtraLayers.stats());
     }
 
     /**
@@ -434,6 +436,8 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                     // 第八改：光柱环的 shader/缓冲、玻璃 AR 文字的缓存也跟着换维度复位
                     HostFxBeamRing.reset();
                     HostFxGlassArText.reset();
+                    // 2026-11-22：结构闪电的"表面节点模型"也是按维度建的 ⇒ 换维度一起作废（下次重读 .bin）
+                    HostFxStructureLightning.reset();
                     // 第二十改：换维度也把"红两束 / 主机接管半径 / 主机接管透镜"还原
                     //（跨维度那份覆盖没有任何意义，留着只会让另一维的黑洞用错半径/透镜）
                     resetSwitchAndOverrides();
@@ -512,6 +516,16 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                     host.isHostLensEnabled());
             // 🔴 2026-10-25 第二十一改：AR 遮罩开关（与上面 6 个同一个节奏、同一次早退清空）
             HostFxState.feedArMask(host.isHostArMaskEnabled());
+            // 🔴 2026-11-21：「环显示」三态（外缘吸积流 51..57 格 ⇄ 粗光柱环 r=54、管径 6）。
+            //    `host` 的 @DescSynced byte 字段是【唯一来源】，这里只做搬运：
+            //    判定全在 HostFxSwitch（apply() 每帧抄一份快照，beamRingOn()/accretionOn() 各自收口）；
+            //    早退闸门与上面 9 个值共用同一次 HostFxState.clear()（clear() 里环显示也复位成"两条"）。
+            HostFxState.feedRingVisualMode(host.getHostRingVisualMode());
+            // 🔴 2026-11-22：两个面板开关（星辰场 = 围绕黑洞的粒子 / 结构闪电）。
+            //    照 feedRingVisualMode 的形态 —— 这里只搬运机器字段，**不含**客户端配置总闸：
+            //    「配置 × 面板」的与运算只在 HostFxSwitch 一处做（日志才能分清是哪个关的）。
+            HostFxState.feedStarField(host.isHostStarFieldEnabled());
+            HostFxState.feedStructureLightning(host.isHostStructureLightningEnabled());
             HostFxGeometry.setGroupDegPerSec(
                     host.getHostRingDegPerSec(),
                     host.getHostShipUpDegPerSec(),
@@ -599,6 +613,19 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             //      不成型时上面已经 return 了 ⇒ 这里不需要再判一次（判两次反而会出现"两处口径不一致"）。
             //      ⚠️ 它自己开 immediate 缓冲并当场 endBatch（不依赖调用方的 flush 时机）。
             HostFxGlassArText.render(poseStack, host, cx, cy, cz, facing, seconds);
+
+            // ═══════════════════════════════════════════════════════════════════════════════════
+            //  🔴 2026-11-22 新增：四件渲染移植里的三件（①②③④ 的落点见下）
+            // ═══════════════════════════════════════════════════════════════════════════════════
+            //  位置纪律：**追加在既有全部绘制之后**，既有任何一层的相对次序一个都没动。
+            //  ① 外缘吸积流（他的 GuixuAccretionFlow，51..57 格、±0.45 起伏，3840 quads）
+            //  ③ 星辰场（他的 GuixuStarField，≤1256 quads；开关 = [hostfx] starField，默认开）
+            //  ④ 结构闪电（他的 GuixuAccretionLightning + 世界核对，≤12 条弧；开关 = [hostfx] structureLightning）
+            //  ② 白边波浪不在这儿画（必须画在透镜之后）⇒ 这里只把"洞心/半径/每像素盘半径"喂给 AFTER_LEVEL 那一档，
+            //     真正的提交在 HostFxHoleRimWaves.onRenderLevelStage(AFTER_LEVEL)。
+            //  三层都提交到既有的加性层 HostFxDraw.beamLayer()（不新建 RenderType、不建纹理）。
+            HostFxExtraLayers.render(poseStack, clientLevel, controllerPos, facing,
+                    cx, cy, cz, seconds, spinSeconds, cam, holeR);
 
             // 🔴 "到底画了没有"的唯一判据：这一行（带计数与台账核对）。每 5 秒最多一条。
             //    2026-10-25 第十九改：这一行里【加上了玩家在面板里调的那 6 个值】
