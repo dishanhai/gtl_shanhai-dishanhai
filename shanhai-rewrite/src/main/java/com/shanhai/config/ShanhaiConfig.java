@@ -124,7 +124,7 @@ public final class ShanhaiConfig {
         /** 🆕 AI 层开关（默认<b>关</b>）。 */
         public ForgeConfigSpec.BooleanValue guardAiLayer;
 
-        /** 🆕 攻击端开关（默认<b>开</b>）。 */
+        /** 🆕 攻击端开关（🔴 默认<b>关</b>；2026-11-20 用户改口）。 */
         public ForgeConfigSpec.BooleanValue guardAttackSide;
 
         /** 🆕 死而无损开关（默认<b>开</b>）。 */
@@ -235,14 +235,16 @@ public final class ShanhaiConfig {
                             "   （不做按时间/距离的自动恢复 —— 用户原话：「noAi 是你关掉这个功能了 ai 才会恢复」）")
                     .define("ai_layer", false);
             guardAttackSide = builder
-                    .comment("攻击端开关（默认 true = 开）",
+                    .comment("攻击端开关（🔴 默认 false = 关；要用的场合在游戏里 /shanhai guard attack on 打开）",
+                            "关着时：自动抹除攻击者、持续压制、逐级 purge（L1~L6）全部不生效",
+                            "打开后：",
                             "触发 A：受保护玩家受到攻击（LivingAttackEvent）⇒ 取消伤害后反手抹除攻击者本人",
                             "         （召唤物/投射物一律不处理；玩家一律不处理）",
                             "触发 B：/shanhai purge（或全息菜单第 1 块板「清除实体」点一次）⇒ 抹除游戏内所有实体",
                             "         🔴 安全默认：跳过所有玩家（含自己）与 EntityType.PLAYER，跳过的数量记日志",
                             "移除阶梯：L1 discard → L2 核实 → L3 setRemoved → L4 发包 → L5 摘实体账 → L6 隔离",
                             "日志用 purge_channel=L1|L3|L4|L5|L6 分辨是哪一级解决掉的")
-                    .define("attack_side", true);
+                    .define("attack_side", false);
             guardDeathLossless = builder
                     .comment("死而无损开关（默认 true = 开）",
                             "现有的 die() 拒绝已经让死亡不发生；本项是「万一真的走到死亡」时的兜底：",

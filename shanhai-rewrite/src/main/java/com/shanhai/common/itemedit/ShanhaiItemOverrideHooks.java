@@ -124,6 +124,51 @@ public final class ShanhaiItemOverrideHooks {
      * （原物品自带描述、附魔、属性、GTCEu 的机器信息……）只留我们的行。这就是"尽量去掉原物品自带描述"，
      * 而且不需要去猜哪一行是"原物品的描述"（那是猜不准的）。
      */
+    /**
+     * 🔴 2026-11-20 用户：「这个物品编辑器，它新增的描述是在最下面的，我希望它**在正常注册的物品的描述那里**」
+     *
+     * <p>⇒ <b>追加模式</b>（{@code append}）不再等到 {@code getTooltipLines} 的 RETURN 才
+     * {@code addAll}（那会排到整个提示框最底、压在 GT 机器信息/JEI 附加行后面），改由
+     * {@code ShanhaiItemDescTooltip}（{@code ItemTooltipEvent}）在"名字与属性之后、其它模组附加行之前"
+     * 加上 —— 与物品自己注册的描述落在同一段。
+     *
+     * <p>{@link #tooltip} 的 RETURN 路径从此**只负责 {@code replace} 模式**（那需要看整份列表才能裁剪）。
+     *
+     * @return 这个物品要抢先加的描述行（没有 / 是 replace 模式 ⇒ 空表）
+     */
+    public static List<Component> earlyLore(Object stackObj) {
+        try {
+            ShanhaiItemOverrideTable.refresh();
+            if (!ShanhaiItemOverrideTable.active()) {
+                return List.of();
+            }
+            if (!(stackObj instanceof ItemStack stack) || stack.isEmpty()) {
+                return List.of();
+            }
+            final ShanhaiItemOverrideTable.Entry e = ShanhaiItemOverrideTable.getFor(stack.getItem());
+            if (e == null || !e.hasLore() || e.replaceMode()) {
+                return List.of();
+            }
+            final List<Component> ours = buildLore(e);
+            return ours == null ? List.of() : List.copyOf(ours);
+        } catch (Throwable t) {
+            warnOnce("earlyLore", t);
+            return List.of();
+        }
+    }
+
+    /** 把一条 entry 的 lore 按 shift/ctrl 门控展开成行（带"按住 shift"提示行）；没有就 {@code null}。 */
+    private static List<Component> buildLore(ShanhaiItemOverrideTable.Entry e) {
+        final boolean shift = ShanhaiItemLore.shiftHeld();
+        final boolean ctrl = ShanhaiItemLore.ctrlHeld();
+        final List<Component> ours = new ArrayList<>(4);
+        final boolean gated = ShanhaiItemLore.addLoreLines(e.lore(), shift, ctrl, ours);
+        if (gated && !shift && !ctrl) {
+            ours.add(Component.literal(ShanhaiItemLore.HINT));
+        }
+        return ours.isEmpty() ? null : ours;
+    }
+
     public static List<Component> tooltip(Object stackObj, Object originalList) {
         try {
             ShanhaiItemOverrideTable.refresh();
@@ -145,12 +190,8 @@ public final class ShanhaiItemOverrideHooks {
 
             final boolean shift = ShanhaiItemLore.shiftHeld();
             final boolean ctrl = ShanhaiItemLore.ctrlHeld();
-            final List<Component> ours = new ArrayList<>(4);
-            final boolean gated = ShanhaiItemLore.addLoreLines(e.lore(), shift, ctrl, ours);
-            if (gated && !shift && !ctrl) {
-                ours.add(Component.literal(ShanhaiItemLore.HINT));
-            }
-            if (ours.isEmpty()) {
+            final List<Component> ours = buildLore(e);
+            if (ours == null) {
                 return null;
             }
             if (e.replaceMode()) {
@@ -161,15 +202,9 @@ public final class ShanhaiItemOverrideHooks {
                 out.addAll(ours);
                 return out;
             }
-            try {
-                list.addAll(ours);
-                return null;
-            } catch (Throwable immutable) {
-                final List<Component> out = new ArrayList<>(list.size() + ours.size());
-                out.addAll(list);
-                out.addAll(ours);
-                return out;
-            }
+            // 🔴 追加模式：已经由 {@link #earlyLore} 在 ItemTooltipEvent 里加过了（2026-11-20 用户
+            //    要求"放在正常注册物品的描述那里"）⇒ 这里不再 addAll，否则同一行会出现两遍。
+            return null;
         } catch (Throwable t) {
             warnOnce("tooltip", t);
             return null;

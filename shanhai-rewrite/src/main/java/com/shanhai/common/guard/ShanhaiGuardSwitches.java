@@ -18,7 +18,7 @@ import com.shanhai.config.ShanhaiConfig;
  * <h2>🔴 三个默认值都是用户拍板的</h2>
  * <pre>
  *   AI 层     默认 <b>关</b>（新功能；没开的时候一个字节都不改变世界）
- *   攻击端    默认 <b>开</b>
+ *   攻击端    默认 <b>关</b>（2026-11-20 改口；自动抹除攻击者 / 持续压制 / 逐级 purge 默认都不生效）
  *   死而无损  默认 <b>开</b>
  *   🆕 反击退 默认 <b>开</b>（2026-10-17 加：用户原话「我还需要反击退（包括碰撞箱挤压我），这个猫把我扔来扔去的」）
  * </pre>
@@ -41,8 +41,25 @@ public final class ShanhaiGuardSwitches {
     /** AI 层默认值：<b>关</b>（用户口径）。 */
     public static final boolean DEFAULT_AI_LAYER = false;
 
-    /** 攻击端默认值：<b>开</b>（用户口径）。 */
-    public static final boolean DEFAULT_ATTACK_SIDE = true;
+    /**
+     * 攻击端默认值：<b>关</b>。
+     *
+     * <p>🔴 2026-11-20 用户改口（原话「把那个创始模块的自动抹除攻击者+压制什么的代码改成默认关闭，
+     * 可以在指令里面打开，这玩意我感觉没啥用处」）。
+     *
+     * <p>🔴 同日再改口（原话「<b>还有那个山海的不攻击，不是停止所有攻击，我打那个抹除的指令都不生效了，
+     * 我要的是不自动攻击，就是不要有那个压制，也不要有受击之后自动攻击那个实体</b>」）
+     * ⇒ 这个开关现在<b>只关两样自动反制</b>：
+     * <ol>
+     *   <li>受击后自动抹除攻击者（{@code ShanhaiPurge#onLivingAttack} → 排队 → L1→L6 阶梯）；</li>
+     *   <li>持续压制（{@code ShanhaiGuardSuppression} 的 enroll ＋ 每 5 tick 复查）。</li>
+     * </ol>
+     * 🔴 <b>手动命令一律不受它影响</b>：{@code /shanhai purge}、{@code /shanhai purge count}、
+     * {@code /shanhai_add purge}、{@code /shanhai_add suppress list|clear}、
+     * {@code /shanhai_add hotfix auto on|off} 全部照常可用（权限仍按各自的 gate）。
+     * 判据可机器验：上面这些命令的入口<b>没有一个</b>读 {@code attackSide()}。
+     */
+    public static final boolean DEFAULT_ATTACK_SIDE = false;
 
     /** 死而无损默认值：<b>开</b>（用户口径）。 */
     public static final boolean DEFAULT_DEATH_LOSSLESS = true;

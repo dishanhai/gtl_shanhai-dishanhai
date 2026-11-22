@@ -3,6 +3,7 @@ package com.shanhai.add.guard.state;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -13,9 +14,14 @@ import com.shanhai.add.ShanhaiAdd;
 import com.shanhai.add.guard.ShanhaiMotionBrake;
 import com.shanhai.add.guard.ShanhaiMotionBrakeRules;
 import com.shanhai.add.guard.stack.ShanhaiViolationProbe;
+import com.shanhai.add.mixin.ShanhaiHealthReadClampMixin;
+import com.shanhai.common.guard.ShanhaiGuardCore;
+import com.shanhai.common.guard.ShanhaiGuardEvents;
+import com.shanhai.common.guard.ShanhaiGuardValueLayer;
 import com.shanhai.common.holo.ShanhaiHoloMenuNetwork;
 
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
@@ -29,9 +35,54 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 /**
- * 山海 · <b>「玩家状态由我们独占权威」的动量/位置/物品栏那一半</b>（用户口径的<u>主线 B</u>）。
+ * 山海 · <b>「玩家状态由我们独占权威」—— 第二层（主脊）</b>（用户口径的<u>主线 B</u>）。
  *
- * <h2>🔴 2026-11-08 之后判据换过一次（用户当场点名的那个错）</h2>
+ * <h2>🔴 2026-11-20：用户点破的架构缺口 —— 「我们当时的第二层是不是还没做好」</h2>
+ * <pre>
+ *   答案：<b>没做全</b>。
+ *   旧版本类只管 <b>动量 / 位置 / 物品栏</b> 三项；
+ *   {@code ShanhaiStateRules.exempt(...)} 还把 {@code deadOrDying} 当成<b>豁免条件</b>
+ *   ⇒ <b>血 / die / 被移除</b> 这三类<b>恰好落在所有判据之外</b>：
+ *     最该管的时候（血被写成 -Infinity、正在死）不管，
+ *     血只靠本体 {@code ShanhaiGuardEvents.guardOne}（{@code ServerTickEvent.END}，<b>1 次/tick</b>）补
+ *     ⇒ <b>追不上对手 20 次/秒的写</b>。实机日志：
+ * </pre>
+ * <pre>
+ *   [SHANHAI-TRIAGE] damage_seen canceled=true guarded=true dmg=Infinity src=mob
+ *   [CHAT] [创始现实修改模块] RESET deathTime (ServerTickEvent) x1 + CANCELLED LivingAttackEvent x1
+ *   [CHAT] [创始现实修改模块] REFUSED die (LivingEntity#die / ServerPlayer#die) x1
+ *   玩家仍然看到死亡界面 + 死亡白烟
+ * </pre>
+ * ⇒ 2026-11-20 起，第二层补齐成 <b>六项</b>（判据都在纯 JDK 的 {@link ShanhaiStateRules} 里）：
+ * <pre>
+ *   ① 血       应当 = getMaxHealth()（不可用则用基线）；实际 &lt;=0 ／ NaN ／ ±∞ ⇒ 写回
+ *   ② 死亡态   isDeadOrDying ／ deathTime&gt;0 ／ 同步血量字段真值&lt;=0 ⇒ 两条腿补血 ＋ 两个计时器归零
+ *   ③ 白烟     deathTime <b>每 tick 无条件归零</b> ⇒ 永远到不了 20 ⇒ tickDeath 压根不广播 60
+ *   ④ 被移除   见 isRemoved ⇒ 复用本体那<b>唯一一份</b> revive 路径（{@code ShanhaiGuardEvents#rescueRemovedNow}）
+ *   ⑤ 动量     原有（归属判据，无阈值）
+ *   ⑥ 位置/物品栏 原有（窗口内）
+ * </pre>
+ * 🔴 <b>① ② ④ 三项永不被 {@link ShanhaiStateRules#exempt} 豁免</b>（那是这次缺口的根因）。
+ *
+ * <h2>为什么 ③ 不需要新 mixin（javap 实证，不是推测）</h2>
+ * <pre>
+ *   net.minecraft.world.entity.LivingEntity#tickDeath（srg m_6153_）
+ *       偏移 0..10   ++deathTime
+ *       偏移 14..16  bipush 20 / if_icmplt 53        ← deathTime &gt;= 20 才往下
+ *       偏移 36..41  level() / bipush 60             ← 60 = POOF 白烟
+ *       偏移 43      Level#broadcastEntityEvent(this, (byte)60)
+ *       偏移 46..50  remove(RemovalReason.KILLED)
+ *   LivingEntity#tick（srg m_6075_）偏移 651 才调 tickDeath，且只在 isDeadOrDying() 时
+ *   ==== Forge 补丁后的 Player#tick（sources jar 实测，47.3.0）====
+ *       213 public void tick() {
+ *       214    ForgeEventFactory.onPlayerPreTick(this);   ← PlayerTickEvent START 在这里
+ *       241    super.tick();                              ← tickDeath 在这一行之后
+ *       285    ForgeEventFactory.onPlayerPostTick(this);
+ *   ⇒ 在 START（{@link #reconcile}）里把 deathTime 归零，是<b>掐在 tickDeath 之前</b>，
+ *     deathTime 那一拍最多变成 1 ⇒ 20 永远到不了 ⇒ 白烟 0 次、remove(KILLED) 0 次。
+ * </pre>
+ *
+ * <h2>判据</h2>
  * <pre>
  *   「你这个反击退写得不行啊，我被打的时候自己都动不了了，然后那个猫居然还能推动我」
  *   「反击退的话，你为什么要把 tick 作为判据，我说了<b>把是否为玩家自己的操作作为判据</b>啊」
@@ -112,6 +163,16 @@ public final class ShanhaiStateAuthority {
     private static final AtomicLong MOTION_FIXED = new AtomicLong();
     private static final AtomicLong POS_FIXED = new AtomicLong();
     private static final AtomicLong INV_FIXED = new AtomicLong();
+    /** 🆕 2026-11-20：血被写回几次（第二层新增第 ① 项）。 */
+    private static final AtomicLong HEALTH_FIXED = new AtomicLong();
+    /** 🆕 2026-11-20：死亡态被掰正几次（第 ② 项）。 */
+    private static final AtomicLong DEATH_FIXED = new AtomicLong();
+    /** 🆕 2026-11-20：{@code deathTime} 被归零几次（第 ③ 项 = 掐白烟）。 */
+    private static final AtomicLong DEATH_TIMER_ZEROED = new AtomicLong();
+    /** 🆕 2026-11-20：被移除之后救回来几次（第 ④ 项，复用本体那条唯一路径）。 */
+    private static final AtomicLong REMOVED_FIXED = new AtomicLong();
+    /** 🆕 2026-11-20：{@code LivingEntity#tickDeath} 被整刀取消几次（白烟/remove 都没发生的那几次）。 */
+    private static final AtomicLong TICK_DEATH_BLOCKED = new AtomicLong();
     private static final AtomicLong WINDOWS_OPENED = new AtomicLong();
     private static final AtomicLong ERRORS = new AtomicLong();
     private static final AtomicLong SELF_INPUT_ADOPTED = new AtomicLong();
@@ -124,16 +185,53 @@ public final class ShanhaiStateAuthority {
 
     // ═══════════════════════════════ 装配 / 自证 ═══════════════════════════════
 
-    /** 一行开机自证（真值仍要看 {@code 拦截 状态被改写} / {@code motion_brake} 那两个行）。 */
+    /** 一行开机自证（真值仍要看 {@code 拦截 状态被改写} / {@code state_second_layer} 那几个行）。 */
     public static String armedLine() {
         return "state_authority armed " + ShanhaiStateSwitches.statusLine()
                 + " window_ticks=" + WINDOW_TICKS
+                + " layer2=health+dead+deathtime+removed+motion+pos+inv"
+                + " judge_health=dead_band_only(<=0/NaN/Inf)"
+                + " judge_dead=deathFlowResetDecision"
+                + " judge_deathtime=always_zero(fix_60_poof_at_tickDeath@20)"
+                + " judge_removed=reuse_guard_events_rescue"
                 + " judge_motion=self_attribution（self_input/self_guard 一律采纳；无阈值）"
                 + " judge_pos=self_attribution+anchor_budget(" + ShanhaiStateRules.SPRINT_BUDGET_PER_TICK + "/tick)"
                 + " judge_inv=lost>=" + (int) Math.round(ShanhaiStateRules.INVENTORY_LOST_FRACTION * 100) + "%"
                 + " brake_at_write_head=on（" + ShanhaiMotionBrakeRules.Tuning.production() + "）"
+                + " hold_grace_ticks=" + ShanhaiStateRules.HOLD_GRACE_TICKS
+                + "/" + ShanhaiGuardEvents.HOLD_GRACE_TICKS
+                + (ShanhaiStateRules.HOLD_GRACE_TICKS == ShanhaiGuardEvents.HOLD_GRACE_TICKS
+                        ? "(match)" : "(🔴 MISMATCH 两处常量漂了)")
                 + " " + ShanhaiSelfInput.statusLine()
-                + " logger=" + (ShanhaiStateLog.emitted() >= 0 ? "bound" : "?");
+                + " judge_tickdeath=HEAD_cancel(.m_6153_@LivingEntity)+heal_before_cancel=on"
+                + "（受保护玩家：先补血＋计时器归零，再 cancel ⇒ 白烟/remove 都不发生）"
+                + " logger=" + loggerProbe();
+    }
+
+    /**
+     * 🔴 2026-11-20：<b>真值</b>自证"日志出口通不通"（旧版这一句是假的）。
+     *
+     * <h2>为什么要重写（实机证据）</h2>
+     * 旧版写的是 {@code (ShanhaiStateLog.emitted() >= 0 ? "bound" : "?")} ——
+     * {@code emitted()} 是"已落盘行数"计数器，<b>永远 &gt;= 0</b> ⇒ 这一句恒为 {@code bound}。
+     * 于是 22:10:26.919 那行开机自证看起来"日志已接线"，而同一场 8341 行日志里
+     * {@code 拦截 状态被改写}（含 {@code field=motion/pos/inv/health/dead/deathtime/removed}）
+     * <b>一行都没有</b> ⇒ "自证"恰好把要发现的问题藏住了。
+     *
+     * <p>现在改成<b>真的发一行探针、再看计数器涨没涨</b>（同一个出口、同一套 1/s 限流）：
+     * 探针行掉下来 ⇒ 出口活着；掉不下来 ⇒ 出口没接，第二层所有 {@code field=…} 行都会静默消失。
+     */
+    private static String loggerProbe() {
+        try {
+            final long before = ShanhaiStateLog.emitted();
+            ShanhaiStateLog.emit("selfcheck", "-", "emit_probe", "emit_probe", "none_poll",
+                    "selfcheck 探针：这一行掉下来 ⇒ 第二层的 field=… 行才会掉下来");
+            return ShanhaiStateLog.emitted() > before
+                    ? "bound(probe_emitted=true)"
+                    : "🔴 UNBOUND(probe_dropped=true ⇒ 第二层所有 field=… 行都不会出现)";
+        } catch (Throwable t) {
+            return "probe_failed(" + t + ")";
+        }
     }
 
     /** 一行读数（命令 / 报告用）。 */
@@ -157,6 +255,11 @@ public final class ShanhaiStateAuthority {
                 + " motion_fixed=" + MOTION_FIXED.get()
                 + " pos_fixed=" + POS_FIXED.get()
                 + " inv_fixed=" + INV_FIXED.get()
+                + " health_fixed=" + HEALTH_FIXED.get()
+                + " death_fixed=" + DEATH_FIXED.get()
+                + " deathtime_zeroed=" + DEATH_TIMER_ZEROED.get()
+                + " removed_fixed=" + REMOVED_FIXED.get()
+                + " tick_death_blocked=" + TICK_DEATH_BLOCKED.get()
                 + " self_input_adopted=" + SELF_INPUT_ADOPTED.get()
                 + " self_guard_adopted=" + SELF_GUARD_ADOPTED.get()
                 + " implausible_input=" + IMPLAUSIBLE_INPUT.get()
@@ -484,6 +587,29 @@ public final class ShanhaiStateAuthority {
         }
     }
 
+    /**
+     * 🆕 2026-11-20：<b>伤害事件本身</b>（不管有没有被取消）⇒ 触发源第 ① 类 {@code hurt}。
+     *
+     * <p>为什么必须挂在 {@code LivingHurtEvent} 而不是只在"被取消"时才抓：这条事件是在
+     * {@code LivingEntity#hurt} <b>里面</b>发的，所以此刻栈上还留着「<b>谁调了 hurt</b>」——
+     * 那正是"对手在打我们玩家"的那一帧。而"伤害被取消"只是其中一小部分情形
+     * （大多数攻击并没有被取消，只是伤害被削）⇒ 只在取消点抓等于<b>大部分场景都漏掉</b>。
+     *
+     * <p>用 {@link EventPriority#LOWEST}：等所有人都处理完再抓，栈里不会有"别人的处理器"干扰。
+     * 成本：{@code StackWalker} 只在<b>受保护玩家挨打</b>时走一趟，且同一 {@code hurt|玩家} 1/s 限流。
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onLivingHurtProbe(LivingHurtEvent event) {
+        try {
+            if (event.getEntity() instanceof ServerPlayer sp
+                    && sp.level() != null && !sp.level().isClientSide()) {
+                ShanhaiViolationProbe.onHurt(sp, "LivingHurtEvent", event.getAmount());
+            }
+        } catch (Throwable ignored) {
+            // 抓不到栈不影响任何判定
+        }
+    }
+
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         try {
@@ -514,6 +640,13 @@ public final class ShanhaiStateAuthority {
         if (!protectedNow) {
             return;                              // 不携带模块 ⇒ 一个字节都不碰
         }
+
+        // ── 🔴 2026-11-20 新增 ① ② ③：血 / 死亡态 / 白烟计时器 ──
+        //    🔴 这三项【永不】被 exemptOf(...) 豁免 —— 旧版把 deadOrDying 当豁免条件，
+        //       于是"血被写死 / 正在死"这件事恰好落在所有判据之外（这就是用户点破的缺口）。
+        checkLife(sp, t);
+        // ── 🔴 2026-11-20 新增 ④：被移除 ⇒ 复用本体那唯一一份 revive 路径 ──
+        checkRemoved(sp, t);
 
         final boolean exempt = exemptOf(sp, t);
         final ShanhaiSelfInput.Origin origin = originOf(t);
@@ -633,6 +766,350 @@ public final class ShanhaiStateAuthority {
         t.invSnapshot = ShanhaiStateInventory.snapshot(sp);   // 补完立刻重拍，免得下一拍重复补
     }
 
+    // ═══════════════ 🆕 2026-11-20：第二层的 ① 血 / ② 死亡态 / ③ 白烟计时器 ═══════════════
+
+    /**
+     * 🔴 <b>第二层第 ① ② ③ 项：血 / 死亡态 / 白烟计时器</b>（2026-11-20 补的缺口）。
+     *
+     * <h2>为什么顺序是 ③ → ① → ②</h2>
+     * <ol>
+     *   <li><b>③ 先归零 {@code deathTime}</b>：这是<b>无条件</b>的（不设阈值），
+     *       因为对手可以做到"血是满的、但 {@code deathTime} 被写到 19"⇒ 下一拍
+     *       {@code tickDeath} 一加就够 20 ⇒ 下面"白烟的证据链"那一行说的事情就发生了。
+     *       归零的代价为零：原版只在 {@code isDeadOrDying()} 时才读它。</li>
+     *   <li><b>① 再判血</b>：{@code <=0 / NaN / ±∞} 才写回（正常受伤不归这一项管）。</li>
+     *   <li><b>② 最后判死亡态</b>：血已经掰正之后还判死 ⇒ 走<b>唯一一份</b>复位动作
+     *       （{@link ShanhaiGuardValueLayer#resetDeathFlow}：两条腿补血 ＋ 两个计时器归零）。</li>
+     * </ol>
+     *
+     * <h2>🔴 白烟的证据链（javap，不是推测）</h2>
+     * <pre>
+     *   LivingEntity#tickDeath（srg m_6153_）：++deathTime → 偏移14 bipush 20 → if_icmplt 53
+     *      → 偏移41 bipush 60 → 偏移43 Level#broadcastEntityEvent(this, (byte)60)   ← 白烟
+     *   LivingEntity#tick（srg m_6075_）偏移 651 才调它，且只在 isDeadOrDying()
+     *   Forge 的 Player#tick：214 onPlayerPreTick(START) → 241 super.tick() → 285 onPlayerPostTick
+     *   ⇒ 本方法由 START 里的 {@link #reconcile} 调 ⇒ <b>永远掐在 tickDeath 之前</b>。
+     * </pre>
+     *
+     * @param sp 受保护玩家（调用方已经判过）
+     * @param t  这一拍的跟踪状态
+     */
+    private static void checkLife(ServerPlayer sp, Track t) {
+        // ── ③ 白烟计时器：无条件归零（永不到 20 ⇒ tickDeath 压根不广播 (byte)60）──
+        final int deathTimeSeen = sp.deathTime;
+        if (ShanhaiStateRules.deathTimerNeedsZero(deathTimeSeen, sp.hurtTime)) {
+            sp.deathTime = 0;
+            DEATH_TIMER_ZEROED.incrementAndGet();
+            ShanhaiStateLog.emit("deathtime", name(sp), "death_time=0", "death_time=" + deathTimeSeen,
+                    "none_poll",
+                    "restored=true via=second_layer judge=tickDeath_threshold_20"
+                            + " next_broadcast=never(poof_60) hurt_time=" + sp.hurtTime
+                            + " note=poll_cannot_see_writer");
+        }
+
+        // ── ① 血：应当值 vs 实际值 ──
+        //    实际值优先用【字段真值】（对手会给 getHealth() 加偏移，与本体同一口径）。
+        final float fieldHealth = readFieldHealth(sp);
+        final float found = Float.isNaN(fieldHealth) ? safeHealth(sp) : fieldHealth;
+        final float expected = healthExpected(sp, t);
+        if (ShanhaiStateRules.healthVerdict(true, expected, found) == ShanhaiStateRules.Verdict.RESTORE) {
+            restoreHealth(sp, t, expected, found);
+        }
+
+        // ── ② 死亡态：血/计时器/字段真值 任一说"已经在死" ⇒ 唯一一份复位动作 ──
+        final float fieldNow = readFieldHealth(sp);
+        if (ShanhaiStateRules.deathStateVerdict(true, sp.isDeadOrDying(), sp.deathTime,
+                sp.hurtTime, fieldNow) == ShanhaiStateRules.Verdict.RESTORE) {
+            final float max = sp.getMaxHealth();
+            if (!ShanhaiStateRules.healthUsable(max)) {
+                // 🔴 getMaxHealth() 不可用 ⇒ 【一步都不写】：硬写会把血量字段写成 NaN，比 0 更糟
+                //    （与客户端那一路同一条纪律）。留给下一拍 / 本体的 look_up 通道。
+                ShanhaiStateLog.emit("dead", name(sp), "state=alive", "state=dying", "none_poll",
+                        "restored=false via=failed_probe getMaxHealth=" + max
+                                + " dead=" + sp.isDeadOrDying() + " death_time=" + sp.deathTime
+                                + " field_health=" + fieldNow + " note=getMaxHealth_unusable");
+                return;
+            }
+            final ShanhaiGuardValueLayer.HealOutcome outcome = ShanhaiGuardValueLayer.resetDeathFlow(sp);
+            DEATH_FIXED.incrementAndGet();
+            ShanhaiStateLog.emit("dead", name(sp), "state=alive", "state=dying",
+                    ShanhaiViolationProbe.writerForCorrection("die", sp),
+                    "restored=" + outcome.landed() + " via=second_layer heals=" + outcome.channel.label()
+                            + " death_time_was=" + deathTimeSeen + " field_health=" + fieldNow
+                            + " | " + outcome.detail);
+        }
+    }
+
+    /**
+     * 把血写回应当值（<b>能写多少写多少，写不了就如实说写不了</b>）。
+     *
+     * <pre>
+     *   getMaxHealth() 可用      ⇒ 走唯一一份复位动作（两条腿补血 ＋ deathTime/hurtTime 归零）
+     *   getMaxHealth() 不可用    ⇒ 用【基线】直写同步血量字段（forceHealthField，绕开 setHealth）
+     *   基线也不可用             ⇒ 一个字节都不写，日志写 via=failed_probe
+     * </pre>
+     *
+     * @param sp       玩家
+     * @param t        跟踪状态（基线在 {@code t.approvedHealth} 里）
+     * @param expected 应当值
+     * @param found    这次读到的实际值（会变红/NaN/±∞）
+     */
+    private static void restoreHealth(ServerPlayer sp, Track t, float expected, float found) {
+        final float max = sp.getMaxHealth();
+        final boolean maxOk = ShanhaiStateRules.healthUsable(max);
+        final String writer = ShanhaiViolationProbe.writerForCorrection("health", sp);
+        if (maxOk) {
+            final ShanhaiGuardValueLayer.HealOutcome outcome = ShanhaiGuardValueLayer.resetDeathFlow(sp);
+            HEALTH_FIXED.incrementAndGet();
+            ShanhaiStateLog.emit("health", name(sp),
+                    ShanhaiStateLog.num(expected), ShanhaiStateLog.num(found), writer,
+                    "restored=" + outcome.landed() + " via=second_layer write_path="
+                            + outcome.channel.label() + " writer_source=write_point"
+                            + " note=poll_cannot_see_writer | " + outcome.detail);
+            return;
+        }
+        if (ShanhaiStateRules.healthUsable(t.approvedHealth)) {
+            final boolean ok = ShanhaiGuardValueLayer.forceHealthField(sp, t.approvedHealth);
+            if (ok) {
+                sp.deathTime = 0;
+                sp.hurtTime = 0;
+            }
+            HEALTH_FIXED.incrementAndGet();
+            ShanhaiStateLog.emit("health", name(sp),
+                    ShanhaiStateLog.num(t.approvedHealth), ShanhaiStateLog.num(found), writer,
+                    "restored=" + ok + " via=second_layer write_path=baseline_field"
+                            + " getMaxHealth=" + max + " writer_source=write_point"
+                            + " note=getMaxHealth_unusable_used_baseline");
+            return;
+        }
+        ShanhaiStateLog.emit("health", name(sp), "?", ShanhaiStateLog.num(found), writer,
+                "restored=false via=failed_probe getMaxHealth=" + max
+                        + " baseline=" + t.approvedHealth + " note=no_usable_target");
+    }
+
+    /** 应当的血量：优先 {@code getMaxHealth()}，不可用则用基线（再不可用 ⇒ 原样返回，由判据判 KEEP）。 */
+    private static float healthExpected(ServerPlayer sp, Track t) {
+        final float max = sp.getMaxHealth();
+        if (ShanhaiStateRules.healthUsable(max)) {
+            return max;
+        }
+        return t != null ? t.approvedHealth : max;
+    }
+
+    /** 读血（读不出来 ⇒ {@code NaN}，**不假装是 0**）。 */
+    private static float safeHealth(ServerPlayer sp) {
+        try {
+            return sp.getHealth();
+        } catch (Throwable ignored) {
+            return Float.NaN;
+        }
+    }
+
+    /** 同步血量字段真值（读不到 ⇒ {@code NaN}；与本体 {@code ShanhaiGuardValueLayer} 同一份实现）。 */
+    private static float readFieldHealth(ServerPlayer sp) {
+        try {
+            return ShanhaiGuardValueLayer.readHealthField(sp);
+        } catch (Throwable ignored) {
+            return Float.NaN;
+        }
+    }
+
+    // ═══════════════ 🆕 2026-11-20：第二层的 ④ 被移除（复用本体唯一那条 revive 路径） ═══════════════
+
+    /**
+     * 🔴 <b>第二层第 ④ 项：被移除</b>。
+     *
+     * <h2>为什么这里只写一行包装、判据与动作全在别人手里</h2>
+     * 用户口径：<b>「把它挪进/复用第二层，别写两套」</b>。
+     * 那条"见 {@code isRemoved()} ⇒ 放回位置 → {@code revive()} → {@code addFreshEntity()}（判返回值）"
+     * 的路径本来就在本体 {@code ShanhaiGuardEvents.guardOne} 里，且带三条硬约束
+     * （过滤正常离开／顺序死／判返回值）。⇒ 2026-11-20 把它抽成
+     * {@link ShanhaiGuardEvents#rescueRemovedNow}，<b>两边调同一个方法</b>，
+     * 本类只负责"在第二层的采样点上发现它、并补一条 {@code field=removed} 的读数"。
+     *
+     * <p>⚠️ 采样点说明（诚实边界）：被移除的实体<b>不会再收到 {@code PlayerTickEvent}</b>，
+     * 所以这一条真正的采样点是 {@link #onServerTickStart}（{@code ServerTickEvent.START}）——
+     * 那里每次都跑，且对每个受保护玩家都看一眼 {@code isRemoved()}。
+     *
+     * @param sp 受保护玩家
+     * @param t  跟踪状态（本方法不用它，留作签名一致）
+     */
+    private static void checkRemoved(ServerPlayer sp, Track t) {
+        if (!sp.isRemoved()) {
+            return;
+        }
+        final boolean rescued = ShanhaiGuardEvents.rescueRemovedNow(sp);
+        if (!rescued) {
+            // 没救回来 / 按规矩不动手（正常离开）⇒ 本体那边已经有一行 KIND_REMOVED，这里不重复刷
+            return;
+        }
+        REMOVED_FIXED.incrementAndGet();
+        ShanhaiStateLog.emit("removed", name(sp), "present", "removed",
+                ShanhaiViolationProbe.writerForCorrection("remove", sp),
+                "restored=true via=guard_events_revive(shared_impl) writer_source=write_point");
+    }
+
+    // ═══════════════ 🆕 2026-11-20：决定性拦截 —— tickDeath 整个不跑（mixin 的入口） ═══════════════
+
+    /**
+     * 🔴 <b>{@code LivingEntity#tickDeath} 的 HEAD（{@code m_6153_}，由 {@code ShanhaiTickDeathGuardMixin} 调）</b>。
+     *
+     * <h2>为什么这一刀比"归零 deathTime"更硬</h2>
+     * <pre>
+     *   tickDeath:  ++deathTime;  if (deathTime &gt;= 20 && !client && !isRemoved) { broadcast(60); remove(KILLED); }
+     *   baseTick :  if (isDeadOrDying() && shouldTickDeath(this)) tickDeath();     ← 唯一调用点
+     * </pre>
+     * 第二层原来的 ③（{@link #checkLife} 里归零 {@code deathTime}）跑在
+     * {@code PlayerTickEvent.START}（{@code Player#tick:214}），那是<b>本方法之前</b>；
+     * 但如果 {@code ++deathTime} 这句被对手 redirect 成"直接写 20"（KEYCLASS 扫描里存在注入 id
+     * {@code redirectDeathTimeSet}），清零与阈值就在<b>一次调用内</b>前后脚发生 ⇒ 归零永远追不上。
+     * 在 HEAD 上 cancel ⇒ 连 {@code ++deathTime} 都不执行 ⇒ 白烟（byte 60）与 {@code remove(KILLED)} 都不发生。
+     *
+     * <h2>🆕 2026-11-20 22:56：光挡住不够 —— cancel 之前必须先把血补回来</h2>
+     * <pre>
+     *   现场：field=tickDeath ×19（cancel 成功 ⇒ 白烟与 remove 都没发生）
+     *         但 client_death_screen_opening hp=-Infinity ×5
+     *         第二层"每 tick 对账补血"一条日志都没有（field=health 命中 0）⇒ 那条腿不会来救
+     *   ⇒ 挡住"死的过程"与"把血掰回来"是两件事。值层仍是 -Infinity ⇒ isDeadOrDying() 恒真
+     *      ⇒ 原版每 tick 都还想走死亡流程、客户端一直开着死亡界面。
+     *   ⇒ 顺序改成：判受保护 → 【补血 ＋ 归零】→ cancel。
+     *     补血<b>复用全工程唯一一份复位动作</b> {@link ShanhaiGuardValueLayer#resetDeathFlow}
+     *     （＝ ② 每 tick 看门狗 / ④ die 拒绝调的那一个：两条腿补血 ＋ 两个计时器归零），
+     *     本类<b>不另写一套写血口径</b>。
+     *   {@code getMaxHealth()} 不可用（{@code <=0} ／ {@code NaN} ／ {@code ±∞}）⇒ <b>一个字节都不写</b>
+     *     （硬写会把血量字段写成 NaN，比 0 更糟；与 {@link #checkLife} 同一条纪律）。
+     * </pre>
+     *
+     * <h2>🔴 只对受保护玩家生效（负向路径逐条写死）</h2>
+     * <ol>
+     *   <li>不是 {@code ServerPlayer} ⇒ <b>在调用任何判定之前</b>就 return（怪物/掉落物/别的实体：
+     *       一个字段都不碰，也不多跑一次物品栏扫描）；</li>
+     *   <li>客户端 / level 为空 ⇒ return（客户端本来就不会走 remove 分支）；</li>
+     *   <li>{@link ShanhaiGuardEvents#isGuarded} 为 false ⇒ return（<b>唯一</b>受保护入口：持有 ／ 登记过 ／ 宽限窗口）；</li>
+     *   <li>本方法抛任何 Throwable ⇒ 返回 false ⇒ <b>不 cancel</b>（退化成原版，绝不给别人加行为）。</li>
+     * </ol>
+     *
+     * @param entity mixin 传进来的 {@code this}（{@code Object}：mixin 类体不许引 MC 成员）
+     * @return true = 这一次已经取消（调用方 {@code ci.cancel()}）；false = 原版照走
+     */
+    public static boolean onTickDeathHead(Object entity) {
+        try {
+            if (!(entity instanceof ServerPlayer sp)) {
+                return false;                       // 🔴 非玩家：一个字都不改
+            }
+            if (sp.level() == null || sp.level().isClientSide()) {
+                return false;
+            }
+            if (!ShanhaiGuardEvents.isGuarded(sp)) {
+                return false;                       // 🔴 唯一受保护入口（不另写一套判据）
+            }
+            final int deathSeen = sp.deathTime;
+            final int hurtSeen = sp.hurtTime;
+            // ── 🆕 2026-11-20 22:56 缺口：先【补血】，再归零，最后 cancel ──
+            //   只挡 tickDeath 挡不住"血已经被写成 -Infinity"：值层没补回来 ⇒ isDeadOrDying() 恒真
+            //   ⇒ 原版每 tick 都还想走死亡流程、客户端一直开着死亡界面
+            //     （现场：field=tickDeath ×19，但 client_death_screen_opening hp=-Infinity ×5）。
+            //   🔴 补血走全工程【唯一一份】复位动作（＝ ② 每 tick 看门狗 / ④ die 拒绝调的那一个）：
+            //      两条腿补血（setHealth 自证 → 直写同步血量字段，绕开任何人对 setHealth 的 cancel）
+            //      ＋ deathTime/hurtTime 归零。本类不另写一套写血口径。
+            //   🔴 getMaxHealth() 不可用（<=0 / NaN / ±∞）⇒ 一个字节都不写：硬写会把血量字段写成 NaN，
+            //      比 0 更糟（与 checkLife 同一条纪律）。
+            //   读数口径与 checkLife 相同：优先【同步血量字段真值】，读不到才退回 getHealth()。
+            final float fieldBefore = readFieldHealth(sp);
+            final float hpBefore = Float.isNaN(fieldBefore) ? safeHealth(sp) : fieldBefore;
+            final ShanhaiGuardValueLayer.HealOutcome heal =
+                    ShanhaiStateRules.healthUsable(sp.getMaxHealth())
+                            ? ShanhaiGuardValueLayer.resetDeathFlow(sp)
+                            : null;
+            final float fieldAfter = readFieldHealth(sp);
+            final float hpAfter = Float.isNaN(fieldAfter) ? safeHealth(sp) : fieldAfter;
+            // 「归零」与第二层 ③ 同一个口径（判据住在纯 JDK 核里，这里只落写）
+            sp.deathTime = 0;
+            sp.hurtTime = 0;
+            TICK_DEATH_BLOCKED.incrementAndGet();
+            ShanhaiStateLog.emit("tickDeath", name(sp), "death_time=0", "death_time=" + deathSeen,
+                    "none_poll",
+                    "拦截 tickDeath（受保护玩家，白烟与 remove 都不会发生）"
+                            + " at=LivingEntity#m_6153_@HEAD hurt_time=" + hurtSeen
+                            + " judge=" + (ShanhaiStateRules.deathTimerNeedsZero(deathSeen, hurtSeen)
+                                    ? "second_layer_deathtime" : "dying_but_timer_zero")
+                            + " healed=" + (heal != null && heal.landed())
+                            + " hp_before=" + ShanhaiStateLog.num(hpBefore)
+                            + " hp_after=" + ShanhaiStateLog.num(hpAfter)
+                            + " heal_channel=" + (heal == null ? "max_unusable" : heal.channel.label())
+                            // 🆕 读取侧钳制的两个读数（只加字段，不改本行任何既有字段的算法）：
+                            //   read_clamped=<本拍是否钳过读取> / hp_field=<同步血量字段真值，读不到=unknown>
+                            //   目的：一眼看出"字段是 -∞、但读取被钳成 20"；若 read_clamped=false 而
+                            //   hp_field=-Infinity ⇒ 读侧没钳住（读侧那条注入没挂上/抛异常），不必再猜。
+                            + ShanhaiHealthReadClampMixin.Core.fieldsForTickDeathLog((Object) sp));
+            return true;
+        } catch (Throwable ignored) {
+            return false;                           // 我们坏了 ⇒ 原版行为逐字不变
+        }
+    }
+
+    // ═══════════════ 🆕 2026-11-20：全服最早的那个写点（ServerTickEvent.START） ═══════════════
+
+    /**
+     * 🔴 <b>全服最早的一个可写点</b>：{@code ServerTickEvent.START}（在任何 {@code ServerLevel#tick}、
+     * 任何实体 tick 之前）。
+     *
+     * <h2>它兜的是什么（{@link #reconcile} 兜不到的两类）</h2>
+     * <ol>
+     *   <li><b>被移除的玩家</b>：他<b>不再 tick</b> ⇒ {@code PlayerTickEvent} 一次都不会来
+     *       ⇒ 只有这里还看得到他（{@link #checkRemoved}）；</li>
+     *   <li><b>{@code deathTime} 的"跨 tick 蓄水"</b>：对手可以在<b>自己的</b>实体 tick 里把我们的
+     *       {@code deathTime} 写成 19，然后我们的玩家下一拍 {@code tickDeath} 一加就够 20。
+     *       这里把他归零，等于<b>在他 tick 之前</b>再清一次（{@link #reconcile} 里那一次是主力，这是双保险）。</li>
+     * </ol>
+     *
+     * <p>成本：只遍历<b>玩家表</b>（几十个），而且对每个玩家先问一句
+     * {@link #protectedNow}（缓存版，不翻物品栏）⇒ 非受保护玩家<b>一个字段都不碰</b>。
+     */
+    @SubscribeEvent
+    public static void onServerTickStart(TickEvent.ServerTickEvent event) {
+        if (event == null || event.phase != TickEvent.Phase.START) {
+            return;
+        }
+        try {
+            final MinecraftServer server = event.getServer();
+            if (server == null) {
+                return;
+            }
+            final List<ServerPlayer> roster = server.getPlayerList().getPlayers();
+            final int n = roster.size();
+            for (int i = 0; i < n; i++) {
+                final ServerPlayer sp = roster.get(i);
+                if (sp == null) {
+                    continue;
+                }
+                try {
+                    if (!protectedNow(sp)) {
+                        continue;                       // 不受保护 ⇒ 一个字段都不碰（与全工程同一道闸门）
+                    }
+                    // ④ 被移除（这一类玩家已经不 tick 了，只有这里还看得到）
+                    if (sp.isRemoved()) {
+                        checkRemoved(sp, null);
+                        continue;
+                    }
+                    // ③ 白烟计时器（在别人 tick 之前的双保险）
+                    if (sp.deathTime != 0) {
+                        final int was = sp.deathTime;
+                        sp.deathTime = 0;
+                        DEATH_TIMER_ZEROED.incrementAndGet();
+                        ShanhaiStateLog.emit("deathtime", name(sp), "death_time=0", "death_time=" + was,
+                                "none_poll", "restored=true via=server_tick_start judge=tickDeath_threshold_20");
+                    }
+                } catch (Throwable ignored) {
+                    // 单个玩家出错不许影响别人（本层坏掉的结果只能是"这一拍没纠正"）
+                }
+            }
+        } catch (Throwable t) {
+            ERRORS.incrementAndGet();
+            ShanhaiMod.LOGGER.warn("{} state_authority_failed where=server_tick_start err={}", PREFIX, t.toString());
+        }
+    }
+
     // ═══════════════════════════════ ④ END：把这一拍的结果记成认可值 ═══════════════════════════════
 
     private static void record(ServerPlayer sp) {
@@ -649,6 +1126,12 @@ public final class ShanhaiStateAuthority {
         t.ticksSeen++;
         t.ourMomentum = false;
         t.protectedNow = isProtected(sp);
+        // 🆕 2026-11-20：把这一拍 END 的"合法血量"记成基线（只记可用的值，绝不把 NaN/0 记成基线）
+        final float fieldNow = readFieldHealth(sp);
+        final float bloodNow = Float.isNaN(fieldNow) ? safeHealth(sp) : fieldNow;
+        if (ShanhaiStateRules.healthUsable(bloodNow)) {
+            t.approvedHealth = bloodNow;
+        }
         t.ready = true;
         if (t.windowLeft > 0) {
             t.windowLeft--;
@@ -720,6 +1203,15 @@ public final class ShanhaiStateAuthority {
 
         /** 窗口内的物品栏权威快照。 */
         ShanhaiStateInventory.Snapshot invSnapshot;
+
+        /**
+         * 🆕 2026-11-20：<b>我们认可的血量基线</b>（上一拍 END 读到的合法值）。
+         *
+         * <p>用途：{@code getMaxHealth()} 被写坏（NaN / ±∞ / 非正）时，第二层还有东西可写
+         * ⇒ 不至于"因为上限坏了就整项放手"。初值 0（未建立）由
+         * {@link ShanhaiStateRules#healthUsable} 判成"不可用"，不会被误写成 0。
+         */
+        float approvedHealth;
     }
 
     private static Track trackOf(ServerPlayer sp) {
@@ -792,8 +1284,29 @@ public final class ShanhaiStateAuthority {
         return origin == null ? "none" : origin.token();
     }
 
-    /** 受保护 = 携带「创始现实修改模块」（与本体 {@code guardOne} 同一判据）。 */
+    /**
+     * 受保护 = 携带「创始现实修改模块」（**与本体 {@code guardOne} 同一判据**）。
+     *
+     * <h2>🔴 2026-11-20：判据改成"本体那一个"（这是"模块被清空 ⇒ 全套防护失效"的一半修法）</h2>
+     * 旧版只问 {@code ShanhaiHoloMenuNetwork.moduleInInventory(sp)}（<b>只看当前背包</b>）——
+     * 而本体那套（伤害 / 死亡 / die 拒绝）问的是
+     * {@link ShanhaiGuardEvents#isGuarded}（<b>当前持有 ＋ 登记过 ＋ 宽限窗口</b>）。
+     * 两套判据不一致 ⇒ 模块被清空的那一帧：
+     * <pre>
+     *   本体那条线：isGuarded 仍 true（登记过） ⇒ 挡伤害照旧
+     *   本类这条线：moduleInInventory=false     ⇒ 第二层【整层停工】
+     * </pre>
+     * 用户实测的破防形态就是这个。⇒ 现在<b>优先问本体那一个</b>，
+     * 只有它判不了（抛异常）才退回"只看当前背包"的旧口径（保守：判不了 ⇒ 不碰）。
+     */
     private static boolean isProtected(ServerPlayer sp) {
+        try {
+            if (ShanhaiGuardEvents.isGuarded(sp)) {
+                return true;      // 当前持有 ／ 登记过 ／ 模块刚丢但还在宽限窗口内
+            }
+        } catch (Throwable ignored) {
+            // 本体那一套判不了 ⇒ 退回下面那条旧口径（绝不当成"受保护"乱写）
+        }
         try {
             return ShanhaiHoloMenuNetwork.moduleInInventory(sp);
         } catch (Throwable t) {

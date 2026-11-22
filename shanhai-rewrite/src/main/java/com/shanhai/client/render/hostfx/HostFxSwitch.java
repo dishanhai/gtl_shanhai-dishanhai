@@ -40,6 +40,19 @@ import java.util.Locale;
  * <p>要改成"变红"只需把 {@link #beamRingOn()} 改成 {@code return true;} —— 颜色已经接好了
  * （{@link #beamRingGlowRgb()} 在降级态返回红色，见 {@code HostFxDraw} 第 ④ 段）。
  *
+ * <h2>「环显示」三态（2026-11-21：两条都保留，只让玩家选显示哪一条）</h2>
+ * 用户原话是「<b>选 乙，在渲染设置那个页面切换</b>」⇒ 外缘吸积流（{@code 51..57} 格）与粗光柱环
+ * （{@code r=54}、管径 {@code 6}）的<b>几何一个字节都没动</b>，变的是"这一帧提交哪一条"：
+ * <pre>
+ *   mode = 0（默认，两条都画）  ⇒ beamRingOn() = !degraded    accretionOn() = !degraded
+ *   mode = 1（只画外缘吸积流）  ⇒ beamRingOn() = false        accretionOn() = !degraded
+ *   mode = 2（只画粗光柱环）    ⇒ beamRingOn() = !degraded    accretionOn() = false
+ * </pre>
+ * 🔴 <b>特效总开关（{@code hostFxEnabled}=false = 降级态）优先级高于「环显示」</b>：
+ * 降级态下两条环一条都不画 —— 「环显示」是玩家显式选择，不许把特效总开关关掉的东西顶回来。
+ * <p>mode 的<b>唯一来源</b>是 {@link HostFxState#ringVisualMode()}（渲染入口每帧喂一次），
+ * 本类只在 {@link #apply()} 里抄一份快照 ⇒ <b>没有第二套状态来源</b>；判定仍然全部在本类。
+ *
  * <h2>🔴 可脱机断言（和 {@link HostFxState} 同一条纪律：开关语义必须能被机器判红判绿）</h2>
  * 本文件<b>自身不 import 任何 MC / GL 类型</b>（只有 {@code java.util.Locale}），只依赖两个类：
  * <ul>
@@ -80,6 +93,15 @@ public final class HostFxSwitch {
     /** 最近一次 {@link #apply}/{@link #reset} 判定的降级态（{@code true} = 机器把特效关了）。 */
     private static boolean degraded;
 
+    /**
+     * 「环显示」三态的快照（{@link HostFxState#ringVisualMode()} 的每帧副本，见类注释那一节）。
+     *
+     * <p>{@code 0} = 两条都画 / {@code 1} = 只画外缘吸积流 / {@code 2} = 只画粗光柱环。
+     * 只由 {@link #apply()} 写、{@link #reset()} 复位成 {@code 0} —— <b>不另设 setter</b>，
+     * 否则就等于给渲染侧开了第二条"绕过喂料"的状态来源。
+     */
+    private static byte ringVisualMode = HostFxState.RING_VISUAL_BOTH;
+
     /** 红色是不是<b>我们</b>设的（恢复时只清自己设过的，照 {@code clearBlackHoleIfOurs} 的先例）。 */
     private static boolean degradedColorApplied;
 
@@ -99,8 +121,10 @@ public final class HostFxSwitch {
     /**
      * 按 {@link HostFxState#fxEnabled()} 应用开关语义（渲染器在<b>喂料之后、任何绘制之前</b>每帧调一次）。
      *
-     * <p>做两件事：
+     * <p>做三件事：
      * <ol>
+     *   <li>把 {@link HostFxState#ringVisualMode()} 抄成这一帧的 mode 快照（{@link #beamRingOn()} /
+     *       {@link #accretionOn()} 都读它）；</li>
      *   <li>降级 ⇒ 把中央上下两束的外层发光色换成 {@link #DEGRADED_BEAM_RGB}
      *       （走既有 {@code jetGlowOverride}，不新增硬编码分支）；</li>
      *   <li>恢复 ⇒ 把这层覆盖<b>还原成我们进来之前的样子</b>（有人先设过色就写回那个色，没有就清掉）。</li>
@@ -108,6 +132,8 @@ public final class HostFxSwitch {
      * 幂等：连调一百次的结果与调一次相同（没有累积状态）。
      */
     public static void apply() {
+        // 🔴 2026-11-21：「环显示」三态的快照（唯一来源 = HostFxState 那个喂料口；本类不自己读机器/配置）
+        ringVisualMode = HostFxState.ringVisualMode();
         final boolean off = !HostFxState.fxEnabled();
         degraded = off;
         if (off) {
@@ -130,6 +156,8 @@ public final class HostFxSwitch {
      */
     public static void reset() {
         degraded = false;
+        // 「环显示」也一起复位成默认（两条都画）：没有主机在喂料时不该停在"少一条"的那一档
+        ringVisualMode = HostFxState.RING_VISUAL_BOTH;
         restoreColor();
     }
 
@@ -193,9 +221,81 @@ public final class HostFxSwitch {
         return HostFxGeometry.THIN_BEAM_COUNT;
     }
 
-    /** 内外环之间那圈粗光柱环这一帧画不画（按任务书补注：降级态算"主光束" ⇒ 一起消失）。 */
+    /**
+     * 内外环之间那圈<b>粗光柱环</b>这一帧画不画（{@code HostFxDraw} 第 ④ 段唯一的判据，
+     * 着色器两遍 + CPU 回落<b>都</b>在这一个 {@code if} 里面）。
+     *
+     * <p>两条语义：
+     * <ul>
+     *   <li>降级态（机器 {@code hostFxEnabled=false}）算"主光束" ⇒ 不画（既有语义，一个字节都没改）；</li>
+     *   <li>「环显示」= 只画外缘吸积流（{@code mode==1}）⇒ 不画（玩家自己选的）。</li>
+     * </ul>
+     * {@code mode==2}（只画粗光柱环）<b>不看吸积流那条</b>：它要的就是"这一条留着"⇒ 判据仍是降级态那一条。
+     * <p>⚠️ {@code HostFxDraw} 里<b>不许</b>再判一次 mode —— 收口只在本方法（第二条判据 = 两处口径会分叉）。
+     */
     public static boolean beamRingOn() {
-        return !degraded;
+        return ringVisualMode != HostFxState.RING_VISUAL_ACCRETION_ONLY && !degraded;
+    }
+
+    /**
+     * <b>外缘吸积流</b>（{@code 51..57} 格那圈等离子流）这一帧画不画
+     * —— {@code HostFxExtraLayers} 在提交点读它（跳过时连顶点都不算）。
+     *
+     * <p>两条判据：
+     * <ol>
+     *   <li>🔴 <b>降级态优先</b>：特效总开关关 ⇒ 一条都不画（「环显示」不许把总开关关掉的东西顶回来）；</li>
+     *   <li>「环显示」= 只画粗光柱环（{@code mode==2}）⇒ 不画。</li>
+     * </ol>
+     */
+    public static boolean accretionOn() {
+        if (degraded) {
+            return false;
+        }
+        return ringVisualMode != HostFxState.RING_VISUAL_BEAM_RING_ONLY;
+    }
+
+    /** 「环显示」三态的短名（日志用；与面板那三个带色标签一一对应）。 */
+    public static String ringVisualModeText() {
+        switch (ringVisualMode) {
+            case HostFxState.RING_VISUAL_ACCRETION_ONLY:
+                return "只吸积流";
+            case HostFxState.RING_VISUAL_BEAM_RING_ONLY:
+                return "只光柱环";
+            default:
+                return "两条";
+        }
+    }
+
+    /**
+     * <b>星辰场（围绕黑洞的粒子）</b>这一帧画不画
+     * —— {@code HostFxExtraLayers} 第 ③ 段唯一的判据（跳过时连星点都不算）。
+     *
+     * <p>🔴 判据 = <b>客户端配置总闸 × 机器面板开关</b>（两者都为 true 才画），口径只在本方法一处：
+     * <ul>
+     *   <li>{@code configEnabled} = 客户端 {@code [hostfx] starField}（<b>总闸</b>，关 = 谁都别画）；</li>
+     *   <li>{@link HostFxState#starFieldEnabled()} = 这台机器面板上的开关。</li>
+     * </ul>
+     * 为什么把 config 当入参传进来而不是在本类读配置：本类必须保持<b>零 MC 依赖</b>（见类注释），
+     * 而 {@code ShanhaiClientConfig} 会拖 MC —— 传进来就能让"与"逻辑仍只有一处、且可离线断言。
+     */
+    public static boolean starFieldOn(boolean configEnabled) {
+        return configEnabled && HostFxState.starFieldEnabled();
+    }
+
+    /** <b>结构闪电</b>这一帧画不画（判据同 {@link #starFieldOn(boolean)}：配置总闸 × 面板开关）。 */
+    public static boolean structureLightningOn(boolean configEnabled) {
+        return configEnabled && HostFxState.structureLightningEnabled();
+    }
+
+    /** 星辰场/结构闪电跳过时的原因（进 stats；{@code ""} = 真的画了）。 */
+    public static String layerOffReason(boolean configEnabled, boolean panelEnabled) {
+        if (!configEnabled) {
+            return "关:配置";
+        }
+        if (!panelEnabled) {
+            return "关:面板";
+        }
+        return "";
     }
 
     /**

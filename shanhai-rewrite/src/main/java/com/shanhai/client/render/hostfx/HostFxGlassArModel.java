@@ -368,9 +368,17 @@ public final class HostFxGlassArModel {
         public int hostRemainSeconds = -1;
         /** 主机级：当前 {@code EU/t}（{@code < 0} = 读不到）。 */
         public long hostEuPerTick = -1L;
-        /** 主机级：同时处理几个配方（{@code < 0} = 读不到）。 */
+        /**
+         * 主机级：同时处理几个配方 —— <b>与 Jade「同时处理至多 N 个配方」同一来源同一数值</b>。
+         * <p>{@link #PARALLEL_INFINITE_SENTINEL}（-114514）= 无限档（Jade 画彩虹「无限」）；
+         * 其它 {@code < 0} = 读不到；{@code >= 0} = 真值。渲染走 {@link #hostParallelText}。
+         */
         public int hostParallel = -1;
-        /** 主机级：拥有几个跨配方线程（{@code < 0} = 读不到）。 */
+        /**
+         * 主机级：拥有几个跨配方线程 —— <b>与 Jade「拥有 N 个跨配方线程」同一来源同一数值</b>
+         * （{@code PrimordialEngineRecipeLogic#getMultipleThreads()} 的同一唯一实现，
+         * 服务端经 {@code getEnergyCapThreads()} 取）。{@code < 0} = 读不到。
+         */
         public int hostThreads = -1;
         /** 主机级：当前在产出的东西（{@code 名字×数量}），最多 {@link HostFxGlassArPanel#HOST_OUTPUTS} 项。 */
         public String[] hostOutputs = new String[0];
@@ -1121,7 +1129,11 @@ public final class HostFxGlassArModel {
                 "主机 · 配方执行",
                 "进度 " + pct + " 剩 " + remain,
                 // 🔴 2026-10-25 第三十四改（用户：「其余量 -- 要变成真值；真拿不到就写「读不到」而不是 --」）
-                "耗能 " + hostEuText(st.hostEuPerTick) + " EU/t 并行 " + hostCountText(st.hostParallel)
+                // 🔴 2026-11-18（用户：「这里读不到并行和线程，然而明明有」）：并行改走
+                //    {@link #hostParallelText}（无限档写「无限」，与 Jade 那行同字），线程仍走
+                //    {@link #hostCountText}（128 这种小数字）。
+                //    两个值都来自服务端 {@code refreshHostRuntimeSnapshot$body} 里与 Jade 同源的两句。
+                "耗能 " + hostEuText(st.hostEuPerTick) + " EU/t 并行 " + hostParallelText(st.hostParallel)
                         + " 线程 " + hostCountText(st.hostThreads),
                 hostOutputLine(st, 0),
                 hostOutputLine(st, 1),
@@ -1460,14 +1472,34 @@ public final class HostFxGlassArModel {
     }
 
     /**
+     * <b>gtladditions 约定的「无限」哨兵 {@code -114514}</b> ——
+     * <b>镜像</b> {@code ShanhaiParallelDisplay#INFINITE_SENTINEL}（<b>两处必须同步改</b>，
+     * 与 {@link #REASON_NONE} 一族同一条纪律：本类刻意<b>零 Minecraft 依赖、零工程依赖</b>，
+     * 才能被一个裸 {@code javac} 脱机跑判据 ⇒ 不 import 那个类，只镜像这个常量）。
+     *
+     * <p>为什么要认识它：主机并行进「无限档」时 {@code getMaxParallel()}（= Jade 抬头那一行的
+     * 取值点）返回的就是这个哨兵，gtladditions 的 tooltip 见到它画彩虹「无限」。
+     * AR 若不认识它，就会把一个负数画成「读不到」——<b>那正是用户这次报的 bug 的另一半</b>。
+     */
+    public static final int PARALLEL_INFINITE_SENTINEL = -114514;
+
+    /** 主机级<b>并行</b>（= Jade「同时处理至多 N 个配方」那一个数）：{@code 无限 / 真值 / 读不到}。 */
+    static String hostParallelText(int v) {
+        if (v == PARALLEL_INFINITE_SENTINEL) {
+            return "无限";                                     // 与 Jade 那行同字（逐字一致）
+        }
+        return v < 0 ? "读不到" : compactMagnitude(v);
+    }
+
+    /**
      * 主机块<b>六个量</b>的一行读数（日志判死用）：
-     * {@code 主机=[耗能=1.2M 并行=读不到 线程=读不到 输出=1/3]}（输出 = 有效条数 / 应有条数）。
+     * {@code 主机=[耗能=1.2M 并行=无限 线程=128 输出=1/3]}（输出 = 有效条数 / 应有条数）。
      */
     public static String hostBlockCounts(State st) {
         final String[] outs = st.hostOutputs;
         final int have = outs == null ? -1 : outs.length;
         return "主机=[耗能=" + hostEuText(st.hostEuPerTick)
-                + " 并行=" + hostCountText(st.hostParallel)
+                + " 并行=" + hostParallelText(st.hostParallel)
                 + " 线程=" + hostCountText(st.hostThreads)
                 + " 输出=" + (have < 0 ? "读不到" : have + "/" + st.hostOutputTotal) + "]";
     }
@@ -1475,9 +1507,13 @@ public final class HostFxGlassArModel {
     /**
      * 主机块「有配方在跑时至少 4 个量非空」的判据（探针与自检共用）。
      *
-     * <p>为什么是 4 而不是 6：并行 / 线程在本机<b>没有权威现值</b>（服务端写 −1，
-     * 见 {@code refreshHostRuntimeSnapshot$body} 里"绝不拿上限冒充现值"那段）⇒ 它们本来就该是「读不到」；
-     * 剩下 4 个（进度 / 剩 / 耗能 / 输出）必须都有真值。
+     * <p>为什么是 4 而不是 6：并行 / 线程在本机<b>曾经</b>没有权威现值（服务端写 −1）
+     * ⇒ 那时它们本来就该是「读不到」；剩下 4 个（进度 / 剩 / 耗能 / 输出）必须都有真值。
+     * <p>🔴 <b>2026-11-18 订正</b>：那两格<b>现在有真值了</b>（服务端改成与 Jade 同源取数，
+     * 见 {@code GuixuVisionCoreMachine#refreshHostRuntimeSnapshot$body} 里的 {@code hostPar/hostThr}），
+     * 所以判据①「并行/线程 至少一格有数」变成可满足的正常项；只有服务端读抛异常时才会退回
+     * 「读不到」。数量 4 这个门槛<b>刻意不抬高</b>：它在"真的读不到"时仍然必须成立，
+     * 否则一条真故障会被一条假失败盖掉。
      */
     public static int hostFilledCount(State st) {
         int n = 0;
@@ -1496,7 +1532,9 @@ public final class HostFxGlassArModel {
         if (st.hostOutputTotal >= 0) {
             n++;
         }
-        if (st.hostParallel >= 0 || st.hostThreads >= 0) {
+        // 「无限」哨兵也是【有真值】——它绝不能被算成"读不到"
+        if (st.hostParallel == PARALLEL_INFINITE_SENTINEL
+                || st.hostParallel >= 0 || st.hostThreads >= 0) {
             n++;
         }
         return n;

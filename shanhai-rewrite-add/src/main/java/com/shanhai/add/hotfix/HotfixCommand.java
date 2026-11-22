@@ -1,10 +1,13 @@
 package com.shanhai.add.hotfix;
 
+import java.lang.instrument.Instrumentation;
+
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.shanhai.ShanhaiMod;
 import com.shanhai.add.ShanhaiAdd;
+import com.shanhai.add.config.ShanhaiAddConfig;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -22,9 +25,12 @@ import net.minecraftforge.fml.common.Mod;
  *   /shanhai_add hotfix status           打印：有没有拿到 Instrumentation / 体检结论 / 工作目录
  *   /shanhai_add hotfix prewarm          手动重跑一次预热（绕过"只做一次"的闩；同步执行，会阻塞到出结果）
  *   /shanhai_add hotfix selftest         闭环自检：① 常量替换靶子 ② 换方法体靶子（{@link HotfixAutoCounter#selftest()}）
- *   /shanhai_add hotfix auto             查主动热改开关（默认关）
- *   /shanhai_add hotfix auto on|off      打开／关闭主动热改（只改内存，不落配置）
+ *   /shanhai_add hotfix auto             查主动热改开关（配置键 {@code hotfix.auto}，默认开）
+ *   /shanhai_add hotfix auto on|off      打开／关闭主动热改（🔴 写回 config/shanhai_add-common.toml；off 会立刻 undoall）
+ *   /shanhai_add hotfix chainwipe        查整链抹除开关（配置键 {@code hotfix.chain_wipe}，默认开）
+ *   /shanhai_add hotfix chainwipe on|off 热开关整链抹除（🔴 写回同一份配置；off ⇒ 只记录不写字节：chain_wipe_refused）
  *   /shanhai_add hotfix undo &lt;类&gt;#&lt;方法&gt;  还原一个被改过的方法
+ *   /shanhai_add hotfix restore &lt;类&gt;[#方法] 恢复一个关键类（只摘外部 handler；OP 2）
  *   /shanhai_add hotfix undoall          还原全部（退出世界／停服时也会自动跑）
  * </pre>
  *
@@ -58,7 +64,7 @@ public final class HotfixCommand {
                         .executes(HotfixCommand::prewarm))
                 .then(Commands.literal("selftest").requires(HotfixCommand::canEdit)
                         .executes(HotfixCommand::selftest))
-                // ---- 第 3 档：主动热改（默认关）
+                // ---- 第 3 档：主动热改（默认开；2026-11-20 用户拍板）
                 .then(Commands.literal("auto")
                         .executes(HotfixCommand::autoQuery)
                         .then(Commands.literal("on").requires(HotfixCommand::canEdit)
@@ -68,6 +74,17 @@ public final class HotfixCommand {
                 .then(Commands.literal("undo").requires(HotfixCommand::canEdit)
                         .then(Commands.argument("target", StringArgumentType.greedyString())
                                 .executes(HotfixCommand::undo)))
+                // ---- 🆕 2026-11-21（④）：整链抹除的开关（默认开；用户点名"可以指令开关"）
+                .then(Commands.literal("chainwipe")
+                        .executes(HotfixCommand::chainWipeQuery)
+                        .then(Commands.literal("on").requires(HotfixCommand::canEdit)
+                                .executes(HotfixCommand::chainWipeOn))
+                        .then(Commands.literal("off").requires(HotfixCommand::canEdit)
+                                .executes(HotfixCommand::chainWipeOff)))
+                // ---- 🆕 2026-11-21：手动恢复关键类（只清空外部 handler，不动我们的）
+                .then(Commands.literal("restore").requires(HotfixCommand::canEdit)
+                        .then(Commands.argument("target", StringArgumentType.greedyString())
+                                .executes(HotfixCommand::restore)))
                 .then(Commands.literal("undoall").requires(HotfixCommand::canEdit)
                         .executes(HotfixCommand::undoAll));
     }
@@ -105,6 +122,31 @@ public final class HotfixCommand {
                 + " §8" + line;
         ctx.getSource().sendSuccess(() -> Component.literal(msg), false);
         ShanhaiMod.LOGGER.info("{} event=status {}", HotfixBootstrap.PREFIX, line);
+
+        // 🆕 2026-11-20：<b>逐行列出"每个目标当前用的是哪一档"</b>（用户点名要的那一条）。
+        //   为什么要单独几行而不是塞进上面那一行：{@code targets=} 只放得下"键=档"，
+        //   而"为什么是这一档"（换掉几条指令、站点叫什么、被打到第几次）才是判读的依据。
+        final java.util.List<String> tiers;
+        try {
+            tiers = HotfixAutoCounter.patchedTiers();
+        } catch (Throwable t) {
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "§c[热更新] 目标档位读不出来：" + t.getClass().getSimpleName()), false);
+            return ready ? 1 : 0;
+        }
+        if (tiers.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "§7[热更新] 当前没有目标（patched=0）"), false);
+        } else {
+            for (final String row : tiers) {
+                ctx.getSource().sendSuccess(() -> Component.literal("§7[热更新] §f" + row), false);
+                ShanhaiMod.LOGGER.info("{} event=status_target {}", HotfixBootstrap.PREFIX, row);
+            }
+        }
+        // 行内改写那一路的读数（普通攻击真的生效过几次／原样转发过几次）
+        final String shield = HotfixShield.statusLine();
+        ctx.getSource().sendSuccess(() -> Component.literal("§8[热更新] " + shield), false);
+        ShanhaiMod.LOGGER.info("{} event=status_line_attack {}", HotfixBootstrap.PREFIX, shield);
         return ready ? 1 : 0;
     }
 
@@ -198,6 +240,10 @@ public final class HotfixCommand {
 
     private static int autoSet(CommandContext<CommandSourceStack> ctx, boolean on) {
         final long t0 = System.currentTimeMillis();
+        // ① 先落盘：{@code config/shanhai_add-common.toml [hotfix] auto} 是【唯一真相】。
+        //    🔴 顺序有意义：off 会立刻 undoAll（一次 retransform 风暴），万一那一步出事，
+        //       配置里也应该已经记着 off —— 而不是"内存关了、文件还是 on"。
+        final boolean persisted = ShanhaiAddConfig.setHotfixAuto(on);
         boolean tap = false;
         try {
             tap = HotfixAutoCounterGlue.ensure(on ? "auto_on" : "auto_off");
@@ -205,15 +251,109 @@ public final class HotfixCommand {
             ShanhaiMod.LOGGER.warn("{} event=auto_switch phase=glue state=degraded reason={} policy=record_only",
                     HotfixBootstrap.PREFIX, t.toString());
         }
+        // ② 再改内存（两处同时改 ⇒ 不再分叉）
         final boolean now = HotfixAutoCounter.setAuto(on);
         final String line = HotfixAutoCounter.statusLine();
         final boolean finalTap = tap;
+        // ③ 回显用的是【刚落盘的结果】，不是"内存改成什么了"
+        final String tail = persisted
+                ? " §8· 已写进 config/" + ShanhaiAddConfig.FILE_NAME + " [hotfix] auto=" + now + "（重启还是这个值）"
+                : " §c· 配置文件没写成功 ⇒ 重启会回到上次保存的值（看日志 cfg_write）";
         ctx.getSource().sendSuccess(() -> Component.literal(
-                (now ? "§a[热更新] 主动热改已开" : "§e[热更新] 主动热改已关")
+                (now ? "§a[热更新] 主动热改已开" : "§e[热更新] 主动热改已关") + tail
                         + " §8tap=" + finalTap + " " + line), false);
-        ShanhaiMod.LOGGER.info("{} event=auto_switch auto={} tap={} elapsed_ms={} {}",
-                HotfixBootstrap.PREFIX, now, finalTap, System.currentTimeMillis() - t0, line);
+        ShanhaiMod.LOGGER.info("{} event=auto_switch auto={} saved={} key={} tap={} elapsed_ms={} {}",
+                HotfixBootstrap.PREFIX, now, persisted, ShanhaiAddConfig.KEY_HOTFIX_AUTO,
+                finalTap, System.currentTimeMillis() - t0, line);
         return now ? 1 : 0;
+    }
+
+    // ------------------------------------------------------------------ 🆕 ④ 整链抹除开关
+
+    /** 查整链抹除开关（只读；与 {@code auto} 同口径：不设权限门）。 */
+    private static int chainWipeQuery(CommandContext<CommandSourceStack> ctx) {
+        final boolean on = HotfixChainWipe.enabled();
+        final String line = HotfixChainWipe.statusLine();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§b[热更新] 整链抹除 chainwipe=" + (on ? "§a开" : "§7关")
+                        + " §8（配置键 " + HotfixChainWipe.KEY + "，默认 "
+                        + HotfixChainWipe.DEFAULT_ENABLED + "）" + line), false);
+        ShanhaiMod.LOGGER.info("{} event=chainwipe_query {}", HotfixBootstrap.PREFIX, line);
+        return on ? 1 : 0;
+    }
+
+    private static int chainWipeOn(CommandContext<CommandSourceStack> ctx) {
+        return chainWipeSet(ctx, true);
+    }
+
+    private static int chainWipeOff(CommandContext<CommandSourceStack> ctx) {
+        return chainWipeSet(ctx, false);
+    }
+
+    /**
+     * 热开关（默认开）。{@code off} 之后整链抹除<b>只记录不写字节</b>：
+     * 日志是 {@code chain_wipe_refused reason=chainwipe_off classes=[…]}，且 {@code retransform} 计数不涨。
+     *
+     * <p>🔴 2026-11-22（用户报"重开游戏配置重置为默认"）：本命令改成<b>先写 config／落盘、再改内存</b>。
+     * 以前只有 {@code HotfixChainWipe.setEnabled(on)} —— 配置键 {@code hotfix.chain_wipe} 从来没人写，
+     * 于是重开游戏时 {@code applyConfiguredDefault(文件里的 true)} 一定把它打回默认。
+     *
+     * <p>⚠️ 与 {@code auto off} 一样：只关"以后不再动手"，已经抹掉的类不自动还原（要还原用 {@code undoall}）。
+     */
+    private static int chainWipeSet(CommandContext<CommandSourceStack> ctx, boolean on) {
+        // ① 先落盘（唯一真相 = config/shanhai_add-common.toml [hotfix] chain_wipe）
+        final boolean persisted = ShanhaiAddConfig.setChainWipe(on);
+        // ② 再改内存里的开关（影子与配置同时更新）
+        final boolean now = HotfixChainWipe.setEnabled(on);
+        final String line = HotfixChainWipe.statusLine();
+        // ③ 回显用【刚落盘的结果】
+        final String tail = persisted
+                ? " §8· 已写进 config/" + ShanhaiAddConfig.FILE_NAME + " [hotfix] chain_wipe=" + now
+                        + "（重启还是这个值）"
+                : " §c· 配置文件没写成功 ⇒ 重启会回到上次保存的值（看日志 cfg_write）";
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                (now ? "§a[热更新] 整链抹除已开" : "§e[热更新] 整链抹除已关（只记录不写字节）") + tail
+                        + " §8" + line), false);
+        ShanhaiMod.LOGGER.info("{} event=chainwipe_switch chainwipe={} saved={} key={} {}",
+                HotfixBootstrap.PREFIX, now, persisted, ShanhaiAddConfig.KEY_CHAIN_WIPE, line);
+        return now ? 1 : 0;
+    }
+
+    /**
+     * 手动恢复一个关键类：{@code /shanhai_add hotfix restore <类名>[#<方法>]}。
+     *
+     * <p>只接受六个已监控关键类（判据在 {@link HotfixKeyClassRestore#restoreByName}）。
+     * 回执一行给玩家、一行进日志；{@code restoreByName} 自己还会打一条
+     * {@code keyclass_restore …}（与 {@code keyclass_restore_inline} 区分开）。
+     */
+    private static int restore(CommandContext<CommandSourceStack> ctx) {
+        final String target = StringArgumentType.getString(ctx, "target");
+        try {
+            // 与 undo 同一个口径：先把日志出口接上，否则 keyclass_restore… 那行没地方落
+            HotfixAutoCounterGlue.bind();
+        } catch (Throwable ignored) {
+            // 接不上也不影响恢复本身（回执行仍会打）
+        }
+        final HotfixKeyClassRestore.Result r;
+        try {
+            final Instrumentation inst = HotfixHolder.instrumentation();
+            // 🆕 2026-11-21（P2 追加）：走**串行化入口**（与 patch／chain_wipe 同一把按类锁）——
+            //   手动 restore 也是一次独立的 retransformClasses，不许与另外两条路径交错。
+            r = HotfixAutoCounter.restoreByNameSerialized(inst, target, null);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} event=restore target={} result=failed detail=exception_{} policy=record_only",
+                    HotfixBootstrap.PREFIX, target, t.getClass().getSimpleName());
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "§c[热更新] restore " + target + " 失败：" + t.getClass().getSimpleName()), false);
+            return 0;
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§b[热更新] restore " + target + " ⇒ " + (r.ok ? "§a已恢复" : "§c未恢复")
+                        + " §8stripped=" + r.stripped + " ours_kept=" + r.oursKept
+                        + " retransforms=" + r.retransforms + " reason=" + r.reason), false);
+        ShanhaiMod.LOGGER.info("{} event=restore target={} ok={} stripped={} ours_kept={} retransforms={} reason={}",
+                HotfixBootstrap.PREFIX, target, r.ok, r.stripped, r.oursKept, r.retransforms, r.reason);
+        return r.ok ? 1 : 0;
     }
 
     /** 还原一个目标：{@code /shanhai_add hotfix undo <类>#<方法>}。 */

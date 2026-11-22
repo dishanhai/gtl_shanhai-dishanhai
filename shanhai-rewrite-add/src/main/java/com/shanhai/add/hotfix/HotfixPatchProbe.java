@@ -6,7 +6,7 @@ package com.shanhai.add.hotfix;
  *
  * <h2>为什么要有这个类（而不是把判据写在 {@link HotfixAutoCounter} 里）</h2>
  * 2026-11-08 12:41 的真实现场：patch 的账本说 {@code result=patched}，
- * 而运行中的类<b>一点没变</b>（{@code forceSetHealth:375} 还在调 {@code setHealth}，
+ * 而运行中的类<b>一点没变</b>（{@code doHurt:375} 还在调 {@code setHealth}，
  * 29 条 {@code setHealth_guard value_was=-57.0}）。
  * 也就是说「改成功了」这件事<b>从来没人验证过</b>。
  * 而这类判据最容易写成"只有它自己说对"的样子，所以这里把它抽成

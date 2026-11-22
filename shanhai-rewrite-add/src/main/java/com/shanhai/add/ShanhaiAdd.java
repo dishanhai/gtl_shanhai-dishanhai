@@ -93,10 +93,13 @@ public final class ShanhaiAdd {
         try {
             ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, ShanhaiAddConfig.COMMON_SPEC);
             // 🆕 2026-11-08：多了一节 [guard_module]（momentum_guard / pos_guard / inv_guard）
+            // 🆕 2026-11-22：又多了一节 [hotfix]（chain_wipe / auto）—— 热修改那两个开关现在真的落盘了
             LOGGER.info("[SHANHAI-ADD] config registered type=COMMON file=config/{} section=[gravity] key={}"
-                            + " section2=[guard_module] key2={}|{}|{}",
+                            + " section2=[guard_module] key2={}|{}|{}"
+                            + " section3=[hotfix] key3={}|{}",
                     ShanhaiAddConfig.FILE_NAME, "multiplier",
-                    "momentum_guard", "pos_guard", "inv_guard");
+                    "momentum_guard", "pos_guard", "inv_guard",
+                    "chain_wipe", "auto");
         } catch (Throwable t) {
             // 配置注册失败 ⇒ 重力倍率退化成"只在内存里生效"（指令仍可用），不影响启动
             LOGGER.error("[SHANHAI-ADD] config registered=false ⇒ 重力倍率不会落盘", t);

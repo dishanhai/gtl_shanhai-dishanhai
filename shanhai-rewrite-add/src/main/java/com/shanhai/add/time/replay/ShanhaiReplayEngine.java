@@ -866,17 +866,37 @@ public final class ShanhaiReplayEngine
                 // 🔴 ⑤ 死亡那一刻记下来的血量是 0 ⇒ 写回去 = 把它重新写死（用户：「我杀的生物还是没活过来」）。
                 //    一律跳过并计数；同时强制救活（满血 + 清死亡计时）。
                 ++this.healthZeroSkipped;
-                forceAlive(living);
+                if (!forceAlive(living)) {
+                    ++this.healthFailed;   // 救活了但没证明 ⇒ 如实记失败（不假装成功）
+                    return false;
+                }
                 ++this.healthApplied;
                 return true;
             }
             ShanhaiClockHooks.beginReplayWrite();
             try {
-                living.setHealth(health);
+                final float target = health;
+                living.setHealth(target);
                 living.deathTime = 0;
                 living.hurtTime = 0;
                 if (!this.revivedUuids.contains(living.getUUID())) {
                     this.revivedUuids.add(living.getUUID());
+                }
+                // 🔴 2026-11-21（口径统一）：「调了 setHealth」不等于「补上了」—— 记账改成【回读字段真值】。
+                //    生物不受值层兜底保护（那条线只管玩家），但记账口径必须同源：
+                //    先读同步血量字段（DATA_HEALTH_ID），读不到才退回 getHealth()，并把用的是哪一个写进日志。
+                final float field = com.shanhai.common.guard.ShanhaiGuardValueLayer.readHealthField(living);
+                final boolean fieldProof = !Float.isNaN(field);
+                final float proofValue = fieldProof ? field : living.getHealth();
+                final boolean landed =
+                        Math.abs(proofValue - target) <= com.shanhai.common.guard.ShanhaiGuardCore.EPS;
+                if (!landed) {
+                    ++this.healthFailed;
+                    ShanhaiMod.LOGGER.warn("[SHANHAI-REPLAY] health_apply_unproven uuid={} want={} proof={}"
+                                    + " proof_value={} read={}",
+                            living.getUUID(), target, fieldProof ? "field" : "read_degraded",
+                            proofValue, living.getHealth());
+                    return false;
                 }
                 ++this.healthApplied;
                 return true;
@@ -894,12 +914,18 @@ public final class ShanhaiReplayEngine
      *
      * <p>用户原话：「我杀的生物还是没活过来，还是死了」。根因是死亡边界记录到的血量就是 0，
      * 倒流把它写回去 = 又写死一次（并在下一拍冒白烟）。这里给满血并把死亡/受击计时清零。
+     *
+     * <p>🆕 2026-11-21（口径统一）：<b>返回值 = 「回读字段真值」证明的血真的落地了</b>。
+     * "调了 {@code setHealth}" 不再算成功 —— 记账只认回读（详见 {@link ShanhaiReplayEngine#heal}）。
+     *
+     * @return true = 血真的到了满值（字段真值或退化读数证明）；false = 没证明 / 抛异常
      */
-    private void forceAlive(net.minecraft.world.entity.LivingEntity living) {
+    private boolean forceAlive(net.minecraft.world.entity.LivingEntity living) {
         try {
             ShanhaiClockHooks.beginReplayWrite();
             try {
-                living.setHealth(living.getMaxHealth());
+                final float target = living.getMaxHealth();
+                living.setHealth(target);
                 living.deathTime = 0;
                 living.hurtTime = 0;
                 living.invulnerableTime = 0;
@@ -911,11 +937,24 @@ public final class ShanhaiReplayEngine
                 if (!this.revivedUuids.contains(living.getUUID())) {
                     this.revivedUuids.add(living.getUUID());
                 }
+                // 🔴 记账只认回读（字段真值优先，读不到才退回 getHealth() 并把它标出来）
+                final float field = com.shanhai.common.guard.ShanhaiGuardValueLayer.readHealthField(living);
+                final boolean fieldProof = !Float.isNaN(field);
+                final float proofValue = fieldProof ? field : living.getHealth();
+                final boolean landed =
+                        Math.abs(proofValue - target) <= com.shanhai.common.guard.ShanhaiGuardCore.EPS;
+                if (!landed) {
+                    ShanhaiMod.LOGGER.warn("[SHANHAI-REPLAY] force_alive_unproven uuid={} want={} proof={}"
+                                    + " proof_value={} read={}",
+                            living.getUUID(), target, fieldProof ? "field" : "read_degraded",
+                            proofValue, living.getHealth());
+                }
+                return landed;
             } finally {
                 ShanhaiClockHooks.endReplayWrite();
             }
         } catch (Throwable t) {
-            ++this.healthFailed;
+            return false;   // 计数交给调用方（唯一调用点是 heal）—— 只在一处加，免得重复记
         }
     }
 

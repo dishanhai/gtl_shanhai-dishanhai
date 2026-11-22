@@ -173,8 +173,8 @@ public final class HotfixPatchWatch {
     private long lastLogMillis;
 
     /**
-     * @param className  源级类名（{@code examplemod.util.EntityUtil}）
-     * @param methodName 方法名（{@code forceSetHealth}）
+     * @param className  源级类名（{@code examplemod.util.ExampleHelper}）
+     * @param methodName 方法名（{@code doHurt}）
      */
     public HotfixPatchWatch(String className, String methodName) {
         this.className = className == null ? "" : className;

@@ -5,7 +5,7 @@ import com.shanhai.common.guard.ShanhaiGuardCore;
 /**
  * 🔴 <b>客户端「死亡态解锁」的判据 ＋ 那一行日志</b>（2026-11-08 新增）。
  *
- * <h2>为什么要加这两道门（用户原话，这是全部动因）</h2>
+ * <h2>为什么要加这一环（用户原话，这是全部动因）</h2>
  * <pre>
  *   「因为每当我把猫清除的时候，都会左下角有一句自动把血补满的话」
  *   「我感觉我把猫放出来时，玩家可能已经死了，又或者没有血了，所以才打不开」
@@ -14,7 +14,7 @@ import com.shanhai.common.guard.ShanhaiGuardCore;
  * 但客户端很可能<b>长期停在死亡态</b>：{@code getHealth() <= 0} ／ {@code isDeadOrDying()} ／ {@code deathTime > 0}
  * ⇒ 面板不显示、右键像失效、人僵住。客户端这一路就是来补这一环的。
  *
- * <h2>🔴 本类<b>不写第二份死亡判据</b>（只做「组合 ＋ 新增两道门」）</h2>
+ * <h2>🔴 本类<b>不写第二份死亡判据</b>（只做「组合 ＋ 新增一道门」）</h2>
  * 三条既有判定全部<b>原样委托</b>给纯逻辑核（{@link ShanhaiGuardCore}，零 Forge / 零 Minecraft），
  * 本类一个字都不重复：
  * <ol>
@@ -25,11 +25,16 @@ import com.shanhai.common.guard.ShanhaiGuardCore;
  *       再加一条更毒的信号：同步血量字段真值 &lt;= 0（{@code getHealth()} 带偏移时只有它可靠）。</li>
  * </ol>
  *
- * <h2>本类唯一的新东西：两道门 ＋ 一个日志行</h2>
+ * <h2>本类唯一的新东西：一道门 ＋ 一个日志行</h2>
  * <ul>
  *   <li>🔴 <b>「受保护」门</b>：没带模块、也没被登记过 ⇒ <b>一个字节都不动</b>（不许阻断正常死亡）；</li>
- *   <li>🔴 <b>「创造 / 旁观」门</b>：玩家真的在创造或旁观 ⇒ <b>不动</b>（这两类本来进不了死亡态，
- *       客户端不去碰它，免得把创造模式的真实行为遮住；血量那条腿仍由服务端负责）；</li>
+ *   <li>🔴 <b>「创造 / 旁观」这道豁免 —— 2026-11-21 已删</b>（{@code creativeOrSpectator} 参数留着，
+ *       但<b>只进日志</b>）：原版创造模式"不会死"只建立在 {@code Player#hurt} 会挡伤害这一条上，
+ *       <b>对手不走 {@code hurt} 时这道门根本不在路上</b>（直写同步血量字段 ／ 直接调 {@code die} ／
+ *       给 {@code getHealth()} 加偏移，三条都绕开它）。实机证据：本局那 203 次 / 3 分钟的死亡界面
+ *       （{@code client_death_screen_opening}）<b>就是创造模式下发生的</b>。
+ *       ⇒ 创造 / 旁观<b>照常解锁</b>；"读数与字段都正常 ⇒ 一个字节都不写"那道快路仍在下面
+ *       （{@code looksDeadDecision} ／ {@code deathFlowResetDecision}），不靠创造模式这一条。</li>
  *   <li>{@link #logLine} —— {@code [SHANHAI-GUARD] client_death_unlock hp_before=… hp_after=…
  *       dead_before=… dead_after=… death_time=… screen=… via=…}，字段顺序就是核对顺序。</li>
  * </ul>
@@ -37,8 +42,8 @@ import com.shanhai.common.guard.ShanhaiGuardCore;
  * <h2>🔴 为什么本类必须是纯 JDK</h2>
  * 只能 import {@code java.*} ＋ {@link ShanhaiGuardCore}（它自己也是纯 JDK）⇒
  * 判据可以在<b>离线、零 Minecraft、零 Forge</b> 的前提下被 {@code javac}/{@code java} 直接跑
- * （{@code temp\clientdeath\selfcheck\}），不用起游戏就能证明"死亡态要解锁、满血不动、创造不动、
- * NaN 视为死、deathTime&gt;0 但血满也清"。
+ * （{@code temp\clientdeath\selfcheck\}），不用起游戏就能证明"死亡态要解锁、满血不动、
+ * 创造<b>照常</b>解锁（自检 case 名 {@code creative_no_exemption}）、NaN 视为死、deathTime&gt;0 但血满也清"。
  *
  * <p>⚠️ 本类在 {@code com.shanhai.client.guard} 包下，但<b>没有任何 Minecraft 引用</b>
  * ⇒ 也满足该包的两条既有自查门（{@code net\.minecraft\.client} 零命中 ／ 常量池无 client Class 条目）。
@@ -69,11 +74,18 @@ public final class ShanhaiClientDeathUnlock {
      * <pre>
      *   开关关                            ⇒ false（一个字节都不动）
      *   不是受保护玩家                    ⇒ false（不许阻断正常死亡）
-     *   创造 / 旁观                       ⇒ false（这两类不碰；🔴 这两道门排在死亡判据之前）
      *   looksDead（含 hp &lt;= 0 ／ hp=NaN ／ isDeadOrDying ／ deathTime &gt; 0）⇒ true
      *   deathFlowReset（字段真值 &lt;= 0）                                ⇒ true
      *   其余                              ⇒ false（血满 ＋ 计时器归零 ＋ 字段真值 &gt; 0 ⇒ 不动）
      * </pre>
+     *
+     * <p>🔴 <b>这里【没有】"创造 / 旁观 ⇒ false"那一条了</b>（2026-11-21 删）：原版创造模式只在
+     * {@code Player#hurt} 里挡伤害，对手不走 {@code hurt} 时（直写 {@code DATA_HEALTH_ID} ／
+     * 直接调 {@code die} ／ 给 {@code getHealth()} 加偏移）这道门<b>根本不在路上</b>；
+     * 实机那 203 次 / 3 分钟的死亡界面就是<b>创造模式下</b>发生的。
+     * ⇒ 创造 / 旁观<b>照常解锁</b>。{@code creativeOrSpectator} 参数仍然收（签名与调用点要稳定），
+     * 但<b>不参与任何判断</b>，只能由调用方写进日志（{@code creative=}）。
+     * 自检矩阵里这一条的 case 名是 {@code creative_no_exemption}（"创造不再豁免"）。
      *
      * @param hp                  {@code player.getHealth()}（可能被别人加了偏移；NaN = 读不到）
      * @param deadOrDying         {@code player.isDeadOrDying()}
@@ -82,6 +94,7 @@ public final class ShanhaiClientDeathUnlock {
      * @param fieldHealth         同步血量字段真值 {@code DATA_HEALTH_ID}（NaN = 第二通道读不到）
      * @param guarded             {@code ShanhaiGuardEvents.isGuarded(player)}（带模块 ／ 登记过）
      * @param creativeOrSpectator {@code player.isCreative() || player.isSpectator()}
+     *                            —— 🔴 <b>只进日志，不参与判断</b>（2026-11-21：创造 / 旁观不再豁免）
      * @param enabledFlag         {@link ShanhaiGuardCore#enabled}
      */
     public static ShanhaiGuardCore.Decision decide(float hp, boolean deadOrDying, int deathTime, int hurtTime,
@@ -94,10 +107,16 @@ public final class ShanhaiClientDeathUnlock {
             return ShanhaiGuardCore.Decision.of(false,
                     "不是受保护玩家（没带模块、也没登记过）⇒ 一个字节都不动（不许阻断正常死亡）");
         }
-        if (creativeOrSpectator) {
-            return ShanhaiGuardCore.Decision.of(false,
-                    "玩家在创造 / 旁观 ⇒ 不动（这两类不碰；血量那条腿归服务端，客户端不遮真实行为）");
-        }
+        // 🔴 2026-11-21 删掉的第三道门 —— 原来这里就是：
+        //      if (creativeOrSpectator) { return Decision.of(false, "玩家在创造 / 旁观 ⇒ 不动…"); }
+        //    为什么删（理由，不是省事）：创造模式的"不会死"只是原版 {@code Player#hurt} 挡住了伤害，
+        //    对手三种做法都不走 hurt ——① 直写同步血量字段 {@code DATA_HEALTH_ID} ② 直接调 {@code die}
+        //    ③ 给 {@code getHealth()} 的读侧加偏移 —— 这道门<b>根本不在路上</b>。
+        //    实机证据：本局创造模式下客户端 hp=-Infinity / 字段真值 20.0，
+        //    {@code client_death_screen_opening} 203 次 / 3 分钟 ⇒ 就是这道门让我们"照常撒手"。
+        //    ⇒ 创造 / 旁观<b>照常解锁</b>。
+        //    ⚠️ 参数 creativeOrSpectator 故意<b>留着</b>（调用点还在传），但它【只进日志】——
+        //       🔴 不许再让它出现在任何 if / 三元 / switch 里。
         // ① 交叉校验表（含「血 <= 0」「血 = NaN ⇒ 按死处理」「isDeadOrDying」「deathTime > 0」）
         final ShanhaiGuardCore.Decision looks = ShanhaiGuardCore.looksDeadDecision(hp, deadOrDying, deathTime, hurtTime);
         if (looks.yes) {
@@ -117,6 +136,10 @@ public final class ShanhaiClientDeathUnlock {
      *
      * <p>离线自证就是拿这个跑矩阵：{@code hurtTime = 0}、{@code fieldHealth = NaN}（= 第二通道读不到，这一条不参与）、
      * {@code enabled = true}。
+     *
+     * <p>⚠️ {@code creativeOrSpectator} 只为签名稳定而保留：<b>结论与它无关</b>
+     * （2026-11-21 起创造 / 旁观不再豁免，见 {@link #decide}）；自检矩阵里那两条期望已按新口径写成
+     * {@code creative_no_exemption}（创造 ⇒ 照常解锁）。
      */
     public static boolean shouldUnlock(float hp, boolean deadOrDying, int deathTime, boolean guarded,
                                        boolean creativeOrSpectator) {

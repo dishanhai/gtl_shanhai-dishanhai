@@ -297,6 +297,25 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     public static final int HOST_HOLE_RADIUS_TENTHS_DEFAULT = 52;
 
     /**
+     * <b>「环显示」三态</b>：两条都画（默认）。
+     *
+     * <p>用户 2026-11-21 的决定（逐字）：「<b>选 乙，在渲染设置那个页面切换</b>」
+     * ⇒ 乙 = <b>外缘吸积流（51..57 格）与粗光柱环（r=54、管径 6）两条都保留</b>（不替换、不挪半径），
+     * 再在「渲染参数」面板上给一个切换，让玩家自己选显示哪一条。
+     *
+     * <p>这 3 个常量是<b>面板与渲染共用的唯一口径</b>。渲染侧的镜像常量在
+     * {@code HostFxState.RING_VISUAL_*}，数值必须与这里<b>逐位相同</b>
+     * （渲染包不认识机器包，两边只能各存一份常量 —— 与 {@code HostFxState} 里那组钳位值同一条纪律）。
+     */
+    public static final byte HOST_RING_VISUAL_BOTH = 0;
+
+    /** 「环显示」= <b>只画外缘吸积流</b>（粗光柱环这一帧一条都不提交）。 */
+    public static final byte HOST_RING_VISUAL_ACCRETION_ONLY = 1;
+
+    /** 「环显示」= <b>只画粗光柱环</b>（外缘吸积流这一帧一条都不提交）。 */
+    public static final byte HOST_RING_VISUAL_BEAM_RING_ONLY = 2;
+
+    /**
      * <b>特效总开关</b>（面板第 ⑦ 个 tab「特效渲染」）。
      *
      * <p>🔴 与基类的 {@code starAlwaysWorking} 是<b>两个字段</b>，刻意不合并：
@@ -351,6 +370,54 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     @Persisted
     @DescSynced
     private boolean hostArMaskEnabled = true;
+
+    /**
+     * <b>「环显示」三态</b>（{@code 0} = 两条都画 / {@code 1} = 只画外缘吸积流 / {@code 2} = 只画粗光柱环）。
+     *
+     * <p>为什么要有它：用户 2026-11-21 的决定是「<b>两条都保留</b>（不替换、不挪半径），
+     * 再在渲染参数面板上给一个切换」⇒ 两条几何一个字节都没动，只是"这一帧提交哪一条"改成玩家自己的选择。
+     *
+     * <p>注解与其余视界参数同款两件套（{@code @Persisted} = 拆装/重载后保持；{@code @DescSynced} = 客户端
+     * 渲染器读得到）。⚠️ 类型是 {@code byte}，LDLib 两条链都支持它（不是"编译过、运行期不生效"）：
+     * {@code ManagedField.of} 把 {@code Byte.TYPE} 映射到 {@code ManagedField$Byte}；
+     * {@code PrimitiveTypedPayload.registerAll} 注册了 {@code BytePayload + BYTE_ACCESSOR}。
+     *
+     * <p>渲染侧只经 {@code HostFxState.feedRingVisualMode(...)} → {@code HostFxSwitch} 读它
+     * （渲染包不认识机器包）；面板与渲染共用 {@link #HOST_RING_VISUAL_BOTH} 那三个常量。
+     */
+    @Persisted
+    @DescSynced
+    private byte hostRingVisualMode = HOST_RING_VISUAL_BOTH;
+
+    /**
+     * <b>星辰场（围绕黑洞的粒子）开关</b>（默认 <b>开</b>）。
+     *
+     * <p>用户 2026-11-21 原话：「这里我让你加的开关你怎么没加，就是结构闪电还有这个围绕黑洞的粒子的开关」
+     * ⇒ 这两个效果以前只能在客户端配置 {@code [hostfx] starField} 里关，现在面板上也要能点。
+     *
+     * <p>🔴 <b>与客户端配置是「与」关系，不是替换</b>：客户端 {@code [hostfx] starField}（默认 true）
+     * 继续当<b>总闸</b> —— 它关 ⇒ 谁都不画（本机面板打开也没用）；本字段关 ⇒ <b>这一台</b>不画。
+     * 这条口径只有一处实现：{@code HostFxSwitch.starFieldOn(configEnabled)}（渲染侧只读那一个出口）。
+     *
+     * <p>注解与其余视界参数同款两件套（{@code @Persisted} 落盘 + {@code @DescSynced} 客户端渲染器读得到）；
+     * 渲染侧只经 {@code HostFxState.feedStarField(...)} 读它（渲染包不认识机器包）。
+     */
+    @Persisted
+    @DescSynced
+    private boolean hostStarFieldEnabled = true;
+
+    /**
+     * <b>结构闪电开关</b>（默认 <b>开</b>）。
+     *
+     * <p>用户原话同上（「结构闪电还有这个围绕黑洞的粒子的开关」）。
+     *
+     * <p>🔴 与 {@code [hostfx] structureLightning} 也是<b>「与」关系</b>（配置 = 总闸、本字段 = 这台机器）：
+     * 配置关 ⇒ 强制不画；本字段关 ⇒ 这一台不画。实现只有一处：
+     * {@code HostFxSwitch.structureLightningOn(configEnabled)}。
+     */
+    @Persisted
+    @DescSynced
+    private boolean hostStructureLightningEnabled = true;
 
     /**
      * <b>已装模块的槽位位图</b>（服务端权威；{@code bit i = 1} ⇒ 第 {@code i} 个扫描位上有成型且
@@ -462,6 +529,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     //      还没有取值来源</b>：它们要读 gtlcore 的模块配方状态（{@code IModularMachineModule} 的
     //      recipe logic），本轮没有取到可验证的 API 证据 ⇒ 一律留 −1（面板显示 {@code --}），
     //      <b>绝不填 0 冒充</b>。接上时只需要在下面那个方法里逐槽位填数组，别的都不用动。
+    //  🔴 2026-11-18 订正：上面"主机级汇总还没有取值来源"已过期（进度/耗能/输出/能源仓早已接上）。
+    //      本轮接上的是**并行 / 跨配方线程**：见 {@link #refreshHostRuntimeSnapshot$body()} 里
+    //      {@code hostPar / hostThr} 那段 —— 直接读 Jade 抬头那两行的取值点
+    //      （{@code getMaxParallel()} / {@code getEnergyCapThreads()}），逐位一致，只读不写。
+    //      现在留 −1 的只剩"真的读抛异常"这一条路。
     // ═══════════════════════════════════════════════════════════════════════════════════
 
     /** 每个扫描位（0..23）的配方进度百分比；{@code <0} = 未知。 */
@@ -690,6 +762,15 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     private long snapLogCount = 0L;
     /** 异常只报一次（同一个异常刷屏会盖掉别的日志）。 */
     private boolean snapErrorLogged = false;
+    /**
+     * 「并行 / 线程取数抛异常」只报一次（2026-11-18）。
+     *
+     * <p>🔴 为什么要有它：那两句被 try/catch 包着（读抛异常 ⇒ 面板保持「读不到」）。
+     * 若**静默**吞掉，用户看到的仍然是「读不到」，而日志里分不清三种情况：
+     * ① 服务端没读到 ② 没同步 ③ 客户端解码坏了 —— 正是本工程反复踩过的"信息量为 0"形态。
+     * 有这一行，下次一看就知道"还是读不到"到底是哪一环。
+     */
+    private boolean parThrReadWarned = false;
 
     /**
      * 功率滑窗的采样环（长度 2）：每次快照把「能源仓/动力仓上一个 20 tick 窗口内的实测吞吐」
@@ -865,6 +946,73 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         }
         hostArMaskEnabled = value;
         pushHostFxSync();
+    }
+
+    /** 「环显示」三态（{@code 0} = 两条都画 / {@code 1} = 只吸积流 / {@code 2} = 只光柱环；默认 0 = 两条）。 */
+    public byte getHostRingVisualMode() {
+        return hostRingVisualMode;
+    }
+
+    /**
+     * 写「环显示」三态（<b>越界一律夹到 0..2</b>；值没变就一个字节都不动）。
+     *
+     * <p>只有"玩家真的换了一档"才打一行 {@code [SHANHAI-HOSTFX] ring_visual_mode=…} ——
+     * 每一帧都会读这个字段，所以这行的节流方式就是"只在变化时打"。
+     *
+     * @param mode 0 = 两条都画 / 1 = 只画外缘吸积流 / 2 = 只画粗光柱环
+     */
+    public void setHostRingVisualMode(int mode) {
+        final int v = clampInt(mode, HOST_RING_VISUAL_BOTH, HOST_RING_VISUAL_BEAM_RING_ONLY);
+        if (hostRingVisualMode == v) {
+            return;
+        }
+        hostRingVisualMode = (byte) v;
+        pushHostFxSync();
+        LOGGER.info("[SHANHAI-HOSTFX] ring_visual_mode={}（{}；0=两条 1=只吸积流 2=只光柱环）",
+                v, hostRingVisualModeText());
+    }
+
+    /** 「环显示」三态的短名（日志/自检用；面板有自己那套带色标签）。 */
+    public String hostRingVisualModeText() {
+        switch (hostRingVisualMode) {
+            case HOST_RING_VISUAL_ACCRETION_ONLY:
+                return "只吸积流";
+            case HOST_RING_VISUAL_BEAM_RING_ONLY:
+                return "只光柱环";
+            default:
+                return "两条";
+        }
+    }
+
+    /** 星辰场（围绕黑洞的粒子）开关（默认开；客户端的 {@code [hostfx] starField} 仍是总闸）。 */
+    public boolean isHostStarFieldEnabled() {
+        return hostStarFieldEnabled;
+    }
+
+    /** 写星辰场开关（值没变就一个字节都不动；只在变化时打一行 {@code [SHANHAI-HOSTFX]}）。 */
+    public void setHostStarFieldEnabled(boolean value) {
+        if (hostStarFieldEnabled == value) {
+            return;
+        }
+        hostStarFieldEnabled = value;
+        pushHostFxSync();
+        LOGGER.info("[SHANHAI-HOSTFX] star_field_enabled={}（面板；客户端 [hostfx] starField 仍是总闸）", value);
+    }
+
+    /** 结构闪电开关（默认开；客户端的 {@code [hostfx] structureLightning} 仍是总闸）。 */
+    public boolean isHostStructureLightningEnabled() {
+        return hostStructureLightningEnabled;
+    }
+
+    /** 写结构闪电开关（值没变就一个字节都不动；只在变化时打一行 {@code [SHANHAI-HOSTFX]}）。 */
+    public void setHostStructureLightningEnabled(boolean value) {
+        if (hostStructureLightningEnabled == value) {
+            return;
+        }
+        hostStructureLightningEnabled = value;
+        pushHostFxSync();
+        LOGGER.info("[SHANHAI-HOSTFX] structure_lightning_enabled={}"
+                + "（面板；客户端 [hostfx] structureLightning 仍是总闸）", value);
     }
 
     /** 已装模块槽位位图（服务端权威、{@code @DescSynced}；{@code bit i} = 第 i 个扫描位上有模块）。 */
@@ -1377,6 +1525,39 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
             hostIdx++;
         }
 
+        // ── 主机级：并行 / 跨配方线程（🔴 2026-11-18 · 与 Jade 抬头【同源】）─────────────────
+        //
+        //  用户 bug 原话：「这里读不到并行和线程，然而明明有」
+        //      （同一台机器 Jade 抬头写着「同时处理至多无限个配方」+「拥有128个跨配方线程」）。
+        //  🔴 根因：这一段以前是 `hostRecipeParallel = -1; hostRecipeThreads = -1;`
+        //      （旧注释的理由是「本机没有当前并行份数的权威读数，getRecipeLogicMaxParallel() 是
+        //        上限不是现值」）⇒ 面板永远画「读不到」。**不是读不到，是压根没去读。**
+        //  ✅ 现行：读 Jade 那两条链的【同一个方法】，从而逐位一致：
+        //      · 并行 = getMaxParallel()
+        //        —— {@code ShanhaiInfiniteThreadDisplayMixin#shanhai$infiniteThreads} 就是读它
+        //        （`final int parallel = machine.getMaxParallel(); data.putLong("parallel", parallel);`）。
+        //        无限档它返回 {@code ShanhaiParallelDisplay.INFINITE_SENTINEL}(-114514) ⇒ Jade 画彩虹
+        //        「无限」；AR 侧按同一个哨兵画「无限」（{@code HostFxGlassArModel#hostParallelText}）。
+        //      · 线程 = getEnergyCapThreads()
+        //        —— 与 {@code PrimordialEngineRecipeLogic#getMultipleThreads()}（Jade 那一侧的取值点）
+        //        调用【同一个唯一实现】{@code ShanhaiParallelBudget#crossRecipeThreadsForHost(128, 附加)}
+        //        ⇒ 当前 = 128。
+        //  ⚠️ 两个都只读：不写任何预算、不碰并行算法、不碰 canVoidRecipeOutputs / 零点发电。
+        int hostPar;
+        int hostThr;
+        try {
+            hostPar = getMaxParallel();
+            hostThr = getEnergyCapThreads();
+        } catch (Throwable t) {
+            hostPar = -1;                                  // 读抛异常 ⇒ 宁可「读不到」，绝不编数
+            hostThr = -1;
+            if (!parThrReadWarned) {                       // 只报一次：这一行出现 ⇒ 面板会写「读不到」
+                parThrReadWarned = true;
+                LOGGER.warn("[SHANHAI-HOSTSNAP] 并行/线程取数抛异常（面板将显示「读不到」）：{}: {}",
+                        t.getClass().getName(), String.valueOf(t.getMessage()));
+            }
+        }
+
         final int installedNow = hostModuleCountAuthoritative();
         final int kindsNow = kinds.size();
         final boolean changed =
@@ -1403,7 +1584,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                         || !java.util.Arrays.equals(outItem, hostModOutItem)
                         || !java.util.Arrays.equals(outAmount, hostModOutAmount)
                         || !java.util.Arrays.equals(hostOutIds, hostOutItem)
-                        || !java.util.Arrays.equals(hostOutAmounts, hostOutAmount);
+                        || !java.util.Arrays.equals(hostOutAmounts, hostOutAmount)
+                        // 🔴 2026-11-18：并行 / 线程也要进"变没变"的比较，否则"只有这两个变了"
+                        //    的那一拍不会推包 ⇒ 面板永远停在旧值（或永远的 -1）。
+                        || hostPar != hostRecipeParallel
+                        || hostThr != hostRecipeThreads;
         if (!changed) {
             return;
         }
@@ -1412,10 +1597,19 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         hostRecipeProgressPct = hostPct;
         hostRecipeRemainSec = hostRemain;
         hostEuPerTick = hostEu;
-        // 主机级并行 / 跨配方线程：本机**没有**"当前并行份数"的权威读数（getRecipeLogicMaxParallel()
-        // 是上限不是现值）⇒ 保持 -1（面板画 --），绝不拿上限冒充现值。
-        hostRecipeParallel = -1;
-        hostRecipeThreads = -1;
+        // 主机级并行 / 跨配方线程。
+        // ⛔【2026-11-18 作废，原文留档】旧实现：
+        //     // 主机级并行 / 跨配方线程：本机**没有**"当前并行份数"的权威读数
+        //     // （getRecipeLogicMaxParallel() 是上限不是现值）⇒ 保持 -1（面板画 --），
+        //     // 绝不拿上限冒充现值。
+        //     hostRecipeParallel = -1;
+        //     hostRecipeThreads = -1;
+        // ⛔ 作废原因：用户实机报「这里读不到并行和线程，然而明明有」——Jade 抬头在同一台机器上
+        //     显示「同时处理至多无限个配方 / 拥有128个跨配方线程」。那两行就是用户要的"现值"，
+        //     取数点在 getMaxParallel() / getMultipleThreads()（本文件 getEnergyCapThreads 同一实现）
+        //     ⇒ 见上面 `hostPar / hostThr` 那段注释。**这不改任何运算，只是把已有的数读出来。**
+        hostRecipeParallel = hostPar;
+        hostRecipeThreads = hostThr;
         hostOutKinds = kindsNow;
         hostTotalOutputCount = outEntries;
         hostTotalEuUsedPerTick = euUsedPower;
@@ -2094,7 +2288,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     }
 
     /**
-     * 6 个视界参数的<b>一行摘要</b>（给渲染侧那个每 5 秒一次的 {@code draw} 日志用）。
+     * 6 个视界参数 + 「环显示」三态的<b>一行摘要</b>（给渲染侧那个每 5 秒一次的 {@code draw} 日志用）。
      *
      * <p>判据（用户进游戏后唯一需要的 grep）：玩家在面板里调完，这行里的数字必须跟着变。
      */
@@ -2105,7 +2299,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 + " 下舰=−" + hostShipDownDegPerSec + "°/s"
                 + " 洞半径=" + String.format(Locale.ROOT, "%.1f", getHostBlackHoleRadiusBlocks())
                 + "格(" + hostBlackHoleRadiusTenths + "×0.1)"
-                + " 透镜=" + (hostLensEnabled ? "开" : "关");
+                + " 透镜=" + (hostLensEnabled ? "开" : "关")
+                // 🔴 2026-11-21 追加（既有片段一个字节都没改）：环显示三态。
+                //    进游戏后 grep `环显示=` 就能确认面板点击真的传到了机器侧。
+                + " 环显示=" + hostRingVisualModeText() + "(" + hostRingVisualMode + ")"
+                // 🔴 2026-11-21 追加（既有片段一个字节都没改）：两个新开关。
+                //    进游戏后 grep `星辰场=` / `结构闪电=` 就能确认面板点击真的传到了机器侧。
+                + " 星辰场=" + (hostStarFieldEnabled ? "开" : "关")
+                + " 结构闪电=" + (hostStructureLightningEnabled ? "开" : "关");
     }
 
     public GuixuVisionCoreMachine(IMachineBlockEntity holder, Object... args) {
@@ -2466,6 +2667,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled",
                 // 🔴 2026-10-25 第二十一改：AR 遮罩开关（必须落盘 + 同步）与模块位图（必须同步）
                 "hostArMaskEnabled", "hostModuleMask",
+                // 🔴 2026-11-21 新增「环显示」三态（面板可切）：漏登记的表现同样是
+                //    "面板点了能变、退出重进回默认"，且【完全静默】⇒ 必须逐个登记。
+                "hostRingVisualMode",
+                // 🔴 2026-11-21 新增「星辰场 / 结构闪电」面板开关（默认开）：同样必须逐个登记，
+                //    漏一个 = 面板点了能变、退出重进回默认，且完全静默。
+                "hostStarFieldEnabled", "hostStructureLightningEnabled",
                 // 🔴 2026-10-25 第二十二改：AR 右侧信息栏那份运行快照（数组 + 序号 + 主机级汇总）。
                 //    漏登记 = 后台永远画 --（反而是"安全"的那一边），但等于白做 ⇒ 也逐个点出来。
                 "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
@@ -3155,10 +3362,18 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 shanhai$genDisplayBranch = "no-guixu-logic";
                 return null;                        // 配方逻辑还没装 ⇒ 读不到（不是 0）
             }
-            // ① 即时读数在场（本 tick 刚好算过）⇒ 直接用它（最准）
+            // ① 即时读数在场（本 tick 刚好算过）⇒ 直接用它（最准；摊平后给的是"每 tick 实发"）
             if (guixuLogic.isWorking()) {
                 final GuixuZeroPointGeneration.Readings r = guixuLogic.shanhai$visionReadings();
                 if (r != null && r.product.signum() > 0 && shanhai$visionPoolUuid() != null) {
+                    // 🔴🆕 2026-11-22：口径跟着【实发】走 —— 摊平后每 tick 不再是 乘积，
+                    //   面板若继续印 乘积 就会"池子按实发涨、面板印计划量"（本项目红线：活的界面不许放假数据）。
+                    final GuixuZeroPointGeneration.Amortized am = shanhai$genAmortized;
+                    if (am != null && shanhai$genAmortizedFor == r && !am.fallback
+                            && am.perTick.signum() > 0) {
+                        shanhai$genDisplayBranch = "readings(摊平每tick)";
+                        return am.perTick;
+                    }
                     shanhai$genDisplayBranch = "readings";
                     return r.product;
                 }
@@ -3802,6 +4017,39 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     /** 显示读数的"新鲜期"（tick）：超过它就<b>不再</b>拿旧值充现值。2 秒。 */
     public static final int GEN_STICKY_TICKS = 40;
 
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🔴🆕 2026-11-22（用户选 ①「摊平，每批总量守恒」）—— 逐批摊平状态
+    //
+    //  口径：本批计划总量 = 乘积 × 发电配方自身时长；每 tick = 总量 ÷ 本批时长；
+    //        余数只在**本批最后一 tick** 补；批次提前结束 ⇒ 余额不发（唯一补发路径）。
+    //  ⛔ 这三项都只在 {@link #shanhai$visionGenerationTick()} 里推进，且新一轮由
+    //     {@link #shanhai$resetVisionGenerationBatch()}（setupRecipe 调）归零 ——
+    //     绝不许把上一批的"已发 tick / 已发合计"带进下一批。
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /** 本批的摊平计划（{@code null} = 本批还没建 / 已归零）。 */
+    @Nullable
+    private GuixuZeroPointGeneration.Amortized shanhai$genAmortized;
+    /** 这份摊平属于哪一份读数（<b>身份比较</b>：读数每次装配都是新对象 ⇒ 天然是"批次标识"）。 */
+    @Nullable
+    private GuixuZeroPointGeneration.Readings shanhai$genAmortizedFor;
+    /** 建这份摊平时用的本批时长（{@code RecipeLogic#duration}；变了就重建）。 */
+    private long shanhai$genAmortizedBatchDuration = -1L;
+    /** 本批已走过的 tick 数（= 下一个 tick 的 0-based 下标）。 */
+    private long shanhai$genPaidTicks;
+    /** 本批已入池合计（只给日志对账，不参与任何算术）。 */
+    @Nullable
+    private java.math.BigInteger shanhai$genPaidTotal;
+    /** 摊平那一行的形状串（同形状只打一次 + 最后一 tick 收尾再打一次）。 */
+    private String shanhai$genAmortLogKey = "";
+    /** 退回旧口径的 WARN 只打一次（本实例级）。 */
+    private boolean shanhai$genFallbackWarned;
+    /**
+     * 「分料结算 · 进度证明」每一批只打一次（2026-11-22 新增）。
+     * <p>用户要求：混合轮不能只拿 parallels>0 当证据，必须能读出「这一批真的在跑」。
+     */
+    private int shanhai$genProgressProofStage;
+
     /**
      * 本机的无线网归属：<b>① 自己（放置者）</b> → <b>② 结构里已绑定的「无线电网终端」部件</b> → {@code null}。
      * <p>与发电模块 {@code shanhai$wirelessPoolUuid()} 逐字同形（同一条理由：终端部件的 uuid 就是
@@ -3949,6 +4197,22 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
      * <h2>🔴 顺带的一条防双计</h2>
      * 入池前再读一次"工作配方上的电"：若它不是 0（说明清零被别处复原了），
      * <b>本 tick 不入池</b>并发一次 WARN —— 宁可少发，也绝不让同一度电出两次。
+     *
+     * <h2>🔴🆕 2026-11-22（用户选 ①）：结算口径改成「每批总量守恒的摊平」</h2>
+     * 上一版是"每 tick 入池 = 乘积"，批次一长就整批多发（实测混合轮 3199 tick vs 自身 20 tick
+     * ⇒ 同一批燃料多付 159.95 倍）。现行口径（唯一算式在
+     * {@link GuixuZeroPointGeneration#amortize} / {@link GuixuZeroPointGeneration#payoutAt}）：
+     * <pre>
+     *   本批计划总量 = 乘积 × 发电配方自身时长
+     *   每 tick      = 总量 ÷ 本批时长（BigInteger 整除）
+     *   最后一 tick  += 余数                      ← 唯一的补发点
+     *   超出本批时长 ⇒ 0                          ← 批次提前结束 ⇒ 余额不发（没有第二条补发路径）
+     * </pre>
+     * 本批时长取的是 {@code RecipeLogic#duration}（{@code javap -c} 实证：
+     * {@code RecipeLogic#setupRecipe} 偏移 {@code :106-116} {@code progress=0; duration=recipe.duration}），
+     * 也就是<b>真正在倒计时的那个数</b>，已经含面板地板 {@code max(引擎时长, 面板值)}。
+     * 逐批计数器只在本方法里推进；新一轮由 {@code setupRecipe} 显式归零
+     * （见 {@link #shanhai$resetVisionGenerationBatch()}）。
      */
     private void shanhai$visionGenerationTick() {
         if (isRemote()) {
@@ -3961,8 +4225,16 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
             }
             final GuixuZeroPointGeneration.Readings r = guixuLogic.shanhai$visionReadings();
             if (r == null || r.product.signum() <= 0) {
-                return;                         // 这一轮不是"发电型视界能流抽取" ⇒ 一个字节都不动
+                // 这一轮不是"发电型视界能流抽取" ⇒ 一个字节都不动（顺手把逐批状态清掉，绝不吃上一轮残留）
+                shanhai$resetVisionGenerationBatch();
+                return;
             }
+            // ① 本批摊平计划：读数或批次时长一变就重建（"新一轮"的兜底；主入口是 setupRecipe 的显式重置）
+            final GuixuZeroPointGeneration.Amortized am = shanhai$amortizationFor(logic, r);
+            // ② 本 tick 的实发量（唯一分发算式；下标 = 本批已走过的 tick 数）
+            final long index = shanhai$genPaidTicks;
+            final java.math.BigInteger amount = GuixuZeroPointGeneration.payoutAt(am, index);
+            shanhai$genPaidTicks = index + 1L;   // 批次时钟必须走一格（哪怕这一 tick 不发）
             final GTRecipe last = logic.getLastRecipe();
             if (last != null) {
                 final long stillThere = com.gregtechceu.gtceu.api.recipe.RecipeHelper.getOutputEUt(last);
@@ -3976,12 +4248,20 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                     return;
                 }
             }
-            final boolean accepted = shanhai$depositGeneration(r.product);
-            if (accepted) {
-                // 🆕 2026-11-18：「发电功率」那一格改成读"真的进了池子多少"（见 shanhai$noteGenerationDeposited）
-                shanhai$noteGenerationDeposited(r.product);
+            boolean accepted = false;
+            if (amount.signum() > 0) {
+                accepted = shanhai$depositGeneration(amount);
+                if (accepted) {
+                    // 🆕 2026-11-18：「发电功率」那一格改成读"真的进了池子多少"
+                    // 🆕 2026-11-22：金额从"乘积"改成"本 tick 实发"（摊平后两者不再相等）
+                    shanhai$noteGenerationDeposited(amount);
+                    shanhai$genPaidTotal = shanhai$genPaidTotal == null
+                            ? amount : shanhai$genPaidTotal.add(amount);
+                }
             }
             shanhai$logVisionGeneration(last, r, accepted);
+            shanhai$logAmortized(am, index, amount, accepted, last);
+            shanhai$logSplitProgress(guixuLogic, logic, last);
         } catch (Throwable t) {
             final String key = "err|" + t;
             if (!key.equals(shanhai$visionGenLogKey)) {
@@ -3989,6 +4269,126 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 ShanhaiMod.LOGGER.error("{} 归墟零点能发电的读数/入池出问题（已忽略，配方不受影响）：{}",
                         GuixuZeroPointGeneration.TAG, t.toString());
             }
+        }
+    }
+
+    /**
+     * 取<b>本批</b>的摊平计划（读数身份或批次时长变了就重建，并把逐批计数器归零）。
+     *
+     * <p>{@code RecipeLogic#duration} 是本批时长的唯一出处（见调用处那段 javadoc）；
+     * 读不到（{@code <=0}）时由纯核退回旧口径并给原因，这里只负责把原因打一次 WARN。
+     */
+    @NotNull
+    private GuixuZeroPointGeneration.Amortized shanhai$amortizationFor(
+            @NotNull com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic,
+            @NotNull GuixuZeroPointGeneration.Readings r) {
+        final long batchDuration = logic.getDuration();
+        if (shanhai$genAmortized != null && shanhai$genAmortizedFor == r) {
+            // 🔴 同一批 ⇒ **绝不重建**：重建会把"已走 tick 数"清零 ⇒ 前面的 tick 再发一遍 = 多发。
+            //    （批次时长正常只在 setupRecipe 里写一次；万一中途变了，守恒优先：按开工时的计划走完这一批。）
+            if (shanhai$genAmortizedBatchDuration != batchDuration && !shanhai$genFallbackWarned) {
+                shanhai$genFallbackWarned = true;
+                ShanhaiMod.LOGGER.warn("{} 归墟本批时长中途变了（{} → {}）⇒ 本批仍按开工时的摊平计划走完"
+                                + "（守恒优先；下一批重新建计划）pos={}",
+                        GuixuZeroPointGeneration.TAG, shanhai$genAmortizedBatchDuration, batchDuration, getPos());
+            }
+            return shanhai$genAmortized;
+        }
+        shanhai$genAmortizedFor = r;
+        shanhai$genAmortizedBatchDuration = batchDuration;
+        shanhai$genAmortized = GuixuZeroPointGeneration.amortize(r.product, r.ownDuration, batchDuration);
+        shanhai$genPaidTicks = 0L;
+        shanhai$genPaidTotal = java.math.BigInteger.ZERO;
+        shanhai$genAmortLogKey = "";
+        final GuixuZeroPointGeneration.Amortized am = shanhai$genAmortized;
+        if (am.fallback && !shanhai$genFallbackWarned) {
+            shanhai$genFallbackWarned = true;
+            ShanhaiMod.LOGGER.warn("{} 归墟的摊平读数拿不到（{}）⇒ 本批**退回改动前口径**：每 tick 入池 = 乘积 {}"
+                            + "（批次一长就会多发；判据：自身时长={} 本批时长={}）pos={}",
+                    GuixuZeroPointGeneration.TAG, am.reason, r.product == null ? "?" : r.product,
+                    r.ownDuration, batchDuration, getPos());
+        }
+        return am;
+    }
+
+    /**
+     * 🔴 <b>逐批计数器归零</b> —— 由配方逻辑的 {@code setupRecipe} 每次开工时调用（"新一轮"的唯一显式入口）。
+     *
+     * <p>为什么必须有：摊平的余数只能在<b>本批最后一 tick</b>补；若把上一批的"已发 tick 数 / 已发合计"
+     * 带进下一批，就会出现"上一批的余额被下一批补发"= 用户明确禁止的第二条补发路径。
+     * <p>只清<b>摊平状态</b>，不碰读数（读数由配方逻辑管）、不碰池子、不写任何游戏状态。
+     */
+    public void shanhai$resetVisionGenerationBatch() {
+        shanhai$genAmortized = null;
+        shanhai$genAmortizedFor = null;
+        shanhai$genAmortizedBatchDuration = -1L;
+        shanhai$genPaidTicks = 0L;
+        shanhai$genPaidTotal = null;
+        shanhai$genAmortLogKey = "";
+        shanhai$genProgressProofStage = 0;
+    }
+
+    /**
+     * 🔴🆕 2026-11-22 <b>「分料结算 · 进度证明」</b>：每一批只打一次，证明<b>这一批真的在跑</b>，
+     * 并把耗电/发电两份分工读数并排打出来 —— 用户明确要求"别只靠 parallels&gt;0"。
+     *
+     * <pre>
+     *   [SHANHAI-GEN-LIMIT] 归墟分料结算 进度开始 progress=0/&lt;duration&gt; 耗电份数=A 发电份数=B 本批每tick扣电=…
+     * </pre>
+     * 判据：{@code 耗电份数 ≥ 1}（两侧都进批次）、进度从 0 真的往上走（后续看 Jade/面板或
+     * {@code [SHANHAI-RLPROBE] … progress=} 行），且 {@code 本批每tick扣电 > 0}（耗电配方的电真的在账上）。
+     */
+    private void shanhai$logSplitProgress(@NotNull GuixuVisionCoreRecipeLogic guixuLogic,
+                                          @NotNull com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic,
+                                          @Nullable GTRecipe last) {
+        try {
+            final int progress = logic.getProgress();
+            final int duration = logic.getDuration();
+            // 一批打两行：progress=0（开工）与 progress≈时长/2（过半）⇒ 两行一对比就能看出"进度真的在涨"
+            final int stage = progress == 0 ? 1 : (duration > 2 && progress == duration / 2 ? 2 : 0);
+            if (stage == 0 || shanhai$genProgressProofStage >= stage) {
+                return;
+            }
+            shanhai$genProgressProofStage = stage;
+            final long[] split = guixuLogic.shanhai$lastSplit();      // {耗电份数和, 发电份数}
+            final long batchEu = last == null ? -1L
+                    : com.gregtechceu.gtceu.api.recipe.RecipeHelper.getInputEUt(last);
+            ShanhaiMod.LOGGER.info("{} 归墟分料结算 进度{} progress={}/{} 耗电份数={} 发电份数={} "
+                            + "本批每tick扣电={} 本批批次={} pos={}",
+                    GuixuZeroPointGeneration.TAG, stage == 1 ? "开始" : "过半",
+                    progress, duration, split[0], split[1], batchEu,
+                    last == null || last.id == null ? "?" : last.id, getPos());
+        } catch (Throwable ignored) {
+            // 证据行永远不许影响入池
+        }
+    }
+    /**
+     * <b>摊平读数那一行</b>（新前缀族：{@code [SHANHAI-GEN-LIMIT] 归墟零点能摊平 …}）。
+     *
+     * <p>字段与用户要求一致：{@code 自身时长 / 本批时长 / 每tick / 余数 / 本批计划总量 / 本批已发}，
+     * 另加 {@code 本tick实发} —— 因为老那行 {@code 归墟零点能发电 … 乘积=… Δ池=…} 里的
+     * {@code 乘积}是<b>计划量</b>（老行语义本轮一个字没改），摊平后 {@code Δ池 ≠ 乘积}；
+     * 这一行把"这一 tick 实际发了多少"写清，两条读数就不会打架。
+     *
+     * <p>限流：形状变了打一行 + 本批最后一 tick 再打一行（收尾，用来核对"总量守恒"）。
+     */
+    private void shanhai$logAmortized(@NotNull GuixuZeroPointGeneration.Amortized am, long index,
+                                      @NotNull java.math.BigInteger amount, boolean accepted,
+                                      @Nullable GTRecipe last) {
+        try {
+            final boolean lastTick = GuixuZeroPointGeneration.isLastTick(am, index);
+            final String key = am.ownDuration + "|" + am.batchDuration + "|" + am.perTick + "|"
+                    + am.remainder + "|" + am.total + "|" + am.fallback + "|" + (lastTick ? "end" : "");
+            if (key.equals(shanhai$genAmortLogKey)) {
+                return;
+            }
+            shanhai$genAmortLogKey = key;
+            ShanhaiMod.LOGGER.info("{} {} 本tick实发={} 接受={} 配方={}"
+                            + "（老行里的 乘积= 是【计划每 tick 上限】，摊平后每 tick 实发看本行的 每tick=）pos={}",
+                    GuixuZeroPointGeneration.TAG, am.line(index + 1L, shanhai$genPaidTotal), amount, accepted,
+                    last == null || last.id == null ? "?" : last.id, getPos());
+        } catch (Throwable ignored) {
+            // 证据行永远不许影响入池（本包同一条纪律）
         }
     }
 

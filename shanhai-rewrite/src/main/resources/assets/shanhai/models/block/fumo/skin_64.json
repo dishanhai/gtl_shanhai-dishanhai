@@ -1,0 +1,162 @@
+{
+  "credit": "Model by dishanhai (SH-Common-Lib, MIT). Namespace ported to shanhai 2026-11-21; provenance: assets/shanhai/models/block/fumo/CREDITS.txt",
+  "parent": "minecraft:block/block",
+  "ambientocclusion": false,
+  "render_type": "minecraft:cutout",
+  "textures": { "particle": "#skin" },
+  "display": {
+    "head": {"translation": [0, 11.5, 0], "scale": [0.6, 0.6, 0.6]},
+    "gui": {"rotation":[22,215,0],"translation":[0,-1.5,0],"scale":[0.7,0.7,0.7]},
+    "ground": {"translation":[0,3,0],"scale":[0.4,0.4,0.4]}
+  },
+  "elements": [
+    {
+      "name": "Head",
+      "from": [3.125,11,5.125],
+      "to": [12.875,20.375,13.875],
+      "faces": {
+        "north": { "uv": [2,2,4,4], "texture": "#skin" },
+        "east": { "uv": [0,2,2,4], "texture": "#skin" },
+        "south": { "uv": [6,2,8,4], "texture": "#skin" },
+        "west": { "uv": [4,2,6,4], "texture": "#skin" },
+        "up": { "uv": [2,0,4,2], "texture": "#skin" },
+        "down": { "uv": [4,0,6,2], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Head outer layer",
+      "from": [3,10.875,5],
+      "to": [13,20.5,14],
+      "faces": {
+        "north": { "uv": [10,2,12,4], "texture": "#skin" },
+        "east": { "uv": [8,2,10,4], "texture": "#skin" },
+        "south": { "uv": [14,2,16,4], "texture": "#skin" },
+        "west": { "uv": [12,2,14,4], "texture": "#skin" },
+        "up": { "uv": [10,0,12,2], "texture": "#skin" },
+        "down": { "uv": [12,0,14,2], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Jacket",
+      "from": [4,2.25,6],
+      "to": [12,11,13],
+      "faces": {
+        "north": { "uv": [5,5,7,8], "texture": "#skin" },
+        "east": { "uv": [4,5,5,8], "texture": "#skin" },
+        "south": { "uv": [8,5,10,8], "texture": "#skin" },
+        "west": { "uv": [7,5,8,8], "texture": "#skin" },
+        "up": { "uv": [5,4,7,5], "texture": "#skin" },
+        "down": { "uv": [7,4,9,5], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Jacket outer layer",
+      "from": [3.9375,2.1875,5.9375],
+      "to": [12.0625,11.0625,13.0625],
+      "faces": {
+        "north": { "uv": [5,9,7,12], "texture": "#skin" },
+        "east": { "uv": [4,9,5,12], "texture": "#skin" },
+        "south": { "uv": [8,9,10,12], "texture": "#skin" },
+        "west": { "uv": [7,9,8,12], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Right sleeve",
+      "from": [12,4,6.5],
+      "to": [15,10.75,12.5],
+      "faces": {
+        "north": { "uv": [11,5,11.75,8], "texture": "#skin" },
+        "east": { "uv": [10,5,11,8], "texture": "#skin" },
+        "south": { "uv": [12.75,5,13.5,8], "texture": "#skin" },
+        "west": { "uv": [11.75,5,12.75,8], "texture": "#skin" },
+        "up": { "uv": [11,4,11.75,5], "texture": "#skin" },
+        "down": { "uv": [11.75,4,12.5,5], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Right sleeve outer layer",
+      "from": [11.9375,3.9375,6.4375],
+      "to": [15.0625,10.8125,12.5625],
+      "faces": {
+        "north": { "uv": [11,9,11.75,12], "texture": "#skin" },
+        "east": { "uv": [10,9,11,12], "texture": "#skin" },
+        "south": { "uv": [12.75,9,13.5,12], "texture": "#skin" },
+        "west": { "uv": [11.75,9,12.75,12], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Left sleeve",
+      "from": [1,4,6.5],
+      "to": [4,10.75,12.5],
+      "faces": {
+        "north": { "uv": [9,13,9.75,16], "texture": "#skin" },
+        "east": { "uv": [8,13,9,16], "texture": "#skin" },
+        "south": { "uv": [10.75,13,11.5,16], "texture": "#skin" },
+        "west": { "uv": [9.75,13,10.75,16], "texture": "#skin" },
+        "up": { "uv": [9,12,9.75,13], "texture": "#skin" },
+        "down": { "uv": [9.75,12,10.5,13], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Left sleeve outer layer",
+      "from": [0.9375,3.9375,6.4375],
+      "to": [4.0625,10.8125,12.5625],
+      "faces": {
+        "north": { "uv": [13,13,13.75,16], "texture": "#skin" },
+        "east": { "uv": [12,13,13,16], "texture": "#skin" },
+        "south": { "uv": [14.75,13,15.5,16], "texture": "#skin" },
+        "west": { "uv": [13.75,13,14.75,16], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Right shoe",
+      "from": [9,0,2.25],
+      "to": [13,3,9.75],
+      "faces": {
+        "north": { "uv": [1,7,2,8], "texture": "#skin" },
+        "east": { "uv": [0,7,1,8], "texture": "#skin" },
+        "south": { "uv": [3,7,4,8], "texture": "#skin" },
+        "west": { "uv": [2,7,3,8], "texture": "#skin" },
+        "up": { "uv": [1,6,2,7], "texture": "#skin" },
+        "down": { "uv": [2,4,3,5], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Right shoe outer layer",
+      "from": [8.9375,0,2.1875],
+      "to": [13.0625,3.0625,9.8125],
+      "faces": {
+        "north": { "uv": [1,11,2,12], "texture": "#skin" },
+        "east": { "uv": [0,11,1,12], "texture": "#skin" },
+        "south": { "uv": [3,11,4,12], "texture": "#skin" },
+        "west": { "uv": [2,11,3,12], "texture": "#skin" },
+        "up": { "uv": [1,10,2,11], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Left shoe",
+      "from": [3,0,2.25],
+      "to": [7,3,9.75],
+      "faces": {
+        "north": { "uv": [5,15,6,16], "texture": "#skin" },
+        "east": { "uv": [4,15,5,16], "texture": "#skin" },
+        "south": { "uv": [7,15,8,16], "texture": "#skin" },
+        "west": { "uv": [6,15,7,16], "texture": "#skin" },
+        "up": { "uv": [5,14,6,15], "texture": "#skin" },
+        "down": { "uv": [6,12,7,13], "texture": "#skin" }
+      }
+    },
+    {
+      "name": "Left shoe outer layer",
+      "from": [2.9375,0,2.1875],
+      "to": [7.0625,3.0625,9.8125],
+      "faces": {
+        "north": { "uv": [1,15,2,16], "texture": "#skin" },
+        "east": { "uv": [0,15,1,16], "texture": "#skin" },
+        "south": { "uv": [3,15,4,16], "texture": "#skin" },
+        "west": { "uv": [2,15,3,16], "texture": "#skin" },
+        "up": { "uv": [1,14,2,15], "texture": "#skin" }
+      }
+    }
+  ]
+}

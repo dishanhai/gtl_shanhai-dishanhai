@@ -30,12 +30,12 @@ public final class ShanhaiStateSwitches {
     /** 与守卫同一套前缀（纯 JDK 常量，避免本类依赖 MC）。 */
     public static final String PREFIX = ShanhaiStateLog.PREFIX;
 
-    /** 配置键（与 {@code ShanhaiAddConfig} 里 {@code .define(...)} 的那个串一致）。 */
-    public static final String KEY_MOMENTUM = "guard_module.momentum_guard";
+    /** 配置键（唯一字面量在 {@code ShanhaiAddConfig.KEY_*}；这里只是转发，避免两处写法）。 */
+    public static final String KEY_MOMENTUM = ShanhaiAddConfig.KEY_MOMENTUM;
     /** 见 {@link #KEY_MOMENTUM}。 */
-    public static final String KEY_POS = "guard_module.pos_guard";
+    public static final String KEY_POS = ShanhaiAddConfig.KEY_POS;
     /** 见 {@link #KEY_MOMENTUM}。 */
-    public static final String KEY_INV = "guard_module.inv_guard";
+    public static final String KEY_INV = ShanhaiAddConfig.KEY_INV;
 
     /** 三个默认值只在配置类里写一次。 */
     public static final boolean DEFAULT_MOMENTUM = ShanhaiAddConfig.DEFAULT_MOMENTUM_GUARD;
@@ -132,57 +132,55 @@ public final class ShanhaiStateSwitches {
     }
 
     /**
-     * 改一个开关（<b>写配置 ＋ 立刻落盘 ＋ 一行日志</b>）。
+     * 改一个开关（<b>写配置 ＋ 立刻落盘 ＋ 回读磁盘 ＋ 一行日志</b>）。
      *
-     * <p>日志口径（用户点名要的那一行）：
+     * <p>日志口径（用户点名要的那一行，2026-11-22 起 {@code saved=} 换成<b>落盘并回读一致</b>）：
      * <pre>
      *   动量： [SHANHAI-GUARD] momentum_switch enabled=false was=true saved=true key=guard_module.momentum_guard
      *   其它： [SHANHAI-GUARD] state_switch field=pos enabled=false was=true saved=true key=guard_module.pos_guard
      * </pre>
+     * 真正写文件的是 {@code ShanhaiAddConfig#setGuardSwitch}（{@code AddConfigFiles} 里的唯一出口，
+     * 会另打一行 {@code [SHANHAI-ADD] cfg_write key=… saved=… verified=…}）。
      *
-     * @return true = 真的写进去了；false = 配置没加载 / 写失败（<b>不假报成功</b>）
+     * @return {@code persisted} = 盘上重新读出来就是新值；{@code applied} = 配置 API 现在返回新值
+     *         （配置没加载时 {@code applied=false}：这一项本来就是"退回默认值"的读法，改不动）
      */
-    public static boolean set(Switch which, boolean on) {
+    public static Write set(Switch which, boolean on) {
         if (which == null) {
-            return false;
+            return new Write(false, false);
         }
         if (!ShanhaiAddConfig.isLoaded()) {
             ShanhaiMod.LOGGER.warn("{} state_switch_write_skipped reason=config_not_loaded field={} want={}",
                     PREFIX, which.arg, on);
-            return false;
+            return new Write(false, false);
         }
         final boolean before = which.now();
-        boolean saved = false;
-        try {
-            switch (which) {
-                case MOMENTUM:
-                    ShanhaiAddConfig.COMMON.momentumGuard.set(on);
-                    break;
-                case POS:
-                    ShanhaiAddConfig.COMMON.posGuard.set(on);
-                    break;
-                default:
-                    ShanhaiAddConfig.COMMON.invGuard.set(on);
-                    break;
-            }
-            ShanhaiAddConfig.COMMON_SPEC.save();
-            saved = true;
-        } catch (Throwable t) {
-            ShanhaiMod.LOGGER.warn("{} state_switch_write_failed field={} want={} err={}",
-                    PREFIX, which.arg, on, t.toString());
-            return false;
-        }
+        final String key = which == Switch.MOMENTUM ? KEY_MOMENTUM : (which == Switch.POS ? KEY_POS : KEY_INV);
+        final boolean persisted = ShanhaiAddConfig.setGuardSwitch(key, on);
         final boolean after = which.now();
+        final boolean applied = after == on;
         if (which == Switch.MOMENTUM) {
             // 🔴 用户点名的那一行：关掉时必须有 `momentum_switch enabled=false`
             ShanhaiMod.LOGGER.info("{} momentum_switch enabled={} was={} saved={} key={}",
-                    PREFIX, after, before, saved, KEY_MOMENTUM);
+                    PREFIX, after, before, persisted, KEY_MOMENTUM);
         } else {
             ShanhaiMod.LOGGER.info("{} state_switch field={} zh={} enabled={} was={} saved={} key={}",
-                    PREFIX, which.arg, which.zh, after, before, saved,
-                    which == Switch.POS ? KEY_POS : KEY_INV);
+                    PREFIX, which.arg, which.zh, after, before, persisted, key);
         }
-        return after == on;
+        if (!applied) {
+            ShanhaiMod.LOGGER.warn("{} state_switch_write_failed field={} want={} now={}（配置没写成功）",
+                    PREFIX, which.arg, on, after);
+        }
+        return new Write(applied, persisted);
+    }
+
+    /**
+     * 一次写入的结果。
+     *
+     * @param applied   配置 API 现在返回的就是新值（= 本局行为已经改了）
+     * @param persisted 盘上重新读出来就是新值（= 重启不会回退）—— 回显只许用这一位说"已保存"
+     */
+    public record Write(boolean applied, boolean persisted) {
     }
 
     /** 一行总表（命令回显 / 启动自证 / 报告都用它）。 */

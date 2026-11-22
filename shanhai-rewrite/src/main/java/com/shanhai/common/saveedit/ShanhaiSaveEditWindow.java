@@ -27,8 +27,8 @@ import java.util.List;
  *      其它区块压缩字节 SHA 不变"）
  *   ⑥ 成就页（四期：纯 JSON，写前备份 + 写后 JSON 往返等价，且 criteria/done 三样都对）
  *   ⑦ 统计页（四期：纯 JSON，同上）
- *   ⑧ 体检页（五期：双份登记 —— 删区块里那份复用实体页的删除核；删旁挂那行是"字节级删行"，
- *      备份 → 原子写 → 回读①字节相等 ②该 UUID/坐标再也找不到 ③行数正好少掉删的那几行）
+ *   ⑧ 体检页（S2d：白名单之外一律算异常 —— 每一条自己"复制到回收目录 → 删 → 回读确认已消失"；
+ *      目录递归删，删前先把"将删 N 个文件 / M 字节"数出来；🔴 白名单内的路径一律拒绝）
  * </pre>
  * 🔴 八部分<b>各自</b>都有"备份 + 原子写 + 回读"，彼此独立；任一部分失败 ⇒ 立刻停手、
  * 不再写后面的部分，并如实报"哪几页已经写进去了"。这比"整批回滚"更诚实：
@@ -306,17 +306,16 @@ public final class ShanhaiSaveEditWindow {
             written.add("统计页(" + statsDone + " 条)");
         }
 
-        // ── ⑧ 体检页（第七页 · 双份登记：删区块里那份 / 删旁挂那行）—— 累积清单逐条落盘
+        // ── ⑧ 体检页（第七页 · 白名单之外一律算异常：逐条删）—— 累积清单逐条落盘
+        //    每一条自己：白名单闸门 → 复制到 config/shanhai/audit-trash/<存档>-<时间戳>/ → 删 → 回读
         int auditDone = 0;
-        int auditEntities = 0;
-        int auditLines = 0;
+        int auditFiles = 0;
+        long auditBytes = 0L;
+        java.nio.file.Path auditTrash = null;
         for (com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request req : auditReqs) {
             final com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Result r =
                     com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.applyRequestInWindow(
-                            worldDir, req, backupRoot, stamp);
-            if (r.write() != null) {
-                lastWrite = r.write();
-            }
+                            worldDir, req, stamp);
             if (!r.ok()) {
                 return new ShanhaiPlayerDataEditor.Result(false,
                         "audit_page_failed:" + r.reason() + " " + r.message()
@@ -328,12 +327,18 @@ public final class ShanhaiSaveEditWindow {
                 changed.add("audit:" + f);
             }
             notes.addAll(nz(r.notes()));
-            auditEntities += r.removedEntities();
-            auditLines += r.removedLines();
+            auditFiles += r.deletedFiles();
+            auditBytes += r.deletedBytes();
+            if (r.trashDir() != null) {
+                auditTrash = r.trashDir();
+            }
             auditDone++;
         }
         if (!auditReqs.isEmpty()) {
-            written.add("体检页(" + auditDone + " 条 / " + auditEntities + " 个实体 / " + auditLines + " 行)");
+            written.add("体检页(" + auditDone + " 条 / " + auditFiles + " 个文件 / " + auditBytes + " 字节)");
+            if (auditTrash != null) {
+                notes.add("体检页回收目录（可撤回）：" + auditTrash);
+            }
         }
 
         if (changed.isEmpty()) {

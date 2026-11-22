@@ -50,6 +50,10 @@ final class ShanhaiItemOverridePage extends WidgetGroup {
     private String editMode = ShanhaiItemOverrideTable.MODE_APPEND;
 
     private TextFieldWidget nameField;
+    /** 🔴 2026-11-22：名字框换成能插 {@code §} 码的 {@link ShanhaiTokenField}（位置/宽度不变）。 */
+    private ShanhaiTokenField nameTokenField;
+    private ShanhaiTokenField lastFocusedName;
+    private ShanhaiFontTokenOverlay fontOverlay;
     private TextFieldWidget stackField;
     private ShanhaiCreativeWidgets.TextButton modeButton;
     private LabelWidget idLabel;
@@ -74,10 +78,13 @@ final class ShanhaiItemOverridePage extends WidgetGroup {
 
         // ---- 名字 ----
         this.addWidget(new LabelWidget(6, 182, "§7名字"));
-        this.nameField = new TextFieldWidget(46, 178, 288, 16, () -> this.editName, value -> {
-            // 真值以保存时现取为准（TextResponder 在客户端这份不一定被调）
-        });
-        this.nameField.setMaxStringLength(ShanhaiItemOverrideTable.MAX_NAME_CHARS);
+        // 🔴 2026-11-22：TextFieldWidget → ShanhaiTokenField；位置/宽度一个像素没动 (46,178,288,16)。
+        //    普通 TextFieldWidget 打不进 §（原版 isAllowedChatCharacter 硬排除，粘贴也被 filterText 吃掉）。
+        this.nameTokenField = new ShanhaiTokenField(46, 178, 288, 16, () -> this.editName,
+                value -> this.editName = value == null ? "" : value,
+                field -> this.lastFocusedName = field);
+        this.nameField = this.nameTokenField;
+        this.nameField.setMaxStringLength(ShanhaiItemOverrideTable.MAX_NAME_RAW_CHARS);
         this.addWidget(this.nameField);
 
         // ---- 描述（复用现成的多行编辑器）----
@@ -111,6 +118,9 @@ final class ShanhaiItemOverridePage extends WidgetGroup {
                 () -> "§e清除（恢复原样）", this::clearOverride));
         this.addWidget(new ShanhaiCreativeWidgets.TextButton(194, 238, 60, 18,
                 () -> "§f关闭", this::close));
+        // 🆕 2026-11-22：名字字体选择器入口（76px 宽，塞在「关闭」右边那块空处）
+        this.addWidget(new ShanhaiCreativeWidgets.TextButton(258, 238, 76, 18,
+                () -> "§f名字字体…", this::openFontPicker));
 
         this.statusLabel = new LabelWidget(6, 262, "§7在上面搜一个 id，点一行选中它");
         this.addWidget(this.statusLabel);
@@ -131,6 +141,18 @@ final class ShanhaiItemOverridePage extends WidgetGroup {
             }
         });
         this.addWidget(this.loreEditor);
+
+        // 🆕 2026-11-22：名字字体浮层（39 个色码/格式码/山海样式按钮；默认隐藏，画在最上面）
+        this.fontOverlay = new ShanhaiFontTokenOverlay(this.nameTokenField,
+                () -> this.editName, ShanhaiItemOverrideTable.MAX_NAME_RAW_CHARS);
+        this.addWidget(this.fontOverlay);
+    }
+
+    /** 🆕 2026-11-22：打开「名字字体」浮层。 */
+    private void openFontPicker() {
+        if (this.fontOverlay != null) {
+            this.fontOverlay.open();
+        }
     }
 
     // ------------------------------------------------------------------ 选中
@@ -273,14 +295,25 @@ final class ShanhaiItemOverridePage extends WidgetGroup {
         if (liveName != null) {
             this.editName = liveName;
         }
+        // 🔴 2026-11-22：名字按"可见字符 ≤ 128"截断（§ 与 &$…- 不占可见长度；见 ShanhaiNameCaps）
+        final String cappedName = ShanhaiItemOverrideTable.capName(this.editName);
+        final boolean nameCapped = !cappedName.equals(this.editName);
+        if (nameCapped) {
+            this.editName = cappedName;
+            if (this.nameField != null) {
+                this.nameField.setCurrentString(cappedName);
+            }
+        }
         final int liveStack = liveStack();
         ShanhaiCreativeItemsNetwork.requestOverride(this.selectedId.toString(), this.editName,
                 this.editLore, this.editMode, liveStack);
         this.setStatus("§a已发送保存 §8· §f" + this.selectedId
+                + (nameCapped ? " §e（名字按可见 " + ShanhaiItemOverrideTable.MAX_NAME_CHARS + " 字截断）" : "")
                 + (liveStack > 64 ? " §c⚠ >64 可能有未知 bug" : ""));
-        com.shanhai.ShanhaiMod.LOGGER.info("[SHANHAI-ITEMEDIT] page2_save id={} name_len={} lore_len={} "
-                        + "mode={} stack={}",
-                this.selectedId, this.editName.length(), this.editLore.length(), this.editMode, liveStack);
+        com.shanhai.ShanhaiMod.LOGGER.info("[SHANHAI-ITEMEDIT] page2_save id={} name_len={} name_visible={} "
+                        + "lore_len={} mode={} stack={}",
+                this.selectedId, this.editName.length(), ShanhaiNameCaps.visibleLength(this.editName),
+                this.editLore.length(), this.editMode, liveStack);
     }
 
     private void clearOverride() {
@@ -340,11 +373,22 @@ final class ShanhaiItemOverridePage extends WidgetGroup {
         if (this.pane != null) {
             this.pane.tick();
         }
+        // 🔴 2026-11-22：名字框换成 ShanhaiTokenField 之后，编辑缓冲每 tick 从控件现取一次
+        // （字体选择器是"往框里插码"，不走 textResponder；不现取的话状态/日志里是旧值）
+        if (this.nameField != null) {
+            final String live = this.nameField.getCurrentString();
+            if (live != null && !live.equals(this.editName)) {
+                this.editName = live;
+            }
+        }
     }
 
     void closeOverlays() {
         if (this.loreEditor != null) {
             this.loreEditor.close();
+        }
+        if (this.fontOverlay != null) {
+            this.fontOverlay.close();
         }
     }
 

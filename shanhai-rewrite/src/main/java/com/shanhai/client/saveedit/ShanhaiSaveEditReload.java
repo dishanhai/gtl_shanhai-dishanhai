@@ -1,5 +1,7 @@
 package com.shanhai.client.saveedit;
 
+import com.mojang.datafixers.util.Pair;
+import com.mojang.serialization.DynamicOps;
 import com.shanhai.ShanhaiMod;
 import com.shanhai.common.saveedit.ShanhaiPlayerDataEdit;
 import com.shanhai.common.saveedit.ShanhaiPlayerDataEditor;
@@ -7,26 +9,42 @@ import com.shanhai.common.saveedit.ShanhaiSaveEditBridge;
 import com.shanhai.common.saveedit.ShanhaiSaveEditFlow;
 import com.shanhai.common.saveedit.ShanhaiSaveEditReopenGate;
 import com.shanhai.common.saveedit.ShanhaiSaveEditStorage;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.GenericDirtMessageScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.commands.Commands;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.resources.RegistryOps;
+import net.minecraft.server.WorldLoader;
 import net.minecraft.server.WorldStem;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.server.packs.repository.FolderRepositorySource;
 import net.minecraft.server.packs.repository.PackRepository;
+import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.repository.ServerPacksSource;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.level.WorldDataConfiguration;
+import net.minecraft.world.level.dimension.LevelStem;
+import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.storage.LevelStorageSource;
+import net.minecraft.world.level.storage.WorldData;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.common.ForgeHooks;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -58,43 +76,88 @@ import java.util.concurrent.atomic.AtomicReference;
  * 所以本类只做一件事：<b>把 {@link ShanhaiSaveEditFlow#markStopped()} 夹在
  * {@code clearLevel} 返回与 {@code tryApply} 之间</b>，别处一概不许落盘。
  *
- * <h2>三、重开用哪条路（路线 B，避开实验性/数据包确认屏）</h2>
+ * <h2>三、重开用哪条路（2026-11-20 实机崩溃后的最终选择 = 任务书里的 <b>b</b>）</h2>
+ *
+ * <p>🔴 <b>结论先说</b>：重开走「<b>自己 {@code new PackRepository}，只喂原版 + 存档自带的数据包，
+ * 跳过 {@code ModLoader.postEvent(AddPackFindersEvent)}</b>」这一条（= b）；
+ * 而且<b>只在这个仓库能凑齐 {@code level.dat} 里点名的全部数据包时才真的重开</b>，
+ * 凑不齐就<b>根本不尝试</b>，直接把"存档已改好、请重新进入这个存档"交给玩家。
+ *
+ * <h3>为什么不选 a（复用客户端仓库 {@code Minecraft#getResourcePackRepository()}）</h3>
+ * <ul>
+ *   <li>那个仓库<b>没有</b>挂存档自己的 {@code <world>/datapacks}（它是客户端资源包那套的源）；</li>
+ *   <li>重开时 {@code WorldLoader.PackConfig#createResourceManager()} 会对传进去的仓库调
+ *       {@code MinecraftServer.configurePackRepository(...)} → {@code PackRepository#setSelected(...)}
+ *       ⇒ 把玩家<b>当前的资源包选择</b>就地改成这个世界的数据包清单。那是客户端视觉状态，
+ *       我们没有任何离线手段能验证"改完画面还对" ⇒ 不能拿玩家的画面赌；</li>
+ *   <li>它<b>省不掉</b> {@link WorldStem} 的构造：{@code WorldOpenFlows#loadWorldStem(access,false)}
+ *       内部第 157 行自己还会调一次 {@code ServerPacksSource.createPackRepository}
+ *       ⇒ 事件照发、崩溃照旧。</li>
+ * </ul>
+ *
+ * <h3>为什么不调 {@code loadWorldStem(access, false)}（这一条是本次崩溃的真正根因）</h3>
+ * <p>同一个理由：它内部第 157 行就是 {@code ServerPacksSource.createPackRepository(access)}。
+ * 所以现在<b>整条重开链路上一个 {@code createPackRepository} 都没有</b>：
  * <pre>
  *   LevelStorageSource#validateAndCreateAccess(levelId)      ← 拿 session.lock
  *   LevelStorageAccess#readAdditionalLevelSaveData()         ← Forge 的世界额外数据（与 doLoadLevel 一致）
- *   ServerPacksSource#createPackRepository(access)
- *   MinecraftServer#configurePackRepository(packs, dataPacks, false, features)  ← 让 /reload 还是对的
- *   WorldOpenFlows#loadWorldStem(access, false)              ← 阻塞，这段就是加载屏时间
+ *   new PackRepository(new ServerPacksSource(),
+ *                      new FolderRepositorySource(access.getLevelPath(DATAPACK_DIR),
+ *                                                SERVER_DATA, PackSource.WORLD))
+ *        ↑ 这两行 = 原版 {@code createPackRepository} 的<b>全部函数体</b>，只去掉最后那两行 postEvent
+ *   packs.reload();  逐个核对"要的包"（level.dat 的 Enabled ∪ Forge 的模组数据包）都在仓库里
+ *                    —— 缺一个就不重开（见 {@code missingPacks}）
+ *   WorldLoader.load(new WorldLoader.PackConfig(packs, cfg, false, false), &lt;原版 loadWorldStem 的 lambda&gt;,
+ *                    WorldStem::new, Util.backgroundExecutor(), mc)
+ *   Minecraft#managedBlock(future::isDone)                   ← = 原版 {@code driveUntil} 那一句
  *   Minecraft#doWorldLoad(levelId, access, packs, stem, false)
  * </pre>
- * 🔴 <b>路线 B 只在"数据包配置读得出来"时成立</b>：{@code access.getDataConfiguration()} 为 null 时
- * <b>不抛异常</b>，整段交回原版的 {@code WorldOpenFlows#loadLevel}（路线 A，即 QuickPlay 那条），
- * 并在日志打 {@code reopen_route=vanilla_loadLevel}。分支判断在
- * {@link ShanhaiSaveEditReopenRoute#of(Object)}（纯函数，离线可断言）。
- * <p>为什么不是"抛"：原版确实会在 {@code getPackConfigFromLevelData} 抛
- * {@code ISE("Failed to load data pack config")}，但它<b>发生在 {@code loadWorldStem} 内部、被
- * {@code doLoadLevel} 的 {@code catch (Exception)} 兜成 {@code DatapackLoadFailureScreen}</b>
- * —— 在原版里"读不到配置"是<b>降级</b>，不是致命；我们照抄它、不要在入口自己加一道更硬的闸。
- * <p>⚠️ <b>不调</b> {@code PrimaryLevelData#withConfirmedWarning(true)}：它会把
- * {@code confirmedExperimentalWarning} 置真、随即被 {@code doWorldLoad:2013} 的
- * {@code saveDataTag} 写进 level.dat —— 那是"本期不碰 level.dat"的红线；而路线 B 根本不走
- * {@code doLoadLevel} 里那道实验性确认屏（{@code WorldOpenFlows.java:201-206}），所以也不需要它。
+ * <p>证据（{@code javap -p -c} 打在 mapped forge jar 1.20.1-47.4.16 上，2026-11-20 本机）：
+ * {@code ServerPacksSource.createPackRepository(Path)} 的字节码是
+ * {@code new PackRepository(new ServerPacksSource(), new FolderRepositorySource(dir, SERVER_DATA, PackSource.WORLD))}
+ * 后面紧跟 {@code ModLoader.get().postEvent(new AddPackFindersEvent(SERVER_DATA, repo::addPackFinder))}；
+ * {@code createPackRepository(access)} 只是把 {@code access.getLevelPath(DATAPACK_DIR)} 转给上一个重载。
  *
- * <p>⚠️ 已知差异（本期<b>主动挡掉而不是装作没有</b>）：这条路线跳过了
- * {@code DownloadedPackSource#loadBundledResourcePack}（{@code WorldOpenFlows.java:207}），
- * 也就是"存档自带的服务器资源包"不会重新加载。所以 {@link ShanhaiSaveEditBridge} 在启动前
- * 检查 {@code <存档>/server-resources}：存在就直接拒绝，让人手动退出重进。
+ * <p>⚠️ <b>代价（如实计入文案）</b>：这个自建仓库里<b>没有模组动态数据包</b>
+ * （{@code mod:shanhai}、{@code gtceu:dynamic_data} 这些只在 {@code AddPackFindersEvent} 里被加进来）。
+ * 而原版 {@code MinecraftServer#configurePackRepository} 对"配置里有、仓库里没有"的包<b>只打一行
+ * {@code LOGGER.warn("Missing data pack {}")} 然后跳过</b>（字节码已核），<b>不会</b>替你拦住
+ * ⇒ 硬开就等于"世界在没有 GT 动态数据包的状态下启动"，那是丢东西级别的风险。
+ * <b>所以缺包时我们不重开</b>：原版那条路每次正常进世界都会发一次事件，让玩家重进存档是最安全的。
  *
- * <h2>四、🔴 重开之前的两道闸（2026-11-14 加，判据都在 {@link ShanhaiSaveEditReopenGate}）</h2>
+ * <h3>为什么不直接选 c（根本不重开）</h3>
+ * <p>纯原版存档（数据包清单只有 {@code vanilla}）时上面这条链路是完整可用的，白白放弃"原地重载"没道理。
+ * 缺包的情形已被完整性检查挡在重开之前 ⇒ 合起来就是 c 的效果，但不牺牲 b 能覆盖的那一半。
+ * <p>⚠️ 仍<b>不调</b> {@code PrimaryLevelData#withConfirmedWarning(true)}：它会把
+ * {@code confirmedExperimentalWarning} 置真、随即被 {@code doWorldLoad} 的 {@code saveDataTag}
+ * 写进 level.dat —— 那是"不碰 level.dat"的红线。
+ * <p>⚠️ 也仍<b>不重新加载</b>"存档自带的服务器资源包"（{@code <world>/server-resources}）：
+ * 这条链路和原来的 {@code loadWorldStem} 一样跳过了 {@code DownloadedPackSource#loadBundledResourcePack}
+ * ⇒ {@link ShanhaiSaveEditBridge} 在启动前见到那个目录就直接拒绝（{@code confirm_rejected reason=server_resources}）。
+ *
+ * <h2>四、🔴 重开之前的四道闸（①② 于 2026-11-14 加，判据在 {@link ShanhaiSaveEditReopenGate}）</h2>
  * <pre>
- *   ① levelId 算不出来（或 level.dat 不在）⇒ fail(level_id_unresolved candidates=[…])，不重开。
- *       根因：1.20.1 的 LevelResource.ROOT 的 id 就是 "." ⇒ 旧实现拿到的 levelId 是 "."
- *             ⇒ validateAndCreateAccess(".") 指到 saves\. 这个不存在的目录 ⇒ 原版「数据包有错误」屏。
- *   ② applyResult 说"没有实际变化"（no_effective_change）且一个字节都没写 ⇒ 不重开，
- *       停在"没改"的返回屏。现场那行 region_page_failed:no_effective_change（这个位置本来就是 air）
- *       之后照样停了世界、照样重开。
+ *   ② applyResult 说"没有实际变化"（no_effective_change）且一个字节都没写 ⇒ 不重开（结局 C 的专门版本）。
+ *      （现场那行 region_page_failed:no_effective_change —— 这个位置本来就是 air —— 之后照样停了世界、照样重开。）
+ *   ⓪ apply_ok=false（其余写入失败）⇒ 一个字节都没改 ⇒ 不重开、也绝不说"已改好"（结局 C）。
+ *   ① levelId 算不出来（或 level.dat 不在）⇒ level_id_unresolved candidates=[…]，不重开（结局 B）。
+ *   ③ 数据包凑不齐（模组动态包不在自建仓库里）⇒ 不重开（结局 B）。见上。
  * </pre>
- * 两道闸都在 {@code markReopening()} <b>之前</b>，所以停手时状态机会 FAILED 并放锁（不会永远 BUSY）。
+ * 顺序是有意的：② 是 C 的<b>专门文案</b>（"没删掉 / 没改动"），所以排在通用闸 ⓪ 之前；
+ * ⓪ 又必须排在 ① 之前 —— 写入都没成功的时候不许给 B 那一档"存档已改好"的文案。
+ * 四道闸都在 {@code markReopening()} <b>之前</b>，所以停手时状态机会 FAILED 并放锁（不会永远 BUSY）。
+ *
+ * <h2>五、🔴 提示文案必须说真话（2026-11-20 那条"存档本身没有被改动"就是另一半 bug）</h2>
+ * <pre>
+ *   A  写入成功 ∧ 重开成功         ⇒「已写入 … 并已重新载入世界」（聊天栏 + 备份在哪）
+ *   B  写入成功 ∧ 重开没成功/没尝试  ⇒「存档已改好」＋ 一行原因 ＋「请重新进入这个存档」
+ *        B2 世界已经停了（getSingleplayerServer()==null 且 level==null）⇒ 重进存档即可，不用退出游戏
+ *        B3 世界还在跑（停不下来）                                  ⇒ 才写"完全退出游戏再进一次"
+ *   C  写入没成功                  ⇒「没有改动存档」＋ 一行原因 ＋ 备份在哪
+ * </pre>
+ * 🔴 判据只有一条：{@code applyResult != null && applyResult.ok()}（就是日志里 {@code apply_ok} 那个字段）。
+ * <b>绝对不许</b>在 {@code apply_ok=true} 之后再出现"没有改动 / 没做完"这类字样。
+ * B2 与 B3 的分界用"世界是否已停"（不用新造状态）：见 {@link #worldStillRunning(Minecraft)}。
  */
 @OnlyIn(Dist.CLIENT)
 public final class ShanhaiSaveEditReload {
@@ -121,7 +184,7 @@ public final class ShanhaiSaveEditReload {
             try {
                 begin(mc, ctx, edit, flow);
             } catch (Throwable t) {
-                fail(mc, flow, "begin_threw", t);
+                fail(mc, flow, null, "begin_threw", t);
             }
         });
     }
@@ -170,7 +233,9 @@ public final class ShanhaiSaveEditReload {
             try {
                 reopen(mc, ctx, flow, result.get(), err);
             } catch (Throwable t) {
-                fail(mc, flow, "reopen_threw", t);
+                // reopen() 自己已经兜了一层；能漏到这里的说明它连兜底都没走完 ⇒ 用这次真实的
+                // applyResult 判"存档到底改了没有"，别默认当成"没改"（那样又会说假话）。
+                fail(mc, flow, result.get(), "reopen_threw", t);
             }
         }));
     }
@@ -212,19 +277,14 @@ public final class ShanhaiSaveEditReload {
     private static void reopen(Minecraft mc, com.shanhai.common.saveedit.ShanhaiSaveEditRunContext ctx,
                                ShanhaiSaveEditFlow flow, ShanhaiPlayerDataEditor.Result applyResult,
                                Throwable ioError) {
-        // ── 重开之前的两道闸（都在 markReopening 之前 ⇒ 一旦停手就 FAILED 放锁，不会永远 BUSY）
-        // 🔴 闸 ①（本 bug 的根治点）：算不出 levelId ⇒ 一个字节都不许往重开走。
-        //    现场（2026-11-14 09:57）：levelId 被算成 "."，于是
-        //    validateAndCreateAccess(".")/loadLevel(".") 指向 saves\. 这个【不存在的世界目录】
-        //    ⇒ getDataConfiguration() 必然 null ⇒ 掉回原版「数据包有错误」屏。
-        if (ctx == null || !ctx.hasLevelId()) {
-            fail(mc, flow, "level_id_unresolved candidates="
-                    + (ctx == null ? "[]" : ctx.levelIdCandidatesLine()), null);
-            return;
-        }
-        // 🔴 闸 ②：这次一个字节都没改成（no_effective_change）⇒ 不许重开。
+        // 🔴 结局三档的唯一判据（全部取自日志里已有的那两行，没有新造状态）：
+        //    apply_ok    = applyResult.ok()  ⇒ 决定"存档到底改了没有"（A/B 还是 C）
+        //    apply_phase = flow.phase()      ⇒ 决定"世界停了没有"（B2 / B3 的分界，见 worldStillRunning）
+        final boolean applyOk = applyResult != null && applyResult.ok();
+        // 🔴 闸 ②（2026-11-14）：这次一个字节都没改成（no_effective_change）⇒ 不许重开。
         //    现场那行 region_page_failed:no_effective_change（这个位置本来就是 air）之后照样停了世界、
         //    照样重开，最后掉到原版错误屏；停手更诚实（存档原样，玩家回标题自己进）。
+        //    ⚠️ 它是结局 C 的一个专门版本（"没删掉/没改动"），所以必须排在闸 ⓪ 前面。
         if (ShanhaiSaveEditReopenGate.skipReopen(
                 applyResult != null && applyResult.ok(),
                 applyResult == null ? null : applyResult.error(),
@@ -233,16 +293,28 @@ public final class ShanhaiSaveEditReload {
             skipReopenNoChange(mc, flow, applyResult);
             return;
         }
-        final Screen loading = loadingScreen();
-        mc.setScreen(loading);
-        if (!flow.markReopening()) {
-            ShanhaiMod.LOGGER.warn("{} reopen_phase_unexpected phase={}", PREFIX, flow.phase());
+        // ── 闸 ⓪（结局 C，2026-11-20 加）：写入没成功 ⇒ 一个字节都没改 ⇒ 不重开，也绝不说"已改好"。
+        if (!applyOk) {
+            fail(mc, flow, applyResult, "apply_not_ok", ioError);
+            return;
+        }
+        // ── 重开之前的闸（都在 markReopening 之前 ⇒ 一旦停手就 FAILED 放锁，不会永远 BUSY）
+        // 🔴 闸 ①（本 bug 的根治点）：算不出 levelId ⇒ 一个字节都不许往重开走。
+        //    现场（2026-11-14 09:57）：levelId 被算成 "."，于是
+        //    validateAndCreateAccess(".")/loadLevel(".") 指向 saves\. 这个【不存在的世界目录】
+        //    ⇒ getDataConfiguration() 必然 null ⇒ 掉回原版「数据包有错误」屏。
+        //    ⚠️ 走到这里 applyOk 一定为真（闸 ⓪ 已拦掉另一支）⇒ 文案必须走结局 B，不许说"没有改动"。
+        if (ctx == null || !ctx.hasLevelId()) {
+            fail(mc, flow, applyResult, "level_id_unresolved candidates="
+                    + (ctx == null ? "[]" : ctx.levelIdCandidatesLine()), null);
+            return;
         }
         if (ioError != null) {
             ShanhaiMod.LOGGER.error("{} io_stage_threw err={}", PREFIX, ioError.toString());
         }
         LevelStorageSource.LevelStorageAccess access = null;
         WorldStem stem = null;
+        PackRepository packs = null;
         final long t0 = System.nanoTime();
         try {
             access = mc.getLevelSource().validateAndCreateAccess(ctx.levelId);
@@ -266,45 +338,52 @@ public final class ShanhaiSaveEditReload {
                             + "root={} dataCfg={} packs={}",
                     PREFIX, ctx.levelId, ctx.worldDir, fileSize(levelDat), fileSize(levelDatOld),
                     access.getLevelPath(LevelResource.ROOT), probeConfig(cfg), probePacks(cfg));
-            if (ShanhaiSaveEditReopenRoute.of(cfg) != ShanhaiSaveEditReopenRoute.Route.PACK_RELOAD) {
-                // 🔴 cfg 读不出来 ⇒ 不抛，整段交回原版（路线 A）。理由：
-                //    原版也会在 loadWorldStem → getPackConfigFromLevelData 抛 ISE("Failed to load data pack config")，
-                //    但那句在 doLoadLevel 里被 catch (Exception) 兜成 DatapackLoadFailureScreen ⇒ 在原版里这是"降级"。
-                //    我们入口自己抛，就把它变成了"改完盘的人直接掉到失败屏"，比原版更硬 —— 那不是我们该加的检查。
-                //    loadLevel 内部会自己重读一次配置：真只是瞬时读失败的话，世界照样能进。
-                try {
-                    access.close();     // 必须先放 session.lock：loadLevel 内部会 createWorldAccess 再拿一次
-                } catch (Throwable ignored) {
-                    // 关不掉也不改结论
-                }
+            final ShanhaiSaveEditReopenRoute.Route route = ShanhaiSaveEditReopenRoute.of(cfg);
+            if (route != ShanhaiSaveEditReopenRoute.Route.PACK_RELOAD) {
+                // 🔴 2026-11-20：这里<b>不再</b>交回原版 {@code WorldOpenFlows#loadLevel}。
+                //    理由（字节码事实）：loadLevel → createPackRepository → ModLoader.postEvent(AddPackFindersEvent)
+                //    ⇒ 就是本次崩溃那条栈。level.dat 读不出来时宁可停手、如实说"请重新进入这个存档"。
+                closeQuietly(access);
                 access = null;
-                ShanhaiMod.LOGGER.warn("{} reopen_route={} levelId={} reason=data_cfg_missing fallback_screen=saveedit_failed",
-                        PREFIX, ShanhaiSaveEditReopenRoute.Route.VANILLA_LOAD_LEVEL.logName(), ctx.levelId);
-                mc.createWorldOpenFlows().loadLevel(fallbackScreen(mc), ctx.levelId);
-                if (!flow.markDone()) {
-                    // 交回原版后我们不再持有任何资源；状态机万一没到 REOPENING 就直接放锁，免得下一次永远 BUSY
-                    ShanhaiMod.LOGGER.warn("{} reopen_handoff_but_phase={} ⇒ force release", PREFIX, flow.phase());
-                    flow.release();
-                }
-                ShanhaiMod.LOGGER.info("{} reopen_done route={} total_ms={} apply_ok={} "
-                                + "title_screen_shown=false level_loading_screen_expected=true flow={}",
-                        PREFIX, ShanhaiSaveEditReopenRoute.Route.VANILLA_LOAD_LEVEL.logName(),
-                        (System.nanoTime() - t0) / 1_000_000L, applyResult != null && applyResult.ok(),
-                        flow.traceLine());
-                notifyOutcome(mc);
+                ShanhaiMod.LOGGER.warn("{} reopen_skipped reason=data_cfg_missing route={} "
+                                + "would_post_pack_event=true levelId={}",
+                        PREFIX, route.logName(), ctx.levelId);
+                fail(mc, flow, applyResult, "data_cfg_missing:" + route.logName(), null);
                 return;
             }
-            // 让新服的 getPackRepository() 是"装好了数据包"的那一个（否则以后 /reload 会读到空表）
-            ShanhaiMod.LOGGER.info("{} reopen_route={} levelId={}", PREFIX,
+            // ── 闸 ③（2026-11-20 加）：自建仓库里凑不齐这个世界点名的数据包 ⇒ 不重开。
+            //    = 原版 createPackRepository 的<b>全部函数体</b>，只去掉那两行 postEvent
+            //    （见 {@link #buildPackRepositoryWithoutEvent}）。
+            ShanhaiMod.LOGGER.info("{} reopen_route={} levelId={} pack_event=skip", PREFIX,
                     ShanhaiSaveEditReopenRoute.Route.PACK_RELOAD.logName(), ctx.levelId);
-            final PackRepository packs = ServerPacksSource.createPackRepository(access);
-            MinecraftServer.configurePackRepository(packs, cfg.dataPacks(), false, cfg.enabledFeatures());
+            packs = buildPackRepositoryWithoutEvent(access);
+            packs.reload();
+            final List<String> missing = missingPacks(packs, cfg);
+            ShanhaiMod.LOGGER.info("{} reopen_packs src=vanilla_plus_save available={} missing={}",
+                    PREFIX, packs.getAvailableIds(), missing);
+            if (!missing.isEmpty()) {
+                // 🔴 缺包<b>不许</b>硬开：原版 MinecraftServer#configurePackRepository 对缺包
+                //    只打一行 "Missing data pack {}" 就跳过（字节码已核）⇒ 世界会在没有 GT / 模组
+                //    动态数据包的状态下启动，那是丢东西级别的风险。
+                closeQuietly(access);
+                access = null;
+                // ⚠️ PackRepository <b>不是</b> AutoCloseable（字节码已核）：reload() 只读了 pack.mcmeta，
+                //    没有留下任何需要关的句柄 ⇒ 这里只需要丢掉引用。
+                packs = null;
+                fail(mc, flow, applyResult, "pack_set_incomplete missing=" + missing, null);
+                return;
+            }
+            // 所有闸都过了 ⇒ 真的重开（从这里起窗口永久关闭，不再回 APPLIED）
+            mc.setScreen(loadingScreen());
+            if (!flow.markReopening()) {
+                ShanhaiMod.LOGGER.warn("{} reopen_phase_unexpected phase={}", PREFIX, flow.phase());
+            }
+            // 🔴 用<b>已有仓库</b>建 WorldStem：不调 loadWorldStem(access,false)（它内部还会再建一次仓库）
+            stem = loadWorldStemWithoutPackEvent(access, cfg, packs, mc);
             ShanhaiMod.LOGGER.info("{} reopen_packs selected={}", PREFIX, packs.getSelectedIds());
-
-            stem = mc.createWorldOpenFlows().loadWorldStem(access, false);
             // 🔴 故意【不】调 PrimaryLevelData#withConfirmedWarning(true)：
             //    它会把 confirmedExperimentalWarning 置真、由 doWorldLoad 的 saveDataTag 写进 level.dat
-            //    ⇒ 那就是"本期不碰 level.dat"的红线。而且路线 B 根本不走 doLoadLevel 里那道
+            //    ⇒ 那就是"本期不碰 level.dat"的红线。而且这条路线根本不走 doLoadLevel 里那道
             //    实验性确认屏（WorldOpenFlows.java:201-206），所以这一步也不需要。
             ShanhaiMod.LOGGER.info("{} reopen_stem world={} level_stem_lifecycle={}",
                     PREFIX, stem.worldData().getLevelName(),
@@ -326,7 +405,7 @@ public final class ShanhaiSaveEditReload {
                             + "title_screen_shown=false select_world_screen_shown=false "
                             + "level_loading_screen_expected=true flow={}",
                     PREFIX, ms, loadMs, applyResult != null && applyResult.ok(), flow.traceLine());
-            notifyOutcome(mc);
+            notifyOutcome(mc, applyResult);
         } catch (Throwable t) {
             if (stem != null) {
                 try {
@@ -335,14 +414,12 @@ public final class ShanhaiSaveEditReload {
                     // 关不掉也不改结论
                 }
             }
-            if (access != null) {
-                try {
-                    access.close();
-                } catch (Throwable ignored) {
-                    // 关不掉也不改结论
-                }
-            }
-            fail(mc, flow, "reopen_failed", t);
+            closeQuietly(access);
+            // PackRepository 不是 AutoCloseable（见闸 ③ 那行注释）⇒ 只丢引用
+            packs = null;
+            // ⚠️ 这里 applyOk 一定是 true（闸 ⓪ 已拦掉另一支）⇒ fail() 会走结局 B 的文案：
+            //    "存档已改好 / 重开没成功 / 请重新进入这个存档"，绝不再说"没有改动"。
+            fail(mc, flow, applyResult, "reopen_failed", t);
         }
     }
 
@@ -360,14 +437,17 @@ public final class ShanhaiSaveEditReload {
         flow.fail("no_effective_change:" + detail);
         LAST_OUTCOME = "没有实际变化（" + detail + "），没有重开世界";
         ShanhaiMod.LOGGER.warn("{} reopen_skipped reason=no_effective_change detail=\"{}\" "
-                        + "apply_ok=false apply_write=null screen=saveedit_no_change flow={}",
+                        + "apply_ok=false outcome=C_no_write apply_write=null screen=saveedit_no_change flow={}",
                 PREFIX, detail, flow.traceLine());
         try {
+            // 🆕 2026-11-20：文案改成诚实版 —— 这次<b>根本没写入</b>，
+            //   所以不许再出现"世界已经停了／回标题重进"那套（那是"已经删了、要重开"的旧流程）。
+            //   实机判据：退出世界写盘时那条实体会被重写（UUID 变了）⇒ 暂存时的 UUID 已经不存在。
             mc.setScreen(new AlertScreen(
                     () -> mc.setScreen(new TitleScreen()),
-                    Component.literal("这次没有实际变化，没有重开世界"),
-                    Component.literal("存档一个字节都没改（" + detail + "）。\n\n"
-                            + "世界已经停了：点下面的按钮回标题，再从「单人游戏」进这个世界就行。")));
+                    Component.literal("没删掉（存档一个字节都没改）"),
+                    Component.literal("没删掉：那条实体在你退出世界时被重写了（UUID 变了或已被移除）。\n\n"
+                            + "请重新打开这个世界、重新列一次再删。存档一个字节都没改。")));
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} skip_screen_failed err={}", PREFIX, t.toString());
         }
@@ -425,50 +505,323 @@ public final class ShanhaiSaveEditReload {
         }
     }
 
-    /** 交回原版后，万一数据包还是加载失败：原版的取消按钮会把玩家送到这张屏 ⇒ 再点一次才回标题。 */
-    private static Screen fallbackScreen(Minecraft mc) {
-        return new AlertScreen(
-                () -> mc.setScreen(new TitleScreen()),
-                Component.literal("存档直改没做完"),
-                Component.literal("数据包配置读不出来，已经交回原版重开流程。\n\n"
-                        + "存档本身没有被改动（备份在 temp\\saveedit-backup）。"));
-    }
-
-    /** 成功路径往聊天栏发的那一行（路线 B 与兜底共用）。 */
-    private static void notifyOutcome(Minecraft mc) {
-        final String outcome = outcomeText();
-        notifyWhenInWorld(mc, "§8[存档直改] §f" + outcome + " §8· 备份在 §7temp\\saveedit-backup\\");
-    }
-
-    private static String outcomeText() {
-        return LAST_OUTCOME == null || LAST_OUTCOME.isEmpty() ? "没有改盘" : LAST_OUTCOME;
-    }
-
-    // ================================================================== 兜底
+    // ================================================================== 重开用的两个"去掉事件"的小件（2026-11-20）
 
     /**
-     * 失败兜底：给一张带说明的屏 + 一个"回标题"按钮。
+     * 🔴 = 原版 {@code ServerPacksSource#createPackRepository(Path)} 的<b>全部函数体</b>，
+     * 只去掉最后那两行
+     * {@code ModLoader.get().postEvent(new AddPackFindersEvent(SERVER_DATA, repo::addPackFinder))}。
      *
-     * <p>🔴 只有<b>出错</b>这条路才会出现 TitleScreen（成功后一个字都不会退到标题，用户原话：
-     * "不要退到标题（没沉浸感）"）。宁可给一个能点回去的屏，也不许把玩家卡在全黑的加载屏上。
+     * <p>字节码出处（{@code javap -p -c}，mapped forge 1.20.1-47.4.16，2026-11-20 本机）：
+     * <pre>
+     *   new PackRepository(new ServerPacksSource(),
+     *                      new FolderRepositorySource(dir, PackType.SERVER_DATA, PackSource.WORLD));
+     *   ModLoader.get().postEvent(new AddPackFindersEvent(SERVER_DATA, repo::addPackFinder));  ← 只删这两行
+     * </pre>
+     * 为什么非要删：GTCEu 的 {@code registerPackFinders} 在事件里会现场重跑整套配方生成
+     * （{@code GTRecipes.recipeRemoval()} + {@code recipeAddition()}），第二次跑时
+     * {@code ToolRecipeHandler.addElectricToolRecipe} 里 {@code powerUnit} 为 {@code null}
+     * ⇒ 2026-11-20 21:29 那次 {@code ModLoadingException} 崩掉了重开。
+     *
+     * <p>⚠️ 代价：模组动态数据包（{@code mod:*}、{@code gtceu:dynamic_data}）不在这个仓库里 ——
+     * 所以调用方必须先用 {@link #missingPacks} 核对，缺一个就不许往下走。
      */
-    private static void fail(Minecraft mc, ShanhaiSaveEditFlow flow, String why, Throwable t) {
-        if (t != null) {
-            ShanhaiMod.LOGGER.error("{} {} err={} flow={}", PREFIX, why, t.toString(), flow.traceLine(), t);
+    private static PackRepository buildPackRepositoryWithoutEvent(
+            LevelStorageSource.LevelStorageAccess access) {
+        return new PackRepository(
+                new ServerPacksSource(),
+                new FolderRepositorySource(access.getLevelPath(LevelResource.DATAPACK_DIR),
+                        PackType.SERVER_DATA, PackSource.WORLD));
+    }
+
+    /**
+     * 这个世界"要的"数据包里，自建仓库<b>给不出来</b>的那些（空 = 可以安全重开）。
+     *
+     * <p>要的集合 = {@code level.dat} 的 {@code Enabled} <b>∪</b> Forge 的模组数据包。
+     * 后者必须算进来：{@code MinecraftServer#configurePackRepository} 第一步就是
+     * {@code DataPackConfig#addModPacks(ForgeHooks.getModPacks())}（字节码已核）——
+     * 也就是<b>Forge 自己会把模组数据包强行加进启用清单</b>。只看 {@code getEnabled()} 会漏掉它们，
+     * 漏掉之后原版只会打一行 "Missing data pack {}" 然后跳过 ⇒ 世界在没有 GT 动态数据包的状态下启动。
+     * <p>读不出来时<b>故意</b>塞一个占位符 ⇒ 闸门关上（宁可不重开，也不许瞎开）。
+     */
+    private static List<String> missingPacks(PackRepository packs, WorldDataConfiguration cfg) {
+        final List<String> missing = new ArrayList<>();
+        if (packs == null || cfg == null) {
+            missing.add("<no_repo_or_no_config>");
+            return missing;
+        }
+        final List<String> wanted = new ArrayList<>();
+        try {
+            wanted.addAll(cfg.dataPacks().getEnabled());
+        } catch (Throwable t) {
+            missing.add("<config_unreadable:" + t.getClass().getSimpleName() + ">");
+        }
+        try {
+            for (String id : ForgeHooks.getModPacks()) {
+                if (id != null && !wanted.contains(id)) {
+                    wanted.add(id);
+                }
+            }
+        } catch (Throwable t) {
+            missing.add("<mod_packs_unreadable:" + t.getClass().getSimpleName() + ">");
+        }
+        if (!missing.isEmpty()) {
+            return missing;
+        }
+        try {
+            for (String id : wanted) {
+                if (!packs.isAvailable(id)) {
+                    missing.add(id);
+                }
+            }
+        } catch (Throwable t) {
+            missing.add("<repo_unreadable:" + t.getClass().getSimpleName() + ">");
+        }
+        return missing;
+    }
+
+    /**
+     * 用<b>已有仓库</b>建 {@link WorldStem}，<b>不</b>调 {@code WorldOpenFlows#loadWorldStem(access,false)}。
+     *
+     * <p>🔴 为什么不调它：它内部第 157 行就是 {@code ServerPacksSource.createPackRepository(access)}
+     * ⇒ 又会 post 一次 {@code AddPackFindersEvent} ⇒ 就是本次崩溃那条栈。
+     * 这里抄的是它私有方法 {@code loadWorldStem(access, safeMode, packs)} 的<b>原样逻辑</b>：
+     * <pre>
+     *   Pair&lt;WorldData, WorldDimensions.Complete&gt; = access.getDataTag(…)
+     *   PackConfig(packs, cfg, false, false) → InitConfig(…, INTEGRATED, 2)
+     *     → WorldLoader.load(…, 上面那个 lambda, WorldStem::new, Util.backgroundExecutor(), mc)
+     *     → mc.managedBlock(future::isDone)        ← 原版那一句 driveUntil
+     * </pre>
+     *
+     * <p>失败<b>不许崩</b>：异常一律抛给调用方（{@code reopen()} 的 {@code catch (Throwable)}），
+     * 由它落成一句"存档已改好、请重新进入这个存档"的提示屏。
+     */
+    private static WorldStem loadWorldStemWithoutPackEvent(
+            LevelStorageSource.LevelStorageAccess access, WorldDataConfiguration cfg,
+            PackRepository packs, Minecraft mc) throws Exception {
+        final WorldLoader.PackConfig packConfig = new WorldLoader.PackConfig(packs, cfg, false, false);
+        final WorldLoader.InitConfig initConfig = new WorldLoader.InitConfig(
+                packConfig, Commands.CommandSelection.INTEGRATED, 2);
+        final CompletableFuture<WorldStem> future = WorldLoader.load(initConfig, context -> {
+            final DynamicOps<Tag> ops = RegistryOps.create(NbtOps.INSTANCE, context.datapackWorldgen());
+            final Registry<LevelStem> registry =
+                    context.datapackWorldgen().registryOrThrow(Registries.LEVEL_STEM);
+            final Pair<WorldData, WorldDimensions.Complete> pair = access.getDataTag(
+                    ops, context.dataConfiguration(), registry,
+                    context.datapackWorldgen().allRegistriesLifecycle());
+            if (pair == null) {
+                throw new IllegalStateException("Failed to load world");
+            }
+            return new WorldLoader.DataLoadOutput<>(pair.getFirst(),
+                    pair.getSecond().dimensionsRegistryAccess());
+        }, WorldStem::new, Util.backgroundExecutor(), mc);
+        mc.managedBlock(future::isDone);
+        return future.get();
+    }
+
+    /** 静默关掉（{@code null} 安全）；关不掉也不改结论。 */
+    private static void closeQuietly(AutoCloseable closeable) {
+        if (closeable == null) {
+            return;
+        }
+        try {
+            closeable.close();
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} close_failed err={}", PREFIX, t.toString());
+        }
+    }
+
+    /**
+     * 结局 A（写入成功 ∧ 重开成功）往聊天栏发的那一行。
+     *
+     * <p>🔴 只有这一档才可以说"已重新载入世界"：能走到这里就说明 {@code apply_ok=true}
+     * 且 {@code doWorldLoad} 没抛。
+     */
+    private static void notifyOutcome(Minecraft mc, ShanhaiPlayerDataEditor.Result applyResult) {
+        LAST_OUTCOME = "已写入 " + changedSummary(applyResult) + " 并已重新载入世界";
+        notifyWhenInWorld(mc, "§8[存档直改] §f" + LAST_OUTCOME + " §8· 备份在 §7"
+                + backupDir(applyResult));
+    }
+
+    /** 改了什么（最多 3 条 + 截断，够玩家认人；完整清单在日志 {@code apply_ok} 那行里）。 */
+    private static String changedSummary(ShanhaiPlayerDataEditor.Result r) {
+        try {
+            final List<String> changed = r == null ? null : r.changed();
+            if (changed == null || changed.isEmpty()) {
+                return "（没有列出改动项）";
+            }
+            final StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < changed.size() && i < 3; i++) {
+                if (i > 0) {
+                    sb.append("、");
+                }
+                sb.append(changed.get(i));
+            }
+            if (changed.size() > 3) {
+                sb.append(" 等 ").append(changed.size()).append(" 项");
+            }
+            final String s = sb.toString();
+            return s.length() > 120 ? s.substring(0, 120) + "…" : s;
+        } catch (Throwable t) {
+            return "（改动项读不出来）";
+        }
+    }
+
+    /** 备份在哪（{@code temp\saveedit-backup\<时间戳>}）；读不出来就给根目录。 */
+    private static String backupDir(ShanhaiPlayerDataEditor.Result r) {
+        try {
+            if (r != null && r.write() != null && r.write().backupPath() != null) {
+                final Path parent = r.write().backupPath().getParent();
+                if (parent != null && parent.getFileName() != null) {
+                    return "temp\\saveedit-backup\\" + parent.getFileName();
+                }
+            }
+        } catch (Throwable ignored) {
+            // 读不出来就给根目录
+        }
+        return "temp\\saveedit-backup";
+    }
+
+    /** 把异常压成<b>一行</b>（面板上只给一行；完整栈照旧进日志）。 */
+    private static String oneLine(Throwable t) {
+        if (t == null) {
+            return "";
+        }
+        String msg = null;
+        try {
+            msg = t.getMessage();
+        } catch (Throwable ignored) {
+            // 连 getMessage 都抛 ⇒ 走 toString
+        }
+        if (msg == null || msg.isEmpty()) {
+            msg = String.valueOf(t.getClass().getSimpleName());
         } else {
-            ShanhaiMod.LOGGER.error("{} {} flow={}", PREFIX, why, flow.traceLine());
+            msg = t.getClass().getSimpleName() + ": " + msg;
+        }
+        final int nl = msg.indexOf('\n');
+        if (nl >= 0) {
+            msg = msg.substring(0, nl);
+        }
+        msg = msg.replace('\r', ' ').trim();
+        return msg.length() > 160 ? msg.substring(0, 160) + "…" : msg;
+    }
+
+    // ================================================================== 三档结局（文案必须说真话）
+
+    /**
+     * 任何一步出错/停手时的<b>唯一落点</b>：写日志 → 放锁 → 按<b>已有判据</b>选一条诚实的文案。
+     *
+     * <p>🔴 判据只有 {@code applyResult.ok()}（= 日志里 {@code apply_ok} 那个字段）：
+     * <ul>
+     *   <li>{@code true}  ⇒ 结局 <b>B</b>：存档<b>已经改好</b>了，重开没成 ⇒「请重新进入这个存档」；
+     *       只有"世界还开着（停不下来）"才是 B3「完全退出游戏再进一次」（见 {@link #worldStillRunning}）。</li>
+     *   <li>{@code false} ⇒ 结局 <b>C</b>：没有改动存档 ⇒ 原因 + 备份在哪。</li>
+     * </ul>
+     * 2026-11-20 21:29 的现场就是 {@code apply_ok=true} 之后走了老代码那一句
+     * "存档本身没有被改动" —— <b>那是假话</b>；本类另一半修复就是把这条分叉做对。
+     */
+    private static void fail(Minecraft mc, ShanhaiSaveEditFlow flow,
+                             ShanhaiPlayerDataEditor.Result applyResult, String why, Throwable t) {
+        final boolean applyOk = applyResult != null && applyResult.ok();
+        final String outcome = applyOk ? "B_reopen_failed" : "C_no_write";
+        if (t != null) {
+            ShanhaiMod.LOGGER.error("{} {} apply_ok={} outcome={} err={} flow={}",
+                    PREFIX, why, applyOk, outcome, t.toString(), flow.traceLine(), t);
+        } else {
+            ShanhaiMod.LOGGER.error("{} {} apply_ok={} outcome={} flow={}",
+                    PREFIX, why, applyOk, outcome, flow.traceLine());
         }
         flow.fail(why);
         logFlowNotify();
-        final String detail = (t == null ? why : why + ": " + t);
-        LAST_OUTCOME = "失败：" + detail;
+        final String errLine = oneLine(t);
+        // 面板上那"一行原因"：认识的 token 换成玩家看得懂的话；不认识的（例如异常那一路）
+        // 就把异常压成一行原样给他 —— 宁可稍技术，也不许编一句好听的。
+        final String screenReason = playerReason(why, errLine.isEmpty() ? why : errLine);
+        if (applyOk) {
+            showAppliedNoReopen(mc, screenReason, applyResult);
+        } else {
+            showNoWrite(mc, screenReason, applyResult);
+        }
+    }
+
+    /**
+     * 日志 token ⇒ 玩家看得懂的<b>一行</b>原因（不认识就原样返回 {@code detail}）。
+     *
+     * <p>token 本身照旧写进日志（{@code pack_set_incomplete missing=[…]} 这类是排查用的，不给人看）。
+     */
+    private static String playerReason(String why, String detail) {
+        final String token = why == null ? "" : why;
+        if (token.startsWith("pack_set_incomplete")) {
+            return "这台整合的格雷/模组动态数据包只能在玩家进世界时生成，改完盘再原地重开一次会让它崩";
+        }
+        if (token.startsWith("data_cfg_missing")) {
+            return "这个存档的数据包配置读不出来";
+        }
+        if (token.startsWith("level_id_unresolved")) {
+            return "算不出这个存档的目录名";
+        }
+        if (token.startsWith("apply_not_ok")) {
+            return "写入那一步没有成功";
+        }
+        return detail;
+    }
+
+    /** 结局 B：写入成功、重开没成（B2 = 重进存档 / B3 = 才需要退出游戏）。 */
+    private static void showAppliedNoReopen(Minecraft mc, String detail,
+                                            ShanhaiPlayerDataEditor.Result applyResult) {
+        final boolean stillRunning = worldStillRunning(mc);
+        LAST_OUTCOME = "已写入 " + changedSummary(applyResult) + "；重开没成：" + detail;
+        ShanhaiMod.LOGGER.warn("{} reopen_failed outcome=B{} world_still_running={} reason_human=\"{}\" backup={}",
+                PREFIX, stillRunning ? "3" : "2", stillRunning, detail, backupDir(applyResult));
+        final String body = "存档已经改好（" + changedSummary(applyResult) + "）。\n\n"
+                + "但没能自动重新载入世界：" + detail + "\n\n"
+                + (stillRunning
+                ? "现在世界还开着、没能退出来：请完全退出游戏，再进一次。"
+                : "请重新进入这个存档 —— 不用退出游戏。\n万一重进时游戏报错，再完全退出游戏进一次。")
+                + "\n\n备份在 " + backupDir(applyResult) + "。";
+        showScreen(mc, "存档已改好", body);
+    }
+
+    /** 结局 C：没有改动存档（写入失败 / 被拒 / 没有实际变化）。 */
+    private static void showNoWrite(Minecraft mc, String detail,
+                                    ShanhaiPlayerDataEditor.Result applyResult) {
+        final boolean maybeWritten = applyResult != null && applyResult.write() != null;
+        LAST_OUTCOME = "没有改动存档（" + detail + "）";
+        final String body = "原因：" + detail + "\n\n"
+                + (maybeWritten
+                ? "⚠️ 这次写入没有完全成功：可能有部分内容已经落盘 —— 以备份为准；完全退出游戏后再进一次看看。"
+                : "存档一个字节都没改。")
+                + "\n\n备份在 " + backupDir(applyResult) + "。";
+        showScreen(mc, "没有改动存档", body);
+    }
+
+    /** 统一的"带一个回标题按钮"的提示屏；连建屏都失败也不许把玩家卡在加载屏上。 */
+    private static void showScreen(Minecraft mc, String title, String body) {
         try {
             mc.setScreen(new AlertScreen(
                     () -> mc.setScreen(new TitleScreen()),
-                    Component.literal("存档直改没做完"),
-                    Component.literal(detail + "\n\n存档本身没有被改动（备份在 temp\\saveedit-backup）。")));
-        } catch (Throwable t2) {
-            ShanhaiMod.LOGGER.error("{} fail_screen_failed err={}", PREFIX, t2.toString());
+                    Component.literal(title), Component.literal(body)));
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} fail_screen_failed err={}", PREFIX, t.toString());
+        }
+    }
+
+    /**
+     * 世界是不是<b>还开着</b>（= 停服没成功）—— B2 与 B3 的唯一分界。
+     *
+     * <p>判据用原版自己的状态：{@code Minecraft#clearLevel(...)} 会把 {@code this.singleplayerServer}
+     * 与 {@code this.level} 都置 {@code null}（{@code Minecraft.java:2044-2066}，字节码已核）⇒
+     * 两者都是 {@code null} 就说明"世界已经停了、盘就是权威"，这时的正确提示是
+     * "重新进入这个存档"，<b>不是</b>"退出游戏"。
+     * <p>判不出来时按<b>最重</b>那一档说（B3）：宁可让他多重启一次，也不许在"世界可能还开着"的
+     * 情况下骗他"重进就行" —— 那会让内存里的旧世界再写一遍、把改动盖掉。
+     */
+    private static boolean worldStillRunning(Minecraft mc) {
+        try {
+            return mc.getSingleplayerServer() != null || mc.level != null;
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} world_running_probe_failed err={}", PREFIX, t.toString());
+            return true;
         }
     }
 

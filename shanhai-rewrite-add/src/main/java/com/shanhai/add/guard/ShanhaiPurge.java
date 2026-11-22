@@ -170,6 +170,19 @@ public final class ShanhaiPurge {
     /** 🆕 跳过日志（{@code skip reason=…}）：限流，每 5 秒最多一行。 */
     private static final ShanhaiPurgeAdmission.SkipLog SKIP = new ShanhaiPurgeAdmission.SkipLog();
 
+    /**
+     * 🆕 2026-11-20：「自动反制被 attack_side 关掉」这条日志的合并计数（只在服务端线程上读写）。
+     *
+     * <p>为什么要有它：用户报的 bug 是"手动命令也被挡住了"，而这里恰恰是<b>该</b>被挡的那一半
+     * （自动路径）。留一行每 5 秒最多一次的读数，现场就能一眼分清
+     * "自动抹除是关着的"与"命令也不生效"是两件事。
+     */
+    private static final java.util.concurrent.atomic.AtomicLong AUTO_OFF_SKIPPED =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    /** {@link #AUTO_OFF_SKIPPED} 那一行的 5 秒限流（毫秒时间戳；服务端线程独占）。 */
+    private static long AUTO_OFF_LAST_LOG = 0L;
+
     /** 🆕 跨 tick 攒到"5 秒窗口"的台词（左下角那一批；到点一次发完）。 */
     private static final List<Line> ANNOUNCE_LINES = new ArrayList<>();
 
@@ -190,6 +203,9 @@ public final class ShanhaiPurge {
 
     /** 压制日志/播报的"每秒最多一次"闸门（毫秒时间戳）。 */
     private static long LAST_SUPPRESS_FLUSH = 0L;
+
+    /** 🆕 2026-11-20：`suppress_scan suppressed` 那一行只打一次（attack_side 关→开时复位）。 */
+    private static boolean SUPPRESS_OFF_LOGGED = false;
 
     /** 待播的压制汇总（人话名字 ⇒ 这一秒又抹掉几只）。 */
     private static final Map<String, Integer> SUPPRESS_PENDING = new LinkedHashMap<>();
@@ -282,7 +298,10 @@ public final class ShanhaiPurge {
     @SubscribeEvent(receiveCanceled = true)
     public static void onLivingAttack(LivingAttackEvent event) {
         if (!ShanhaiGuardSwitches.attackSide()) {
-            return;   // 开关关着：一个字节都不改（默认开）
+            // 🔴 2026-11-20（任务 1）：这一条是【自动路径】，就该被 attack_side 挡住；
+            //    被挡的只有这一样（受击后自动抹除攻击者）＋ 持续压制，**手动命令一律不受影响**。
+            noteAutoOff();
+            return;
         }
         if (!(event.getEntity() instanceof ServerPlayer victim)) {
             return;
@@ -375,6 +394,27 @@ public final class ShanhaiPurge {
         if (line != null) {
             ShanhaiMod.LOGGER.info(line);
         }
+    }
+
+    /**
+     * 🆕 2026-11-20：记一次"自动反制被 attack_side 关掉"，每 5 秒最多落一行。
+     *
+     * <p>判据行（用户点名要的那一行）：
+     * <pre>
+     *   [SHANHAI-GUARD] auto_removal suppressed reason=attack_side_off n=&lt;累计次数&gt;
+     *   （自动抹除攻击者已关；手动 /shanhai purge ／ /shanhai_add purge 不受影响）
+     * </pre>
+     * ⇒ 现场只要看到这一行，就知道"自动那条路是关着的"，与"命令能不能用"是两回事。
+     */
+    private static void noteAutoOff() {
+        final long n = AUTO_OFF_SKIPPED.incrementAndGet();
+        final long now = System.currentTimeMillis();
+        if (now - AUTO_OFF_LAST_LOG < 5_000L) {
+            return;   // 5 秒窗口内不再打（一行里带累计次数，数字不会丢）
+        }
+        AUTO_OFF_LAST_LOG = now;
+        ShanhaiMod.LOGGER.info(PREFIX + "auto_removal suppressed reason=attack_side_off n=" + n
+                + "（自动抹除攻击者已关；手动 /shanhai purge ／ /shanhai_add purge 不受影响）");
     }
 
     /**
@@ -529,6 +569,18 @@ public final class ShanhaiPurge {
         if (++SUPPRESS_TICK % ShanhaiGuardSuppressWindow.SCAN_EVERY_TICKS != 0) {
             return;
         }
+        // 🔴 2026-11-20（任务 1）：持续压制的【周期复查】是自动反制的那一半 ⇒ attack_side=false 时不扫。
+        //    表里可能还留着上一段开着时上的榜（窗口自己会到期，不清表 —— 清了就等于替用户改了状态）。
+        //    这一行只打一次（关→开时复位），免得每 5 tick 刷屏。
+        if (!ShanhaiGuardSwitches.attackSide()) {
+            if (!SUPPRESS_OFF_LOGGED) {
+                SUPPRESS_OFF_LOGGED = true;
+                ShanhaiMod.LOGGER.info(PREFIX + "suppress_scan suppressed reason=attack_side_off"
+                        + "（持续压制已关；/shanhai purge ／ /shanhai_add purge 这些手动命令不受影响）");
+            }
+            return;
+        }
+        SUPPRESS_OFF_LOGGED = false;
         final long now = System.currentTimeMillis();
         final ServerPlayer to = ShanhaiGuardSuppression.owner(server);
         ShanhaiGuardSuppression.scanAndRemove(server, now, to);

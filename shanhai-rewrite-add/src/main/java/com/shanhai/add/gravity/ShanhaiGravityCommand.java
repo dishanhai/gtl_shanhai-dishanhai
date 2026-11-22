@@ -33,7 +33,8 @@ import net.minecraftforge.fml.common.Mod;
  * <h2>🔴 写入链路（服务端权威）</h2>
  * <pre>
  *   指令 → ShanhaiGravity.set(G)「进程内权威值」
- *        → ShanhaiAddConfig.COMMON.gravityMultiplier.set(G) + COMMON_SPEC.save()「落盘，重启还在」
+ *        → ShanhaiAddConfig.setGravityMultiplier(G)「= ConfigValue#set + COMMON_SPEC.save() + 回读磁盘」
+ *          （唯一出口在 AddConfigFiles，会打一行 cfg_write key=gravity.multiplier saved=… verified=…）
  *        → ShanhaiGravityNetwork.syncToAll(server)「通知所有客户端，避免橡皮筋」
  *        → 两行日志：set_mult=… / gravity_state …
  * </pre>
@@ -122,20 +123,9 @@ public final class ShanhaiGravityCommand {
         final double got = ShanhaiGravity.set(want);
 
         // ① 落盘（COMMON 配置：单机两侧读同一份；专用服务端读服务端那份）
-        boolean saved = false;
-        if (ShanhaiAddConfig.isLoaded()) {
-            try {
-                ShanhaiAddConfig.COMMON.gravityMultiplier.set(got);
-                ShanhaiAddConfig.COMMON_SPEC.save();
-                saved = true;
-            } catch (Throwable t) {
-                ShanhaiMod.LOGGER.warn("{} config_write_failed mult={} err={}",
-                        ShanhaiGravity.PREFIX, ShanhaiGravity.fmt(got), t.toString());
-            }
-        } else {
-            ShanhaiMod.LOGGER.warn("{} config_not_loaded（本次倍率只在内存里生效，重启会丢）",
-                    ShanhaiGravity.PREFIX);
-        }
+        //    🔴 2026-11-22：走 AddConfigFiles 的唯一出口（写值 + save + 回读磁盘 + 一行 cfg_write）。
+        //    persisted 的口径是【盘上重新读出来就是新值】，不是"save() 没抛异常"。
+        final boolean persisted = ShanhaiAddConfig.setGravityMultiplier(got);
 
         // ② 两端同步（服务端权威 → 所有客户端；不广播的话本地玩家预测会分叉 = 橡皮筋）
         final MinecraftServer server = source.getServer();
@@ -144,14 +134,18 @@ public final class ShanhaiGravityCommand {
         // ③ 日志（主代理按这两串判）
         ShanhaiMod.LOGGER.info("{} set mult={} by={} asked={} how={} saved={}",
                 ShanhaiGravity.PREFIX, ShanhaiGravity.fmt(got), by,
-                ShanhaiGravity.fmt(want), how, saved);
+                ShanhaiGravity.fmt(want), how, persisted);
         ShanhaiMod.LOGGER.info("{} {}", ShanhaiGravity.PREFIX,
                 ShanhaiGravity.stateLine(ShanhaiGravity.SITE_BASES.length));
 
         // ④ 回执（含"这条倍率意味着什么"，免得用户对着数字猜）
+        //    🔴 文件名 2026-11-22 修正：这条命令写的是扩展自己那份 shanhai_add-common.toml
+        //    （以前回显写成本体的 shanhai-common.toml —— 玩家照着去改会改错文件）
         final String msg = "§a重力倍率 = §f" + ShanhaiGravity.fmt(got)
                 + " §8(" + describe(got) + ")"
-                + (saved ? " §8· 已写进 config/shanhai-common.toml" : " §c· 配置未加载，只在内存里");
+                + (persisted
+                        ? " §8· 已写进 config/" + ShanhaiAddConfig.FILE_NAME + "（重启还是这个值）"
+                        : " §c· 配置没写成功，只在内存里（重启会回到上次保存的值）");
         source.sendSuccess(() -> Component.literal(msg), true);
         return 1;
     }

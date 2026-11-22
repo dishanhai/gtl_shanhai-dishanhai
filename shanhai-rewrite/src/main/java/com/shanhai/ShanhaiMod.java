@@ -131,6 +131,11 @@ public class ShanhaiMod {
         // ① 18 个物品：纯 Registrate builder 入列，不碰 GTRegistry，构造期合法。
         ShanhaiRegistry.init();
 
+        // 🆕 2026-11-22：「现实流体」32 个占位流体（shanhai:reality_fluid_1..32）。
+        //    与上面 ShanhaiFluids 那条同一个理由：流体是 Forge 原生注册表，构造期入列即可，
+        //    不受 GTCEu GTRegistry 冻结窗口约束；注册点只加这一行，既有逻辑一行没动。
+        com.shanhai.fluid.ShanhaiRealityFluids.init();
+
         // 🆕 2026-11-16（阶段 3）：16 件异常投掷物的装配点。
         //    ├─ 注册唯一那个 EntityType（shanhai:crash_bolt，渲染用原版 ThrownItemRenderer）
         //    ├─ 占住 OOM 用的「保命缓冲」（几十 MB，崩时先还给堆，报告才写得出来）

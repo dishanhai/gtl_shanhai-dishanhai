@@ -428,7 +428,8 @@ public final class ShanhaiSaveEditFactory extends UIFactory<ShanhaiSaveEditFacto
         // v2 = 面板扩到三页（页号/BE 模式各侧自持，当前值靠 LabelWidget push）
         // v3 = 扩到六页（+ 实体/成就/统计：模式、暂存请求、明细行同样各侧自持 + push）
         // v4 = 扩到七页（+ 存档体检：清单/摘要/选中同样服务端权威 + push；⚪ 客户端那份 holder 不持有扫描结果）
-        buf.writeVarInt(4);
+        // v5 = 第 ⑦ 页改语义（白名单之外一律算异常，7 行列表 + 翻页 + 搜索；双份登记那两个动作删掉）
+        buf.writeVarInt(5);
     }
 
     // ================================================================== Holder
@@ -523,22 +524,15 @@ public final class ShanhaiSaveEditFactory extends UIFactory<ShanhaiSaveEditFacto
             }
         }
 
-        // ── 第五期加的第 ⑦ 页（存档体检 · 双份登记）
-        /** 体检页清单行数（面板与这里共用同一个数，见 {@code ShanhaiSaveEditLayout.AU_LINES}）。 */
-        public static final int AUDIT_LINES = ShanhaiSaveEditLayout.AU_LINES;
-        /** 体检页暂存的动作（从单槽改成累积容器；空表 = 没按过「删…」）。 */
+        // ── 第五期加的第 ⑦ 页（存档体检 · 白名单之外一律算异常，可逐条删）
+        /**
+         * 体检页暂存的动作（累积容器；<b>键 = 归一后的相对路径</b>，空表 = 没按过「删除选中项」）。
+         *
+         * <p>扫描结果/选中项/页码都在 {@code ShanhaiSaveEditPanel} 那一侧（服务端那份），
+         * 不在这里 —— holder 只管"跨面板存在的那一份"（暂存清单）。
+         */
         private final Map<String, com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request> stagedAudit
                 = new LinkedHashMap<>();
-        /** 上一次扫描的结果（服务端那份才有；客户端靠 LabelWidget push 看字）。 */
-        private com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.Report auditReport;
-        /** 清单里选中第几条（服务端权威；客户端只显示推来的字）。 */
-        private int auditSelected;
-        /** 摘要那一行 + 选中那一行（都是服务端权威的字面串）。 */
-        private String auditSummary = "";
-        private String auditSelectedLine = "";
-        /** 选中那条的旁挂是不是二进制（true ⇒「删旁挂那行」灰掉）。 */
-        private boolean auditCanDropSidecar;
-        private final String[] auditLines = new String[AUDIT_LINES];
 
         public Holder(boolean remote, ShanhaiSaveEditRunContext ctx, String status) {
             this.remote = remote;
@@ -905,9 +899,10 @@ public final class ShanhaiSaveEditFactory extends UIFactory<ShanhaiSaveEditFacto
             return request == null ? "" : request.cat() + "/" + request.statKey();
         }
 
-        /** 体检请求的键 = {@code 动作|UUID}（同一个 UUID 的两个动作动的是两个不同的文件，必须能并存）。 */
+        /** 体检请求的键 = 归一后的相对路径（同一条路径重复暂存 = 覆盖）。 */
         static String auditKey(com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request request) {
-            return request == null ? "" : request.action() + "|" + request.normalizedUuid();
+            final String rel = request == null ? null : request.normalizedRel();
+            return rel == null ? "" : rel;
         }
 
         /** 实体字段补丁的键 = {@code 维度|UUID}（UUID 统一小写）。 */
@@ -955,7 +950,7 @@ public final class ShanhaiSaveEditFactory extends UIFactory<ShanhaiSaveEditFacto
             return this.stagedAudit.size();
         }
 
-        /** 暂存一条体检动作（<b>累加</b>；{@code 动作|UUID} 相同的只留最后一次）。{@code null}/空 ⇒ 清空这一页。 */
+        /** 暂存一条体检动作（<b>累加</b>；同一路径只留最后一次）。{@code null}/空 ⇒ 清空这一页。 */
         public void setStagedAudit(com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request request) {
             if (request == null || request.isEmpty()) {
                 this.stagedAudit.clear();
@@ -976,68 +971,6 @@ public final class ShanhaiSaveEditFactory extends UIFactory<ShanhaiSaveEditFacto
             this.stagedStats.clear();
             this.stagedEntityPatch.clear();
             this.stagedAudit.clear();
-        }
-
-        /** 上一次扫描的结果（客户端那份恒 {@code null}）。 */
-        public com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.Report auditReport() {
-            return this.auditReport;
-        }
-
-        public void setAuditReport(com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.Report report) {
-            this.auditReport = report;
-        }
-
-        public int auditSelected() {
-            return this.auditSelected;
-        }
-
-        public void setAuditSelected(int selected) {
-            final int total = this.auditReport == null ? 0 : this.auditReport.findings().size();
-            this.auditSelected = total <= 0 ? 0 : Math.max(0, Math.min(total - 1, selected));
-        }
-
-        /** 选中那条 finding（没有扫描结果 / 没选中 ⇒ {@code null}；只有服务端那份有）。 */
-        public com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.Finding auditSelectedFinding() {
-            if (this.auditReport == null) {
-                return null;
-            }
-            final java.util.List<com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.Finding> list =
-                    this.auditReport.findings();
-            return this.auditSelected >= 0 && this.auditSelected < list.size()
-                    ? list.get(this.auditSelected) : null;
-        }
-
-        public String auditSummary() {
-            return this.auditSummary == null ? "" : this.auditSummary;
-        }
-
-        public void setAuditSummary(String summary) {
-            this.auditSummary = summary == null ? "" : summary;
-        }
-
-        public String auditSelectedLine() {
-            return this.auditSelectedLine == null ? "" : this.auditSelectedLine;
-        }
-
-        public void setAuditSelectedLine(String line) {
-            this.auditSelectedLine = line == null ? "" : line;
-        }
-
-        /** 选中那条的旁挂能不能删（false ⇒「删旁挂那行」灰掉 + tooltip 说明）。 */
-        public boolean auditCanDropSidecar() {
-            return this.auditCanDropSidecar;
-        }
-
-        public void setAuditCanDropSidecar(boolean can) {
-            this.auditCanDropSidecar = can;
-        }
-
-        public void setAuditLines(java.util.List<String> lines) {
-            fill(this.auditLines, lines);
-        }
-
-        public String auditLine(int index) {
-            return at(this.auditLines, index);
         }
 
         private static String at(String[] source, int index) {

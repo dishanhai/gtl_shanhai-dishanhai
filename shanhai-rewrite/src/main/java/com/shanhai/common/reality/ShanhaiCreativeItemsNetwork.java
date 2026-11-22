@@ -37,6 +37,8 @@ import java.util.function.Supplier;
  *   id=3  C2S  removal    ：id + 动作(藏/取消藏/抹除/撤回)              —— 「删除」页三个按钮
  *   id=4  C2S  impact_req ：id                                        —— 「删除」页选中/「看影响面」
  *   id=5  S2C  impact_res ：id + 影响面五个数 + 方块计数                —— 服务端算完回填
+ *   id=6  C2S  fluid_save ：槽位 + 名字 + tint + still + flow             —— 🆕「流体」页点「保存」
+ *   id=7  S2C  fluid_sync ：现实流体整表 JSON                            —— 🆕 服务端改完之后广播
  * </pre>
  * <b>没有"请求打开界面"这条消息</b>：两条入口（全息板 / 指令）本来就在服务端那一侧动作
  * （全息板走 {@code ShanhaiHoloMenuNetwork} 的既有 C2S，指令直接跑在服务端）。
@@ -56,8 +58,10 @@ public final class ShanhaiCreativeItemsNetwork {
     /**
      * 🔴 2026-10-17 由 "1" 提到 "2"：同一个通道上多了三条 C2S ＋ 一条 S2C。
      * 版本号一致才握手 ⇒ 新旧 jar 混装会<b>拒连</b>，而不是把消息 id 对错位（对错位是静默的坏）。
+     * <p>🆕 2026-11-22 由 "2" 提到 "3"：追加「现实流体」两条（C2S 保存 ＋ S2C 整表），
+     * 理由与上面逐字相同。
      */
-    private static final String CHANNEL_VERSION = "2";
+    private static final String CHANNEL_VERSION = "3";
 
     private static final int ID_C2S_SAVE = 0;
     private static final int ID_S2C_SYNC = 1;
@@ -69,6 +73,10 @@ public final class ShanhaiCreativeItemsNetwork {
     private static final int ID_C2S_IMPACT = 4;
     /** 🆕 影响面结果（回填给请求的那一个玩家）。 */
     private static final int ID_S2C_IMPACT = 5;
+    /** 🆕 2026-11-22 「流体」页：保存一个流体槽位（名字 / tint / still / flow）。 */
+    private static final int ID_C2S_FLUID_SAVE = 6;
+    /** 🆕 「流体」页：整表 JSON（服务端改完之后广播）。 */
+    private static final int ID_S2C_FLUID_SYNC = 7;
 
     /** 「删除」页的四个动作（{@link #requestRemoval} 的第二个参数）。 */
     public static final int ACTION_HIDE_ON = 0;
@@ -118,9 +126,17 @@ public final class ShanhaiCreativeItemsNetwork {
             channel.registerMessage(ID_S2C_IMPACT, ImpactResultMessage.class,
                     ImpactResultMessage::encode, ImpactResultMessage::decode, ImpactResultMessage::handle,
                     Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+            // 🆕 2026-11-22：「现实流体」两条（保存 / 整表同步）
+            channel.registerMessage(ID_C2S_FLUID_SAVE, FluidSaveMessage.class,
+                    FluidSaveMessage::encode, FluidSaveMessage::decode, FluidSaveMessage::handle,
+                    Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            channel.registerMessage(ID_S2C_FLUID_SYNC, FluidSyncMessage.class,
+                    FluidSyncMessage::encode, FluidSyncMessage::decode, FluidSyncMessage::handle,
+                    Optional.of(NetworkDirection.PLAY_TO_CLIENT));
             registered = true;
-            ShanhaiMod.LOGGER.info("{} net_channel_registered name={} version={} c2s=[save,override,removal,impact] "
-                            + "s2c=[sync,impact_result]",
+            ShanhaiMod.LOGGER.info("{} net_channel_registered name={} version={} "
+                            + "c2s=[save,override,removal,impact,fluid_save] "
+                            + "s2c=[sync,impact_result,fluid_sync]",
                     PREFIX, CHANNEL_NAME, CHANNEL_VERSION);
         } catch (Throwable t) {
             // 通道建不起来不能让服务端起不来（界面的"保存"会退化成只改客户端内存并打 ERROR）
@@ -155,6 +171,9 @@ public final class ShanhaiCreativeItemsNetwork {
         try {
             channel.send(PacketDistributor.PLAYER.with(() -> player),
                     new SyncMessage(ShanhaiRealityItemTable.toJsonString()));
+            // 🆕 2026-11-22：流体表也一起对账（同一个面板的第 ④ 页读它）
+            channel.send(PacketDistributor.PLAYER.with(() -> player),
+                    new FluidSyncMessage(ShanhaiRealityFluidTable.toJsonString()));
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} sync_send_failed player={} err={}",
                     PREFIX, player.getName().getString(), t.toString(), t);
@@ -176,6 +195,30 @@ public final class ShanhaiCreativeItemsNetwork {
                     ShanhaiRealityItemTable.definedCount());
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} sync_broadcast_failed err={}", PREFIX, t.toString(), t);
+        }
+    }
+
+    /**
+     * 🆕 服务端：把「现实流体」整表广播给所有在线客户端。
+     *
+     * <p>为什么必须广播：名字 / tint / 贴图全是<b>客户端渲染时现读表</b>的
+     * （{@code FluidType#getDescription} 与 {@code IClientFluidTypeExtensions}）⇒
+     * 客户端那份表不更新，界面改了也"看不到变化"。
+     */
+    public static void syncFluidsToAll(MinecraftServer server) {
+        if (!isReady() || server == null) {
+            return;
+        }
+        try {
+            final String json = ShanhaiRealityFluidTable.toJsonString();
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                channel.send(PacketDistributor.PLAYER.with(() -> p), new FluidSyncMessage(json));
+            }
+            ShanhaiMod.LOGGER.info("{} fluid_sync_broadcast players={} bytes={} customized={} version={}",
+                    PREFIX, server.getPlayerList().getPlayerCount(), json.length(),
+                    ShanhaiRealityFluidTable.customizedCount(), ShanhaiRealityFluidTable.version());
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} fluid_sync_broadcast_failed err={}", PREFIX, t.toString(), t);
         }
     }
 
@@ -248,6 +291,28 @@ public final class ShanhaiCreativeItemsNetwork {
         }
     }
 
+    // ------------------------------------------------------------------ 🆕 现实流体（2026-11-22）
+
+    /**
+     * 「流体」页：把这一个流体的整包字段发到服务端（服务端校验 ＋ 落盘 ＋ 广播）。
+     *
+     * @param tint ARGB（面板已经归一成 {@code 0xFFxxxxxx}；服务端还会再归一一次）
+     */
+    public static void requestFluidSave(int slot, String name, String still, String flow, int tint) {
+        if (!isReady()) {
+            ShanhaiMod.LOGGER.error("{} fluid_save_net_skip reason=channel_not_ready slot={}", PREFIX, slot + 1);
+            return;
+        }
+        try {
+            channel.sendToServer(new FluidSaveMessage(slot, name, still, flow, tint));
+            ShanhaiMod.LOGGER.info("{} fluid_save_sent slot={} name_len={} still={} flow={} tint={}",
+                    PREFIX, slot + 1, name == null ? 0 : name.length(), still, flow,
+                    ShanhaiRealityFluidTable.tintHex(tint));
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} fluid_save_send_failed slot={} err={}", PREFIX, slot + 1, t.toString(), t);
+        }
+    }
+
     /**
      * 影响面结果（服务端 → 客户端）。{@code blockTotal < 0} = 不是方块。
      *
@@ -289,7 +354,7 @@ public final class ShanhaiCreativeItemsNetwork {
 
         void encode(FriendlyByteBuf buf) {
             buf.writeVarInt(slot);
-            buf.writeUtf(cap(name, ShanhaiRealityItemTable.MAX_NAME_CHARS + 8), 512);
+            buf.writeUtf(cap(name, ShanhaiRealityItemTable.MAX_NAME_RAW_CHARS + 8), 512);
             buf.writeUtf(cap(icon, ShanhaiRealityItemTable.MAX_ICON_CHARS + 8), 512);
             buf.writeVarInt(maxStack);
             buf.writeUtf(cap(rarity, 24), 64);
@@ -388,8 +453,8 @@ public final class ShanhaiCreativeItemsNetwork {
 
         void encode(FriendlyByteBuf buf) {
             buf.writeUtf(capStr(id, 160), 512);
-            buf.writeUtf(capStr(name, ShanhaiItemOverrideTable.MAX_NAME_CHARS + 8), 512);
-            // ⚠️ writeUtf 的上限是【UTF-8 字节数】，中文一个字 3 字节 ⇒ 这里给 8192，别卡在 2048
+            buf.writeUtf(capStr(name, ShanhaiItemOverrideTable.MAX_NAME_RAW_CHARS + 8), 1024);
+            // ⚠️ writeUtf 的上限是【char 数】，中文一个字 3 字节 ⇒ 这里给 8192，别卡在 2048
             buf.writeUtf(capStr(lore, ShanhaiItemOverrideTable.MAX_LORE_CHARS + 8), 8192);
             buf.writeUtf(capStr(loreMode, 24), 64);
             buf.writeVarInt(maxStack);
@@ -397,7 +462,7 @@ public final class ShanhaiCreativeItemsNetwork {
         }
 
         static OverrideMessage decode(FriendlyByteBuf buf) {
-            return new OverrideMessage(buf.readUtf(512), buf.readUtf(512),
+            return new OverrideMessage(buf.readUtf(512), buf.readUtf(1024),
                     buf.readUtf(8192), buf.readUtf(64), buf.readVarInt(), buf.readBoolean());
         }
 
@@ -650,6 +715,104 @@ public final class ShanhaiCreativeItemsNetwork {
                 // ⚠️ 本消息方向是 PLAY_TO_CLIENT ⇒ 这段只在客户端跑（专服不会加载到界面类）
                 ShanhaiItemRemovalPage.onImpactResult(this.result);
                 ShanhaiMod.LOGGER.info("{} impact_result_applied {}", PREFIX, this.result.oneLine());
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    // ================================================================== 🆕 现实流体（2026-11-22）
+
+    /** C2S：保存一个流体槽位（名字 / tint / still / flow）。 */
+    public static final class FluidSaveMessage {
+
+        private final int slot;
+        private final String name;
+        private final String still;
+        private final String flow;
+        private final int tint;
+
+        FluidSaveMessage(int slot, String name, String still, String flow, int tint) {
+            this.slot = slot;
+            this.name = name == null ? "" : name;
+            this.still = still == null ? "" : still;
+            this.flow = flow == null ? "" : flow;
+            this.tint = tint;
+        }
+
+        void encode(FriendlyByteBuf buf) {
+            buf.writeVarInt(slot);
+            buf.writeUtf(cap(name, ShanhaiRealityFluidTable.MAX_NAME_RAW_CHARS + 8), 512);
+            buf.writeUtf(cap(still, ShanhaiRealityFluidTable.MAX_TEXTURE_CHARS + 8), 512);
+            buf.writeUtf(cap(flow, ShanhaiRealityFluidTable.MAX_TEXTURE_CHARS + 8), 512);
+            buf.writeInt(tint);
+        }
+
+        static FluidSaveMessage decode(FriendlyByteBuf buf) {
+            return new FluidSaveMessage(buf.readVarInt(), buf.readUtf(512), buf.readUtf(512),
+                    buf.readUtf(512), buf.readInt());
+        }
+
+        void handle(Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
+            final net.minecraftforge.network.NetworkEvent.Context context = ctx.get();
+            context.enqueueWork(() -> {
+                final ServerPlayer player = context.getSender();
+                if (player == null) {
+                    return;
+                }
+                if (!ShanhaiRealityItemTable.playerHasModule(player)) {
+                    // 与「新增」页同一条门槛：服务端不信客户端，再判一次
+                    player.displayClientMessage(Component.literal(
+                            ShanhaiRealityItemTable.moduleRequiredText()), false);
+                    ShanhaiMod.LOGGER.warn("{} fluid_save_rejected reason=no_module slot={} player={}",
+                            PREFIX, this.slot + 1, player.getName().getString());
+                    return;
+                }
+                final boolean ok = ShanhaiRealityFluidTable.apply(this.slot, this.name,
+                        this.still, this.flow, this.tint);
+                if (!ok) {
+                    player.displayClientMessage(Component.literal(
+                            "§c流体保存失败（看日志里的 fluid store_write_failed）"), false);
+                    return;
+                }
+                // 客户端那份表必须跟着换 ⇒ 名字/tint/贴图才"立刻变"（它们全是渲染时现读表）
+                ShanhaiCreativeItemsNetwork.syncFluidsToAll(player.getServer());
+            });
+            context.setPacketHandled(true);
+        }
+
+        private static String cap(String s, int max) {
+            if (s == null) {
+                return "";
+            }
+            return s.length() > max ? s.substring(0, max) : s;
+        }
+    }
+
+    /** S2C：现实流体整表。 */
+    public static final class FluidSyncMessage {
+
+        private final String json;
+
+        FluidSyncMessage(String json) {
+            this.json = json == null ? "{}" : json;
+        }
+
+        void encode(FriendlyByteBuf buf) {
+            buf.writeUtf(json, 262144);
+        }
+
+        static FluidSyncMessage decode(FriendlyByteBuf buf) {
+            return new FluidSyncMessage(buf.readUtf(262144));
+        }
+
+        void handle(Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
+            final net.minecraftforge.network.NetworkEvent.Context context = ctx.get();
+            context.enqueueWork(() -> {
+                // 方向是 PLAY_TO_CLIENT ⇒ 这段只在客户端跑；表是纯数据类，不会加载客户端渲染类
+                ShanhaiRealityFluidTable.applyFromJsonString(json);
+                ShanhaiMod.LOGGER.info("{} fluid_sync_applied customized={} version={}",
+                        PREFIX, ShanhaiRealityFluidTable.customizedCount(),
+                        ShanhaiRealityFluidTable.version());
             });
             context.setPacketHandled(true);
         }

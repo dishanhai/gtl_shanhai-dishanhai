@@ -30,7 +30,7 @@ import net.minecraftforge.fml.common.Mod;
  *   /shanhai purge selfcheck            自检（本体这一半：拦/放行两条值 ＋ 通道 ＋ 隔离阈值 ＋ 四个开关）
  *   /shanhai guard                      看开关现在什么状态
  *   /shanhai guard ai on|off            AI 层（默认关）
- *   /shanhai guard attack on|off        攻击端（默认开）
+ *   /shanhai guard attack on|off        攻击端（默认关；抹除攻击者/持续压制/逐级 purge 都在它下面）
  *   /shanhai guard death on|off         死而无损（默认开）
  *   /shanhai guard knockback on|off     🆕 反击退 / 反挤压（默认开；关掉后完全不动玩家）
  *   /shanhai guard triage [on|off]      🆕 T 件：分诊读数（默认开；<b>只记录不反制</b>，运行时开关不落配置）
@@ -174,12 +174,15 @@ public final class ShanhaiGuardCommand {
             source.sendFailure(Component.literal(denied));
             return 0;
         }
-        if (!ShanhaiGuardSwitches.attackSide()) {
-            source.sendFailure(Component.literal(
-                    "§c攻击端开关是关的（/shanhai guard attack on 打开后才能抹除）"));
-            ShanhaiMod.LOGGER.info("{} purge_rejected reason=attack_side_off", PREFIX);
-            return 0;
-        }
+        // 🔴 2026-11-20（任务 1）：这里【不再判 attackSide】。
+        //    用户原话：「不是停止所有攻击，我打那个抹除的指令都不生效了，我要的是不自动攻击，
+        //    就是不要有那个压制，也不要有受击之后自动攻击那个实体」
+        //    ⇒ attack_side 只关【自动反制】两样：① 受击后自动抹除攻击者（ShanhaiPurge#onLivingAttack）
+        //      ② 持续压制（ShanhaiGuardSuppression 的 enroll ＋ 每 5 tick 复查）。
+        //    命令路径（/shanhai purge ／ purge count ／ /shanhai_add purge ／ suppress list|clear ／
+        //    hotfix auto on|off）永远可用 —— 那种"手动命令被自动开关挡死"是最不该出现的形态。
+        //    权限仍然由上面的 gate(带模块) 把关。
+        final boolean attackSideNow = ShanhaiGuardSwitches.attackSide();
         final MinecraftServer server = source.getServer();
         final ServerPlayer owner = source.getPlayer();
         // ① 先问扩展（唯一的跨 mod 调用点；阶段 2 它返回 -1 = 未实现）
@@ -196,6 +199,10 @@ public final class ShanhaiGuardCommand {
         final ShanhaiPurgeSimple.Result r = route.usesAdd()
                 ? ShanhaiPurgeSimple.fromBridge(server, route.removed)
                 : ShanhaiPurgeSimple.killAll(server, owner, dryRun);
+        // 🔴 2026-11-20 任务 1 的判读行：`purge via=command` 就是"命令路径没被 attackSide 挡住"的证据
+        //    （attack_side=… 只作为背景读数打在这里，不参与放行判断）。
+        ShanhaiMod.LOGGER.info("{} purge via=command count={} dry_run={} attack_side={}（命令路径不判 attackSide）",
+                PREFIX, dryRun ? r.scanned : r.removed, dryRun, attackSideNow);
         ShanhaiMod.LOGGER.info("{} {} bridge_version={} levels={} removed={} skipped_players={} dry_run={}",
                 PREFIX, route.logLine(), bridgeVersion(bridge),
                 r.levels, r.removed, r.skippedPlayers, dryRun);

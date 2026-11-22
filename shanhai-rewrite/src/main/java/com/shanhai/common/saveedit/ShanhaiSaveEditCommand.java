@@ -241,6 +241,7 @@ public final class ShanhaiSaveEditCommand {
         // 五期把页数从 6 改成 7（+ ⑦ 存档体检）：这里不再写死 6，改成"六页的老读数一个不差 + 第七页也有控件"
         // 五期续（第 ④ 页改版：按维度列表 → 点一行 → 覆盖层 + 翻页）：控件数 26 → 19 → 22
         // S2b（第 ⑤⑥ 页照第 ④ 页同构：列表 → 点一行 → 覆盖层 + 翻页）：18/22 → 19/19
+        // S2d（第 ⑦ 页改语义：白名单之外一律算异常，7 行列表 + 翻页 + 搜索）：18 → 19
         final boolean layout6 = ShanhaiSaveEditLayout.PAGE_COUNT == 7
                 && ShanhaiSaveEditLayout.pageWidgetCount(0) == 29
                 && ShanhaiSaveEditLayout.pageWidgetCount(1) == 1 + ShanhaiLevelDataSpec.FIELDS.size() * 3
@@ -248,7 +249,9 @@ public final class ShanhaiSaveEditCommand {
                 && ShanhaiSaveEditLayout.pageWidgetCount(3) == 22
                 && ShanhaiSaveEditLayout.pageWidgetCount(4) == 19
                 && ShanhaiSaveEditLayout.pageWidgetCount(5) == 19
-                && ShanhaiSaveEditLayout.pageWidgetCount(ShanhaiSaveEditLayout.PAGE_AUDIT) == 18
+                && ShanhaiSaveEditLayout.pageWidgetCount(ShanhaiSaveEditLayout.PAGE_AUDIT) == 19
+                && ShanhaiSaveEditLayout.auditSlots().size() == 19
+                && ShanhaiSaveEditLayout.AU_ROWS == ShanhaiSaveEditLayout.NEW_LINES
                 && ShanhaiSaveEditLayout.layoutProblems().isEmpty();
         final boolean dimTable = ShanhaiSaveEditDimension.MAPPING_SAMPLES.size() == 10
                 && ShanhaiSaveEditDimension.normalize("ad_astra:moon") != null
@@ -299,32 +302,41 @@ public final class ShanhaiSaveEditCommand {
         } catch (IllegalArgumentException expected) {
             statsReqRejects = true;
         }
-        // 五期：第 ⑦ 页（存档体检）的请求校验 —— 好请求放行、乱写 UUID / 空请求必须拒
+        // S2d：第 ⑦ 页（存档体检）的请求校验 —— 好路径放行、绝对路径/含 ../空请求必须拒
         boolean auditReqOk = false;
         boolean auditReqRejects = false;
         try {
             new com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request(
-                    com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request.DROP_ENTITY,
-                    "550e8400-e29b-41d4-a716-446655440000").validate();
+                    "examplemod/sidecar.bin").validate();
             auditReqOk = true;
         } catch (IllegalArgumentException auditBad) {
             auditReqOk = false;
         }
         try {
-            new com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request(
-                    com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request.DROP_ENTITY,
-                    "not-a-uuid").validate();
+            new com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request("../escape.bin").validate();
         } catch (IllegalArgumentException expected) {
             auditReqRejects = true;
         }
+        // 白名单判据的正/负对照（纯函数，不读盘）
+        final boolean auditWhitelisted = com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan
+                .whitelisted("region/r.0.0.mca")
+                && com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.whitelisted("level.dat")
+                && com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan
+                .whitelisted("DIM-1/entities/r.0.0.mca")
+                && com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan
+                .whitelisted("dimensions/kubejs/void/region/r.0.0.mca")
+                && !com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan
+                .whitelisted("examplemod/sidecar.bin")
+                && !com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditScan.whitelisted("weird_dir");
         sb.append(" layout6=").append(layout6).append(" dim_table=").append(dimTable)
                 .append(" new_req_ok=").append(entityReqOk && advReqOk && statsReqOk)
                 .append(" new_req_reject=").append(entityReqRejects && advReqRejects && statsReqRejects)
                 .append(" audit_req_ok=").append(auditReqOk)
-                .append(" audit_req_reject=").append(auditReqRejects);
+                .append(" audit_req_reject=").append(auditReqRejects)
+                .append(" audit_whitelist=").append(auditWhitelisted);
         pass &= layout6 && dimTable && entityReqOk && advReqOk && statsReqOk
                 && entityReqRejects && advReqRejects && statsReqRejects
-                && auditReqOk && auditReqRejects;
+                && auditReqOk && auditReqRejects && auditWhitelisted;
 
         // ⑧ S2c：第 ① 页「物品栏 41 格 + 末影箱」覆盖层（纯逻辑：格号↔槽位 / 四段 / 数量 / 名字回退）
         //    题面点名的三处同步：页① 的控件数（1 换 1，仍是 29，见 layout6）、槽位表

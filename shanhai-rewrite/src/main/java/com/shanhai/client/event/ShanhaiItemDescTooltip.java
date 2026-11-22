@@ -1,6 +1,7 @@
 package com.shanhai.client.event;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.common.itemedit.ShanhaiItemOverrideHooks;
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
 
 import net.minecraft.client.resources.language.I18n;
@@ -64,6 +65,13 @@ public final class ShanhaiItemDescTooltip {
         final ItemStack stack = event.getItemStack();
         if (stack.isEmpty()) {
             return;
+        }
+        // 🔴 2026-11-20（用户：「这个物品编辑器，它新增的描述是在最下面的，我希望它在正常注册的物品的描述那里」）
+        //    物品编辑器加的描述改在**这里**加：事件发生在"名字与属性之后、其它模组附加行之前"，
+        //    ⇒ 与物品自己注册的描述落在同一段，而不是排到整条提示框的最底。
+        //    以前那段是挂在 getTooltipLines 的 RETURN 上加的（最底），现在 RETURN 只负责 replace 模式。
+        for (Component line : ShanhaiItemOverrideHooks.earlyLore(stack)) {
+            event.getToolTip().add(line);
         }
         final ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         if (id == null || !ShanhaiMod.MOD_ID.equals(id.getNamespace())) {

@@ -33,11 +33,11 @@ import static com.shanhai.common.saveedit.ShanhaiSaveEditLayout.*;
 
 /**
  * 「存档直改」面板（<b>七页共存</b>：① 玩家 ② 世界(level.dat) ③ 方块(region) ④ 实体(entities)
- * ⑤ 成就 ⑥ 统计 ⑦ 存档体检(双份登记)）。
+ * ⑤ 成就 ⑥ 统计 ⑦ 存档体检(白名单之外一律算异常)）。
  *
  * <h2>一、版式（W=400 × H=232；坐标是<b>面板内</b>绝对坐标）</h2>
  * <pre>
- *   y=6    [①玩家][②世界][③方块][④实体][⑤成就][⑥统计][⑦审计]  [读当前值 76] [确认 96]
+ *   y=6    [①玩家][②世界][③方块][④实体][⑤成就][⑥统计][⑦其他]  [读当前值 76] [确认 96]
  *   y=28   第 N 页的说明一行（客户端自己知道的字）
  *   ── ① 玩家 ─────────────────────────────────────────────────
  *   y=42   [写入 64]（= 暂存，不落盘）
@@ -53,12 +53,12 @@ import static com.shanhai.common.saveedit.ShanhaiSaveEditLayout.*;
  *   y=126  BE NBT[.......................................]
  *   y=148.. 三行提示
  *   y=186  当前BE：<服务端读到的那条>
- *   ── ⑦ 存档体检（双份登记）────────────────────────────────
- *   y=44   共 N 条 · 可删实体 K · 纯文本旁挂 L · 二进制旁挂 M
- *   y=58 + 12*i  清单 9 行（选中项带 ▶；每行 = 类型 坐标 旁挂文件:行）
- *   y=166  选中：第 k/N 条 + 类型 + 坐标 + 旁挂位置
- *   y=180  [◀上一条][▶下一条][删区块里那份][删旁挂那行(可灰)][重新扫描]
- *   y=200  提示：二进制/NBT 旁挂只报不改
+ *   ── ⑦ 存档体检（白名单之外一律算异常）──────────────────────────
+ *   y=42   搜索[..............196] [重新扫描 68] [删除选中项 92]
+ *   y=62   共 N 条 · 文件 a · 目录 b · 文本 c · 二进制 d
+ *   y=74 + 16*i   7 行可点的异常条目（选中那条带 ▶；点一行 = 选中它）
+ *   y=188  [◀上一页] 第 N/M 页 [下一页▶] 共 X 条 · 本页 a-b
+ *   y=206  选中：路径 · 大小 · 修改时间 · 文本/二进制 · 预览 · 可删
  *   y=220  §7状态 §f<一行>
  * </pre>
  * 🔴 每一行"长度不可控"的字都先过 {@link #fit(String, int)}：LDLib 的 {@code LabelWidget}
@@ -134,6 +134,14 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
     private final EntityRowButton[] entityRows = new EntityRowButton[EN_ROWS];
     /** 实体详情覆盖层（模态；不随切页显隐，所以不进 {@code pageWidgets}）。 */
     private ShanhaiSaveEditEntityOverlay entityOverlay;
+    /**
+     * 「列不出实体」的原因打进聊天栏时的不刷屏闸门（同文本 30 秒不重发、两轮 ≥2 秒；空 notes 不发）。
+     *
+     * <p>粒度：每份面板一个（<b>不是</b> static）—— 两个玩家各开各的面板时，A 的「列出」不会把
+     * B 那条原因挡掉。纯 JDK 那一层是 {@link ShanhaiSaveEditNotesChat}（可离线判）。
+     */
+    private final ShanhaiSaveEditNotesChat.Throttle notesChatThrottle =
+            new ShanhaiSaveEditNotesChat.Throttle();
 
     // 第 ⑤ 页（成就）
     /**
@@ -180,10 +188,23 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
     /** 概况 / 页码 / 本页计数（服务端算好的字面串）。 */
     private String statsSummary = "", statsPageText = "", statsPageCountText = "";
 
-    // 第 ⑦ 页（存档体检 · 双份登记）
-    private final LabelWidget[] auditLines = new LabelWidget[AU_LINES];
-    /** 「删旁挂那行」：二进制旁挂时变灰 + tooltip 说明（服务端把可用状态推给客户端）。 */
-    private AuditButton auditDropSidecarButton;
+    // 第 ⑦ 页（存档体检 · 白名单之外一律算异常）
+    /** 搜索框（子串过滤相对路径；🔴 没有 textSupplier —— 免得冲掉玩家正在输入的字）。 */
+    private FillField auditFilterField;
+    /** 7 行可点的异常条目（字由服务端 push；点某一行 = 选中它）。 */
+    private final AuditRowButton[] auditRows = new AuditRowButton[AU_ROWS];
+    /** 「删除选中项」（🔴 不弹二次确认；删前进回收目录可撤回）。没选中/不可删时变灰。 */
+    private AuditButton auditDropButton;
+    /** 上一次扫描的结果（<b>只有服务端那份有</b>；客户端靠 LabelWidget / 按钮 push 看字）。 */
+    private ShanhaiSaveEditAuditScan.Report auditReport;
+    /** 过滤之后的<b>全量</b>清单（服务端；翻页在它上面切一段）。 */
+    private List<ShanhaiSaveEditAuditScan.Item> auditAll = List.of();
+    /** 当前选中第几条（0 起，指 {@link #auditAll} 的下标；服务端权威）。 */
+    private int auditSelected;
+    /** 当前第几页（0 起；服务端权威）。 */
+    private int auditPage;
+    /** 概况 / 页码 / 本页计数 / 选中行（服务端算好的字面串，靠 LabelWidget push 给客户端）。 */
+    private String auditSummary = "", auditPageText = "", auditPageCountText = "", auditSelLine = "";
 
     /**
      * 🔴 「有暂存时要关面板」的二次确认层（用户点名的<b>唯一</b>一类确认弹窗）。
@@ -722,6 +743,7 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
             case PAGE_ENTITY -> this.onListEntities();
             case PAGE_ADVANCEMENT -> this.onListAdvancements();
             case PAGE_STATS -> this.onListStats();
+            case PAGE_AUDIT -> this.onRescanAudit();
             default -> this.readPlayerData();
         }
     }
@@ -961,6 +983,16 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
                 : "列不出来：" + listing.error());
         ShanhaiMod.LOGGER.info("{} panel_entity_list player={} page={} include_residue={} {}",
                 ShanhaiSaveEditFlow.PREFIX, ctxPlayerName(), fixedPage + 1, includeResidue, listing.line());
+        // 原因也顺手打到聊天栏（用户原话："可以写，打在聊天栏里面，但是要写的简要一点，不要刷屏"）。
+        // 🔴 上面那行日志、详情覆盖层、列表/翻页/搜索一个字都不动；这里只多一条"发给本人"的通道：
+        //    行数与字数由纯 JDK 的 ShanhaiSaveEditNotesChat 定死（≤2 行 · 每行 ≤60 字 · 没原因不发）。
+        final List<String> notesChat = ShanhaiSaveEditNotesChat.linesOf(listing.notes());
+        if (!notesChat.isEmpty() && this.player instanceof ServerPlayer notesChatTo
+                && this.notesChatThrottle.allow(notesChat, System.currentTimeMillis())) {
+            for (String notesChatLine : notesChat) {
+                ShanhaiSaveEditBridge.reportToPlayer(notesChatTo, notesChatLine);
+            }
+        }
     }
 
     /** 「◀上一页 / 下一页▶」：服务端换页并重推（客户端那份只等字，不动状态）。 */
@@ -1272,8 +1304,12 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
             model.setFeedback("§c这条实体没有定位信息（hit=null），不敢暂存");
             return;
         }
+        // 🆕 2026-11-20：把"暂存那一刻的身份"一起记进请求（实体 id ＋ Pos 三位原值）。
+        //    判据（实机）：退出世界写盘时那条实体会被重写、UUID 变了 ⇒ 落盘阶段按 UUID 找不到，
+        //    只能靠「同区块 ＋ 同 id ＋ 同 Pos」兜底（见 ShanhaiEntityEdit.Anchor）。
         final ShanhaiEntityEdit.Request req = new ShanhaiEntityEdit.Request(
-                model.detail().dimension(), hit.regionX(), hit.regionZ(), "", model.detail().uuid());
+                model.detail().dimension(), hit.regionX(), hit.regionZ(), "", model.detail().uuid(),
+                new ShanhaiEntityEdit.Anchor(hit.id(), hit.x(), hit.y(), hit.z()));
         try {
             req.validate();
         } catch (IllegalArgumentException iae) {
@@ -1896,46 +1932,81 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
         return this.player == null ? "?" : this.player.getName().getString();
     }
 
-    // ================================================================ 第 ⑦ 页（存档体检 · 双份登记）
+    // ================================================================ 第 ⑦ 页（存档体检 · 白名单之外）
 
     /**
-     * 第 ⑦ 页：一件摘要 + 9 行清单（选中带 ▶）+ 选中行 + 五个按钮 + 底部提示。
+     * 第 ⑦ 页：骨架照第 ④⑤⑥ 页（7 行列表 + 翻页 + 搜索），动作只剩两个：
+     * 「重新扫描」（只读）与「删除选中项」（🔴 不弹二次确认；删前进回收目录，可撤回）。
      *
-     * <p>🔴 判据只立在世界数据本身（同一个 UUID / 同一组坐标同时出现在区块文件与旁挂文件里），
-     * 这一页<b>不认</b>任何具体模组名/实体名/文件名/字段名。
+     * <p>🔴 判据只立在世界数据布局本身：<b>白名单之外的一切</b>（文件与目录）都是异常数据，
+     * 可逐条删除。这一页<b>不认</b>任何具体模组名 / 实体 id / 文件名 / 字段名。
      */
     private void buildAuditPage() {
         final int p = PAGE_AUDIT;
-        page(p, new LabelWidget(6, SUB_Y,
-                fit("§77 存档体检：同一实体在「区块文件」与「旁挂文件」里各登记一份 ⇒ 双份；选中后删其中一份",
-                        SUB_BUDGET_PX)).setClientSideWidget());
-        // 摘要：共 N 条 · 可删实体 K · 纯文本旁挂 L · 二进制旁挂 M（服务端算，推给客户端）
-        page(p, new LabelWidget(6, AU_SUMMARY_Y,
-                ShanhaiLdlText.sup(() -> fit(this.holder.auditSummary(), W - 12))));
-        // 清单 9 行（选中项在服务端渲染时就带 ▶，客户端只看推来的字）
-        for (int i = 0; i < AU_LINES; i++) {
-            final int idx = i;
-            this.auditLines[i] = page(p, new LabelWidget(6, AU_LINE_Y0 + i * AU_LINE_STEP,
-                    ShanhaiLdlText.sup(() -> fit(this.holder.auditLine(idx), W - 12))));
+        for (Slot slot : auditSlots()) {
+            page(p, auditWidget(slot));
         }
-        // 选中那一行（类型 + 坐标 + 旁挂位置 + 是否二进制只报不改）
-        page(p, new LabelWidget(6, AU_SEL_Y,
-                ShanhaiLdlText.sup(() -> fit(this.holder.auditSelectedLine(), W - 12))));
-        // 五个按钮：上一条 / 下一条 / 删区块里那份 / 删旁挂那行（可灰）/ 重新扫描
-        page(p, button(AU_PREV_X, AU_BTN_Y, AU_PREV_W, AU_BTN_H, "◀上一条", this::onAuditPrev));
-        page(p, button(AU_NEXT_X, AU_BTN_Y, AU_NEXT_W, AU_BTN_H, "▶下一条", this::onAuditNext));
-        page(p, button(AU_DROP_ENTITY_X, AU_BTN_Y, AU_DROP_ENTITY_W, AU_BTN_H,
-                "删区块里那份", this::onStageAuditEntity));
-        this.auditDropSidecarButton = page(p, new AuditButton(AU_DROP_SIDECAR_X, AU_BTN_Y,
-                AU_DROP_SIDECAR_W, AU_BTN_H, "删旁挂那行", this::onStageAuditSidecar));
-        page(p, button(AU_RESCAN_X, AU_BTN_Y, AU_RESCAN_W, AU_BTN_H, "重新扫描", this::onRescanAudit));
-        // 底部提示
-        page(p, new LabelWidget(6, AU_HINT_Y0,
-                fit("§8· 二进制/NBT 旁挂只报不改（「删旁挂那行」会灰掉）；两个动作按「确认」才在停服窗口里落盘",
-                        SUB_BUDGET_PX)).setClientSideWidget());
     }
 
-    /** 「重新扫描」：服务端只读扫一遍，结果推给客户端。 */
+    /** 照一个槽位造第 ⑦ 页的控件（{@code key} 决定它是谁、要挂什么动作）。 */
+    private Widget auditWidget(Slot slot) {
+        final int x = slot.x();
+        final int y = slot.y();
+        final int w = slot.w();
+        final int h = slot.h();
+        switch (slot.key()) {
+            case "subtitle":
+                return new LabelWidget(x, y,
+                        fit("§77 存档体检：白名单之外的文件/目录都算异常，可逐条删除", w))
+                        .setClientSideWidget()
+                        .setHoverTooltips(Component.literal("§e判据§7：只认原版世界布局（level.dat / region / "
+                                + "entities / poi / data / datapacks / playerdata / advancements / stats / "
+                                + "dimensions / DIM-1 / DIM1 / server-resources）。此外的一切 —— 不管它叫什么名字"
+                                + " —— 都列出来并可删"));
+            case "filter.label":
+                return new LabelWidget(x, y, "搜索").setClientSideWidget()
+                        .setHoverTooltips(Component.literal("§e搜索§7：按相对路径的子串过滤"
+                                + "（例如 omnimob / somemod / weird）"));
+            case "filter.field":
+                this.auditFilterField = fillField(x, y, w, 96);
+                return this.auditFilterField;
+            case "rescan.button":
+                return button(x, y, w, h, "重新扫描", this::onRescanAudit);
+            case "drop.button":
+                this.auditDropButton = new AuditButton(x, y, w, h, "删除选中项", this::onStageAuditDrop);
+                return this.auditDropButton;
+            case "summary.label":
+                return label(x, y, "概况");
+            case "summary.value":
+                return new LabelWidget(x, y, ShanhaiLdlText.sup(() -> fit(this.auditSummary, w)));
+            case "row": {
+                final int idx = slot.index();
+                final AuditRowButton.Cell cell = new AuditRowButton.Cell(idx);
+                final AuditRowButton row = new AuditRowButton(x, y, w, h, cell,
+                        () -> this.onClickAuditRow(idx));
+                this.auditRows[idx] = row;
+                return row;
+            }
+            case "page.prev":
+                return button(x, y, w, h, "◀上一页", () -> this.onAuditPage(-1));
+            case "page.label":
+                return new LabelWidget(x, y, ShanhaiLdlText.sup(() -> fit(this.auditPageText, w)));
+            case "page.next":
+                return button(x, y, w, h, "下一页▶", () -> this.onAuditPage(1));
+            case "page.count":
+                return new LabelWidget(x, y, ShanhaiLdlText.sup(() -> fit(this.auditPageCountText, w)));
+            case "selected":
+                return new LabelWidget(x, y, ShanhaiLdlText.sup(() -> fit(this.auditSelLine, w)));
+            default:
+                throw new IllegalStateException("第 ⑦ 页的槽位没被处理：" + slot.key());
+        }
+    }
+
+    /**
+     * 「重新扫描」：服务端只读扫一遍<b>白名单之外的一切</b>（文件 + 目录），结果推给客户端。
+     *
+     * <p>目录只列它自己一条（展开/删除时按整棵子树算），所以清单长度 ≈ 异常根的个数。
+     */
     private void onRescanAudit() {
         if (!isServerSide()) {
             return;
@@ -1953,104 +2024,138 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
                     ShanhaiSaveEditFlow.PREFIX, ctx.playerName, t.toString(), t);
             return;
         }
-        this.holder.setAuditReport(report);
-        this.holder.setAuditSelected(0);
+        this.auditReport = report;
+        this.auditAll = report.filter(text(this.auditFilterField));
+        this.auditPage = 0;
+        this.auditSelected = 0;
         renderAuditPage();
-        ShanhaiMod.LOGGER.info("{} panel_audit_scan player={} {}", ShanhaiSaveEditFlow.PREFIX,
-                ctx.playerName, report.summaryLine());
+        ShanhaiMod.LOGGER.info("{} panel_audit_scan player={} filter=\"{}\" {}",
+                ShanhaiSaveEditFlow.PREFIX, ctx.playerName, text(this.auditFilterField),
+                report.summaryLine());
         for (String line : report.logLines(50)) {
             ShanhaiMod.LOGGER.info("{} {}", ShanhaiSaveEditFlow.PREFIX, line);
         }
-        this.holder.setStatus("已扫描：" + report.panelSummary());
+        this.holder.setStatus("已扫描：" + report.panelSummary()
+                + "（选一条 →「删除选中项」→「确认修改并重载」才真删）");
     }
 
-    /** 「◀ 上一条」：选中项上移（服务端权威，客户端那次什么都不用做）。 */
-    private void onAuditPrev() {
+    /** 「◀上一页 / 下一页▶」：服务端换页并重推。 */
+    private void onAuditPage(int delta) {
         if (!isServerSide()) {
             return;
         }
-        this.holder.setAuditSelected(this.holder.auditSelected() - 1);
+        if (this.auditAll.isEmpty()) {
+            this.holder.setStatus("§c先点一次「重新扫描」再翻页");
+            return;
+        }
+        final int want = ShanhaiSaveEditLayout.clampPage(this.auditPage + delta, this.auditAll.size(), AU_ROWS);
+        if (want == this.auditPage) {
+            this.holder.setStatus("已经是" + (delta < 0 ? "第 1 页" : "最后一页")
+                    + "（共 " + this.auditAll.size() + " 条）");
+            return;
+        }
+        this.auditPage = want;
         renderAuditPage();
     }
 
-    /** 「▶ 下一条」。 */
-    private void onAuditNext() {
+    /** 点了第 {@code index} 行：选中它（客户端那次什么都不做，等服务端推字）。 */
+    private void onClickAuditRow(int index) {
         if (!isServerSide()) {
             return;
         }
-        this.holder.setAuditSelected(this.holder.auditSelected() + 1);
+        final int abs = this.auditPage * AU_ROWS + index;
+        if (abs < 0 || abs >= this.auditAll.size()) {
+            this.holder.setStatus("§c这一行已经过期：先点一次「重新扫描」");
+            return;
+        }
+        this.auditSelected = abs;
         renderAuditPage();
     }
 
     /**
-     * 把"扫描结果 + 选中项"渲染成 摘要 / 9 行清单 / 选中行，并把「删旁挂那行」的可用状态推给客户端。
+     * 把"扫描结果 + 选中项 + 当前页"渲染成 概况 / 7 行 / 翻页 / 选中行，并把「删除选中项」的
+     * 可用状态推给客户端。
      *
-     * <p>🔴 全在服务端算：客户端那份 holder 没有扫描结果（它只有被 push 的字面串）。
+     * <p>🔴 全在服务端算：客户端那份只有被 push 的字面串（它没有扫描结果）。
      */
     private void renderAuditPage() {
-        final ShanhaiSaveEditAuditScan.Report report = this.holder.auditReport();
-        final List<ShanhaiSaveEditAuditScan.Finding> findings =
-                report == null ? List.of() : report.findings();
-        final int total = findings.size();
-        final int sel = Math.max(0, Math.min(Math.max(0, total - 1), this.holder.auditSelected()));
-        this.holder.setAuditSelected(sel);
-
-        final List<String> lines = new ArrayList<>();
-        if (total == 0) {
-            lines.add(report == null ? "§8还没扫描（点「重新扫描」）" : "§a没有发现双份登记");
-            this.holder.setAuditSummary(report == null ? "§8还没扫描" : report.panelSummary());
-        } else {
-            final int from = Math.max(0, Math.min(sel - AU_LINES / 2, Math.max(0, total - AU_LINES)));
-            final int to = Math.min(total, from + AU_LINES);
-            for (int i = from; i < to; i++) {
-                final ShanhaiSaveEditAuditScan.Finding f = findings.get(i);
-                lines.add((i == sel ? "§e▶ " : "§8  ") + f.panelLine()
-                        + (f.sidecar() != null && f.sidecar().binary() ? " §8[二进制]" : ""));
+        final int total = this.auditAll.size();
+        final int pages = ShanhaiSaveEditLayout.pageCount(total, AU_ROWS);
+        this.auditPage = ShanhaiSaveEditLayout.clampPage(this.auditPage, total, AU_ROWS);
+        this.auditSelected = total <= 0 ? 0 : Math.max(0, Math.min(total - 1, this.auditSelected));
+        final int from = Math.min(total, this.auditPage * AU_ROWS);
+        final List<ShanhaiSaveEditAuditScan.Item> rows = auditPageRows();
+        final int to = from + rows.size();
+        // 7 行：选中那条带 ▶（行字整串由服务端算，客户端只负责画）
+        for (int i = 0; i < this.auditRows.length; i++) {
+            final AuditRowButton row = this.auditRows[i];
+            if (row == null) {
+                continue;
             }
-            this.holder.setAuditSummary(report.panelSummary()
-                    + (total > AU_LINES ? " §8(第 " + (from + 1) + "-" + to + " 条)" : ""));
+            if (i >= rows.size()) {
+                row.clearRow();
+                continue;
+            }
+            final int abs = from + i;
+            row.pushRow((abs == this.auditSelected ? "§e▶ " : "§8  ") + rows.get(i).rowText(abs));
         }
-        this.holder.setAuditLines(lines);
-
-        final ShanhaiSaveEditAuditScan.Finding found = this.holder.auditSelectedFinding();
-        if (found == null) {
-            this.holder.setAuditSelectedLine("§8没有选中项");
-            this.holder.setAuditCanDropSidecar(false);
-        } else {
-            this.holder.setAuditSelectedLine("§7选中 §e" + (sel + 1) + "§7/§e" + total + " §f"
-                    + (found.entity() == null ? "残迹" : found.entity().shortType())
-                    + " §7" + (found.entity() == null ? "?" : found.entity().posShort())
-                    + " §8" + (found.sidecar() == null ? "-" : found.sidecar().where())
-                    + (found.sidecar() != null && found.sidecar().binary() ? " §8[二进制只报不改]" : ""));
-            this.holder.setAuditCanDropSidecar(found.canDropSidecar());
+        // 概况：共 N 条 · 文件 a · 目录 b · 文本 c · 二进制 d（截断时带「已截断」）
+        String summary = this.auditReport == null
+                ? "§8还没扫描（点「重新扫描」）" : this.auditReport.panelSummary();
+        final String filter = text(this.auditFilterField);
+        if (this.auditReport != null && !filter.isEmpty()) {
+            summary += " §8· 搜索「" + filter + "」命中 " + total + " 条";
         }
-        pushAuditSidecarActive(this.holder.auditCanDropSidecar());
+        this.auditSummary = summary
+                + (total > AU_ROWS ? " §8(第 " + (from + 1) + "-" + to + " 条)" : "");
+        this.auditPageText = "第 " + (this.auditPage + 1) + "/" + pages + " 页";
+        this.auditPageCountText = "共 " + total + " 条 · 本页 " + (total <= 0 ? "0-0" : (from + 1) + "-" + to);
+        final ShanhaiSaveEditAuditScan.Item sel = total <= 0 ? null : this.auditAll.get(this.auditSelected);
+        this.auditSelLine = sel == null
+                ? "§8没有选中项（点一行选中它，再点「删除选中项」）"
+                : "§7" + sel.detailText(this.auditSelected, total);
+        pushAuditDropActive(sel != null && sel.deletable());
     }
 
-    /** 服务端把「删旁挂那行」能不能点推给客户端（灰按钮 + tooltip）。 */
-    private void pushAuditSidecarActive(boolean can) {
-        if (this.auditDropSidecarButton == null) {
+    /** 服务端把「删除选中项」能不能点推给客户端（灰按钮 + tooltip）。 */
+    private void pushAuditDropActive(boolean can) {
+        if (this.auditDropButton == null) {
             return;
         }
-        this.auditDropSidecarButton.pushActive(can);
+        this.auditDropButton.pushActive(can);
     }
 
-    /** 「删区块里那份」：只<b>暂存</b>，真落盘在「确认修改并重载」后的停服窗口里。 */
-    private void onStageAuditEntity() {
+    /** 当前这一页的 7 条原料（服务端）。 */
+    private List<ShanhaiSaveEditAuditScan.Item> auditPageRows() {
+        final int from = Math.min(this.auditAll.size(), this.auditPage * AU_ROWS);
+        final List<ShanhaiSaveEditAuditScan.Item> out = new ArrayList<>();
+        for (int i = from; i < Math.min(this.auditAll.size(), from + AU_ROWS); i++) {
+            out.add(this.auditAll.get(i));
+        }
+        return out;
+    }
+
+    /**
+     * 「删除选中项」：只<b>暂存</b>，真落盘在「确认修改并重载」之后的停服窗口里
+     * （{@link ShanhaiSaveEditWindow} 第 ⑧ 段：复制到回收目录 → 删 → 回读）。
+     *
+     * <p>🔴 不弹二次确认（用户明确讨厌自加的确认弹窗）：可撤回靠回收目录，不靠弹窗。
+     */
+    private void onStageAuditDrop() {
         if (!isServerSide()) {
             return;
         }
-        final ShanhaiSaveEditAuditScan.Finding found = this.holder.auditSelectedFinding();
-        if (found == null) {
-            this.holder.setStatus("§c先在清单里选一条（「▶ 下一条」或「重新扫描」）");
+        final ShanhaiSaveEditAuditScan.Item item = this.auditAll.isEmpty() ? null
+                : this.auditAll.get(Math.max(0, Math.min(this.auditAll.size() - 1, this.auditSelected)));
+        if (item == null) {
+            this.holder.setStatus("§c先在清单里点一条（或者先点「重新扫描」）");
             return;
         }
-        if (!found.canDropEntity()) {
-            this.holder.setStatus("§c这条只是旁挂残留：区块文件里那份已经没了，没得删");
+        if (!item.deletable()) {
+            this.holder.setStatus("§c这条不是普通文件/目录（符号链接或特殊文件），不动它：" + item.rel());
             return;
         }
-        final ShanhaiSaveEditAuditFix.Request req =
-                new ShanhaiSaveEditAuditFix.Request(ShanhaiSaveEditAuditFix.Request.DROP_ENTITY, found.uuid());
+        final ShanhaiSaveEditAuditFix.Request req = new ShanhaiSaveEditAuditFix.Request(item.rel());
         try {
             req.validate();
         } catch (IllegalArgumentException iae) {
@@ -2058,45 +2163,11 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
             return;
         }
         this.holder.setStagedAudit(req);
-        this.holder.setStatus(ShanhaiSaveEditFactory.STATUS_STAGED + "删区块里那份：" + req.line());
-        ShanhaiMod.LOGGER.info("{} panel_staged_audit player={} {} disk_written=0 (窗口未开)",
-                ShanhaiSaveEditFlow.PREFIX, ctxPlayerName(), req.line());
-    }
-
-    /** 「删旁挂那行」：二进制/NBT 旁挂直接拒绝（按钮已经灰了，这里再兜一层）。 */
-    private void onStageAuditSidecar() {
-        if (!isServerSide()) {
-            return;
-        }
-        final ShanhaiSaveEditAuditScan.Finding found = this.holder.auditSelectedFinding();
-        if (found == null) {
-            this.holder.setStatus("§c先在清单里选一条（「▶ 下一条」或「重新扫描」）");
-            return;
-        }
-        if (found.sidecar() != null && found.sidecar().binary()) {
-            this.holder.setStatus("§c这条来自二进制/NBT 旁挂：只报不改 ⇒ 需你手动处理（"
-                    + found.sidecar().where() + "）");
-            ShanhaiMod.LOGGER.info("{} panel_staged_audit_rejected reason={} where={} disk_written=0",
-                    ShanhaiSaveEditFlow.PREFIX, ShanhaiSaveEditAuditFix.REASON_BINARY,
-                    found.sidecar().where());
-            return;
-        }
-        if (!found.canDropSidecar()) {
-            this.holder.setStatus("§c这条没有可删的旁挂文本行");
-            return;
-        }
-        final ShanhaiSaveEditAuditFix.Request req =
-                new ShanhaiSaveEditAuditFix.Request(ShanhaiSaveEditAuditFix.Request.DROP_SIDECAR, found.uuid());
-        try {
-            req.validate();
-        } catch (IllegalArgumentException iae) {
-            this.holder.setStatus("§c" + iae.getMessage());
-            return;
-        }
-        this.holder.setStagedAudit(req);
-        this.holder.setStatus(ShanhaiSaveEditFactory.STATUS_STAGED + "删旁挂那行：" + req.line());
-        ShanhaiMod.LOGGER.info("{} panel_staged_audit player={} {} disk_written=0 (窗口未开)",
-                ShanhaiSaveEditFlow.PREFIX, ctxPlayerName(), req.line());
+        this.holder.setStatus(ShanhaiSaveEditFactory.STATUS_STAGED + "删除「" + item.rel() + "」（"
+                + item.sizeText() + "）· 点「确认修改并重载」才真删，删前进回收目录可撤回");
+        ShanhaiMod.LOGGER.info("{} panel_staged_audit player={} {} kind={} bytes={} disk_written=0 (窗口未开)",
+                ShanhaiSaveEditFlow.PREFIX, ctxPlayerName(), req.line(),
+                item.directory() ? "dir" : "file", item.bytes());
     }
 
     // ================================================================ 第 ① 页：物品栏覆盖层（41 格 / 末影箱）
@@ -3254,27 +3325,108 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
     }
 
     /**
-     * 能<b>变灰 + 换 tooltip</b>的按钮（体检页「删旁挂那行」用）。
+     * 第 ⑦ 页<b>一行可点的异常</b>：点它 = 选中它（再点「删除选中项」才暂存删除）。
+     *
+     * <h2>为什么是按钮而不是 {@code LabelWidget}</h2>
+     * 与 {@link EntityRowButton} 同一条理由：玩家要"看到哪一行就点哪一行"。
+     *
+     * <h2>🔴 为什么这一页推的是整串字，而 ④⑤⑥ 页推"原料"</h2>
+     * ④⑤⑥ 的行首要中文名，而名字只有客户端查得到（语言表 / 注册表），所以只能推原料、客户端现拼。
+     * 体检页的行是<b>路径 + 大小 + 文本|二进制</b>，全是服务端算出来的死字，直接推整串最简单
+     * —— 与 {@link FillField#pushText(String)} 同一条通道（{@code writeUpdateInfo} → {@code readUpdateInfo}）。
+     */
+    static final class AuditRowButton extends ButtonWidget {
+
+        /**
+         * 本条 update-info 的 id。
+         *
+         * <p>已占用的号（同一份代码里的约定，别撞）：1 = TextFieldWidget / FillField.pushText、
+         * 77 = {@link AuditButton}、78/81/82 = ④⑤⑥ 页的行、79/80 = 实体覆盖层、83/84 = 成就覆盖层、
+         * 85/86 = 统计覆盖层、87/88/89 = 物品栏覆盖层、93 = 关闭确认层 ⇒ 这里用 90。
+         */
+        static final int UPDATE_ROW = 90;
+
+        /** 这一行的字（可变；由面板建好递进来 —— {@code super(...)} 里不许引用 this）。 */
+        static final class Cell {
+            final int index;
+            String line = "";
+
+            Cell(int index) {
+                this.index = index;
+            }
+
+            boolean hasRow() {
+                return !this.line.isEmpty();
+            }
+        }
+
+        private final Cell cell;
+
+        AuditRowButton(int x, int y, int w, int h, Cell cell, Runnable action) {
+            super(x, y, w, h,
+                    new GuiTextureGroup(GuiTextures.BUTTON,
+                            new TextTexture((Supplier<String>) () -> ShanhaiLdlText.esc(
+                                    fit(cell.hasRow() ? cell.line : "", w - 8)))),
+                    clickData -> {
+                        try {
+                            action.run();
+                        } catch (Throwable t) {
+                            ShanhaiMod.LOGGER.warn("{} panel_audit_row_click_failed err={}",
+                                    ShanhaiSaveEditFlow.PREFIX, t.toString());
+                        }
+                    });
+            this.cell = cell;
+        }
+
+        /** 🔴 只在服务端调：把这一行的字同步到客户端那份。 */
+        void pushRow(String line) {
+            this.cell.line = line == null ? "" : line;
+            writeUpdateInfo(UPDATE_ROW, buf -> buf.writeUtf(this.cell.line));
+        }
+
+        /** 清空这一行（空行点了没反应）。 */
+        void clearRow() {
+            pushRow("");
+        }
+
+        /** 本侧的原料（判据/调试用）。 */
+        Cell cell() {
+            return this.cell;
+        }
+
+        @Override
+        public void readUpdateInfo(int id, FriendlyByteBuf buffer) {
+            if (id == UPDATE_ROW) {
+                this.cell.line = buffer.readUtf();
+                return;
+            }
+            super.readUpdateInfo(id, buffer);
+        }
+    }
+
+    /**
+     * 能<b>变灰 + 换 tooltip</b>的按钮（体检页「删除选中项」用）。
      *
      * <h2>为什么需要它</h2>
      * {@code Widget#setActive} 与 {@code setHoverTooltips} 都<b>只作用于本侧</b>
-     * （{@code Widget#detectAndSendChanges} 是空实现 —— 字节码实证），而"选中那条是不是二进制旁挂"
+     * （{@code Widget#detectAndSendChanges} 是空实现 —— 字节码实证），而"有没有选中一条可删的"
      * <b>只有服务端知道</b>（扫描是服务端读盘做的）。所以必须自己开一条 update-info 通道把它推过去，
      * 与 {@link FillField#pushText(String)} 同一条路（{@code writeUpdateInfo} → 客户端
      * {@code readUpdateInfo}）。
      *
      * <h2>推送时机</h2>
-     * 每次「重新扫描 / 上一条 / 下一条」之后由服务端 {@link #pushActive(boolean)} 一次。
-     * 面板刚打开时是默认值（可点）—— 那时还没有扫描结果，也确实没有可删的东西。
+     * 每次「重新扫描 / 翻页 / 点一行」之后由服务端 {@link #pushActive(boolean)} 一次。
+     * 面板刚打开时是<b>灰</b>的（还没有扫描结果，也确实没有可删的东西）。
      */
     static final class AuditButton extends ButtonWidget {
 
         /** 本条 update-info 的 id（1 已被 {@code TextFieldWidget} 的内部同步用掉，这里错开）。 */
         static final int UPDATE_ACTIVE = 77;
         /** 可点时悬停说明。 */
-        static final String TIP_ON = "删掉旁挂文本文件里「含这个 UUID / 坐标」的那一整行（改前备份、改后回读校验）";
+        static final String TIP_ON = "把选中的这条从存档里删掉（🔴 不弹二次确认；删前先复制到 "
+                + "config\\shanhai\\audit-trash\\<存档名>-<时间戳>\\，可撤回）";
         /** 灰掉时悬停说明。 */
-        static final String TIP_OFF = "这条来自二进制/NBT 旁挂：只报不改 ⇒ 需你手动处理（按钮已灰）";
+        static final String TIP_OFF = "灰着 = 还没选中（点上面一行）或这条不可删（符号链接/特殊文件）";
 
         AuditButton(int x, int y, int w, int h, String text, Runnable action) {
             super(x, y, w, h,
@@ -3288,6 +3440,7 @@ public final class ShanhaiSaveEditPanel extends WidgetGroup {
                                     ShanhaiSaveEditFlow.PREFIX, t.toString(), t);
                         }
                     });
+            setActive(false);                  // 还没扫描 ⇒ 没有可删的东西（服务端 render 时再 push）
             applyTooltip();
         }
 

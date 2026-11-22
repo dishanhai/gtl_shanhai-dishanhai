@@ -142,8 +142,20 @@ public final class ShanhaiEntityEdit {
      * @param regionZ   区坐标 Z
      * @param typeId    按类型删（如 {@code minecraft:item}）
      * @param uuid      按 UUID 删（标准 {@code xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}）
+     * @param anchor    🆕 2026-11-20：暂存时记下的退化匹配锚点（{@code null} = 没有，只能按 UUID 严格匹配）。
+     *                  用途见 {@link Anchor}：停服写盘把 UUID 换了之后，按「同区块 ＋ 同 id ＋ 同 Pos」兜底。
      */
-    public record Request(String dimension, int regionX, int regionZ, String typeId, String uuid) {
+    public record Request(String dimension, int regionX, int regionZ, String typeId, String uuid,
+                          Anchor anchor) {
+
+        /**
+         * 旧签名（没有锚点）—— 保留它，让既有调用点一个字都不用改。
+         *
+         * <p>⚠️ 走这个构造器的请求<b>只能</b>严格按 UUID 匹配（退化匹配需要锚点，没有就退不了）。
+         */
+        public Request(String dimension, int regionX, int regionZ, String typeId, String uuid) {
+            this(dimension, regionX, regionZ, typeId, uuid, null);
+        }
 
         /** 有没有指定类型。 */
         public boolean hasType() {
@@ -425,16 +437,46 @@ public final class ShanhaiEntityEdit {
             notes.add("🔴 玩家实体一律不删：跳过 " + skippedPlayers.size() + " 条（" + skippedPlayers.get(0)
                     + (skippedPlayers.size() > 1 ? " …" : "") + "）");
         }
+        // ── 🆕 2026-11-20：按 UUID 找不到 ⇒ 两档<b>退化匹配</b>（实机判据见 {@link Anchor}） ──
+        //    ① 同区块 ＋ 实体 id 相同 ＋ Pos 三元组<b>逐位</b>全等
+        //    ② 同区块 ＋ 实体 id 相同 ＋ 该 id 在该区块<b>只有 1 个</b>（唯一才删；不唯一就放弃）
+        //    🔴 "不唯一"一律放弃，绝不随便挑一个删。
+        String matchedHow = byUuid ? "uuid" : "type";
+        String degradedWhy = "";
+        if (matched == 0 && byUuid && req.anchor() != null) {
+            final Fallback fb = fallbackMatch(beforeChunks, req);
+            degradedWhy = fb.why();
+            if (!fb.hits().isEmpty()) {
+                matchedHow = fb.how();
+                for (FallbackHit h : fb.hits()) {
+                    toRemove.computeIfAbsent(h.slot(), k -> new ArrayList<>()).add(h.index());
+                    removedUuids.computeIfAbsent(h.slot(), k -> new LinkedHashSet<>())
+                            .add(h.uuid().toUpperCase(Locale.ROOT));
+                    matched++;
+                }
+                notes.add("⚠ 按 UUID 找不到 ⇒ 退化匹配命中（matched=" + matchedHow + "）：" + req.anchor().describe()
+                        + "；这些实体属于「退出世界时被重写过」的那一类（UUID 变了）");
+            } else {
+                notes.add("按 UUID 与两档退化判据都没命中：anchor=" + req.anchor().describe()
+                        + " reason=" + degradedWhy);
+            }
+        }
+        final String matchedLine = "matched=" + matchedHow;
         if (matched == 0) {
             // 🔴 "一条都没匹配上" = 这一页<b>没什么可删</b>（盘上本来就是这样）⇒ 一个字节都不会写
             //    ⇒ 必须落在 no_effective_change 这一族里，否则重开闸
             //    （ShanhaiSaveEditReopenGate#isNoEffectiveChange）认不出来 ⇒ 世界停服 + 重开，
             //    但盘上什么都没变。判据装置：SaveEditProbe 的判据 ⑮ P2。
+            //    🆕 2026-11-20 文案：不再说"世界已经停了、回去重进"，改成诚实版 ——
+            //    这次<b>根本没写入</b>，失败原因是在退出世界写盘时那条实体被重写了。
             return fail("no_effective_change：这个区域里没有匹配的实体（"
                     + (byUuid ? "uuid=" + wantUuid : "type=" + wantType)
-                    + "）" + (skippedPlayers.isEmpty() ? "" : "；只有玩家实体匹配，而玩家实体不许删"));
+                    + "；" + matchedLine + (degradedWhy.isEmpty() ? "" : " reason=" + degradedWhy)
+                    + "）" + (skippedPlayers.isEmpty() ? "" : "；只有玩家实体匹配，而玩家实体不许删")
+                    + "。没删掉：那条实体在你退出世界时被重写了（UUID 变了或已被移除）。"
+                    + "请重新打开这个世界、重新列一次再删。存档一个字节都没改。");
         }
-        notes.add("匹配到 " + matched + " 条实体，分布在 " + toRemove.size() + " 个区块里");
+        notes.add("匹配到 " + matched + " 条实体（" + matchedLine + "），分布在 " + toRemove.size() + " 个区块里");
 
         // ── ③ 造出"删完之后"的 chunk（只摘 Entities，别的键一个不碰）
         final Map<Integer, CompoundTag> afterChunks = new LinkedHashMap<>();
@@ -531,7 +573,7 @@ public final class ShanhaiEntityEdit {
             }
             notes.add("其它 " + others.compared() + " 个区块的压缩字节 sha256 全部与写前相同");
             notes.add("文件 " + disk.length + " 字节；区块 " + afterParse.chunkCount() + " 个");
-            return new Result(true, "", changed, notes, write, others.line());
+            return new Result(true, "", changed, notes, write, others.line() + " " + matchedLine);
         } catch (Throwable t) {
             restore(write, file);
             return fail("回读阶段抛了（已用备份盖回）：" + t);
@@ -541,6 +583,94 @@ public final class ShanhaiEntityEdit {
     /** 回读失败时用备份盖回去（尽力而为）。 */
     private static void restore(ShanhaiSaveEditStorage.WriteResult write, Path target) {
         ShanhaiSaveEditStorage.restore(write == null ? null : write.backupPath(), target);
+    }
+
+    // ═══════════════════════ 🆕 2026-11-20：退化匹配（UUID 变了之后的唯一兜底） ═══════════════════════
+
+    /** 退化匹配的一处结果（{@code slot} ＋ {@code Entities} 下标 ＋ 那条记录自己的身份）。 */
+    private record FallbackHit(int slot, int index, String id, String uuid) {}
+
+    /**
+     * 一次退化匹配的读数。
+     *
+     * @param how  {@code pos} ／ {@code type_unique} ／ {@code none}
+     * @param hits 命中的那几条（{@code how=none} 时为空）
+     * @param why  没命中时的原因码（{@code none} 时空串）
+     */
+    private record Fallback(String how, List<FallbackHit> hits, String why) {}
+
+    /**
+     * 🔴 <b>按 UUID 找不到时的两档退化匹配</b>（用户在 2026-11-20 点名的判据）。
+     *
+     * <pre>
+     *   ① 同区块 ＋ 实体 id 相同 ＋ Pos 三元组【逐位】全等           ⇒ matched=pos
+     *   ② 同区块 ＋ 实体 id 相同 ＋ 该 id 在该区块【只有 1 个】      ⇒ matched=type_unique
+     *   都不成立 ⇒ 放弃（reason=…），一个字节都不写
+     * </pre>
+     *
+     * <p>🔴 "不唯一"一律放弃：那说明同区块里还有同类的第二只，随便挑一个删就是删错东西。
+     *
+     * <p>"同区块"怎么定：锚点里存的是暂存那一刻的 {@code Pos} 原值，区块坐标由它算出来
+     * （{@code floor(x) >> 4}）—— 不另存一份区块号，免得两个来源对不上。
+     */
+    private static Fallback fallbackMatch(Map<Integer, CompoundTag> chunks, Request req) {
+        final Anchor anchor = req.anchor();
+        if (anchor == null) {
+            return new Fallback("none", List.of(), "no_anchor");
+        }
+        final String wantType = normalizeType(anchor.typeId());
+        if (!isTypeId(wantType)) {
+            return new Fallback("none", List.of(), "anchor_type_unusable");
+        }
+        final int wantChunkX = ((int) Math.floor(anchor.x())) >> 4;
+        final int wantChunkZ = ((int) Math.floor(anchor.z())) >> 4;
+        final List<FallbackHit> byPos = new ArrayList<>();
+        final List<FallbackHit> byType = new ArrayList<>();
+        for (Map.Entry<Integer, CompoundTag> en : chunks.entrySet()) {
+            final int slot = en.getKey();
+            final CompoundTag tag = en.getValue();
+            final int[] cxz = chunkCoords(tag, slot, req.regionX(), req.regionZ());
+            if (cxz[0] != wantChunkX || cxz[1] != wantChunkZ) {
+                continue;   // 🔴 只在【同区块】里退化：跨区块的同类撞车一律不碰
+            }
+            final ListTag list = tag.getList(ENTITIES, Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                final CompoundTag e = list.getCompound(i);
+                final String type = entityType(e);
+                if (!wantType.equals(normalizeType(type)) || PLAYER_TYPE.equals(normalizeType(type))) {
+                    continue;   // 类型不同、或者是玩家 ⇒ 不参与
+                }
+                final FallbackHit h = new FallbackHit(slot, i, type, entityUuidText(e));
+                byType.add(h);
+                final double[] p = entityPos(e);
+                if (bitEqual(p[0], anchor.x()) && bitEqual(p[1], anchor.y()) && bitEqual(p[2], anchor.z())) {
+                    byPos.add(h);
+                }
+            }
+        }
+        if (byPos.size() == 1) {
+            return new Fallback("pos", byPos, "");
+        }
+        if (byPos.size() > 1) {
+            return new Fallback("none", List.of(), "pos_ambiguous=" + byPos.size());
+        }
+        if (byType.size() == 1) {
+            return new Fallback("type_unique", byType, "");
+        }
+        if (byType.isEmpty()) {
+            return new Fallback("none", List.of(), "no_same_chunk_type_match");
+        }
+        return new Fallback("none", List.of(), "type_not_unique=" + byType.size());
+    }
+
+    /**
+     * "double 逐位相等"（任务书写死的判据）。
+     *
+     * <p>用 {@link Double#doubleToLongBits} 而不是 {@code ==}：{@code -0.0 == 0.0} 为真但位不同，
+     * 而这里要的是<b>逐位</b>；NaN 的两个形态也一并按位比（同一位型才算相等）。
+     */
+    private static boolean bitEqual(double a, double b) {
+        return Double.doubleToLongBits(a) == Double.doubleToLongBits(b);
     }
 
     // ================================================================== 校验（判据的尺子）
@@ -1031,12 +1161,43 @@ public final class ShanhaiEntityEdit {
         }
     }
 
-    /** 一处命中（定位结果；{@code path} 是落盘文件，{@code index} 是 {@code Entities} 里的下标）。 */
+    /**
+     * 一处命中（定位结果；{@code path} 是落盘文件，{@code index} 是 {@code Entities} 里的下标）。
+     *
+     * <p>🆕 2026-11-20：多了 {@code x/y/z}（实体 NBT 里 {@code Pos} 的三个 double 原值）——
+     * 落盘阶段按 UUID 找不到时要退化匹配，"同区块 ＋ id 相同 ＋ Pos 三位全等"就是第一档判据
+     * （见 {@link Anchor}）。这里存的是<b>读盘时的原值</b>，不做四舍五入。
+     */
     public record Hit(String file, Path path, int regionX, int regionZ, int slot, int chunkX, int chunkZ,
-                      int index, String id, String uuid) {
+                      int index, String id, String uuid, double x, double y, double z) {
         public String line() {
             return this.id + " uuid=" + this.uuid + " file=" + this.file + " slot=" + this.slot
-                    + " chunk(" + this.chunkX + "," + this.chunkZ + ") #" + this.index;
+                    + " chunk(" + this.chunkX + "," + this.chunkZ + ") #" + this.index
+                    + " pos=(" + this.x + "," + this.y + "," + this.z + ")";
+        }
+    }
+
+    /**
+     * 🆕 2026-11-20：暂存时记下的<b>退化匹配锚点</b>（UUID 在停服写盘后变了的唯一兜底依据）。
+     *
+     * <h2>为什么需要它（实机判据）</h2>
+     * <pre>
+     *   20:23:47 panel_entity_open … uuid=073667a6-… file=r.-1.0.mca slot=157 chunk(-3,4) #0
+     *   20:23:48 panel_entity_delete_staged … by=uuid:073667a6-…
+     *   20:24:07 （用户退出世界 ⇒ 服务器停 ⇒ 内存实体写回 region）
+     *   20:24:09 apply_failed entity_page_failed:no_effective_change（uuid 已经不存在）
+     * </pre>
+     * ⇒ 那一类实体是"重启会复活"型，停服写盘时<b>换了 UUID</b>。没有了 UUID，唯一还能认的是
+     * 「<b>同一个区块 ＋ 同一个实体 id ＋ 同一个 Pos</b>」。三者都是暂存那一刻从盘上读到的原值。
+     *
+     * @param typeId 暂存时读到的实体 id（如 {@code minecraft:item}）
+     * @param x      {@code Pos[0]} 原值
+     * @param y      {@code Pos[1]} 原值
+     * @param z      {@code Pos[2]} 原值
+     */
+    public record Anchor(String typeId, double x, double y, double z) {
+        public String describe() {
+            return "type=" + normalizeType(this.typeId) + " pos=(" + this.x + "," + this.y + "," + this.z + ")";
         }
     }
 
@@ -1497,8 +1658,9 @@ public final class ShanhaiEntityEdit {
                     final CompoundTag e = list.getCompound(i);
                     final String here = entityUuidText(e);
                     if (wantText.equalsIgnoreCase(here)) {
+                        final double[] p = entityPos(e);
                         hits.add(new Hit(file.getFileName().toString(), file, rz[0], rz[1], slot,
-                                cxz[0], cxz[1], i, entityType(e), wantText));
+                                cxz[0], cxz[1], i, entityType(e), wantText, p[0], p[1], p[2]));
                     }
                     collectPassenger(e, wantText, entityType(e) + " @chunk(" + cxz[0] + "," + cxz[1]
                             + ") #" + i + " uuid=" + here + " 文件=" + file.getFileName(), passengers, 0);
@@ -2019,7 +2181,7 @@ public final class ShanhaiEntityEdit {
      *
      * <p>🔴 全部按<b>整串键名</b>取写（{@link CompoundTag#put(String, Tag)}），
      * 没有任何"按 {@code .} 切路径"的写法 —— 实测存档里存在
-     * {@code omnimobs_ExplosionRender_DATA_COLOUR.X} 这种带点号的键名，切了就会碎。
+     * {@code examplemod_Thing_DATA_COLOUR.X} 这种带点号的键名，切了就会碎。
      */
     public static void applyPatch(CompoundTag e, Patch p, Hit hit, List<String> changed,
                                   List<String> notes, List<String> dangers) {

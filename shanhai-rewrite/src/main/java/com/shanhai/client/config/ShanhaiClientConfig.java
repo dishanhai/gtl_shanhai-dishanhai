@@ -147,6 +147,10 @@ public final class ShanhaiClientConfig {
     //       旧判定让特效从站体里永远看不见（这正是"特效一点没看见"的根因）。
     private static final ForgeConfigSpec.BooleanValue HOSTFX_ENABLED;
     private static final ForgeConfigSpec.BooleanValue HOSTFX_HIDE_REAL_BLOCKS;
+    /** 2026-11-22 追加：星辰场开关（③ 移植件）。 */
+    private static final ForgeConfigSpec.BooleanValue HOSTFX_STAR_FIELD;
+    /** 2026-11-22 追加：结构闪电开关（④ 移植件）。 */
+    private static final ForgeConfigSpec.BooleanValue HOSTFX_STRUCTURE_LIGHTNING;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -332,6 +336,26 @@ public final class ShanhaiClientConfig {
                         "false ⇒ 真块留着，动效叠在上面（两层的观感，但没有客户端写方块这一层风险）。",
                         "⚠️ 只有在特效真的出问题时才建议关掉它。")
                 .define("hideRealBlocks", true);
+
+        // 🔴 2026-11-22 追加（四件渲染移植里的 ③④）：各自一个开关，默认开。
+        //    为什么放在客户端配置、而不放进机器那个「渲染参数」面板：
+        //    ① 这两件是【纯客户端观感层】，不同步、不进存档、不影响别人 —— 与那 7 个 @DescSynced 机器字段
+        //       语义不同（那几个是"所有人都会看到"的机器状态）；
+        //    ② 「渲染参数」面板最后一行（y=125）只剩一个 72px 空位，而这一轮要求「不许改面板行数」
+        //       ⇒ 两个开关塞不进去；加行会抬高面板（158×170 → 158×194），那是已验收的几何。
+        //    关掉的方式：游戏内 Mods → 山海 → Config（Forge 自带配置界面，即时生效，不用重启）；
+        //               或直接改 config/shanhai-client.toml 的 [hostfx] 两行（改了要重启）。
+        HOSTFX_STAR_FIELD = b.comment("【③ 星辰场】按世界时间纯函数采样的一整片星空（吸入星/背景星/轨道尘/流星/体积星/星尘），默认 true。",
+                        "false ⇒ 这一整层不提交（黑洞、内环、飞船、光柱一根都不受影响）。",
+                        "⚠️ 它有距离降级：相机离黑洞超过 160 格自动降级（背景星 512→96、体积星 384→64、星尘 96→0），",
+                        "   超过 320 格整组不画。护栏读数在 [SHANHAI-HOSTFX] draw 行的「新增层 … 星辰 N/1256(完整|降级)」。")
+                .define("starField", true);
+
+        HOSTFX_STRUCTURE_LIGHTNING = b.comment("【④ 结构闪电】沿结构表面放电的电弧（读回自己的结构，最多 256 个表面节点，",
+                        "逐点核对世界里真实方块——含被渲染藏起来的格子台账——才让电弧落点），默认 true。",
+                        "false ⇒ 这一层不提交（同一帧的其它特效一根都不受影响）。",
+                        "⚠️ 护栏：一帧最多 12 条弧（每条 6 段 × 2 条交叉带 = 12 个四边形）。")
+                .define("structureLightning", true);
 
         b.pop();   // hostfx
 
@@ -587,6 +611,32 @@ public final class ShanhaiClientConfig {
     public static boolean hostFxHideRealBlocks() {
         try {
             return HOSTFX_HIDE_REAL_BLOCKS.get();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * ③ <b>星辰场</b>开关（{@code [hostfx] starField}）；读不到 ⇒ {@code true}（<b>默认开</b>）。
+     *
+     * <p>关掉它只影响这一层：{@code HostFxExtraLayers} 里整段跳过，不提交任何顶点。
+     */
+    public static boolean hostFxStarField() {
+        try {
+            return HOSTFX_STAR_FIELD.get();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * ④ <b>结构闪电</b>开关（{@code [hostfx] structureLightning}）；读不到 ⇒ {@code true}（<b>默认开</b>）。
+     *
+     * <p>关掉它只影响这一层：{@code HostFxExtraLayers} 里整段跳过（连结构采样都不会跑）。
+     */
+    public static boolean hostFxStructureLightning() {
+        try {
+            return HOSTFX_STRUCTURE_LIGHTNING.get();
         } catch (Throwable t) {
             return true;
         }

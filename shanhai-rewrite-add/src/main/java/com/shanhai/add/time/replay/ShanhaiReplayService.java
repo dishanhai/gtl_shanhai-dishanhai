@@ -314,7 +314,7 @@ public final class ShanhaiReplayService {
         final long now = probe == null ? newest : probe.getGameTime();
 
         // ---- ① 先落盘"倒流前"（第 3 参 false = 真写）
-        final int saved = saveAll(srv, true, false);
+        final int saved = saveAll(srv, true, false, "begin");
 
         // ---- ② 关写盘闸（屏蔽每 6000 tick 的自动保存；崩溃 ⇒ 磁盘停在①）
         int noSaveCount = 0;
@@ -796,11 +796,13 @@ public final class ShanhaiReplayService {
                 level.noSave = false;
                 ++restored;
             }
-            final int saved = saveAll(server, true, false);
+            final int saved = saveAll(server, true, false, "stop");
             ShanhaiMod.LOGGER.info("[SHANHAI-REPLAY] save_restored noSave=false levels={} saved={}", restored, saved);
         }
 
         // ---- ④ 清空五条时间线 + 各载荷池（设计 §4.2 末 + 任务口径"结束后把 ring 清空"）
+        // 🔴 计时：清空也可能卡（几万条记录一次性丢）；与 save_all 分开量，一眼看得出谁慢
+        final long clearT0 = System.nanoTime();
         journal.clear();
         journal.clearAnchor();
         ShanhaiReplayPayloads.clear();
@@ -812,6 +814,8 @@ public final class ShanhaiReplayService {
         ShanhaiReplayScalarRecorder.reset();
         // 倒流改过时间/天气/规则 ⇒ 必须重新基线，否则下一拍会把我们自己的写当成新历史
         ShanhaiReplayScalarRecorder.rebaseline();
+        ShanhaiMod.LOGGER.info("[SHANHAI-REPLAY] stop_clear ms={}",
+                (System.nanoTime() - clearT0) / 1_000_000L);
         activeAnchor = null;
         anchorTick = ShanhaiReplayAnchor.NO_ANCHOR_TICK;
         boundActor = null;
@@ -1135,13 +1139,27 @@ public final class ShanhaiReplayService {
 
     // ------------------------------------------------------------------ 工具
 
-    /** 给所有 level 各存一次；返回成功次数（失败只记日志，绝不抛）。 */
-    private static int saveAll(MinecraftServer server, boolean flush, boolean skip) {
+    /**
+     * 给所有 level 各存一次；返回成功次数（失败只记日志，绝不抛）。
+     *
+     * <p>🔴 2026-11-22 加计时：用户报「倒流之后那一瞬间会卡住一段时间」，日志里两次 `Can't keep up!`
+     * 都紧贴本方法（`save_restored` 那行前 56 ms），但**从外部量不出它花了多久**
+     * （渲染线程一直在打日志，把服务端空档填满了）。所以这里直接打
+     * {@code save_all ms=总耗时 levels=维度数 ok=成功数 slowest=最慢维度 Xms}，
+     * 下一次倒流就能指认"是全部维度都慢，还是某一个维度在拖"。
+     */
+    private static int saveAll(MinecraftServer server, boolean flush, boolean skip, String tag) {
         int ok = 0;
+        final long t0 = System.nanoTime();
+        long slowestMs = -1L;
+        String slowestDim = "none";
+        int levels = 0;
         for (ServerLevel level : server.getAllLevels()) {
             if (level == null) {
                 continue;
             }
+            ++levels;
+            final long t1 = System.nanoTime();
             try {
                 // 🔴 第 3 参 = skip：false 才真写（true 是"跳过"，设计 §4.2 的坑）
                 level.save(null, flush, skip);
@@ -1150,7 +1168,15 @@ public final class ShanhaiReplayService {
                 ShanhaiMod.LOGGER.error("[SHANHAI-REPLAY] save 失败 dim={} err={}",
                         level.dimension().location(), t.toString());
             }
+            final long ms = (System.nanoTime() - t1) / 1_000_000L;
+            if (ms > slowestMs) {
+                slowestMs = ms;
+                slowestDim = level.dimension().location().toString();
+            }
         }
+        final long totalMs = (System.nanoTime() - t0) / 1_000_000L;
+        ShanhaiMod.LOGGER.info("[SHANHAI-REPLAY] save_all tag={} ms={} levels={} ok={} flush={} skip={} slowest={} {}ms",
+                tag, totalMs, levels, ok, flush, skip, slowestDim, Math.max(0L, slowestMs));
         return ok;
     }
 

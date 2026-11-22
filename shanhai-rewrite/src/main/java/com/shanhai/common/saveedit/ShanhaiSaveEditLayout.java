@@ -22,10 +22,10 @@ import java.util.List;
  *
  * <h2>二、版式（W=400 × H=232，<b>三期定的尺寸不变</b>）</h2>
  * <pre>
- *   y=6    [①玩家][②世界][③方块][④实体][⑤成就][⑥统计][⑦审计]  [读当前值 76] [确认 96]
+ *   y=6    [①玩家][②世界][③方块][④实体][⑤成就][⑥统计][⑦其他]  [读当前值 76] [确认 96]
  *          │ 页签每个 28 px（动态算），七个共占 208 px，右边留 14 px 才到按钮
  *   y=28   第 N 页的说明一行
- *   y=42.. 各页内容（① 从 42 起；②③④⑤⑥ 从 44~46 起；⑦ 从 44 起）
+ *   y=42.. 各页内容（① 从 42 起；②③④⑤⑥ 从 44~46 起；⑦ 从 42 起）
  *   y=220  §7状态 §f<服务端权威的一行>
  * </pre>
  * 🔴 每一行"长度不可控"的字都要先过面板里的 {@code fit(text, px)}：LDLib 不换行也不裁。
@@ -52,10 +52,11 @@ public final class ShanhaiSaveEditLayout {
     /** 第 ⑥ 页：统计（stats）。 */
     public static final int PAGE_STATS = 5;
     /**
-     * 第 ⑦ 页：存档体检（双份登记）。
+     * 第 ⑦ 页：存档体检（<b>白名单之外的一切 = 异常数据，可逐条删除</b>）。
      *
-     * <p>判据只立在世界数据本身（同一个 UUID / 同一组坐标同时出现在区块文件与非原版布局文件里），
-     * 所以这一页对"任何名字的旁挂登记"一视同仁 —— 它<b>不认</b>任何具体模组名、实体名、文件名、字段名。
+     * <p>判据只立在世界数据布局本身（原版目录名白名单，见
+     * {@code ShanhaiSaveEditAuditScan#ROOT_FILES/#VANILLA_DIRS}），所以这一页对"任何名字的旁挂文件"
+     * 一视同仁 —— 它<b>不认</b>任何具体模组名、实体名、文件名、字段名。
      */
     public static final int PAGE_AUDIT = 6;
     /** 🔴 页数：切页上下界、页签个数、控件总数全部由它算，<b>别处不许再写 6</b>。 */
@@ -64,40 +65,46 @@ public final class ShanhaiSaveEditLayout {
     /** 三个新页的明细行数（面板与 Holder 共用这一个数）。 */
     public static final int NEW_LINES = 7;
 
-    // ================================================================== 第 ⑦ 页（审计）
+    // ================================================================== 第 ⑦ 页（存档体检）
 
     /**
-     * 审计页的清单行数。
+     * 第 ⑦ 页的<b>竖排节奏</b>（照第 ④⑤⑥ 页的列表骨架：搜索一行 + 概况一行 + 7 行 →
+     * 翻页一行 + 选中一行）。
      *
-     * <p>比其它三页多（9 行而不是 7 行）：这一页没有输入框，整页高度都让给清单，
-     * 上限是"不压到下面的动作按钮"（{@link #AU_BTN_Y}）。这个数在
-     * {@link #layoutProblems()} 里被离线断言过。
+     * <pre>
+     *   y=28   说明（客户端自己知道的字）
+     *   y=42   [搜索] 输入框 196 ] [重新扫描 68] [删除选中项 92]    （42+16 = 58）
+     *   y=62   概况「共 N 条 · 文件 a · 目录 b · 文本 c · 二进制 d」（62+9 = 71）
+     *   y=74 + 16*i   7 行可点（每行一个 ButtonWidget，h=15）→ 最后一行 170..185
+     *   y=188  [◀上一页] 第 N/M 页 [下一页▶] 共 X 条 · 本页 a-b      （188+16 = 204）
+     *   y=206  选中那一行（相对路径 / 文件或目录 / 字节 / 修改时间 / 文本或二进制 / 预览 / 可删）
+     *   y=220  §7状态 §f&lt;一行&gt;
+     * </pre>
+     * 🔴 验收口径（用户 2026-11-15）：「列表骨架照抄页④/⑤/⑥（7 行列表 + 选中行 + 翻页 + 搜索）」，
+     * 所以行高/行距与那三页<b>逐字相同</b>（{@link #LP_ROW_STEP} / {@link #LP_ROW_H}），
+     * 翻页四个控件的 x / 宽也直接复用 {@code LP_*} —— 手感一致，几何只有一份。
      */
-    public static final int AU_LINES = 9;
-    /** 摘要行 y（{@code 共 N 条 · 可删实体 K · 纯文本旁挂 L · 二进制旁挂 M}）。 */
-    public static final int AU_SUMMARY_Y = 44;
+    public static final int AU_FILTER_Y = 42;
+    /** 概况行 y（{@code 共 N 条 · 文件 a · 目录 b · 文本 c · 二进制 d}）。 */
+    public static final int AU_SUMMARY_Y = 62;
     /** 清单第一行 y。 */
-    public static final int AU_LINE_Y0 = 58;
-    /** 清单行距。 */
-    public static final int AU_LINE_STEP = 12;
-    /** 「选中」那一行 y（显示选中项的类型/坐标/旁挂位置 + UUID）。 */
-    public static final int AU_SEL_Y = 166;
-    /** 动作按钮那一行 y。 */
-    public static final int AU_BTN_Y = 180;
-    /** 动作按钮高。 */
-    public static final int AU_BTN_H = 16;
-    /** 「◀ 上一条」x / 宽。 */
-    public static final int AU_PREV_X = 6, AU_PREV_W = 62;
-    /** 「▶ 下一条」x / 宽。 */
-    public static final int AU_NEXT_X = 72, AU_NEXT_W = 62;
-    /** 「删区块里那份」x / 宽。 */
-    public static final int AU_DROP_ENTITY_X = 138, AU_DROP_ENTITY_W = 86;
-    /** 「删旁挂那行」x / 宽（二进制旁挂时变灰，见面板里的 {@code AuditButton}）。 */
-    public static final int AU_DROP_SIDECAR_X = 228, AU_DROP_SIDECAR_W = 86;
+    public static final int AU_ROW_Y0 = 74;
+    /** 清单行距（与 ④⑤⑥ 逐字相同；用类名限定写法，避免"前向引用"编译错误 —— 那三个常量在下面）。 */
+    public static final int AU_ROW_STEP = ShanhaiSaveEditLayout.LP_ROW_STEP;
+    /** 行高（与 ④⑤⑥ 逐字相同；16 px 步长里放 15 px 的按钮 ⇒ 相邻两行留 1 px）。 */
+    public static final int AU_ROW_H = ShanhaiSaveEditLayout.LP_ROW_H;
+    /** 可点的行数（= {@link #NEW_LINES}；面板、Holder、槽位表共用）。 */
+    public static final int AU_ROWS = NEW_LINES;
+    /** 翻页那一行 y / 高（{@code 188+16 = 204}，下面还有一行"选中"）。 */
+    public static final int AU_PAGER_Y = 188, AU_PAGER_H = 16;
+    /** 「选中」那一行 y（{@code 206+9 = 215 < 220} 状态行）。 */
+    public static final int AU_SEL_Y = 206;
+    /** 搜索框宽（右边留给两个动作按钮）。 */
+    public static final int AU_FILTER_W = 196;
     /** 「重新扫描」x / 宽。 */
-    public static final int AU_RESCAN_X = 318, AU_RESCAN_W = 76;
-    /** 底部提示第一行 y。 */
-    public static final int AU_HINT_Y0 = 200;
+    public static final int AU_RESCAN_X = 232, AU_RESCAN_W = 68;
+    /** 「删除选中项」x / 宽（🔴 不弹二次确认；删前进回收目录，可撤回）。 */
+    public static final int AU_DROP_X = 304, AU_DROP_W = 92;
 
     // ================================================================== 全局（页签 / 按钮 / 状态行）
 
@@ -607,6 +614,34 @@ public final class ShanhaiSaveEditLayout {
     }
 
     /**
+     * 🔴 第 ⑦ 页（存档体检）的<b>控件清单</b>（<b>19 个</b>：说明 1 + 搜索 2 + 两个动作按钮 2 +
+     * 概况 2 + 可点行 7 + 翻页 4 + 选中 1）。
+     *
+     * <p>骨架照第 ④⑤⑥ 页（7 行列表 + 翻页 + 搜索），动作只有两个：「重新扫描」（只读）与
+     * 「删除选中项」（🔴 不弹二次确认，删前进回收目录可撤回）。原来那三件套
+     * （删区块里那份 / 删旁挂那行 / 重新扫描）只剩「重新扫描」。
+     */
+    public static List<Slot> auditSlots() {
+        final List<Slot> out = new ArrayList<>();
+        out.add(new Slot("subtitle", Kind.LABEL, -1, 6, SUB_Y, W - 14, 9));
+        out.add(new Slot("filter.label", Kind.LABEL, -1, 6, AU_FILTER_Y + 3, 24, 9));
+        out.add(new Slot("filter.field", Kind.FIELD, -1, 32, AU_FILTER_Y, AU_FILTER_W, FIELD_H));
+        out.add(new Slot("rescan.button", Kind.BUTTON, -1, AU_RESCAN_X, AU_FILTER_Y, AU_RESCAN_W, FIELD_H));
+        out.add(new Slot("drop.button", Kind.BUTTON, -1, AU_DROP_X, AU_FILTER_Y, AU_DROP_W, FIELD_H));
+        out.add(new Slot("summary.label", Kind.LABEL, -1, 6, AU_SUMMARY_Y, 24, 9));
+        out.add(new Slot("summary.value", Kind.LABEL, -1, 32, AU_SUMMARY_Y, W - 32 - 8, 9));
+        for (int i = 0; i < AU_ROWS; i++) {
+            out.add(new Slot("row", Kind.ROW, i, 6, AU_ROW_Y0 + i * AU_ROW_STEP, W - 14, AU_ROW_H));
+        }
+        out.add(new Slot("page.prev", Kind.BUTTON, -1, LP_PREV_X, AU_PAGER_Y, LP_PREV_W, AU_PAGER_H));
+        out.add(new Slot("page.label", Kind.LABEL, -1, LP_PAGE_LBL_X, AU_PAGER_Y + 4, LP_PAGE_LBL_W, 9));
+        out.add(new Slot("page.next", Kind.BUTTON, -1, LP_NEXT_X, AU_PAGER_Y, LP_NEXT_W, AU_PAGER_H));
+        out.add(new Slot("page.count", Kind.LABEL, -1, LP_PAGE_CNT_X, AU_PAGER_Y + 4, LP_PAGE_CNT_W, 9));
+        out.add(new Slot("selected", Kind.LABEL, -1, 6, AU_SEL_Y, W - 14, 9));
+        return List.copyOf(out);
+    }
+
+    /**
      * 第 ⑤ 页（成就）详情覆盖层的控件清单（<b>12 个</b>：标题 1 + 读数 8 + 按钮 3）。
      *
      * <p>没有输入框 —— "改一条成就"是<b>两个动作</b>（写入 = 给、撤成就），不是填值。
@@ -851,8 +886,14 @@ public final class ShanhaiSaveEditLayout {
     private static final int PAGE5_WIDGETS = advancementSlots().size();
     /** 第 ⑥ 页控件数：<b>由 {@link #statsSlots()} 的长度算</b>（19，与第 ⑤ 页逐格同构）。 */
     private static final int PAGE6_WIDGETS = statsSlots().size();
-    /** 第 ⑦ 页：说明 1 + 摘要 1 + 清单 {@link #AU_LINES} + 选中 1 + 按钮 5 + 提示 1。 */
-    private static final int PAGE7_WIDGETS = 1 + 1 + AU_LINES + 1 + 5 + 1;
+    /**
+     * 第 ⑦ 页控件数：<b>由 {@link #auditSlots()} 的长度算</b>（19）。
+     *
+     * <p>S2d 改版：18 → 19。旧版是「9 行只读清单 + 选中行 + 5 个按钮 + 提示」；现在照 ④⑤⑥ 的
+     * 列表骨架换成「搜索 2 + 两个动作按钮 2 + 概况 2 + 7 个可点的行 + 翻页 4 + 选中行 1 + 说明 1」，
+     * 双份登记那三件套（删区块里那份 / 删旁挂那行 / 重新扫描）只剩「重新扫描」。
+     */
+    private static final int PAGE7_WIDGETS = auditSlots().size();
 
     private ShanhaiSaveEditLayout() {}
 
@@ -867,7 +908,7 @@ public final class ShanhaiSaveEditLayout {
             case PAGE_ENTITY: return "④实体";
             case PAGE_ADVANCEMENT: return "⑤成就";
             case PAGE_STATS: return "⑥统计";
-            case PAGE_AUDIT: return "⑦审计";
+            case PAGE_AUDIT: return "⑦其他";
             default: return "?";
         }
     }
@@ -885,7 +926,7 @@ public final class ShanhaiSaveEditLayout {
     public static List<String> pageTitles() {
         return List.of("① 玩家", "② 世界(level.dat)", "③ 方块(region)",
                 "④ 实体(entities)", "⑤ 成就(advancements)", "⑥ 统计(stats)",
-                "⑦ 存档体检(双份登记)");
+                "⑦ 存档体检(白名单之外)");
     }
 
     // ================================================================== 控件计数（分析式）
@@ -924,10 +965,10 @@ public final class ShanhaiSaveEditLayout {
      *   <li>「读当前值」不压「确认」，「确认」不越界；</li>
      *   <li>状态行在面板内；</li>
      *   <li>各页的明细行不压状态行、起点不高于 40；</li>
-     *   <li>🔴 <b>同页任意两个控件的矩形不相交、且都在面板内</b>（第 ④⑤⑥ 页 + 覆盖层；
+     *   <li>🔴 <b>同页任意两个控件的矩形不相交、且都在面板内</b>（第 ④⑤⑥⑦ 页 + 覆盖层；
      *       见 {@link #rectOverlapProblems(String, List)}，负对照直接喂两个叠在一起的矩形）；</li>
-     *   <li>第 ④ 页的可点行"行距 ≥ 行高"，不压提示、不压状态行；</li>
-     *   <li>第 ⑦ 页的清单/选中/按钮/提示互不重叠、按钮不越界；</li>
+     *   <li>第 ④⑤⑥⑦ 页的可点行"行距 ≥ 行高"，不压翻页行、翻页行不压状态行；</li>
+     *   <li>第 ⑦ 页的搜索框 / 两个动作按钮 / 概况 / 7 行 / 翻页 / 选中行互不重叠、按钮不越界；</li>
      *   <li>每一页都有控件（分析式计数 &gt; 0）。</li>
      * </ol>
      *
@@ -976,9 +1017,7 @@ public final class ShanhaiSaveEditLayout {
         if (STATUS_Y + 9 > H) {
             problems.add("状态行越界 y=" + STATUS_Y);
         }
-        // ④ 各页的明细行
-        checkLines(problems, "审计", AU_LINE_Y0, AU_LINE_STEP, AU_LINES);
-        // ④' 第 ④⑤⑥ 页的可点行：行距必须 ≥ 行高（15 px 的按钮放进 16 px 的行距里正好留 1 px；
+        // ④' 第 ④⑤⑥⑦ 页的可点行：行距必须 ≥ 行高（15 px 的按钮放进 16 px 的行距里正好留 1 px；
         //     放进 12 px 的行距里就会互相叠 —— 这类数字错了编译期全绿）
         checkRowRhythm(problems, "实体", EN_ROW_Y0, EN_ROW_STEP, EN_ROW_H, EN_ROWS,
                 EN_PAGER_Y, EN_PAGER_H);
@@ -986,11 +1025,16 @@ public final class ShanhaiSaveEditLayout {
                 LP_PAGER_Y, LP_PAGER_H);
         checkRowRhythm(problems, "统计", LP_ROW_Y0, LP_ROW_STEP, LP_ROW_H, LP_ROWS,
                 LP_PAGER_Y, LP_PAGER_H);
+        checkRowRhythm(problems, "体检", AU_ROW_Y0, AU_ROW_STEP, AU_ROW_H, AU_ROWS,
+                AU_PAGER_Y, AU_PAGER_H);
         if (EN_ROWS != NEW_LINES) {
             problems.add("实体页可点行数 " + EN_ROWS + " ≠ NEW_LINES=" + NEW_LINES);
         }
         if (LP_ROWS != NEW_LINES) {
             problems.add("成就/统计页可点行数 " + LP_ROWS + " ≠ NEW_LINES=" + NEW_LINES);
+        }
+        if (AU_ROWS != NEW_LINES) {
+            problems.add("体检页可点行数 " + AU_ROWS + " ≠ NEW_LINES=" + NEW_LINES);
         }
         // ④'' 第 ⑤⑥ 页：翻页行 → 提示行 → 状态行 的纵向关系（三条都不许压）
         if (LP_PAGER_Y + LP_PAGER_H > LP_HINT_Y) {
@@ -1001,11 +1045,12 @@ public final class ShanhaiSaveEditLayout {
             problems.add("成就/统计页提示行压到状态行 end=" + (LP_HINT_Y + 9)
                     + " status_y=" + STATUS_Y);
         }
-        // ⑤ 🔴 同页任意两个控件的矩形不相交（第 ④⑤⑥ 页 + 三个覆盖层）
+        // ⑤ 🔴 同页任意两个控件的矩形不相交（第 ④⑤⑥⑦ 页 + 三个覆盖层）
         //    这一条是第五期补的：原来只查"页与页/行与状态行"的关系，同页内部控件叠在一起是查不出来的。
         problems.addAll(rectOverlapProblems("第④页", rects(entitySlots())));
         problems.addAll(rectOverlapProblems("第⑤页", rects(advancementSlots())));
         problems.addAll(rectOverlapProblems("第⑥页", rects(statsSlots())));
+        problems.addAll(rectOverlapProblems("第⑦页", rects(auditSlots())));
         problems.addAll(rectOverlapProblems("覆盖层", rects(entityOverlaySlots())));
         problems.addAll(rectOverlapProblems("成就覆盖层", rects(advancementOverlaySlots())));
         problems.addAll(rectOverlapProblems("统计覆盖层", rects(statsOverlaySlots())));
@@ -1045,37 +1090,26 @@ public final class ShanhaiSaveEditLayout {
             problems.add("统计覆盖层输入行压到按钮行 end=" + (OV2_IN_Y + OV_IN_H)
                     + " btn_y=" + OV2_BTN_Y);
         }
-        // ⑥ 第 ⑦ 页：清单 / 选中 / 按钮 / 提示 之间的纵向关系
-        final int auLastBottom = AU_LINE_Y0 + (AU_LINES - 1) * AU_LINE_STEP + 9;
-        if (auLastBottom >= AU_SEL_Y) {
-            problems.add("审计页清单压到选中行 last=" + auLastBottom + " sel_y=" + AU_SEL_Y);
+        // ⑥ 第 ⑦ 页：翻页行 / 选中行 / 两个动作按钮 之间的纵向关系
+        if (AU_PAGER_Y + AU_PAGER_H > AU_SEL_Y) {
+            problems.add("体检页翻页行压到选中行 end=" + (AU_PAGER_Y + AU_PAGER_H)
+                    + " sel_y=" + AU_SEL_Y);
         }
-        if (AU_SEL_Y + 9 >= AU_BTN_Y) {
-            problems.add("审计页选中行压到按钮 y=" + AU_SEL_Y + " btn_y=" + AU_BTN_Y);
+        if (AU_SEL_Y + 9 > STATUS_Y) {
+            problems.add("体检页选中行压到状态行 end=" + (AU_SEL_Y + 9) + " status_y=" + STATUS_Y);
         }
-        if (AU_BTN_Y + AU_BTN_H >= AU_HINT_Y0) {
-            problems.add("审计页按钮压到底部提示 y=" + AU_BTN_Y + " hint_y=" + AU_HINT_Y0);
+        if (AU_SUMMARY_Y + 9 > AU_ROW_Y0) {
+            problems.add("体检页概况压到清单 end=" + (AU_SUMMARY_Y + 9) + " row_y0=" + AU_ROW_Y0);
         }
-        if (AU_HINT_Y0 + 9 >= STATUS_Y) {
-            problems.add("审计页提示压到状态行 y=" + AU_HINT_Y0);
-        }
-        // ⑥ 第 ⑦ 页的五个按钮：不越界、不互相压
-        checkButton(problems, "上一条", AU_PREV_X, AU_PREV_W);
-        checkButton(problems, "下一条", AU_NEXT_X, AU_NEXT_W);
-        checkButton(problems, "删区块里那份", AU_DROP_ENTITY_X, AU_DROP_ENTITY_W);
-        checkButton(problems, "删旁挂那行", AU_DROP_SIDECAR_X, AU_DROP_SIDECAR_W);
+        // ⑥ 第 ⑦ 页的两个动作按钮：不越界、不与搜索框/彼此相压
         checkButton(problems, "重新扫描", AU_RESCAN_X, AU_RESCAN_W);
-        if (AU_PREV_X + AU_PREV_W > AU_NEXT_X) {
-            problems.add("审计页「上一条」压「下一条」");
+        checkButton(problems, "删除选中项", AU_DROP_X, AU_DROP_W);
+        if (32 + AU_FILTER_W > AU_RESCAN_X) {
+            problems.add("体检页搜索框压到「重新扫描」end=" + (32 + AU_FILTER_W)
+                    + " rescan_x=" + AU_RESCAN_X);
         }
-        if (AU_NEXT_X + AU_NEXT_W > AU_DROP_ENTITY_X) {
-            problems.add("审计页「下一条」压「删区块里那份」");
-        }
-        if (AU_DROP_ENTITY_X + AU_DROP_ENTITY_W > AU_DROP_SIDECAR_X) {
-            problems.add("审计页「删区块里那份」压「删旁挂那行」");
-        }
-        if (AU_DROP_SIDECAR_X + AU_DROP_SIDECAR_W > AU_RESCAN_X) {
-            problems.add("审计页「删旁挂那行」压「重新扫描」");
+        if (AU_RESCAN_X + AU_RESCAN_W > AU_DROP_X) {
+            problems.add("体检页「重新扫描」压到「删除选中项」");
         }
         // ⑦ 每页都有控件
         for (int p = 0; p < PAGE_COUNT; p++) {
@@ -1086,18 +1120,18 @@ public final class ShanhaiSaveEditLayout {
         return problems;
     }
 
-    /** 一个按钮的几何自检（审计页五个按钮用）。 */
+    /** 一个按钮的几何自检（第 ⑦ 页那两个动作按钮用）。 */
     private static void checkButton(List<String> problems, String name, int x, int w) {
         if (x < 0 || x + w > W) {
-            problems.add("审计页按钮「" + name + "」越界 x=" + x + " w=" + w);
+            problems.add("体检页按钮「" + name + "」越界 x=" + x + " w=" + w);
         }
     }
 
     /**
-     * 一页"可点的行 + 翻页行"的竖排自检（第 ④⑤⑥ 页共用这一条）。
+     * 一页"可点的行 + 翻页行"的竖排自检（第 ④⑤⑥⑦ 页共用这一条）。
      *
      * <p>三条：① 行距 ≥ 行高（不然相邻两行会互相盖住）；② 最后一行不压翻页行；
-     * ③ 翻页行不压状态行。S2b 把 ⑤⑥ 也改成这种版式之后，这一条必须三页都跑一遍。
+     * ③ 翻页行不压状态行。S2b 把 ⑤⑥ 也改成这种版式之后，这一条必须四页都跑一遍。
      */
     private static void checkRowRhythm(List<String> problems, String name, int rowY0, int rowStep,
                                        int rowH, int rows, int pagerY, int pagerH) {
@@ -1111,16 +1145,6 @@ public final class ShanhaiSaveEditLayout {
         if (pagerY + pagerH > STATUS_Y) {
             problems.add(name + "页翻页按钮压到状态行 end=" + (pagerY + pagerH)
                     + " status_y=" + STATUS_Y);
-        }
-    }
-
-    private static void checkLines(List<String> problems, String name, int y0, int step, int lines) {
-        final int last = y0 + (Math.max(1, lines) - 1) * step + 9;
-        if (y0 < 40) {
-            problems.add(name + "页明细起点太高 y=" + y0);
-        }
-        if (last >= STATUS_Y) {
-            problems.add(name + "页明细压到状态行 last=" + last + " status_y=" + STATUS_Y);
         }
     }
 
@@ -1195,11 +1219,11 @@ public final class ShanhaiSaveEditLayout {
                 + " page5_overlay=[notes=" + OV2_NOTE_LINES + "@" + OV2_NOTE_Y0 + "+" + OV2_NOTE_STEP
                 + " in_y=" + OV2_IN_Y + "/" + OV_IN_H + " btns_y=" + OV2_BTN_Y
                 + " slots=" + statsOverlaySlots().size() + "]"
-                + " page6=[audit summary_y=" + AU_SUMMARY_Y
-                + " lines=" + AU_LINES + "x" + AU_LINE_STEP + "@" + AU_LINE_Y0
-                + " sel_y=" + AU_SEL_Y + " btns_y=" + AU_BTN_Y + "/" + AU_BTN_H
-                + " btns_w=[" + AU_PREV_W + "," + AU_NEXT_W + "," + AU_DROP_ENTITY_W + ","
-                + AU_DROP_SIDECAR_W + "," + AU_RESCAN_W + "] hint_y=" + AU_HINT_Y0 + "]"
+                + " page6=[audit filter_y=" + AU_FILTER_Y + " summary_y=" + AU_SUMMARY_Y
+                + " rows=" + AU_ROWS + "x" + AU_ROW_STEP + "@" + AU_ROW_Y0 + " h=" + AU_ROW_H
+                + " pager_y=" + AU_PAGER_Y + "/" + AU_PAGER_H + " sel_y=" + AU_SEL_Y
+                + " btns=[rescan(" + AU_RESCAN_X + "," + AU_RESCAN_W + ") drop("
+                + AU_DROP_X + "," + AU_DROP_W + ")] slots=" + auditSlots().size() + "]"
                 + " page0_inventory=[cells=" + inventoryCellRects(false).size() + "/"
                 + inventoryCellRects(true).size() + " cell=" + IV_CELL + " step=" + IV_STEP
                 + " side_x=" + IV_SIDE_X + " main_x=" + IV_MAIN_X + " rows_y=" + IV_ROW_Y0

@@ -5,6 +5,7 @@ import com.mojang.brigadier.context.CommandContext;
 
 import com.shanhai.ShanhaiMod;
 import com.shanhai.add.ShanhaiAdd;
+import com.shanhai.add.config.ShanhaiAddConfig;
 import com.shanhai.add.guard.stack.ShanhaiViolationProbe;
 import com.shanhai.add.guard.stack.ShanhaiViolationStack;
 import com.shanhai.add.hotfix.HotfixTriageTap;
@@ -147,11 +148,14 @@ public final class ShanhaiStateCommand {
             source.sendFailure(Component.literal(denied));
             return 0;
         }
-        final boolean ok = ShanhaiStateSwitches.set(which, on);
+        final ShanhaiStateSwitches.Write w = ShanhaiStateSwitches.set(which, on);
+        // 🔴 回显只用【刚落盘的结果】判"已保存"：w.persisted() = 盘上重新读出来就是新值
         final String reading = which.zh + " = " + which.now()
-                + (ok ? "" : "（写入失败，看日志 state_switch_write_failed）");
-        source.sendSuccess(() -> Component.literal((ok ? "§a" : "§c") + reading), true);
-        return ok ? 1 : 0;
+                + (w.persisted()
+                        ? "（已写进 config/" + ShanhaiAddConfig.FILE_NAME + "，重启还是这个值）"
+                        : "（配置没写成功，重启会回到上次保存的值 —— 看日志 cfg_write）");
+        source.sendSuccess(() -> Component.literal((w.persisted() ? "§a" : "§c") + reading), true);
+        return w.applied() ? 1 : 0;
     }
 
     private static int reset(CommandContext<CommandSourceStack> ctx) {

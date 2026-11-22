@@ -82,6 +82,15 @@ public final class ShanhaiItemOverrideTable {
 
     /** 名字字符上限（够用，且防止有人把整个 JS 塞进来）。 */
     public static final int MAX_NAME_CHARS = 128;
+    /**
+     * 🆕 2026-11-22：名字的<b>原始 char</b> 上限。
+     *
+     * <p>理由与 {@code ShanhaiRealityItemTable#MAX_NAME_RAW_CHARS} 逐条相同：{@link #MAX_NAME_CHARS}
+     * 从此是<b>可见字符</b>口径（见 {@code com.shanhai.common.reality.ShanhaiNameCaps}），
+     * 名字里允许出现 {@code §f}（2 char）与 {@code &$neon-}（7..20 char），
+     * 所以"128 个可见字"可能对应 500+ 个 char；这一条只是网络包/JSON 的硬上限。
+     */
+    public static final int MAX_NAME_RAW_CHARS = 512;
     /** 提示总字符上限。 */
     public static final int MAX_LORE_CHARS = 2048;
 
@@ -339,7 +348,8 @@ public final class ShanhaiItemOverrideTable {
                     + "（这 128 个壳物品走 RealityShellItem 自己的动态名字，不吃覆盖）", PREFIX, id);
             return null;
         }
-        final String name = cap(str(o, "name", MAX_NAME_CHARS), MAX_NAME_CHARS);
+        // 🔴 2026-11-22：名字按"可见字符 ≤ 128"读回（§ 与 &$…- 不占可见长度），见 MAX_NAME_RAW_CHARS
+        final String name = capName(str(o, "name", MAX_NAME_RAW_CHARS));
         final String lore = cap(normalizeNewlines(str(o, "lore", MAX_LORE_CHARS)), MAX_LORE_CHARS);
         final String mode = sanitizeMode(str(o, "lore_mode", 16));
         int stack = 0;
@@ -506,9 +516,20 @@ public final class ShanhaiItemOverrideTable {
     /** 设显示名。 */
     public static boolean setName(ResourceLocation id, String name) {
         return mutate(id, "name", cur -> new Entry(cur.id(),
-                cap(name == null ? "" : name.trim(), MAX_NAME_CHARS),
+                capName(name == null ? "" : name),
                 cur.lore(), cur.loreMode(), cur.maxStack(), System.currentTimeMillis(),
                 cur.hidden(), cur.removed()));
+    }
+
+    /**
+     * 🆕 2026-11-22：名字的<b>唯一截断口径</b>（可见字符 ≤ {@link #MAX_NAME_CHARS}，原串 ≤
+     * {@link #MAX_NAME_RAW_CHARS}）。
+     *
+     * <p>读盘（{@code parseEntry}）与写（{@link #setName} / 网络包）都走这一条 ——
+     * 三条路共用同一份判据，才不会出现"界面上 48 字、读回来 30 字"的错位。
+     */
+    public static String capName(String raw) {
+        return com.shanhai.common.reality.ShanhaiNameCaps.cap(raw, MAX_NAME_CHARS, MAX_NAME_RAW_CHARS);
     }
 
     /** 设提示（多行，已含真实换行）。{@code mode} 传 {@code null} = 保持原模式。 */

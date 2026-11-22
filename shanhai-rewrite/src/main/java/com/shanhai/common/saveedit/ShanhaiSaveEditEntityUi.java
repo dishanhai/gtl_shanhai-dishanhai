@@ -824,7 +824,7 @@ public final class ShanhaiSaveEditEntityUi {
     /**
      * 写回 10 项里的若干项（<b>带闸</b>：{@code flow} 不在 STOPPED 就一个字节都不写）。
      *
-     * <p>为什么闸在这里而不在调用方：与 {@code ShanhaiSaveEditAuditFix#dropEntity} 同一条口径
+     * <p>为什么闸在这里而不在调用方：与 {@code ShanhaiSaveEditAuditFix#drop} 同一条口径
      * —— 面板那一层只负责"把字念给玩家听"，闸必须紧贴落盘那一行。
      */
     public static Apply writeGated(Path worldDir, String dimension, String uuid,

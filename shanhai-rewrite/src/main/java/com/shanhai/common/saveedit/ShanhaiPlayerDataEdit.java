@@ -252,9 +252,9 @@ public final class ShanhaiPlayerDataEdit {
     /** 第六页（{@code stats/<uuid>.json}）的请求（可空 = 这一页没填东西）。 */
     public ShanhaiStatsEdit.Request statsRequest;
     /**
-     * 第七页（存档体检 · 双份登记）的动作请求（可空 = 这一页没选东西）。
+     * 第七页（存档体检 · 白名单之外一律算异常）的删除请求（可空 = 这一页没选东西）。
      *
-     * <p>与四~七页同一条口径：只有按过「暂存」才参与落盘，而且<b>还是同一个停服窗口</b>
+     * <p>与四~七页同一条口径：只有按过「删除选中项」才参与落盘，而且<b>还是同一个停服窗口</b>
      * （{@link ShanhaiSaveEditWindow} 的第 ⑧ 段），不另开一条写盘路径。
      */
     public com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request auditRequest;
@@ -274,7 +274,7 @@ public final class ShanhaiPlayerDataEdit {
     public final List<ShanhaiAdvancementEdit.Request> advancementRequests = new ArrayList<>();
     /** 统计页的累积清单（键 = 分类/键）。 */
     public final List<ShanhaiStatsEdit.Request> statsRequests = new ArrayList<>();
-    /** 体检页的累积清单（键 = 动作|UUID）。 */
+    /** 体检页的累积清单（键 = 归一后的相对路径）。 */
     public final List<com.shanhai.common.saveedit.audit.ShanhaiSaveEditAuditFix.Request> auditRequests
             = new ArrayList<>();
     /** 实体字段补丁的累积清单（每个目标一条）。 */
@@ -430,7 +430,7 @@ public final class ShanhaiPlayerDataEdit {
         return (this.statsRequest != null && !this.statsRequest.isEmpty()) || !this.statsRequests.isEmpty();
     }
 
-    /** 七页（存档体检 · 双份登记）有没有要改的。 */
+    /** 七页（存档体检 · 白名单之外一律算异常）有没有要删的。 */
     public boolean hasAudit() {
         return (this.auditRequest != null && !this.auditRequest.isEmpty()) || !this.auditRequests.isEmpty();
     }

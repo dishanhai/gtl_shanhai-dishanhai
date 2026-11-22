@@ -116,8 +116,9 @@ public final class AddGravityConfigMigration {
             return true;
         }
 
-        ShanhaiAddConfig.COMMON.gravityMultiplier.set(legacyValue);
-        ShanhaiAddConfig.COMMON_SPEC.save();
+        // 🔴 2026-11-22：走 AddConfigFiles 的唯一写入出口（写值 + save + 回读磁盘 + cfg_write 日志），
+        //   不再在这里自己 `set + save` —— 否则"到底写没写进文件"会有第二种判据。
+        ShanhaiAddConfig.setGravityMultiplier(legacyValue);
 
         final double written = ShanhaiAddConfig.gravityOr(ShanhaiAddConfig.DEFAULT_GRAVITY_MULTIPLIER);
         LOGGER.info("{} gravity_migration migrated value={} from=config/{} [{}]{} to=config/{} [{}]{} "
