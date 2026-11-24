@@ -1,0 +1,4 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": { "layer0": "gt_shanhai:item/material_module_mass_production_module_mk1" }
+}

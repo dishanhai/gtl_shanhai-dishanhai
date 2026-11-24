@@ -141,6 +141,8 @@
   "gt_shanhai.recipe_threads.hatch.tooltip.4": "§7Batches share machine parallel and power budgets; multiple thread sources take the highest capacity",
   "gt_shanhai.recipe_threads.hatch.tooltip.5": "§eRemoving items, disabling extra batches, or breaking the hatch keeps paid batches and stops excess admission",
   "gt_shanhai.recipe_threads.hatch.tooltip.6": "§dToggle extra batches in the hatch UI and inspect active lanes in the left Jade panel",
+  "item.gt_shanhai.worldline_crystal_core": "Worldline Crystal Core",
+  "item.gt_shanhai.material_module_mass_production_module_mk1": "Material Module Mass Production Module MK1",
   "item.gt_shanhai.miracle_matter": "Miracle Matter",
   "fluid.gt_shanhai.miracle_flow": "Miracle Flow",
   "item.gt_shanhai.miracle_flow_bucket": "Miracle Flow Bucket",

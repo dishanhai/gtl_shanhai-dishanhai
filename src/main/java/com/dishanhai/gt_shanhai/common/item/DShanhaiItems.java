@@ -21,6 +21,8 @@ public final class DShanhaiItems {
     public static ItemEntry<ComponentItem> PATTERN_BUFFER_TOOLKIT;
     public static ItemEntry<ComponentItem> PATTERN_GENERATOR;
     public static ItemEntry<ComponentItem> MIRACLE_MATTER;
+    public static ItemEntry<ComponentItem> WORLDLINE_CRYSTAL_CORE;
+    public static ItemEntry<ComponentItem> MATERIAL_MODULE_MASS_PRODUCTION_MODULE_MK1;
     public static ItemEntry<SelectedRecipePatternItem> SELECTED_RECIPE_PATTERN;
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
@@ -28,6 +30,10 @@ public final class DShanhaiItems {
     public static ItemEntry<ComponentItem> BLACKHOLE_EXTRACTION_MODULE;
 
     public static void init() {
+        WORLDLINE_CRYSTAL_CORE = REGISTRATE.item("worldline_crystal_core", ComponentItem::create)
+                .model(NonNullBiConsumer.noop()).register();
+        MATERIAL_MODULE_MASS_PRODUCTION_MODULE_MK1 = REGISTRATE.item("material_module_mass_production_module_mk1", ComponentItem::create)
+                .model(NonNullBiConsumer.noop()).register();
         MIRACLE_MATTER = REGISTRATE.item("miracle_matter", ComponentItem::create)
                 .model(NonNullBiConsumer.noop())
                 .register();
