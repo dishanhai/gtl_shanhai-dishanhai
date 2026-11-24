@@ -6,6 +6,8 @@ import com.dishanhai.sh_common_lib.api.ulk.fumo.FumoPack;
 import com.dishanhai.sh_common_lib.api.ulk.fumo.Fumos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraftforge.api.distmarker.Dist;
@@ -32,6 +34,14 @@ public final class DShanhaiFumos {
 
     public static Item dgyjh02804Item() {
         return pack.variant(DGYJH02804).item().get();
+    }
+
+    public static void addCreativeItems(CreativeModeTab.Output output) {
+        ForgeRegistries.ITEMS.getDelegate(ResourceLocation.fromNamespaceAndPath("sh_common_lib", "dishanhai_fumo"))
+                .ifPresent(holder -> output.accept(holder.value()));
+        ForgeRegistries.ITEMS.getDelegate(ResourceLocation.fromNamespaceAndPath("sh_common_lib", "beibeipuo_fumo"))
+                .ifPresent(holder -> output.accept(holder.value()));
+        output.accept(dgyjh02804Item());
     }
 
     @Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID, value = Dist.CLIENT)

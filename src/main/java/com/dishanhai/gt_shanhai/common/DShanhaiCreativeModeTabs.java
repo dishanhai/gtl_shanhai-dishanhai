@@ -59,7 +59,7 @@ public class DShanhaiCreativeModeTabs {
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_PARALLEL_PROCESSOR_ITEM.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_CRAFTING_STORAGE_ITEM.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_STRUCTURE_ITEM.get()));
-                            output.accept(DShanhaiFumos.dgyjh02804Item());
+                            DShanhaiFumos.addCreativeItems(output);
                         })
         ).register();
     }

@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: dishanhai/SH-Common-Lib
-          ref: 8b049feac263dd27c1a5773dd50745240215107c
+          ref: b02c6c06db3a61f213d9abc463f2eae1f16f596a
           path: SH-Common-Lib
           persist-credentials: false
 
