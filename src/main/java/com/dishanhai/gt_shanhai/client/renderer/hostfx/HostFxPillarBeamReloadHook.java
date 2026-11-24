@@ -38,6 +38,7 @@ public final class HostFxPillarBeamReloadHook {
     @SubscribeEvent
     public static void onRegisterShaders(RegisterShadersEvent event) {
         HostFxPillarBeam.onResourceReload();
+        HostFxDraw.releaseStaticMeshes();
         // 🔴 2026-10-25 第八改：内外环之间那圈【光柱环】用的是另一份着色器
         //    （shanhai_host_beam_ring，多一个 Normal 属性），同样不在原版列表里 ⇒ 同样要作废。
         //    两件事写在同一行位置，避免"只重载了主光柱、环还是旧 shader"这种半新半旧。

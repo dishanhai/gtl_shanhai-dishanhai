@@ -1,0 +1,19 @@
+{
+  "type": "gtceu:assembler",
+  "data": { "euTier": 12 },
+  "duration": 40,
+  "tickInputs": { "eu": [{ "content": 134217728 }] },
+  "inputs": {
+    "item": [
+      {"content":{"type":"gtceu:sized","count":16,"ingredient":{"item":"gtceu:uxv_machine_casing"}}},
+      {"content":{"type":"gtceu:sized","count":4,"ingredient":{"item":"gt_shanhai:kerr_spacetime_laminate"}}},
+      {"content":{"item":"dishanhai:worldline_divergent_core"}}
+    ]
+  },
+  "outputs": { "item": [{"content":{"type":"gtceu:sized","count":32,"ingredient":{"item":"dishanhai:particle_beam_guidance_pipe_casing"}}}] },
+  "conditions": [{
+    "type": "gt_shanhai:recipe_enabled",
+    "recipeId": "gt_shanhai:assembler/kerr_laminate_beam_guidance",
+    "defaultEnabled": true
+  }]
+}

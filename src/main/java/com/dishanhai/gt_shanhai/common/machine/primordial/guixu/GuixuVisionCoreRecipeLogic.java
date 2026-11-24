@@ -72,6 +72,10 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     /** 遏制場坍縮鎖定期間不開新批次。 */
     @Override
     public void findAndHandleRecipe() {
+        if (host.hasMatrixFailed()) {
+            setWaiting(Component.translatable(GuixuEventHorizonMatrix.LANG + "failed"));
+            return;
+        }
         if (host.isContainmentLocked()) {
             setWaiting(Component.literal("黑洞坍缩，锁定剩余 " + host.getContainmentLockSeconds() + " 秒"));
             return;

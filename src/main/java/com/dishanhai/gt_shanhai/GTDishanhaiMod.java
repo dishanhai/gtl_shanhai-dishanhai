@@ -22,6 +22,7 @@ import net.minecraftforge.registries.RegistryObject;
 import com.dishanhai.gt_shanhai.common.block.DShanhaiFumos;
 import com.dishanhai.gt_shanhai.common.item.EternalGregTechWorkshopDataModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuHyperdimensionalLinkModuleItem;
+import com.dishanhai.gt_shanhai.common.item.GuixuEventHorizonMatrixItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuNyarlathotepLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.NyarlathotepEchoLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GravitonShardItem;
@@ -102,6 +103,10 @@ public class GTDishanhaiMod {
         () -> new GuixuNyarlathotepLinkModuleItem(new Item.Properties()
             .stacksTo(1)
             .rarity(Rarity.EPIC)));
+
+    public static final RegistryObject<Item> GUIXU_EVENT_HORIZON_MATRIX = ITEMS.register(
+        "guixu_event_horizon_matrix",
+        () -> new GuixuEventHorizonMatrixItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> NYARLATHOTEP_ECHO_LINK_MODULE = ITEMS.register(
         "nyarlathotep_echo_link_module",

@@ -16,6 +16,7 @@ public final class GuixuVisionCoreMachines {
     public static final String ID = "guixu_vision_core";
     private static MultiblockMachineDefinition definition;
     public static final String CONTAINMENT_ID = "guixu_penrose_containment_field";
+    public static final String KERR_ID = "guixu_kerr_singularity_engine";
     private static MultiblockMachineDefinition containmentDefinition;
 
     private GuixuVisionCoreMachines() {}
@@ -56,6 +57,15 @@ public final class GuixuVisionCoreMachines {
         }
         GTDishanhaiMod.LOGGER.info("[SHANHAI-HOST] 已注册 {}", ID);
         registerContainment(overlay);
+        GTDishanhaiRegistration.REGISTRATE
+                .multiblock(KERR_ID, GuixuKerrSingularityModule::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTRecipeTypes.DUMMY_RECIPES)
+                .pattern(GuixuPenroseContainmentStructure::createKerrPattern)
+                .appearanceBlock(GuixuPenroseContainmentStructure::appearanceBlock)
+                .workableCasingRenderer(new ResourceLocation("kubejs", "block/hollow_casing"), overlay)
+                .tooltips(Component.translatable("gt_shanhai.multiblock.guixu_kerr_singularity_engine.tooltip"))
+                .register();
     }
 
     /** 歸墟彭羅斯黑洞遏制場：被動模組，掛 DUMMY 配方類型只為滿足多方塊註冊。 */

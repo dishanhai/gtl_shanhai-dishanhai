@@ -8,6 +8,8 @@ public final class GuixuStarField {
     public static final int METEOR_COUNT = 8;
     public static final int VOLUME_COUNT = 384;
     public static final int DUST_COUNT = 96;
+    static final int ACCRETION_TRAILS = 32;
+    static final int SIMPLE_ACCRETION_TRAILS = 14;
     private static final double TAU = Math.PI * 2.0;
     // 山海：只快取不變的種子，不保留動畫、世界或主機狀態。
     private static final double[][] SEEDS = buildSeeds();
@@ -146,7 +148,34 @@ public final class GuixuStarField {
         return new Sample(head.x, head.y, head.z, tail.x, tail.y, tail.z, size, alpha, warm);
     }
 
-    private record Point(double x, double y, double z) {}
+    record Point(double x, double y, double z) {}
+
+    private static double accretionPeriod(int index) {
+        return 3.6 + 2.4 * seed(index, 31);
+    }
+
+    static double accretionPhase(int index, double seconds) {
+        double clock = seconds / accretionPeriod(index) + seed(index, 32);
+        return clock - Math.floor(clock);
+    }
+
+    static Point accretionPosition(int index, double phase, double horizon) {
+        double rest = 1.0 - phase;
+        double radius = horizon * (.89 + (2.20 + 1.05 * seed(index, 33)) * Math.pow(rest, .72));
+        double angle = TAU * (seed(index, 34) - (1.03 + .42 * seed(index, 35)) * phase * (0.66 + .34 * phase));
+        double height = horizon * (2 * seed(index, 36) - 1) * .85 * rest * rest;
+        return new Point(radius * Math.cos(angle), height, radius * Math.sin(angle));
+    }
+
+    static float accretionFeed(double seconds, int count) {
+        float arrivals = 0;
+        for (int i = 0; i < count; i++) {
+            double age = accretionPhase(i, seconds) * accretionPeriod(i);
+            // 相位重启意味着上一股流已经越过盘内缘。脉冲随后衰减。
+            arrivals += (float) Math.max(0, 1 - age / .48);
+        }
+        return arrivals * (3.7F / count);
+    }
 
     private static Point position(int index, double phase, double surfaceRadius) {
         double remaining = 1.0 - phase;

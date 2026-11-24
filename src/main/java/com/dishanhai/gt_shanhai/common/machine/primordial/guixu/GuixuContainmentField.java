@@ -11,7 +11,15 @@ package com.dishanhai.gt_shanhai.common.machine.primordial.guixu;
  */
 public final class GuixuContainmentField {
 
-    public enum Status { CLOSED, CONTAINED, UNSTABLE, HYPERSTABLE }
+    public enum Status {
+        CLOSED, CONTAINED, UNSTABLE, HYPERSTABLE;
+
+        private static final Status[] BY_ID = values();
+
+        public static Status fromId(int id) {
+            return id >= 0 && id < BY_ID.length ? BY_ID[id] : CLOSED;
+        }
+    }
 
     public enum Event { NONE, OPENED, DESTABILIZED, COLLAPSED, SHUT_DOWN }
 

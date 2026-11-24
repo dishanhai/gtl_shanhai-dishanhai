@@ -1,4 +1,9 @@
 {
+    "blend": {
+        "func": "add",
+        "srcrgb": "1",
+        "dstrgb": "1-srcalpha"
+    },
     "vertex": "gt_shanhai:guixu_blackhole",
     "fragment": "gt_shanhai:guixu_blackhole",
     "attributes": [
@@ -22,8 +27,11 @@
         { "name": "uAspect",       "type": "float", "count": 1, "values": [ 1.7777778 ] },
         { "name": "uTime",         "type": "float", "count": 1, "values": [ 0.0 ] },
         { "name": "uDiskGain",     "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "uDiskHeat",     "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uKerrParameters", "type": "float", "count": 3, "values": [ 0.65, 1.7599342, 3.6159372 ] },
         { "name": "uRingGain",     "type": "float", "count": 1, "values": [ 1.0 ] },
         { "name": "uStrength",     "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "uSampleBackground", "type": "float", "count": 1, "values": [ 1.0 ] },
         { "name": "uDepthGate",    "type": "float", "count": 1, "values": [ 0.0 ] },
         { "name": "uHoleDepth",    "type": "float", "count": 1, "values": [ 1.0 ] },
         { "name": "uGateEps",      "type": "float", "count": 1, "values": [ 0.00001 ] }

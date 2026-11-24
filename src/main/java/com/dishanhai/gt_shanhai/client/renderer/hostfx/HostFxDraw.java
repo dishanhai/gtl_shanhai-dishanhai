@@ -500,8 +500,11 @@ public final class HostFxDraw {
         return shipLayer;
     }
 
+    private static HostFxBaked ringExtras;
+    private static HostFxBaked decompressors;
+
     /**
-     * 内环的「加厚箍 + 配重脊」（纯渲染件；**调用方已套好环的自转角**）。
+     * 内环的「加厚箍 + 配重脊」（纯渲染件；调用方已套好环的自转角）。
      *
      * <p>结构 {@code .bin} 一格不动，靠这两圈箍把环带的视觉厚度从 3 层顶到 ≈5 层
      * （伪神三环的实测基准是 3–4 格厚 / 5 层高）。与飞船共用同一个不透明层。
@@ -509,11 +512,15 @@ public final class HostFxDraw {
      * @return 提交的方盒数
      */
     public static int drawRingExtras(PoseStack poseStack) {
-        final RenderType layer = shipLayer();
-        final MultiBufferSource.BufferSource buffers =
-                MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
-        final VertexConsumer vc = buffers.getBuffer(layer);
-        final Matrix4f m = poseStack.last().pose();
+        if (ringExtras == null) {
+            ringExtras = HostFxBaked.bakeBoxes("ring_extras", shipLayer(), HostFxDraw::emitRingExtras);
+        }
+        ringExtras.render(poseStack);
+        return ringExtras.blocks();
+    }
+
+    private static int emitRingExtras(VertexConsumer vc) {
+        final Matrix4f m = new Matrix4f();
         int boxes = 0;
         for (HostFxGeometry.Box b : HostFxGeometry.ringGirdleBoxes()) {
             emitBox(vc, m, b);
@@ -523,7 +530,6 @@ public final class HostFxDraw {
             emitBox(vc, m, b);
             boxes++;
         }
-        buffers.endBatch(layer);
         return boxes;
     }
 
@@ -548,8 +554,8 @@ public final class HostFxDraw {
     /**
      * 画 4 座物质解压机（<b>调用方已经套好"环心枢轴 + 环自转角"</b>）。
      *
-     * <p>每座：{@code translate(轴线落点) → yaw(方位) → tilt(内倾)}，然后逐件写
-     * {@link HostFxGeometry#matterDecompressorBoxes()} 的轴对齐小方盒。
+     * <p>首次绘制时将四座机器的固定变换与小方盒写入同一缓冲。
+     * 每帧只应用环心、主机朝向和当前自转角。
      * 与飞船/环共用同一个不透明层（{@link #shipLayer}），也共用<b>同一个自转角</b>
      * ⇒ 「4 座跟着所在辐条一起转」是定义上成立的（同一句 {@code spin}，见 {@code HostFxRingGroups}）。
      *
@@ -558,10 +564,17 @@ public final class HostFxDraw {
     public static int drawMatterDecompressors(PoseStack poseStack) {
         lastMdBoxes = 0;
         lastMdBatches = 0;
-        final RenderType layer = shipLayer();
-        final MultiBufferSource.BufferSource buffers =
-                MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
-        final VertexConsumer vc = buffers.getBuffer(layer);
+        if (decompressors == null) {
+            decompressors = HostFxBaked.bakeBoxes("decompressors", shipLayer(), HostFxDraw::emitDecompressors);
+        }
+        decompressors.render(poseStack);
+        lastMdBoxes = decompressors.blocks();
+        lastMdBatches = 1;
+        return lastMdBoxes;
+    }
+
+    private static int emitDecompressors(VertexConsumer vc) {
+        final PoseStack poseStack = new PoseStack();
         final List<HostFxGeometry.MdBox> parts = HostFxGeometry.matterDecompressorBoxes();
         int boxes = 0;
         for (int i = 0; i < HostFxGeometry.MD_COUNT; i++) {
@@ -588,10 +601,22 @@ public final class HostFxDraw {
                 poseStack.popPose();
             }
         }
-        buffers.endBatch(layer);
-        lastMdBoxes = boxes;
-        lastMdBatches = 1;
         return boxes;
+    }
+
+    static void releaseStaticMeshes() {
+        if (!RenderSystem.isOnRenderThread()) {
+            RenderSystem.recordRenderCall(HostFxDraw::releaseStaticMeshes);
+            return;
+        }
+        if (ringExtras != null) {
+            ringExtras.close();
+            ringExtras = null;
+        }
+        if (decompressors != null) {
+            decompressors.close();
+            decompressors = null;
+        }
     }
 
     /** 一个<b>以原点为中心</b>的方盒（分件已经平移到自己的位置）→ 6 个四边形。 */

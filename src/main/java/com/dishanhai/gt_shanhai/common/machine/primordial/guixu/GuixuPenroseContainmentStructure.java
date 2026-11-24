@@ -39,16 +39,27 @@ public final class GuixuPenroseContainmentStructure {
     private GuixuPenroseContainmentStructure() {}
 
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
+        return createPattern(definition, false);
+    }
+
+    public static BlockPattern createKerrPattern(MultiblockMachineDefinition definition) {
+        return createPattern(definition, true);
+    }
+
+    private static BlockPattern createPattern(MultiblockMachineDefinition definition, boolean kerr) {
         FactoryBlockPattern pattern = StructureResourceLoader.INSTANCE.loadFactoryPattern(
                 RESOURCE_PATH, RESOURCE_ID, new RelativeDirection[0]);
         var generator = Predicates.blocks(requireBlock(FIELD_GENERATOR));
         var beamPipe = Predicates.blocks(requireBlock(BEAM_PIPE));
+        var shell = Predicates.blocks(appearanceBlock())
+                .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1));
+        if (!kerr) {
+            shell = shell.or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
+                    .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1));
+        }
         return pattern
-                .where('B', Predicates.blocks(appearanceBlock())
-                        .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
-                        .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
-                        .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
-                        .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1)))
+                .where('B', shell)
                 .where('D', generator)
                 .where('E', beamPipe)
                 .where('F', generator)

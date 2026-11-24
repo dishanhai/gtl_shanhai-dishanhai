@@ -51,6 +51,8 @@ public final class BlackHoleFrameStats {
     public static final String SKIP_DEAD = "dead_level3";
     /** 这一帧画了一级。 */
     public static final String DREW_FULL = "drew_full";
+    /** 这一帧画了动态洞外本体，未启用背景采样。 */
+    public static final String DREW_BODY_ONLY = "drew_body_only";
     /** 这一帧画了二级。 */
     public static final String DREW_QUAD = "drew_quad";
 
@@ -87,7 +89,14 @@ public final class BlackHoleFrameStats {
     public static void noteDraw(boolean drewFull, double[] center, double rsBlocks, double dist,
                                 double rectW, double rectH, double screenW, double screenH,
                                 double tanHalfFov, boolean shaderpack) {
-        lastSkip = drewFull ? DREW_FULL : DREW_QUAD;
+        noteDraw(drewFull ? DREW_FULL : DREW_QUAD, center, rsBlocks, dist, rectW, rectH, screenW, screenH,
+                tanHalfFov, shaderpack);
+    }
+
+    static void noteDraw(String result, double[] center, double rsBlocks, double dist,
+                         double rectW, double rectH, double screenW, double screenH,
+                         double tanHalfFov, boolean shaderpack) {
+        lastSkip = result;
         lastCenter = (center == null) ? null : new double[]{center[0], center[1], center[2]};
         lastRsBlocks = rsBlocks;
         lastDist = dist;
@@ -119,7 +128,7 @@ public final class BlackHoleFrameStats {
     }
 
     public static boolean lastDrewAny() {
-        return DREW_FULL.equals(lastSkip) || DREW_QUAD.equals(lastSkip);
+        return DREW_FULL.equals(lastSkip) || DREW_BODY_ONLY.equals(lastSkip) || DREW_QUAD.equals(lastSkip);
     }
 
     public static long lastFrameNanos() {
@@ -190,6 +199,9 @@ public final class BlackHoleFrameStats {
     public static String drawName(String skip) {
         if (DREW_FULL.equals(skip)) {
             return "full";
+        }
+        if (DREW_BODY_ONLY.equals(skip)) {
+            return "body_only";
         }
         if (DREW_QUAD.equals(skip)) {
             return "quad";

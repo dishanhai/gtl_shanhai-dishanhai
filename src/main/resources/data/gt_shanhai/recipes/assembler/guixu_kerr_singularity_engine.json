@@ -1,0 +1,20 @@
+{
+  "type": "gtceu:assembler",
+  "data": { "euTier": 11 },
+  "duration": 400,
+  "tickInputs": { "eu": [{ "content": 33554432 }] },
+  "inputs": {
+    "item": [
+      {"content":{"type":"gtceu:sized","count":8,"ingredient":{"item":"gtceu:uiv_field_generator"}}},
+      {"content":{"type":"gtceu:sized","count":16,"ingredient":{"item":"gtlcore:dimension_injection_casing"}}},
+      {"content":{"type":"gtceu:sized","count":16,"ingredient":{"item":"dishanhai:particle_beam_guidance_pipe_casing"}}},
+      {"content":{"type":"gtceu:sized","count":2,"ingredient":{"item":"dishanhai:worldline_divergent_core"}}}
+    ]
+  },
+  "outputs": { "item": [{"content":{"item":"gt_shanhai:guixu_kerr_singularity_engine"}}] },
+  "conditions": [{
+    "type": "gt_shanhai:recipe_enabled",
+    "recipeId": "gt_shanhai:assembler/guixu_kerr_singularity_engine",
+    "defaultEnabled": true
+  }]
+}

@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.client.renderer.blackhole;
 
 /**
- * 山海重构 · 黑洞一级透镜的 <b>「这一帧到底画出了哪几件」判定器 + 着色器数学的 Java 版</b>。
+ * 山海 · 黑洞取景诊断与史瓦西参考着色。克尔主效果由正式 GLSL 离屏验证。
  *
  * <h2>0. 🔴 为什么必须存在（2026-10-24 深夜，用户实机一句「黑洞光看到透镜了，那黑洞呢」）</h2>
  * 那一轮的日志是<b>全绿</b>的：
@@ -16,20 +16,15 @@ package com.dishanhai.gt_shanhai.client.renderer.blackhole;
  * <p>**为什么当时的离线图看不出来**：出图器（`EveningPreviewPng`）自己另写了一遍透镜数学，
  * 那遍是对的 ⇒ 图很漂亮，游戏里却是空心的。这正是"预览器会替你把错误藏起来"的经典形态。
  *
- * <p>⇒ 本类做两件事，<b>一件事一份代码</b>：
+ * <p>本类保留两项无 GL 的参考检查：
  * <ol>
- *   <li>{@link #shade} —— 与 {@code blackhole.fsh} 逐行同款的<b>单像素着色</b>。
- *       <b>离线出图器直接调它</b>（不再自己写一遍），所以"图里有的"和"游戏里算的"是同一份数学；</li>
- *   <li>{@link #parts} —— 在 rect 内采样网格，<b>真的去算</b>黑盘/光子环/吸积盘/光晕/扭曲各自是否产生非零贡献，
- *       输出一个位掩码进日志（{@code parts=warp|core|ring|disk|glow}）。
- *       这样"日志说画了"和"屏幕上真有"就不会再脱钩。</li>
+ *   <li>{@link #shade} 为软件预览提供史瓦西参考像素；</li>
+ *   <li>{@link #parts} 在矩形内检查相机、投影和参考尺度，记录取景估算
+ *       （{@code parts=warp|core|ring|disk|glow}）。</li>
  * </ol>
  *
  * <h2>1. 与 fsh 的契约</h2>
- * 常数（{@code B_CRIT}/{@code DISK_INNER}/{@code DISK_OUTER}/{@code RING_WIDTH}/{@code RING_GAIN}/
- * {@code HALO_WIDTH}/{@code HALO_GAIN}）与 {@code blackhole.fsh} 顶部<b>逐字同值</b>；
- * 偏折角多项式与 {@link BlackHoleLensMath#deflectAngle} 同款。改任何一处必须三处一起改
- * （fsh / 本类 / {@code BlackHoleLensMath}），并在这里记一行。
+ * 坐标和 Rs 尺度共用，远场偏折角多项式与 {@link BlackHoleLensMath#deflectAngle} 同款。
  *
  * <h2>2. 纯逻辑</h2>
  * 零 MC、零 GL、零 JOML —— 所以能在没有游戏的情况下跑（{@code temp/host-fx/probe}）。
@@ -52,7 +47,7 @@ public final class BlackHoleShaderProbe {
     /** 用户口径要求的四件（缺一件就算没画全）。 */
     public static final int PART_REQUIRED = PART_CORE | PART_RING | PART_DISK | PART_GLOW;
 
-    // ---- 物理常数（与 blackhole.fsh 逐字同值）----
+    // 史瓦西参考参数，长度单位 Rs。
     public static final double B_CRIT = 2.5980762D;
     public static final double DISK_INNER = 3.0D;
     public static final double DISK_OUTER = 11.0D;
@@ -63,7 +58,7 @@ public final class BlackHoleShaderProbe {
     /** 边缘淡出起点比例（与 {@code blackhole.fsh} 的 {@code EDGE_FADE_INNER} 同值）。 */
     public static final double EDGE_FADE_INNER = 0.86D;
 
-    /** 一帧的全部输入（与 `blackhole.json` 的 uniform 一一对应，单位也一致）。 */
+    /** 软件参考模型的一帧输入，单位与同名着色器参数一致。 */
     public record Params(float[] proj, float[] bhView, float[] diskNormal,
                          int screenW, int screenH,
                          double rectX0, double rectY0, double rectW, double rectH,
@@ -347,7 +342,7 @@ public final class BlackHoleShaderProbe {
     // ==========================================================================================
 
     /**
-     * 在 rect 内按 {@code n×n} 网格采样，返回 {@link #PART_WARP} 等位掩码。
+     * 在 rect 内按 {@code n×n} 网格采样史瓦西参考模型，返回取景估算位掩码。
      *
      * <p>判据都是"这一件自己的阈值"（不是颜色）：
      * <ul>

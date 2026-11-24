@@ -6,6 +6,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class GuixuVisualStateTest {
     @Test
+    void depositedMatterBuildsHeatAndTheDiskCoolsWhenTheSupplyStops() {
+        var disk = new GuixuVisualState();
+        assertEquals(0, disk.advanceAccretionHeat(0, 0));
+        float first = disk.advanceAccretionHeat(1, .65F);
+        float second = disk.advanceAccretionHeat(2, .65F);
+        assertTrue(first > 0 && second > first && second < .65F);
+        assertEquals(second, disk.advanceAccretionHeat(2, 0));
+        float cooled = disk.advanceAccretionHeat(7, 0);
+        assertTrue(cooled > 0 && cooled < second);
+        assertEquals(0, new GuixuVisualState().accretionHeat());
+    }
+
+    @Test
     void transitionIsSmoothAndPauseDoesNotAdvanceTheEffect() {
         var visuals = new GuixuVisualState();
         var idle = visuals.advance(GuixuOperationState.IDLE, 0.0);

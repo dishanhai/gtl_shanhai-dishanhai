@@ -68,6 +68,7 @@ public final class GuixuAccretionLightning {
     }
     private static double phase(int seed) { return (seed & 0xffff) / 65536.0; }
     public List<Node> nodes() { return geometry.nodes(); }
+    List<ShanhaiInstabilityGeometry.Link> links() { return geometry.links(); }
 
     public ShanhaiInstabilityGeometry.Frame frame(double seconds, long seed, IntPredicate present) {
         return frame(seconds, seed, present, i -> {

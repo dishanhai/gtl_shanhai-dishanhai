@@ -3,6 +3,8 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry;
+import com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Link;
+import com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Node;
 import com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Point;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuHostGeometry;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreStructure;
@@ -42,14 +44,20 @@ public final class GuixuStructureLightning {
 
     public static ShanhaiInstabilityGeometry.Frame frame(Level world, BlockPos controller, Direction facing,
                                                          double seconds, float spinSeconds) {
-        if (world == null) return EMPTY;
+        var surface = surface(world, controller, facing, spinSeconds);
+        return surface == null ? EMPTY : model().frame(seconds, controller.asLong(),
+                i -> surface.centers()[i] != null, i -> surface.centers()[i]);
+    }
+
+    /** 共用成型结构的可见表面，包含藏块后按当前组角旋转的位置。 */
+    static Surface surface(Level world, BlockPos controller, Direction facing, float spinSeconds) {
+        if (world == null) return null;
         var mesh = model();
-        if (mesh == null) return EMPTY;
-        var present = new boolean[mesh.nodes().size()];
-        var centers = new Point[present.length];
+        if (mesh == null) return null;
+        var centers = new Point[mesh.nodes().size()];
         var candidates = new HashMap<Character, Set<Block>>();
         var ledger = HostFxHide.ledger(controller);
-        for (int i = 0; i < present.length; i++) {
+        for (int i = 0; i < centers.length; i++) {
             var node = mesh.nodes().get(i);
             BlockPos at = HostFxGeometry.worldFromGenerator(controller, facing,
                     node.x(), node.y() + HostFxGeometry.RING_Y, node.z());
@@ -59,7 +67,6 @@ public final class GuixuStructureLightning {
             if (hidden) state = ledger.get(at.asLong());
             if (!candidates.computeIfAbsent(node.symbol(), GuixuVisionCoreStructure::previewBlocks).contains(state.getBlock()))
                 continue;
-            present[i] = true;
             float x = node.x() + node.nx() * .55F, y = node.y() + node.ny() * .55F, z = node.z() + node.nz() * .55F;
             if (hidden) {
                 float[] rotated = HostFxGeometry.rotateYDeg(HostFxGeometry.groupAngleDeg(spinSeconds,
@@ -68,6 +75,8 @@ public final class GuixuStructureLightning {
             }
             centers[i] = new Point(x, y, z);
         }
-        return mesh.frame(seconds, controller.asLong(), i -> present[i], i -> centers[i]);
+        return new Surface(centers, mesh.nodes(), mesh.links());
     }
+
+    record Surface(Point[] centers, List<Node> nodes, List<Link> links) {}
 }

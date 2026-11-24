@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.ToIntFunction;
 
 /**
  * 归墟视界枢核 · <b>烘焙器</b>：把"被藏起来的真方块"烘成静态 {@code VertexBuffer}。
@@ -220,14 +221,37 @@ public final class HostFxBaked implements AutoCloseable {
         for (Map.Entry<RenderType, BufferBuilder> e : builders.entrySet()) {
             final BufferBuilder builder = e.getValue();
             if (builder.building()) {
-                final VertexBuffer vb = new VertexBuffer(VertexBuffer.Usage.STATIC);
-                vb.bind();
-                vb.upload(builder.end());
-                VertexBuffer.unbind();
-                baked.buffers.put(e.getKey(), vb);
+                baked.buffers.put(e.getKey(), upload(builder));
             }
         }
         return baked;
+    }
+
+    /** Bakes opaque colored boxes in ring-local coordinates for the same draw path as the block meshes. */
+    static HostFxBaked bakeBoxes(String name, RenderType layer, ToIntFunction<BufferBuilder> emit) {
+        RenderSystem.assertOnRenderThread();
+        final BufferBuilder builder = new BufferBuilder(layer.bufferSize());
+        builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        final HostFxBaked baked = new HostFxBaked();
+        baked.name = name;
+        baked.blocks = emit.applyAsInt(builder);
+        baked.quads = baked.blocks * 6;
+        baked.buffers.put(layer, upload(builder));
+        return baked;
+    }
+
+    private static VertexBuffer upload(BufferBuilder builder) {
+        final VertexBuffer buffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
+        try {
+            buffer.bind();
+            buffer.upload(builder.end());
+            return buffer;
+        } catch (RuntimeException | Error failure) {
+            buffer.close();
+            throw failure;
+        } finally {
+            VertexBuffer.unbind();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════

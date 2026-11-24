@@ -273,8 +273,8 @@ public final class BlackHoleCommand {
                         .then(Commands.literal("off").executes(ctx -> {
                             BlackHoleTuning.setLensMode(BlackHoleTuning.LensMode.OFF);
                             log("lens=off", ctx.getSource());
-                            reply(ctx.getSource(), "透镜：§c强制二级 §7（只画程序化的黑盘+光环，"
-                                    + "背景不弯 —— 用来和一级做 A/B 对照）");
+                            ctx.getSource().sendSuccess(
+                                    () -> Component.translatable("gt_shanhai.command.bh.lens.off"), false);
                             return 1;
                         })))
                 // ---- 读数 ----

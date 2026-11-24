@@ -4,6 +4,7 @@ import com.google.common.primitives.Ints;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatSources;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHostMountSource;
+import com.dishanhai.gt_shanhai.network.GuixuAnnihilationPacket;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
@@ -19,6 +20,7 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.multiblock.MultiblockControllerMachine;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
+import com.gregtechceu.gtceu.api.pattern.MultiblockState;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
@@ -45,7 +47,10 @@ import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.TickTask;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
@@ -208,6 +213,32 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     @Persisted
     @DescSynced
     private boolean hostNebulaEnabled = true;
+
+    /** 服务端演出起点，随控制器同步给附近客户端。 */
+    @DescSynced
+    private long stellarEndStartTick = -1;
+    @DescSynced
+    private long blackHolePreviewStartTick = -1;
+
+    @Persisted
+    @DescSynced
+    private int kerrSpin = GuixuKerrOrbit.INITIAL_SPIN;
+    @DescSynced
+    private int kerrInnerOrbit;
+    @DescSynced
+    private int kerrOuterOrbit;
+    @DescSynced
+    private long kerrInnerRecovery = -1;
+    @DescSynced
+    private long kerrOuterRecovery = -1;
+    @DescSynced
+    private int containmentVisualStatus;
+    @DescSynced
+    private float containmentVisualStability;
+    @DescSynced
+    private long containmentVisualSource;
+    @DescSynced
+    private long containmentCollapseTick = -1;
 
     @DescSynced
     private long hostModuleMask = 0L;
@@ -524,6 +555,40 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         pushHostFxSync();
     }
 
+    public long getStellarEndStartTick() {
+        return stellarEndStartTick;
+    }
+
+    public boolean startStellarEnd() {
+        if (!(getLevel() instanceof ServerLevel level) || !isFormed()) return false;
+        stellarEndStartTick = level.getGameTime();
+        pushHostFxSync();
+        return true;
+    }
+
+    public void stopStellarEnd() {
+        if (!(getLevel() instanceof ServerLevel) || stellarEndStartTick < 0) return;
+        stellarEndStartTick = -1;
+        pushHostFxSync();
+    }
+
+    public long getBlackHolePreviewStartTick() {
+        return blackHolePreviewStartTick;
+    }
+
+    public boolean startBlackHolePreview() {
+        if (!(getLevel() instanceof ServerLevel level) || !isFormed() || hasMatrixFailed()) return false;
+        blackHolePreviewStartTick = level.getGameTime();
+        pushHostFxSync();
+        return true;
+    }
+
+    public void stopBlackHolePreview() {
+        if (!(getLevel() instanceof ServerLevel) || blackHolePreviewStartTick < 0) return;
+        blackHolePreviewStartTick = -1;
+        pushHostFxSync();
+    }
+
     public void setHostArMaskEnabled(boolean value) {
         if (hostArMaskEnabled == value) {
             return;
@@ -728,6 +793,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     private void refreshHostRuntimeSnapshot$body() {
         final PrimordialOmegaEngineModuleBase[] modules = snapshotModules();
         refreshModuleMask(modules);
+        refreshBlackHoleMechanics(modules);
 
         final byte[] pct = sentinelBytes(SNAP_SLOTS);
         final byte[] reason = sentinelBytes(SNAP_SLOTS);
@@ -1095,7 +1161,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     }
 
     private void ensureSnapshotTick() {
-        if (isRemote() || snapTick != null || !(getLevel() instanceof net.minecraft.server.level.ServerLevel)) {
+        if (isRemote() || snapTick != null || !(getLevel() instanceof ServerLevel)) {
             return;
         }
         snapTick = subscribeServerTick(this::shanhai$snapshotTick);
@@ -1342,6 +1408,21 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     private GuixuPenroseContainmentModule containmentCacheModule;
     private GuixuContainmentBonus containmentCache = GuixuContainmentBonus.NONE;
 
+    @Persisted @DescSynced
+    private int matrixPressure = GuixuEventHorizonMatrix.OFFLINE;
+    @Persisted
+    private long matrixSource;
+    @Persisted
+    private String matrixSourceId = "";
+    @Persisted
+    private long matrixCenter;
+    @Persisted @DescSynced
+    private long matrixSpacetime;
+    private boolean matrixDetonationQueued;
+    private TickableSubscription matrixWatch;
+    private GuixuAnnihilation matrixFootprint = new GuixuAnnihilation();
+    private static final String MATRIX_FOOTPRINT_KEY = "ShanhaiMatrixFootprint";
+
     @Override
     public GuixuEnergyHandler getWirelessNetworkEnergyHandler() {
         if (guixuEnergy == null) guixuEnergy = new GuixuEnergyHandler(this);
@@ -1352,6 +1433,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     public int getActiveModuleCount() { return activeModuleCount; }
     public GuixuVisualState.Profile getVisualProfile(double seconds) {
         return visualState.advance(getOperationState(), seconds);
+    }
+
+    public float updateAccretionHeat(double seconds, float feed) {
+        return visualState.advanceAccretionHeat(seconds, feed);
+    }
+
+    public float getAccretionHeat() {
+        return visualState.accretionHeat();
     }
 
     /** 山海：三類配方全開；批次規劃器分隔耗電與發電方向後輪轉。 */
@@ -1383,6 +1472,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     @Override
     public void onLoad() {
         super.onLoad();
+        if (matrixPressure == GuixuEventHorizonMatrix.FAILURE) queueMatrixDetonation();
+        else if (!isRemote() && isMatrixArmed()) subscribeMatrix();
         nyarlathotepLinkLoaded = true;
         subscribeNyarlathotepLink();
         ensureSnapshotTick();
@@ -1646,7 +1737,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
                 "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos", "engineLinkReady",
                 "linkedNyarlathotepDim", "linkedNyarlathotepPos", "nyarlathotepLinkReady",
-                "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
+                "containmentLockTicks", "matrixPressure", "matrixSource", "matrixSourceId", "matrixCenter", "matrixSpacetime",
+                "blackHolePreviewStartTick", "kerrSpin", "kerrInnerOrbit", "kerrOuterOrbit", "kerrInnerRecovery",
+                "kerrOuterRecovery", "containmentVisualStatus", "containmentVisualStability", "containmentVisualSource",
+                "containmentCollapseTick",
+                "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
                 "hostOuterStarsEnabled", "hostNebulaEnabled",
                 "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostArStatus", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
@@ -1734,6 +1829,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     @Override
     public void onMachineRemoved() {
+        if (isMatrixArmed()) failMatrix();
         super.onMachineRemoved();
         clearInventory(levelOverrideSlot.storage);
         clearInventory(extraMountSlots.storage);
@@ -2006,7 +2102,239 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     }
 
     public boolean isContainmentLocked() {
-        return containmentLockTicks > 0;
+        return containmentLockTicks > 0 || hasMatrixFailed();
+    }
+
+    public boolean hasMatrixFailed() {
+        return matrixPressure == GuixuEventHorizonMatrix.FAILURE;
+    }
+
+    public void onClientMatrixDetonation() {
+        if (isRemote()) matrixPressure = GuixuEventHorizonMatrix.FAILURE;
+    }
+
+    public boolean activateEventHorizonMatrix() {
+        if (!(getLevel() instanceof ServerLevel) || !isFormed() || isContainmentLocked()
+                || matrixPressure != GuixuEventHorizonMatrix.OFFLINE) return false;
+        var module = getEffectiveContainment();
+        if (module == null || module.getUuid() == null || !isNativeModule(module)
+                || module.field().status() != GuixuContainmentField.Status.CONTAINED
+                || module.field().stability() != GuixuContainmentField.MAX_STABILITY) return false;
+
+        var footprint = new GuixuAnnihilation();
+        if (!footprint.capture(this) || !footprint.capture(module) || !module.supplyMatrixStartup()) return false;
+        for (var candidate : getModuleSet()) {
+            if (candidate instanceof PrimordialOmegaEngineModuleBase nativeModule && isNativeModule(nativeModule)) {
+                footprint.capture(nativeModule);
+            }
+        }
+        matrixFootprint = footprint;
+        matrixSource = module.getPos().asLong();
+        matrixSourceId = module.getUuid().toString();
+        matrixCenter = GuixuHostGeometry.centerWorld(getPos(), getFrontFacing()).asLong();
+        updateMatrix(0, GuixuEventHorizonMatrix.spacetimeCost(module.field().requiredSpacetime()));
+        subscribeMatrix();
+        return true;
+    }
+
+    private boolean isNativeModule(PrimordialOmegaEngineModuleBase module) {
+        if (module.getLevel() != getLevel() || module.getHost() != this) return false;
+        for (BlockPos pos : getModuleScanPositions()) if (pos.equals(module.getPos())) return true;
+        return false;
+    }
+
+    public void recordMatrixModule(PrimordialOmegaEngineModuleBase module) {
+        if (!isRemote() && isMatrixArmed() && isNativeModule(module) && matrixFootprint.capture(module)) markDirty();
+    }
+
+    boolean isMatrixArmed() {
+        return matrixPressure >= 0 && matrixPressure < GuixuEventHorizonMatrix.FAILURE;
+    }
+
+    boolean isMatrixSource(GuixuPenroseContainmentModule module) {
+        return matrixPressure != GuixuEventHorizonMatrix.OFFLINE
+                && matrixSource == module.getPos().asLong() && module.getLevel() == getLevel()
+                && module.getUuid() != null && matrixSourceId.equals(module.getUuid().toString());
+    }
+
+    boolean matrixAllowsShutdown() {
+        return matrixPressure <= 0;
+    }
+
+    void shutDownMatrix(GuixuPenroseContainmentModule module) {
+        if (!isMatrixSource(module) || matrixPressure != 0) return;
+        matrixFootprint = new GuixuAnnihilation();
+        matrixSource = 0L;
+        matrixSourceId = "";
+        updateMatrix(GuixuEventHorizonMatrix.OFFLINE, 0L);
+        cancelMatrixWatch();
+    }
+
+    void settleMatrix(GuixuPenroseContainmentModule module, boolean supplied) {
+        if (!isMatrixSource(module)) return;
+        int pressure = GuixuEventHorizonMatrix.nextPressure(matrixPressure, supplied);
+        if (pressure == GuixuEventHorizonMatrix.FAILURE) {
+            failMatrix();
+        } else {
+            if (pressure >= GuixuEventHorizonMatrix.WARNING && matrixPressure < GuixuEventHorizonMatrix.WARNING
+                    && getLevel() instanceof ServerLevel level) {
+                warnMatrixPlayers(level, "warning", pressure, GuixuEventHorizonMatrix.FAILURE);
+            }
+            updateMatrix(pressure, GuixuEventHorizonMatrix.spacetimeCost(module.field().requiredSpacetime()));
+        }
+    }
+
+    private void updateMatrix(int pressure, long spacetime) {
+        if (matrixPressure == pressure && matrixSpacetime == spacetime) return;
+        matrixPressure = pressure;
+        matrixSpacetime = spacetime;
+        containmentCacheTick = Long.MIN_VALUE;
+        markDirty();
+    }
+
+    void failMatrix() {
+        if (!(getLevel() instanceof ServerLevel level) || !isMatrixArmed()) return;
+        updateMatrix(GuixuEventHorizonMatrix.FAILURE, 0L);
+        cancelMatrixWatch();
+        warnMatrixPlayers(level, "failed");
+        queueMatrixDetonation();
+    }
+
+    private void subscribeMatrix() {
+        matrixWatch = subscribeServerTick(matrixWatch, this::watchMatrix);
+    }
+
+    private void cancelMatrixWatch() {
+        if (matrixWatch == null) return;
+        matrixWatch.unsubscribe();
+        matrixWatch = null;
+    }
+
+    private void watchMatrix() {
+        if (getOffsetTimer() % 20 != 0 || !(getLevel() instanceof ServerLevel level) || !isMatrixArmed()) return;
+        BlockPos source = BlockPos.of(matrixSource);
+        if (matrixPatternBroken(this)) {
+            failMatrix();
+        } else if (level.hasChunkAt(source)) {
+            if (!(MetaMachine.getMachine(level, source) instanceof GuixuPenroseContainmentModule module)
+                    || module.getUuid() != null && (!isMatrixSource(module) || matrixPatternBroken(module))) {
+                failMatrix();
+            }
+        }
+    }
+
+    private static boolean matrixPatternBroken(MultiblockControllerMachine machine) {
+        var lock = machine.getPatternLock();
+        if (!lock.tryLock()) return false;
+        try {
+            var error = machine.getMultiblockState().error;
+            return error != null && error != MultiblockState.UNLOAD_ERROR && error != MultiblockState.UNINIT_ERROR;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void warnMatrixPlayers(ServerLevel level, String state, Object... args) {
+        var message = Component.translatable(GuixuEventHorizonMatrix.LANG + state, args).withStyle(ChatFormatting.RED);
+        var center = BlockPos.of(matrixCenter);
+        for (var player : level.players()) {
+            if (center.closerToCenterThan(player.position(), 160D)) player.displayClientMessage(message, true);
+        }
+    }
+
+    private void queueMatrixDetonation() {
+        if (matrixDetonationQueued || matrixFootprint.isEmpty() || !(getLevel() instanceof ServerLevel level)) return;
+        matrixDetonationQueued = true;
+        var burst = new GuixuAnnihilationPacket(getPos(), BlockPos.of(matrixCenter), getHostBlackHoleRadiusBlocks(),
+                getKerrSpin(), level.getGameTime(), false);
+        var server = level.getServer();
+        server.tell(new TickTask(server.getTickCount(), () -> {
+            GuixuNyarlathotepLink.unlinkHost(this);
+            unlinkEngine();
+            matrixFootprint.detonate(level, burst);
+        }));
+    }
+
+    void addMatrixStatus(List<Component> lines) {
+        if (matrixPressure == GuixuEventHorizonMatrix.OFFLINE) return;
+        if (matrixPressure == GuixuEventHorizonMatrix.FAILURE) {
+            lines.add(Component.translatable(GuixuEventHorizonMatrix.LANG + "failed").withStyle(ChatFormatting.RED));
+            return;
+        }
+        lines.add(Component.translatable(GuixuEventHorizonMatrix.LANG + "status", matrixPressure,
+                GuixuEventHorizonMatrix.FAILURE, matrixSpacetime,
+                Component.translatable(GuixuEventHorizonMatrix.LANG + (matrixPressure == 0 ? "boosted" : "suspended")))
+                .withStyle(matrixPressure >= GuixuEventHorizonMatrix.WARNING ? ChatFormatting.RED : ChatFormatting.AQUA));
+    }
+
+    @Override
+    public void saveCustomPersistedData(CompoundTag tag, boolean forSyncing) {
+        super.saveCustomPersistedData(tag, forSyncing);
+        if (!forSyncing && !matrixFootprint.isEmpty()) tag.put(MATRIX_FOOTPRINT_KEY, matrixFootprint.save());
+    }
+
+    @Override
+    public void loadCustomPersistedData(CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        if (tag.contains(MATRIX_FOOTPRINT_KEY)) matrixFootprint = GuixuAnnihilation.load(tag.getCompound(MATRIX_FOOTPRINT_KEY));
+    }
+
+    public int getKerrSpin() { return kerrSpin; }
+
+    public int getKerrOrbit(GuixuKerrOrbit.Track track) {
+        return track == GuixuKerrOrbit.Track.INNER ? kerrInnerOrbit : kerrOuterOrbit;
+    }
+
+    public long getKerrRecovery(GuixuKerrOrbit.Track track) {
+        return track == GuixuKerrOrbit.Track.INNER ? kerrInnerRecovery : kerrOuterRecovery;
+    }
+
+    public GuixuContainmentField.Status getContainmentVisualStatus() {
+        return GuixuContainmentField.Status.fromId(containmentVisualStatus);
+    }
+
+    public float getContainmentVisualStability() { return containmentVisualStability; }
+
+    public BlockPos getContainmentVisualSource() { return BlockPos.of(containmentVisualSource); }
+
+    public long getContainmentCollapseTick() { return containmentCollapseTick; }
+
+    void accreteKerrSpin(GuixuKerrOrbit.Track track) {
+        kerrSpin = GuixuKerrOrbit.accrete(kerrSpin, track);
+        markDirty();
+        pushHostFxSync();
+    }
+
+    void recordKerrRecovery(GuixuKerrOrbit.Track track) {
+        long now = getLevel().getGameTime();
+        if (track == GuixuKerrOrbit.Track.INNER) kerrInnerRecovery = now;
+        else kerrOuterRecovery = now;
+        pushHostFxSync();
+    }
+
+    private void refreshBlackHoleMechanics(PrimordialOmegaEngineModuleBase[] modules) {
+        GuixuPenroseContainmentModule effective = isFormed() ? getEffectiveContainment() : null;
+        GuixuContainmentField field = effective == null ? null : effective.field();
+        int fieldStatus = field == null ? GuixuContainmentField.Status.CLOSED.ordinal() : field.status().ordinal();
+        float stability = field == null ? 0 : field.stability();
+        long source = effective == null ? 0 : effective.getPos().asLong();
+        int inner = 0;
+        int outer = 0;
+        for (int slot = 0; slot < GuixuHostGeometry.SLOT_COUNT; slot++) {
+            if (modules[slot] instanceof GuixuKerrSingularityModule engine) {
+                inner = Math.max(inner, engine.orbitProgress(GuixuKerrOrbit.Track.INNER));
+                outer = Math.max(outer, engine.orbitProgress(GuixuKerrOrbit.Track.OUTER));
+            }
+        }
+        if (kerrInnerOrbit == inner && kerrOuterOrbit == outer
+                && containmentVisualStatus == fieldStatus && containmentVisualStability == stability
+                && containmentVisualSource == source) return;
+        kerrInnerOrbit = inner;
+        kerrOuterOrbit = outer;
+        containmentVisualStatus = fieldStatus;
+        containmentVisualStability = stability;
+        containmentVisualSource = source;
+        pushHostFxSync();
     }
 
     public int getContainmentLockSeconds() {
@@ -2018,7 +2346,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         if (isRemote() || containmentLockTicks >= CONTAINMENT_LOCK_TICKS) return;
         containmentLockTicks = CONTAINMENT_LOCK_TICKS;
         containmentCacheTick = Long.MIN_VALUE;
+        kerrSpin = GuixuKerrOrbit.INITIAL_SPIN;
+        if (getLevel() != null) containmentCollapseTick = getLevel().getGameTime();
         markDirty();
+        pushHostFxSync();
         LOGGER.info("[SHANHAI-CONTAINMENT] 归墟 @{} 黑洞坍缩，锁定 {} 秒", getPos(), CONTAINMENT_LOCK_TICKS / 20);
     }
 
@@ -2042,6 +2373,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         for (var candidate : getModuleSet()) {
             if (candidate instanceof GuixuPenroseContainmentModule module && module.isFormed()
                     && module.getHost() == this
+                    && (!isMatrixArmed() || isMatrixSource(module))
                     && !module.isInValid() && module.getLevel() != null
                     && module.getLevel().hasChunkAt(module.getPos())
                     && (best == null || module.getPos().asLong() < best.getPos().asLong())) {
@@ -2049,12 +2381,16 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
             }
         }
         containmentCacheModule = best;
-        if (containmentLockTicks > 0) {
+        if (isContainmentLocked()) {
             containmentCache = GuixuContainmentBonus.LOCKED;
         } else if (best == null) {
             containmentCache = GuixuContainmentBonus.NONE;
         } else {
             containmentCache = GuixuContainmentBonus.of(best.field().status(), best.field().stability());
+            if (isMatrixSource(best) && best.field().status() == GuixuContainmentField.Status.CONTAINED
+                    && !getMultiblockState().hasError() && !best.getMultiblockState().hasError()) {
+                containmentCache = GuixuEventHorizonMatrix.boost(containmentCache, matrixPressure);
+            }
         }
     }
 
@@ -2119,6 +2455,15 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         setHostFormedSync(true);
         // 成型时按槽内实况重算一次等级复写（存档读回后 @DescSynced 的值可能还没跟上）
         if (!isRemote()) {
+            if (isMatrixArmed()) {
+                matrixFootprint.capture(this);
+                for (var candidate : getModuleSet()) {
+                    if (candidate instanceof PrimordialOmegaEngineModuleBase module && isNativeModule(module)) {
+                        matrixFootprint.capture(module);
+                    }
+                }
+                markDirty();
+            }
             refreshMatterLevelOverride();
             if (hasEngineLink()) subscribeEngineLink();
             subscribeNyarlathotepLink();
@@ -2143,6 +2488,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         // 本機卸載而被接管的模組還在載入區塊裡：不放回去它們就會一直掛著一台已經不 tick 的主機
         cancelEngineLink();
         cancelContainment();
+        cancelMatrixWatch();
         if (!isRemote()) releaseRemoteModules();
         engineLinkReady = false;
         super.onUnload();
@@ -2151,6 +2497,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     /** 结构失效：把成型位翻回 false 并推同步（渲染器据此停特效并恢复真方块）。 */
     @Override
     public void onStructureInvalid() {
+        if (!isRemote() && isMatrixArmed() && getMultiblockState().error != MultiblockState.UNLOAD_ERROR) {
+            failMatrix();
+        }
+        stopStellarEnd();
+        stopBlackHolePreview();
         cancelNyarlathotepLink();
         GuixuNyarlathotepLink.pauseHost(this);
         cancelEngineLink();
@@ -2178,6 +2529,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     @Override
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void addModule(M module) {
         super.addModule(module);
+        if (module instanceof PrimordialOmegaEngineModuleBase nativeModule) recordMatrixModule(nativeModule);
         refreshModuleMask();
     }
 
@@ -2376,6 +2728,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         textList.add(Component.literal(GuixuContainmentText.hostSummary(
                         containment == null ? null : containment.field(), getContainmentLockSeconds()))
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
+        addMatrixStatus(textList);
         if (hasNyarlathotepLink()) {
             textList.add(Component.translatable("gt_shanhai.machine.guixu_vision_core.nyarlathotep_link",
                     linkedNyarlathotepDim, getLinkedNyarlathotepPos().toShortString(),

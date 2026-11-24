@@ -31,6 +31,7 @@ item_ids:
 
 * [<ItemLink id="gt_shanhai:guixu_vision_core" />](guixu_vision_core.md)：24 槽终局原初主机，涵盖三类专属配方、双物质模块槽、3 格全局额外挂载、能量双仓功率预算与 AR 全息监控渲染。
 * [<ItemLink id="gt_shanhai:guixu_penrose_containment_field" />](guixu_penrose_containment_field.md)：归墟专属被动模块，利用黑洞种子与时空流体维持旋转黑洞，提供分档全局倍率并伴随失稳吞噬与坍缩停机风险。
+* [<ItemLink id="gt_shanhai:guixu_kerr_singularity_engine" />](guixu_kerr_singularity_engine.md)：用主黑洞的顺旋与逆旋轨道加工坯料，由自旋和稳定度决定产物。
 * [<ItemLink id="gt_shanhai:guixu_hyperdimensional_link_module" />](guixu_hyperdimensional_link.md)：跨维度绑定并接管原始终焉引擎，共享归墟全套增益、仲裁万象核心冲突，并解锁 10 种高阶原初模块。
 
 ## 归墟主机与原始终焉引擎对比

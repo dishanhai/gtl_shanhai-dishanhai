@@ -36,7 +36,8 @@ public final class PrimordialSeriesMachines {
             "primordial_omega_engine",
             "guixu_vision_core",
             "primordial_mass_energy_core",
-            "guixu_penrose_containment_field");
+            "guixu_penrose_containment_field",
+            "guixu_kerr_singularity_engine");
 
     /**
      * 可被「禁用原初系列機器」關掉的機器：全部只用外部配方類型。

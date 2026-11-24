@@ -873,8 +873,7 @@ public final class HostFxGeometry {
      * 的那条竖线（见 {@link #CELL_CENTER}），喂黑洞时也要用 {@code +CELL_CENTER}（三个轴）。
      */
     public static BlockPos centerWorld(BlockPos controllerPos, Direction facing) {
-        return controllerPos.offset(GuixuHostGeometry.rotate(facing,
-                new BlockPos(-CONTROLLER_X, RING_Y - CONTROLLER_Y, -CONTROLLER_Z)));
+        return GuixuHostGeometry.centerWorld(controllerPos, facing);
     }
 
     /**
@@ -3120,7 +3119,7 @@ public final class HostFxGeometry {
     /** 公告板上的一个环带 {@code [r0,r1]}（{@code an0→an1} 透明度渐变）。 */
     private static void addBillboardRing(List<Quad> out, float[][] basis, float r0, float r1,
                                          float zOff, float red, float green, float blue,
-                                         float an0, float an1, float seconds, float detail) {
+                                         float an0, float an1, float seconds, float detail, float flowStrength) {
         final float[] right = basis[0];
         final float[] up = basis[1];
         final float[] dir = basis[2];
@@ -3134,6 +3133,8 @@ public final class HostFxGeometry {
             final float sa1 = (float) Math.sin(a1);
             final float scale0 = (float) BlackHoleSurfaceWaves.radiusScale(a0, seconds, detail);
             final float scale1 = (float) BlackHoleSurfaceWaves.radiusScale(a1, seconds, detail);
+            final double flow = flowStrength == 0 ? 1 :
+                    1 + flowStrength * (BlackHoleSurfaceWaves.photonFlow((a0 + a1) * .5 + (1 - flowStrength), seconds) - 1);
             out.add(new Quad(new float[]{
                     bpx(right, up, dir, ca0, sa0, r0 * scale0, zOff), bpy(right, up, dir, ca0, sa0, r0 * scale0, zOff),
                     bpz(right, up, dir, ca0, sa0, r0 * scale0, zOff),
@@ -3143,7 +3144,7 @@ public final class HostFxGeometry {
                     bpz(right, up, dir, ca1, sa1, r1 * scale1, zOff),
                     bpx(right, up, dir, ca0, sa0, r1 * scale0, zOff), bpy(right, up, dir, ca0, sa0, r1 * scale0, zOff),
                     bpz(right, up, dir, ca0, sa0, r1 * scale0, zOff),
-            }, red, green, blue, (an0 + an1) * 0.5F));
+            }, red, green, blue, (float) Math.min(1, (an0 + an1) * 0.5 * flow)));
         }
     }
 
@@ -3171,7 +3172,7 @@ public final class HostFxGeometry {
         if (basis == null) {
             return out;
         }
-        addBillboardRing(out, basis, 0, surfaceR, 0.02F, 0, 0, 0, 1, 1, seconds, detail);
+        addBillboardRing(out, basis, 0, surfaceR, 0.02F, 0, 0, 0, 1, 1, seconds, detail, 0);
         return out;
     }
 
@@ -3188,9 +3189,9 @@ public final class HostFxGeometry {
             return out;
         }
         addBillboardRing(out, basis, surfaceR * 1.00F, surfaceR * 1.22F, 0.02F,
-                1, 1, 1, 0.95F, 0.55F, seconds, detail);
+                1, 1, 1, 0.95F, 0.55F, seconds, detail, 1);
         addBillboardRing(out, basis, surfaceR * 1.24F, surfaceR * 2.10F, 0.02F,
-                1, 1, 1, 0.34F, 0, seconds, detail);
+                1, 1, 1, 0.34F, 0, seconds, detail, .42F);
         return out;
     }
 
@@ -3228,14 +3229,17 @@ public final class HostFxGeometry {
         return out;
     }
 
-    /** 黑洞<b>吸积盘</b>（加性）：环平面上的环带 {@code [1.15R, 2.55R]}，随时间缓慢自转。 */
+    /** 回退吸积盘的发光表面，围绕局部 Y 轴。 */
     public static List<Quad> holeDiskQuads(float surfaceR, float seconds) {
-        final List<Quad> out = new ArrayList<>(HOLE_SEGMENTS);
+        return holeDiskQuads(surfaceR, seconds, 0);
+    }
+
+    static List<Quad> holeDiskQuads(float surfaceR, float seconds, float heat) {
+        final List<Quad> out = new ArrayList<>(HOLE_SEGMENTS * 4);
         final float step = (float) (Math.PI * 2.0D / HOLE_SEGMENTS);
         final float spin = (float) Math.toRadians(seconds * 24.0F % 360.0F);
-        final float r0 = surfaceR * 1.15F;
-        final float r1 = surfaceR * 2.55F;
-        final float y = 0.06F;
+        final float[] radii = {surfaceR * 1.08F, surfaceR * 1.69F, surfaceR * 2.65F, surfaceR * 1.69F};
+        final float[] heights = {0, surfaceR * .24F, 0, -surfaceR * .24F};
         for (int i = 0; i < HOLE_SEGMENTS; i++) {
             final float a0 = spin + step * i;
             final float a1 = spin + step * (i + 1);
@@ -3243,19 +3247,27 @@ public final class HostFxGeometry {
             final float sa0 = (float) Math.sin(a0);
             final float ca1 = (float) Math.cos(a1);
             final float sa1 = (float) Math.sin(a1);
-            out.add(new Quad(new float[]{
-                    ca0 * r0, y, sa0 * r0,
-                    ca1 * r0, y, sa1 * r0,
-                    ca1 * r1, y, sa1 * r1,
-                    ca0 * r1, y, sa0 * r1,
-            }, 1.00F, 0.72F, 0.42F, 0.40F));
+            float stream = .62F + .38F * (float) Math.sin(i * step * 3 + spin * .75F);
+            for (int band = 0; band < radii.length; band++) {
+                int next = (band + 1) % radii.length;
+                float r0 = radii[band], r1 = radii[next], y0 = heights[band], y1 = heights[next];
+                boolean inner = band == 0 || next == 0;
+                float alpha = stream * (inner ? .22F + .32F * heat : .12F + .21F * heat);
+                out.add(new Quad(new float[]{
+                        ca0 * r0, y0, sa0 * r0,
+                        ca1 * r0, y0, sa1 * r0,
+                        ca1 * r1, y1, sa1 * r1,
+                        ca0 * r1, y1, sa0 * r1,
+                }, 1.0F, (inner ? .67F : .47F) + .27F * heat,
+                         (inner ? .31F : .16F) + .46F * heat, alpha));
+            }
         }
         return out;
     }
 
     /** 黑洞兜底含白邊波峰的四邊形預算上限；實際提交量由渲染器記錄。 */
     public static int holeQuadCount() {
-        return HOLE_SEGMENTS * 16;
+        return HOLE_SEGMENTS * 19;
     }
 
     /** 绕 Y 轴把方向向量转 {@code deg} 度（与 {@code Axis.YP.rotationDegrees} 同一旋向）。 */

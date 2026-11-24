@@ -29,7 +29,7 @@ public final class BlackHoleTuning {
         AUTO,
         /** 强制走一级（光影包生效时也试；日志会写明"用户强制"）。 */
         ON,
-        /** 强制二级（只看静态黑盘+光环，用来做 A/B 对照）。 */
+        /** 洞外绘制动态黑洞本体，跳过背景采样。 */
         OFF;
 
         public String id() {
@@ -115,6 +115,10 @@ public final class BlackHoleTuning {
     private static volatile double[] centerOverride;   // null = 跟 toml（已含 +0.5 补正）
     private static volatile java.lang.ref.WeakReference<Object> hostCenterWorld;
     private static volatile long hostCenterControllerPos;
+    private static final BlackHoleLensSpec.KerrParameters DEFAULT_KERR =
+            BlackHoleLensSpec.kerrParameters(BlackHoleLensSpec.KERR_SPIN);
+    private static volatile BlackHoleLensSpec.KerrParameters hostKerr = DEFAULT_KERR;
+    private static int hostKerrSpin = 20;
     private static volatile double scale = 1.0D;
     private static volatile double strength = 1.0D;
     private static volatile double disk = 1.0D;
@@ -178,8 +182,7 @@ public final class BlackHoleTuning {
      * 所以这里单独存一份"主机接管"，读取口 {@code BlackHoleLensRenderer.rsBlocks()} 优先用它；
      * 主机消失时由渲染器 {@code clearHostRadiusBlocks()} 还原，命令设的值原样回来。
      *
-     * <p>值域 1.0..12.0 格（上限来自 {@code HostFxState.HOLE_MAX_BLOCKS}，
-     * 那又是被 {@code HostFxBlackHole.surfaceRadius()} 的 {@code Math.min(r, 12.0F)} 钉住的）。
+     * <p>基础半径由主机面板设置。群星终焉可以临时扩大本帧半径。
      */
     private static volatile Float hostRadiusBlocks;
 
@@ -367,6 +370,17 @@ public final class BlackHoleTuning {
         return hostCenterWorld != null;
     }
 
+    public static void setHostKerrSpin(int percent) {
+        int spin = Math.clamp(percent, 0, 100);
+        if (hostKerrSpin == spin) return;
+        hostKerrSpin = spin;
+        hostKerr = BlackHoleLensSpec.kerrParameters(BlackHoleLensSpec.KERR_SPIN + (spin - 20) * .003);
+    }
+
+    public static BlackHoleLensSpec.KerrParameters kerrParameters() {
+        return hasHostCenter() ? hostKerr : DEFAULT_KERR;
+    }
+
     public static long hostCenterControllerPos() {
         return hostCenterControllerPos;
     }
@@ -429,7 +443,7 @@ public final class BlackHoleTuning {
 
     /**
      * 写入"主机接管半径"（格）。由 {@code GuixuHostFxRenderer} 每帧在成型闸门之后调，
-     * 值来自 {@code HostFxState.holeRadiusBlocks()}（已钳到 1.0..12.0）。
+     * 值由主机基础半径及当帧的视界扩张共同决定。
      *
      * <p>⚠️ 本方法<b>不</b>动 {@link #scale} —— 命令设的倍率原样保留，主机一走就回到它。
      */

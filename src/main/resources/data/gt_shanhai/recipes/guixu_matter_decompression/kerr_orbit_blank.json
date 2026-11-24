@@ -1,0 +1,18 @@
+{
+  "type": "gtceu:guixu_matter_decompression",
+  "data": { "euTier": 10 },
+  "duration": 100,
+  "tickInputs": { "eu": [{ "content": 8388608 }] },
+  "inputs": {
+    "item": [
+      {"content":{"type":"gtceu:sized","count":2,"ingredient":{"item":"gtceu:double_neutronium_plate"}}}
+    ],
+    "fluid": [{ "content": { "amount": 1000, "value": [{ "fluid": "gtceu:spacetime" }] } }]
+  },
+  "outputs": { "item": [{"content":{"item":"gt_shanhai:kerr_orbit_blank"}}] },
+  "conditions": [{
+    "type": "gt_shanhai:recipe_enabled",
+    "recipeId": "gt_shanhai:guixu_matter_decompression/kerr_orbit_blank",
+    "defaultEnabled": true
+  }]
+}

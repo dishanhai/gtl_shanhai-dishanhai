@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "FSF",
+    "CBC",
+    "FSF"
+  ],
+  "key": {
+    "F": { "item": "gtceu:uiv_field_generator" },
+    "S": { "item": "gtceu:uiv_sensor" },
+    "C": { "item": "kubejs:containment_field_generator" },
+    "B": { "item": "gtladditions:black_hole_seed" }
+  },
+  "result": { "item": "gt_shanhai:guixu_event_horizon_matrix" }
+}

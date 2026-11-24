@@ -169,6 +169,18 @@ public final class BlackHoleLensMath {
         return r;
     }
 
+    /** 绘制区域保住近景黑影覆盖范围，拷贝区域另受纹理边长限制。 */
+    public static Rect rectWithShadow(double cx, double cy, double halfPx, double shadowHalf,
+                                      int screenW, int screenH, double maxPixels) {
+        final Rect budget = rectAround(cx, cy, halfPx, screenW, screenH, maxPixels);
+        final Rect shadow = clamp(shadowHalf, cx, cy, screenW, screenH);
+        return shadow.w > budget.w || shadow.h > budget.h ? shadow : budget;
+    }
+
+    static int copyStart(int start, int end, int size, double center) {
+        return Math.clamp((int) Math.round(center - size * 0.5), start, end - size);
+    }
+
     private static Rect clamp(double half, double cx, double cy, int screenW, int screenH) {
         double x0 = Math.max(0.0, cx - half);
         double y0 = Math.max(0.0, cy - half);

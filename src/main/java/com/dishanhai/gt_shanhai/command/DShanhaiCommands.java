@@ -13,6 +13,7 @@ import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -21,9 +22,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -44,10 +48,15 @@ import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuBlackHolePreview;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuHostGeometry;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIFactory;
 import com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket;
+import com.dishanhai.gt_shanhai.network.GuixuAnnihilationPacket;
+import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -147,6 +156,7 @@ public class DShanhaiCommands {
                 .then(shopCommand("shop"))
                 .then(stellarTeleportCommand())
                 .then(stellarSlotCommand())
+                .then(guixuCommand())
                 .then(cacheCommand())
                 .then(Commands.literal("patternByproduct")
                         .executes(ctx -> PatternByproductOrder.toggleCommand(ctx.getSource())));
@@ -484,6 +494,97 @@ public class DShanhaiCommands {
         event.getDispatcher().register(shopCommand("商店"));
         event.getDispatcher().register(Commands.literal("样板副产物")
                 .executes(ctx -> PatternByproductOrder.toggleCommand(ctx.getSource())));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> guixuCommand() {
+        return Commands.literal("guixu").requires(source -> source.hasPermission(2))
+                .then(guixuBlackHolePreviewCommand())
+                .then(Commands.literal("stellar_end")
+                        .then(Commands.argument("controller", BlockPosArgument.blockPos())
+                                .then(Commands.literal("start").executes(ctx -> setGuixuStellarEnd(
+                                        ctx.getSource(), BlockPosArgument.getLoadedBlockPos(ctx, "controller"), true)))
+                                .then(Commands.literal("stop").executes(ctx -> setGuixuStellarEnd(
+                                        ctx.getSource(), BlockPosArgument.getLoadedBlockPos(ctx, "controller"), false)))))
+                .then(Commands.literal("annihilation")
+                        .then(Commands.literal("preview")
+                                .executes(ctx -> previewGuixuAnnihilation(ctx.getSource(), null))
+                                .then(Commands.argument("controller", BlockPosArgument.blockPos())
+                                        .executes(ctx -> previewGuixuAnnihilation(ctx.getSource(),
+                                                BlockPosArgument.getLoadedBlockPos(ctx, "controller"))))));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> guixuBlackHolePreviewCommand() {
+        return Commands.literal("blackhole_preview")
+                .executes(ctx -> setGuixuBlackHolePreview(ctx.getSource(), null, true))
+                .then(Commands.literal("start").executes(ctx -> setGuixuBlackHolePreview(ctx.getSource(), null, true)))
+                .then(Commands.literal("stop").executes(ctx -> setGuixuBlackHolePreview(ctx.getSource(), null, false)))
+                .then(Commands.argument("controller", BlockPosArgument.blockPos())
+                        .executes(ctx -> setGuixuBlackHolePreview(
+                                ctx.getSource(), BlockPosArgument.getLoadedBlockPos(ctx, "controller"), true))
+                        .then(Commands.literal("start").executes(ctx -> setGuixuBlackHolePreview(
+                                ctx.getSource(), BlockPosArgument.getLoadedBlockPos(ctx, "controller"), true)))
+                        .then(Commands.literal("stop").executes(ctx -> setGuixuBlackHolePreview(
+                                ctx.getSource(), BlockPosArgument.getLoadedBlockPos(ctx, "controller"), false))));
+    }
+
+    private static int setGuixuBlackHolePreview(CommandSourceStack source, BlockPos pos, boolean start)
+            throws CommandSyntaxException {
+        if (pos == null) {
+            ServerPlayer player = source.getPlayerOrException();
+            if (player.level() == source.getLevel()) pos = lookedAtBlock(player);
+        }
+        String key = "gt_shanhai.command.guixu.blackhole_preview.";
+        if (pos == null || !(MetaMachine.getMachine(source.getLevel(), pos) instanceof GuixuVisionCoreMachine host)
+                || (start && !host.startBlackHolePreview())) {
+            source.sendFailure(Component.translatable(key + "invalid"));
+            return 0;
+        }
+        String location = pos.toShortString();
+        if (start) {
+            source.sendSuccess(() -> Component.translatable(key + "started", location,
+                    GuixuBlackHolePreview.DURATION_TICKS / 20), false);
+        } else {
+            host.stopBlackHolePreview();
+            source.sendSuccess(() -> Component.translatable(key + "stopped", location), false);
+        }
+        return 1;
+    }
+
+    private static BlockPos lookedAtBlock(ServerPlayer player) {
+        return player.pick(16D, 1F, false) instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+                ? hit.getBlockPos() : null;
+    }
+
+    private static int previewGuixuAnnihilation(CommandSourceStack source, BlockPos pos) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        if (pos == null) pos = lookedAtBlock(player);
+        ServerLevel level = source.getLevel();
+        if (pos == null || player.level() != level
+                || !(MetaMachine.getMachine(level, pos) instanceof GuixuVisionCoreMachine host)
+                || !host.isFormed() || host.hasMatrixFailed()) {
+            source.sendFailure(Component.translatable("gt_shanhai.command.guixu.annihilation.invalid"));
+            return 0;
+        }
+        BlockPos controller = pos;
+        BlockPos center = GuixuHostGeometry.centerWorld(controller, host.getFrontFacing());
+        var preview = new GuixuAnnihilationPacket(controller, center, host.getHostBlackHoleRadiusBlocks(),
+                host.getKerrSpin(), level.getGameTime(), true);
+        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), preview);
+        source.sendSuccess(() -> Component.translatable("gt_shanhai.command.guixu.annihilation.preview", controller.toShortString()), false);
+        return 1;
+    }
+
+    private static int setGuixuStellarEnd(CommandSourceStack source, BlockPos pos, boolean start) {
+        if (!(MetaMachine.getMachine(source.getLevel(), pos) instanceof GuixuVisionCoreMachine host)
+                || (start && !host.startStellarEnd())) {
+            source.sendFailure(Component.translatable("gt_shanhai.command.guixu.stellar_end.invalid"));
+            return 0;
+        }
+        if (!start) host.stopStellarEnd();
+        String message = start ? "gt_shanhai.command.guixu.stellar_end.started"
+                : "gt_shanhai.command.guixu.stellar_end.stopped";
+        source.sendSuccess(() -> Component.translatable(message, pos.toShortString()), true);
+        return 1;
     }
 
     private static int openRecipeModifier(CommandSourceStack source) {

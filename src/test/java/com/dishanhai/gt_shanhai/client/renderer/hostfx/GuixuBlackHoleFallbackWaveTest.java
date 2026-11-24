@@ -7,6 +7,58 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GuixuBlackHoleFallbackWaveTest {
+    @Test void thickerFallbackDiskGlowsMoreWhenHeated() {
+        var cold = HostFxGeometry.holeDiskQuads(5, 3, 0);
+        var hot = HostFxGeometry.holeDiskQuads(5, 3, 1);
+        assertEquals(cold.size(), hot.size());
+        boolean above = false, below = false;
+        for (int i = 0; i < cold.size(); i++) {
+            assertTrue(hot.get(i).a() > cold.get(i).a());
+            for (int corner = 1; corner < 12; corner += 3) {
+                above |= hot.get(i).xyz()[corner] > 1.1F;
+                below |= hot.get(i).xyz()[corner] < -1.1F;
+            }
+        }
+        assertTrue(above && below);
+    }
+
+    @Test void accretionParticlesSpiralThroughTheInnerEdgeBeforeTheNextHeatPulse() {
+        double radius = 5;
+        var initial = GuixuStarField.accretionPosition(0, 0, radius);
+        var midway = GuixuStarField.accretionPosition(0, .5, radius);
+        var end = GuixuStarField.accretionPosition(0, 1, radius);
+        assertTrue(Math.hypot(initial.x(), initial.z()) > Math.hypot(midway.x(), midway.z()));
+        assertTrue(Math.hypot(midway.x(), midway.z()) > radius);
+        assertTrue(Math.hypot(end.x(), end.z()) < radius);
+        assertEquals(0, end.y(), 1e-6);
+        assertTrue(Math.abs(initial.x() * midway.z() - initial.z() * midway.x()) > 1);
+        double arrival = 0;
+        for (int tick = 1; tick < 160; tick++) {
+            double time = tick / 20.0;
+            if (GuixuStarField.accretionPhase(0, time) < GuixuStarField.accretionPhase(0, time - .05)) {
+                arrival = time;
+                break;
+            }
+        }
+        assertTrue(arrival > 0);
+        assertTrue(GuixuStarField.accretionFeed(arrival, 1) > GuixuStarField.accretionFeed(arrival - .05, 1));
+    }
+
+    @Test void stellarFeedStartsAfterTheFirstDebrisReturnsAndEndsAfterInfall() {
+        assertEquals(0, GuixuStellarEnd.accretionFeed(8));
+        assertTrue(GuixuStellarEnd.accretionFeed(30) > 0);
+        assertEquals(0, GuixuStellarEnd.accretionFeed(GuixuStellarEnd.LAST_CAPTURE_SECONDS + 6));
+    }
+
+    @Test void photonRingMovesEvenWhenTheShadowIsTooSmallForFineWaves() {
+        int shift = HostFxGeometry.HOLE_SEGMENTS / 4;
+        var first = HostFxGeometry.holeHaloQuads(0, 0, 180, 5, 0, 0);
+        var next = HostFxGeometry.holeHaloQuads(0, 0, 180, 5, 1.25F, 0);
+        float atStart = first.getFirst().a();
+        assertTrue(atStart - next.getFirst().a() > .2F);
+        assertEquals(atStart, next.get(shift).a(), 1e-5);
+    }
+
     private Method waves() throws Exception {
         return HostFxGeometry.class.getMethod("holeSurfaceWaveQuads", float.class, float.class, float.class,
                 float.class, float.class, float.class);

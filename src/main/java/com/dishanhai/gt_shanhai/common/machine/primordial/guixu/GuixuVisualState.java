@@ -7,6 +7,8 @@ public final class GuixuVisualState {
     private float density = GuixuOperationState.IDLE.density;
     private float brightness = GuixuOperationState.IDLE.brightness;
     private float jets;
+    private double lastAccretionSeconds = Double.NaN;
+    private float accretionHeat;
 
     public Profile advance(GuixuOperationState state, double seconds) {
         double delta = Double.isNaN(lastSeconds) ? 0.0 : Math.max(0.0, seconds - lastSeconds);
@@ -16,5 +18,18 @@ public final class GuixuVisualState {
         brightness += (state.brightness - brightness) * weight;
         jets += ((state == GuixuOperationState.GENERATING ? 1.0F : 0.0F) - jets) * weight;
         return new Profile(density, brightness, jets);
+    }
+
+    public float advanceAccretionHeat(double seconds, float feed) {
+        double delta = Double.isNaN(lastAccretionSeconds) ? 0 : Math.max(0, seconds - lastAccretionSeconds);
+        lastAccretionSeconds = seconds;
+        float target = Math.clamp(feed, 0, 1);
+        double rate = target > accretionHeat ? .72 : .17;
+        accretionHeat += (target - accretionHeat) * (float) -Math.expm1(-Math.min(delta, 5) * rate);
+        return accretionHeat;
+    }
+
+    public float accretionHeat() {
+        return accretionHeat;
     }
 }

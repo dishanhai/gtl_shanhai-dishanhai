@@ -201,6 +201,10 @@ public final class GuixuHostGeometry {
         return new BlockPos(x, offset.getY(), z);
     }
 
+    public static BlockPos centerWorld(BlockPos controller, Direction facing) {
+        return controller.offset(rotate(facing, new BlockPos(-CONTROLLER_X, RING_Y - CONTROLLER_Y, -CONTROLLER_Z)));
+    }
+
     /** 旋转后的绝对坐标（机器真的摆在世界里时，这个槽位该在哪一格）。 */
     public static BlockPos slotPos(BlockPos controllerPos, Direction facing, Slot slot) {
         return controllerPos.offset(rotate(facing, slot.offset()));

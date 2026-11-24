@@ -4,6 +4,7 @@ package com.dishanhai.gt_shanhai.client.renderer.blackhole;
 public final class BlackHoleSurfaceWaves {
     private static final double TAU = Math.PI * 2;
     private static final double RADIAL_FREQUENCY = 39.2699082;
+    private static final double RADIAL_SPEED = 2.50;
 
     private BlackHoleSurfaceWaves() {}
 
@@ -21,18 +22,23 @@ public final class BlackHoleSurfaceWaves {
     }
 
     public static double phase(double radius, double angle, double time) {
-        return (radius - 0.62) * RADIAL_FREQUENCY + angularPhase(angle, time) - time * 0.85;
+        return (radius - 0.62) * RADIAL_FREQUENCY + angularPhase(angle, time) - time * RADIAL_SPEED;
     }
 
     /** phase = 2pi*n 的解析波峰；取模只替換進出黑色遮罩的波峰索引。 */
     public static double crestRadius(int wave, double angle, double time) {
-        double radialPhase = (time * 0.85) % TAU;
+        double radialPhase = (time * RADIAL_SPEED) % TAU;
         if (radialPhase < 0) radialPhase += TAU;
         return 0.62 + (TAU * wave - angularPhase(angle, time) + radialPhase) / RADIAL_FREQUENCY;
     }
 
     public static double envelope(double radius) {
         return smooth(0.60, 0.67, radius) * (1 - smooth(0.92, 0.98, radius));
+    }
+
+    public static double photonFlow(double angle, double time) {
+        double phase = angle - time * TAU / 5;
+        return .40 + .94 * smooth(-.55, 1, Math.cos(phase)) + .25 * smooth(.10, 1, Math.cos(2 * phase + 1.4));
     }
 
     private static double smooth(double low, double high, double value) {

@@ -8,6 +8,7 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableFluidTank;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
+import com.gregtechceu.gtceu.api.pattern.MultiblockState;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemList;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.mojang.logging.LogUtils;
@@ -75,6 +76,13 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         return getHost() instanceof GuixuVisionCoreMachine guixu && guixu.isFormed() ? guixu : null;
     }
 
+    boolean supplyMatrixStartup() {
+        if (!drainSpacetime(GuixuEventHorizonMatrix.spacetimeCost(field.requiredSpacetime()))) return false;
+        field.tickSecond(true);
+        markDirty();
+        return true;
+    }
+
     // ------------------------------------------------------------------ 生命週期
 
     @Override
@@ -87,6 +95,7 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
 
     @Override
     public void onStructureInvalid() {
+        if (!isRemote() && getMultiblockState().error != MultiblockState.UNLOAD_ERROR) failAnchoredMatrix();
         if (!isRemote() && field.forceCollapse() == GuixuContainmentField.Event.COLLAPSED) {
             // 鎖定那條不要求主機已成型
             GuixuVisionCoreMachine guixu = getHost() instanceof GuixuVisionCoreMachine g ? g : null;
@@ -96,6 +105,16 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         }
         cancelContainment();
         super.onStructureInvalid();
+    }
+
+    @Override
+    public void onMachineRemoved() {
+        failAnchoredMatrix();
+        super.onMachineRemoved();
+    }
+
+    private void failAnchoredMatrix() {
+        if (getHost() instanceof GuixuVisionCoreMachine guixu && guixu.isMatrixSource(this)) guixu.failMatrix();
     }
 
     @Override
@@ -115,24 +134,35 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         if (getOffsetTimer() % 20 != 0) return;
         GuixuVisionCoreMachine guixu = guixuHost();
         if (guixu == null || guixu.getEffectiveContainment() != this || guixu.isContainmentLocked()) return;
-        consumeControlItem();
+        boolean matrix = guixu.isMatrixSource(this);
+        if (matrix && (guixu.getMultiblockState().hasError() || getMultiblockState().hasError())) return;
+        consumeControlItem(guixu);
+        matrix = guixu.isMatrixSource(this);
         GuixuContainmentField.Status status = field.status();
+        if (matrix && status != GuixuContainmentField.Status.CONTAINED) {
+            guixu.failMatrix();
+            return;
+        }
         if (status != GuixuContainmentField.Status.CONTAINED && status != GuixuContainmentField.Status.UNSTABLE) return;
         long need = field.requiredSpacetime();
-        GuixuContainmentField.Event event = field.tickSecond(need > 0L && drainSpacetime(need));
+        if (matrix) need = GuixuEventHorizonMatrix.spacetimeCost(need);
+        boolean supplied = need > 0L && drainSpacetime(need);
+        GuixuContainmentField.Event event = field.tickSecond(supplied);
         if (event == GuixuContainmentField.Event.DESTABILIZED) {
             LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} 失稳", getPos());
+            if (matrix) guixu.failMatrix();
         } else if (event == GuixuContainmentField.Event.COLLAPSED) {
             LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} 坍缩", getPos());
             guixu.startContainmentLock();
         }
+        if (matrix) guixu.settleMatrix(this, supplied);
         markDirty();
     }
 
     // ------------------------------------------------------------------ 倉室：物品與時空流體
 
     /** 每次最多處理一個物品：種子開啟、坍縮器關閉；不適用的物品原樣留著。 */
-    private void consumeControlItem() {
+    private void consumeControlItem(GuixuVisionCoreMachine guixu) {
         for (var part : getParts()) {
             if (!(part instanceof MetaMachine machine)) continue;
             for (var trait : machine.getTraits()) {
@@ -146,11 +176,13 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
                     // 先按物品 id 判斷這次投入會不會成立，不成立的物品原樣留著
                     if (isSeed ? field.status() != GuixuContainmentField.Status.CLOSED
                             : !isCollapser || !field.isOpen()) continue;
+                    if (isCollapser && !guixu.matrixAllowsShutdown()) continue;
                     // AE 清單的槽位不在基類 storage 中，必須走覆寫的取出方法才能扣網路庫存。
                     ItemStack taken = handler instanceof ExportOnlyAEItemList
                             ? handler.extractItem(i, 1, false)
                             : handler.extractItemInternal(i, 1, false);
                     if (taken.isEmpty()) continue;
+                    if (isCollapser) guixu.shutDownMatrix(this);
                     GuixuContainmentField.Event event = isSeed
                             ? field.open(HYPER_SEED.equals(id)) : field.shutDown();
                     LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} {}（{}）", getPos(),
@@ -239,6 +271,7 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
                 for (String line : GuixuContainmentText.moduleLines(field, guixu.getContainmentLockSeconds())) {
                     textList.add(Component.literal(line).withStyle(ChatFormatting.LIGHT_PURPLE));
                 }
+                guixu.addMatrixStatus(textList);
             }
         }
         textList.add(Component.translatable("gt_shanhai.machine.guixu_penrose_containment_field.name")

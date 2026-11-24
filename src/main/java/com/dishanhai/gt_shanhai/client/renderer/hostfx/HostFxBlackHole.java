@@ -178,8 +178,7 @@ public final class HostFxBlackHole {
      * <h2>🔴 2026-10-25 第二十改</h2>
      * 归墟视界枢核的机器字段 {@code hostBlackHoleRadiusBlocks} 是<b>可见半径（格）</b>，
      * 由 {@code GuixuHostFxRenderer} 每帧喂进 {@link BlackHoleTuning#setHostRadiusBlocks(float)}。
-     * 有接管时这里<b>直接用那个数</b>（再夹一次 0.8..12.0：下限是本类几何的退化保护，
-     * 上限与 {@code HostFxState.HOLE_MAX_BLOCKS} 同值 —— 否则"面板能填、画面不变"就是假控件）。
+     * 接管半径也包含群星终焉的临时扩张，兜底与透镜使用同一视界。
      *
      * <p>为什么不能只靠 {@link BlackHoleFrameStats#lastRsBlocks()}：那份读数来自"真黑洞这一帧画过"
      * 的那条路；本类顶上的场合恰恰是**真路径一帧都没画**（{@code LEVEL_NONE}）⇒ 那份读数可能是
@@ -188,7 +187,7 @@ public final class HostFxBlackHole {
     public static float surfaceRadius() {
         if (BlackHoleTuning.hasHostRadiusBlocks()) {
             final float host = BlackHoleTuning.hostRadiusBlocks();
-            return Math.max(0.8F, Math.min(host, 12.0F));
+            return Math.clamp(host, 0.8F, GuixuStellarEnd.MAX_HORIZON_RADIUS);
         }
         final double rs = BlackHoleFrameStats.lastRsBlocks();
         if (!(rs > 1.0e-3D)) {
@@ -208,10 +207,24 @@ public final class HostFxBlackHole {
      */
     public static int render(PoseStack poseStack, float camLocalX, float camLocalY, float camLocalZ,
                              float seconds, float surfaceR) {
+        return render(poseStack, camLocalX, camLocalY, camLocalZ, seconds, surfaceR, 0, Direction.EAST);
+    }
+
+    static int render(PoseStack poseStack, float camLocalX, float camLocalY, float camLocalZ,
+                      float seconds, float surfaceR, float heat, Direction facing) {
         lastQuads = 0;
         if (!active()) {
             return 0;
         }
+        final int quads = drawVisual(poseStack, camLocalX, camLocalY, camLocalZ, seconds, surfaceR, heat, facing);
+        lastQuads = quads;
+        lastState = "on(RS=" + String.format(Locale.ROOT, "%.2f", Math.max(0.8F, surfaceR))
+                + " 黑盘+白边波浪+光子环+光晕+吸积盘 " + quads + " quads)";
+        return quads;
+    }
+
+    static int drawVisual(PoseStack poseStack, float camLocalX, float camLocalY, float camLocalZ,
+                          float seconds, float surfaceR, float heat, Direction facing) {
         final float r = Math.max(0.8F, surfaceR);
         final double distance = Math.sqrt((double) camLocalX * camLocalX + (double) camLocalY * camLocalY
                 + (double) camLocalZ * camLocalZ);
@@ -220,7 +233,14 @@ public final class HostFxBlackHole {
         final float detail = (float) BlackHoleSurfaceWaves.detail(1.4 / Math.max(projectedRadius, 1));
         // ① 先畫吸積盤；黑盤隨後遮住盤面的中心投影，與主 shader 的視界遮罩一致。
         final RenderType add = additiveLayer();
-        int quads = submit(poseStack, add, HostFxGeometry.holeDiskQuads(r, seconds));
+        int quads;
+        poseStack.pushPose();
+        try {
+            poseStack.mulPose(GuixuStarRenderer.diskRotation(facing));
+            quads = submit(poseStack, add, HostFxGeometry.holeDiskQuads(r, seconds, heat));
+        } finally {
+            poseStack.popPose();
+        }
         // ② 黑盤（不透明、寫深度）
         quads += submit(poseStack, opaqueLayer(),
                 HostFxGeometry.holeDiscQuads(camLocalX, camLocalY, camLocalZ, r, seconds, detail));
@@ -228,9 +248,6 @@ public final class HostFxBlackHole {
         final List<HostFxGeometry.Quad> halo = HostFxGeometry.holeHaloQuads(camLocalX, camLocalY, camLocalZ, r, seconds, detail);
         halo.addAll(HostFxGeometry.holeSurfaceWaveQuads(camLocalX, camLocalY, camLocalZ, r, seconds, projectedRadius));
         quads += submit(poseStack, add, halo);
-        lastQuads = quads;
-        lastState = "on(RS=" + String.format(Locale.ROOT, "%.2f", r) + " 黑盘+白边波浪+光子环+光晕+吸积盘 "
-                + quads + " quads)";
         return quads;
     }
 

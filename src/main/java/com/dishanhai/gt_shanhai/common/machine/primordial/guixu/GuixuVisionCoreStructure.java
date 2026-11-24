@@ -227,7 +227,7 @@ public final class GuixuVisionCoreStructure {
         for (Block block : moduleBlocks) {
             predicate = predicate.or(Predicates.blocks(block));
         }
-        return predicate;
+        return predicate.or(Predicates.blocks(requireBlock("gt_shanhai:" + GuixuVisionCoreMachines.KERR_ID)));
     }
 
     /** 按 id 取方块；取不到就抛（带 id），绝不返回 null。 */

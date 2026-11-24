@@ -419,4 +419,13 @@ public final class HostFxHide {
         }
         restoreOne(level, hostKey, ledger, "restore_now");
     }
+
+    public static void discardAnnihilatedHost(BlockPos controllerPos) {
+        long key = controllerPos.asLong();
+        if (HIDDEN.remove(key) != null) stamp++;
+        INCOMPLETE.remove(key);
+        UNFORMED_SINCE.remove(key);
+        LAST_SCAN_MS.remove(key);
+        LAST_FORMED_MS.remove(key);
+    }
 }

@@ -228,7 +228,7 @@ public final class HostFxConfigurators {
                     .setHoverTooltips(
                             Component.literal("§b引力透镜"),
                             Component.literal("§7开：背景与星空被黑洞的引力弯折（真透镜）"),
-                            Component.literal("§7关：只画黑盘 + 光子环 + 吸积盘，不做背景弯折"),
+                            Component.translatable("gt_shanhai.guixu.lens.off.tooltip"),
                             Component.literal("§8默认 §f开§8（= 改动前的画面）")));
             group.addWidget(new LabelWidget(10, 109, this::lensLabelText));
 

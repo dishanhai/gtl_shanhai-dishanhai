@@ -3,21 +3,9 @@
 // ============================================================================================
 // 山海重构 · 黑洞的【真引力透镜】· 一级渲染的片元着色器
 //
-// 它做什么（三件，全部在相机空间里算）：
-//   ① 把【同一帧已经渲染好的背景】（方块 + 天空 + 云）当成一张屏幕空间纹理，
-//      按引力偏折角把采样点搬到别处 ⇒ 背景被真的扭曲（不是贴一张旋涡图）。
-//   ② 程序化算吸积盘：被弯折后的射线与过黑洞的薄盘求交，用噪声 + 开普勒转速 +
-//      多普勒集束（迎面更亮）着色 ⇒ 盘的"背面"会被透镜抬到黑影上方，形成经典弧。
-//   ③ 光子环 / 黑影：碰撞参数 b < b_crit（= 3√3/2·Rs）⇒ 光子被吞 ⇒ 纯黑；
-//      b ≈ b_crit 的一薄层是绕光子球转了几圈的强光 ⇒ 解析式高斯亮环。
-//
-// 与 Java 侧的契约（改这里必须同步改 BlackHoleLensMath 并在报告里标注）：
-//   * 偏折角多项式 deflectAngle() 与 BlackHoleLensMath.deflectAngle() 逐字同款；
-//   * B_CRIT 与 BlackHoleLensMath.B_CRIT 同值 2.5980762（= 3√3/2）；
-//   * 所有 uniform 名与 blackhole.json 的 uniforms 列表逐字一致，
-//     否则 ShaderInstance 找不到 location ⇒ Java 侧的安全检查会降级到二级。
-//   * 边缘淡出常数 EDGE_FADE_INNER 与 BlackHoleLensSpec.EDGE_FADE_INNER 同值，
-//     且 Java 侧 BlackHoleShaderProbe 的逐像素复算必须逐行同款（离线出图与游戏同一份）。
+// 近光环追踪克尔零测地线，远场用解析偏折近似采样同帧背景。
+// 度规、薄盘与频移用 G=c=M=1；场景和回退路径仍按 Java 的 Rs=2M 定标。
+// BlackHoleShaderProbe 的软件出图保留史瓦西参考模型，正式效果用这份 GLSL 离屏验证。
 //
 // 坐标系：像素 = gl_FragCoord（左下原点）；相机空间 = 相机在原点、朝 -z；
 //         黑洞位置 uBhView 已经由 Java 减过 cameraPos 并乘过相机旋转。
@@ -39,8 +27,11 @@ uniform float uTanHalfFov;       // tan(fovY/2)，从投影矩阵反解
 uniform float uAspect;           // w/h
 uniform float uTime;             // 秒（渲染刻 + partialTick）
 uniform float uDiskGain;         // 盘亮度总增益
+uniform float uDiskHeat;         // 主机吸积热度 0..1
+uniform vec3  uKerrParameters = vec3(0.65, 1.7599342, 3.6159372); // a/M、视界半径、顺行 ISCO
 uniform float uRingGain;         // 光子环亮度总增益
 uniform float uStrength;         // 偏折强度倍率（/shanhai bh strength；0 = 不弯背景但盘/环还在）
+uniform float uSampleBackground; // 关透镜时只输出发光和黑影覆盖率。
 
 // 🔴 2026-10-25 新增：<b>"只有比黑洞更远的像素才参与弯折"</b>（用户原话：
 //   「AR 字…为什么会受到黑洞引力透镜的影响，它在黑洞的前面啊，而且我发现黑洞前面的物体
@@ -54,8 +45,7 @@ uniform float uStrength;         // 偏折强度倍率（/shanhai bh strength；
 //   ② 采样门：采样点若落在"比洞心平面更近"的像素上 ⇒ 一律退回<b>本像素自己</b>（warp 归 0，
 //      颜色与已经画好的背景逐像素相同），前景的像素一个都不许被搬走。
 uniform float uDepthGate;        // 1 = 深度可用（已拷进 Sampler1）⇒ 启用采样门；0 = 退回改前行为
-// 黑洞【中心平面】的窗口深度（0..1）。🔴 2026-10-25 第四改：它<b>必须被真的读</b>
-//   （读它的地方是下面 ④b 的 `refDepth = max(dSelf, uHoleDepth)`），原因有两条，缺一不可：
+// 黑洞中心平面的窗口深度（0..1），在 sampleBackground 中作为参考深度的下界。
 //
 //   ① 语义：背景不可能比洞面更近 ⇒ 采样点比「max(本像素深度, 洞面深度)」还近就一定是前景。
 //      纯用 dSelf 时，若某像素的深度没数据/被 clamp 到洞面之前，门就整体失效；用 max 兜住它。
@@ -77,10 +67,11 @@ uniform float uGateEps;
 
 out vec4 fragColor;
 
-// ---- 物理常数（与 Java 侧同值）----
-const float B_CRIT      = 2.5980762;   // 临界碰撞参数 / Rs  (= 3*sqrt(3)/2)
-const float DISK_INNER  = 3.0;         // 吸积盘内缘 / Rs (= 史瓦西 ISCO = 3 Rs)
-const float DISK_OUTER  = 11.0;        // 吸积盘外缘 / Rs
+const float B_CRIT = 2.5980762;        // 史瓦西参考尺度 / Rs
+#define KERR_SPIN (uKerrParameters.x)
+#define HORIZON_R (uKerrParameters.y)
+#define DISK_INNER (uKerrParameters.z)
+const float DISK_OUTER = 22.0;         // 11 Rs，保持原有场景范围
 
 // ---- 数值（不许改太离谱；报告 §3 有推导）----
 const float RING_WIDTH  = 0.075;       // 光子环高斯宽度（单位 Rs）
@@ -93,8 +84,7 @@ const float HALO_GAIN   = 0.48;
 const float EDGE_FADE_INNER = 0.86;
 
 // ============================================================================================
-// 噪声：便宜的 value noise + 3 抽样 fbm（吸积盘湍流）。不要换成 simplex：
-// 这里每像素只跑一次求交，但整块 rect 是逐帧重画的，能省则省。
+// 吸积盘湍流使用按像素足迹过滤的 value noise。
 // ============================================================================================
 float hash21(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -108,6 +98,9 @@ float noiseFootprint(vec2 p) {
 }
 
 float vnoise(vec2 p, float footprint) {
+    if (footprint >= 1.20) {
+        return 0.5;
+    }
     vec2 i = floor(p);
     vec2 f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
@@ -130,7 +123,7 @@ float fbm(vec2 p, float footprint) {
 //   * 首项 2Rs/b = 弱场爱因斯坦偏折（4GM/(c²b)）；
 //   * 后两项是近场经验高阶项：真解在 b→b_crit 发散，多项式做不到，所以把奇点交给
 //     "b < b_crit 直接画黑"来接住。
-//   ⚠️ 这是解析近似偏折律，不是逐像素积分零测地线（报告 §7 已标注）。
+//   用于强场积分带以外的屏幕空间近似。
 // ============================================================================================
 float deflectAngle(float bn) {
     float t = 1.0 / max(bn, 0.35);
@@ -145,210 +138,371 @@ float surfaceRadius(float angle, float detail) {
 
 float surfacePhase(float radius, float angle) {
     return (radius - 0.62) * 39.2699082 + 1.50 * sin(angle * 3.0 - uTime * 0.3)
-         + 0.65 * sin(angle * 5.0 + uTime * 0.2) - uTime * 0.85;
+         + 0.65 * sin(angle * 5.0 + uTime * 0.2) - uTime * 2.50;
+}
+
+// 近环等离子体的宽亮弧和较窄的亮团沿同一方向公转；外层光晕略微拖尾。
+float photonFlow(float phase) {
+    float arc = smoothstep(-0.55, 1.0, cos(phase));
+    float knot = smoothstep(0.10, 1.0, cos(2.0 * phase + 1.4));
+    return 0.40 + 0.94 * arc + 0.25 * knot;
+}
+
+struct KerrRay {
+    float inverseRadius;
+    float radialSpeed;
+    vec3 direction;
+    vec3 angularSpeed;
+    float lambda;
+    float energy;
+    float angularMomentum2;
+    vec3 radialPotential;
+};
+
+// 在有限距离的局部零角动量观测者（ZAMO）标架中发出反向射线。
+// lambda=Lz/E，eta=Q/E²。角向状态用球面笛卡儿向量，避免在旋转轴除以 sin(theta)。
+KerrRay cameraRay(vec3 observer, vec3 dir, vec3 axis, float radius) {
+    float a = KERR_SPIN;
+    float r2 = radius * radius;
+    float mu = dot(observer, axis);
+    float sigma = r2 + a * a * mu * mu;
+    float delta = r2 - 2.0 * radius + a * a;
+    float area = (r2 + a * a) * (r2 + a * a) - a * a * delta * (1.0 - mu * mu);
+    vec3 azimuth = cross(axis, observer);
+    float tangentScale = sqrt(area / sigma);
+    float momentum = -tangentScale * dot(dir, azimuth);
+    float energy = sqrt(sigma * delta / area) + 2.0 * a * radius / area * momentum;
+    float lambda = momentum / energy;
+    float inverseRadius = 1.0 / radius;
+    float radial = dot(dir, observer);
+    vec3 angular = (sqrt(sigma) * (dir - radial * observer)
+                  + (tangentScale - sqrt(sigma)) * dot(dir, azimuth) * azimuth
+                    / max(dot(azimuth, azimuth), 1e-7)) / energy;
+    float angularMomentum2 = dot(angular, angular) - a * a * mu * mu;
+    float k = angularMomentum2 + a * a - 2.0 * a * lambda;
+    float p = a * (a - lambda);
+    return KerrRay(inverseRadius, -radial * sqrt(delta * sigma) / (energy * r2),
+                   observer, angular, lambda, energy, angularMomentum2,
+                   vec3(2.0 * p - k, 2.0 * k, p * p - a * a * k));
+}
+
+// R(r)/r^4 = 1 + B u² + D u³ + C u⁴. 势阱的极小值为零时即克尔临界曲线。
+float shadowDistance(KerrRay ray) {
+    vec3 p = ray.radialPotential;
+    float slope = 1.5 * p.y;
+    float root = sqrt(max(slope * slope - 8.0 * p.x * p.z, 0.0));
+    float u = clamp(-2.0 * p.x / max(slope + root, 1e-5), ray.inverseRadius, 1.0 / HORIZON_R);
+    return (-1.0 - u * u * (p.x + u * (p.y + u * p.z))) * (0.5 * B_CRIT);
+}
+
+float radialAccel(float u, vec3 potential) {
+    return u * (potential.x + u * (1.5 * potential.y + 2.0 * potential.z * u));
+}
+
+vec3 angularAccel(vec3 direction, vec3 axis, float angularMomentum2) {
+    float mu = dot(direction, axis);
+    float a2 = KERR_SPIN * KERR_SPIN;
+    return axis * (a2 * mu) - direction * (angularMomentum2 + 2.0 * a2 * mu * mu);
+}
+
+float dragging(float u, float lambda) {
+    return -KERR_SPIN * u * (2.0 - KERR_SPIN * lambda * u)
+         / max(1.0 - 2.0 * u + KERR_SPIN * KERR_SPIN * u * u, 0.035);
+}
+
+vec3 rotateAboutAxis(vec3 direction, vec3 axis, float angle) {
+    vec3 pole = axis * dot(axis, direction);
+    return pole + cos(angle) * (direction - pole) + sin(angle) * cross(axis, direction);
+}
+
+// 分离的 Mino 时间方程。速度 Verlet 允许在径向／极向转向点连续反弹。
+// 一个像素至多保留两次可见赤道穿越，逃逸方向供背景采样使用。
+void traceKerr(KerrRay ray, vec3 axis, out vec3 firstHit, out vec3 secondHit, out vec3 escaped) {
+    firstHit = vec3(0.0);
+    secondHit = vec3(0.0);
+    escaped = vec3(0.0);
+    float dt = 0.118 * inversesqrt(max(ray.angularMomentum2, 9.0));
+    float u = ray.inverseRadius;
+    float speed = ray.radialSpeed;
+    vec3 point = ray.direction;
+    vec3 velocity = ray.angularSpeed;
+    float height = dot(point, axis);
+    float twist = 0.0;
+    float rate = dragging(u, ray.lambda);
+    for (int i = 0; i < 64; ++i) {
+        speed += 0.5 * dt * radialAccel(u, ray.radialPotential);
+        velocity += 0.5 * dt * angularAccel(point, axis, ray.angularMomentum2);
+        float nextU = u + dt * speed;
+        vec3 nextPoint = point + dt * velocity;
+        if (nextU >= 1.0 / HORIZON_R) {
+            break;
+        }
+        float nextRate = dragging(max(nextU, 0.0), ray.lambda);
+        float nextTwist = twist + 0.5 * dt * (rate + nextRate);
+        float nextHeight = dot(nextPoint, axis);
+        if (secondHit == vec3(0.0) && height * nextHeight < 0.0) {
+            float t = height / (height - nextHeight);
+            float hitU = mix(u, nextU, t);
+            if (hitU > 1.0 / DISK_OUTER && hitU < 1.0 / DISK_INNER) {
+                vec3 hit = rotateAboutAxis(normalize(mix(point, nextPoint, t)), axis, mix(twist, nextTwist, t)) / hitU;
+                if (firstHit == vec3(0.0)) {
+                    firstHit = hit;
+                } else {
+                    secondHit = hit;
+                }
+            }
+        }
+        if (nextU <= 0.0) {
+            float t = u / (u - nextU);
+            escaped = rotateAboutAxis(normalize(mix(point, nextPoint, t)), axis, mix(twist, nextTwist, t));
+            break;
+        }
+        speed += 0.5 * dt * radialAccel(nextU, ray.radialPotential);
+        velocity += 0.5 * dt * angularAccel(nextPoint, axis, ray.angularMomentum2);
+        u = nextU;
+        point = nextPoint;
+        height = nextHeight;
+        twist = nextTwist;
+        rate = nextRate;
+    }
+}
+
+// Page–Thorne 零内边界力矩通量。根、系数及 sqrt(ISCO) 对应 a=0.65。
+float diskFlux(float r) {
+    const float x0 = 1.9015618;
+    const vec3 roots = vec3(1.4504155, 0.4673614, -1.9177769);
+    const vec3 weights = vec3(0.4002077, -0.0913193, -1.2838884);
+    float x = sqrt(r);
+    float orbit = r * x;
+    float f = x - x0 - 1.5 * KERR_SPIN * log(x / x0)
+            - dot(weights, log((vec3(x) - roots) / (vec3(x0) - roots)));
+    return max(f, 0.0) / (r * r * (orbit - 3.0 * x + 2.0 * KERR_SPIN));
+}
+
+// g = nu_obs/nu_em；圆轨道流体满足 nu_em/E = u^t (1 - lambda * Omega)。
+float diskShift(float r, KerrRay ray) {
+    float invOrbit = inversesqrt(r) / r;
+    float orbitA = KERR_SPIN * invOrbit;
+    return sqrt(max(1.0 - 3.0 / r + 2.0 * orbitA, 0.0))
+         / (ray.energy * max(1.0 + orbitA - ray.lambda * invOrbit, 0.2));
+}
+
+vec4 diskMaterial(vec3 hit, vec3 basisX, vec3 basisZ, float r) {
+    float azimuth = atan(dot(hit, basisZ), dot(hit, basisX) + 1e-6);
+    float winding = log(r / DISK_INNER);
+    // 对数螺旋配合有界剪切，保留远景和长时间运行下的纹理宽度。
+    float phase = azimuth + 3.35 * winding - uTime * 0.88
+                + 0.48 * sin(uTime * 0.77 - 2.2 * winding);
+    vec2 arm = vec2(cos(phase), sin(phase));
+    // 沿径向向内输运密度结；方位坐标取周期量，越过 atan 接缝时连续。
+    vec2 grain = vec2(r * 1.14 + uTime * 1.70 + 0.61 * arm.y,
+                      3.6 * arm.y + 1.8 * sin(2.0 * phase + r * 0.49));
+    return vec4(grain, arm);
+}
+
+vec2 diskFootprint(vec4 material) {
+    return vec2(noiseFootprint(material.xy), noiseFootprint(material.zw));
+}
+
+vec3 diskLight(float r, vec4 material, vec2 footprint, KerrRay ray) {
+    if (r <= DISK_INNER || r >= DISK_OUTER) {
+        return vec3(0.0);
+    }
+    float flux = diskFlux(r) * 2800.0;
+    float shift = diskShift(r, ray);
+    float density = fbm(material.xy, footprint.x);
+    float x = material.z;
+    float spiral = x * (4.0 * x * x - 3.0);
+    float arm = smoothstep(0.20, 0.96, spiral + 0.42 * (density - 0.5));
+    float resolved = 1.0 - smoothstep(0.056, 0.27, footprint.y);
+    float filament = resolved * arm * arm * (0.65 + 0.70 * density);
+    float stream = mix(1.02, 0.46 + 0.52 * density, resolved) + 1.62 * filament;
+
+    float temperature = sqrt(sqrt(flux)) * shift * (1.0 + 0.25 * filament + 0.47 * uDiskHeat);
+    vec3 color = mix(vec3(0.78, 0.12, 0.027), vec3(1.0, 0.60, 0.23), smoothstep(0.25, 0.85, temperature));
+    color = mix(color, vec3(0.91, 0.96, 1.0), smoothstep(0.81, 1.58, temperature));
+    float emission = sqrt(flux) * shift * shift * shift * stream * (1.0 + 2.1 * uDiskHeat);
+    return color * emission * smoothstep(0.0, 0.5, r - DISK_INNER)
+                            * (1.0 - smoothstep(16.0, DISK_OUTER, r));
+}
+
+vec3 sampleBackground(vec2 uvSelf, vec3 dirBent, float warp) {
+    vec2 uv = uvSelf;
+    if (warp > 0.0) {
+        vec4 clipB = uProjMat * vec4(dirBent, 0.0);
+        if (clipB.w > 1e-4) {
+            vec2 bentPx = (clipB.xy / clipB.w * 0.5 + 0.5) * uScreenSize;
+            vec2 localPx = bentPx - uBgRect.xy;
+            vec2 border = min(localPx, uBgRect.zw - localPx);
+            float valid = smoothstep(0.0, max(2.0, 0.06 * uLensRadiusPx), min(border.x, border.y));
+            vec2 uvBent = clamp(localPx, vec2(0.5), uBgRect.zw - 0.5) * uBgTexel;
+            uv = mix(uvSelf, uvBent, warp * valid);
+        }
+    }
+    // 拷贝贴图只有第 0 层。在片元分支里显式指定层级，不依赖隐式导数。
+    if (uDepthGate > 0.5 && uv != uvSelf) {
+        float dSamp = textureLod(Sampler1, uv, 0.0).r;
+        if (dSamp > 1e-6 && dSamp < 0.999999) {
+            float dSelf = textureLod(Sampler1, uvSelf, 0.0).r;
+            if (dSamp < max(dSelf, uHoleDepth) - uGateEps) {
+                uv = uvSelf;
+            }
+        }
+    }
+    return textureLod(Sampler0, uv, 0.0).rgb;
 }
 
 void main() {
     vec2 px = gl_FragCoord.xy;
     vec2 ndc = px / uScreenSize * 2.0 - 1.0;
-
-    // ---------------------------------------------------------------------------------------
-    // ① 相机空间射线方向（不靠投影矩阵求逆：标准透视下解析式就是它，报告 §3 有离线交叉验证）
-    // ---------------------------------------------------------------------------------------
-    vec3 dir = normalize(vec3(ndc.x * uTanHalfFov * uAspect,
-                              ndc.y * uTanHalfFov,
-                              -1.0));
-
-    // ---------------------------------------------------------------------------------------
-    // ② 射线 ↔ 黑洞几何：tca = 最近接近点在线上的参数，b = 碰撞参数
-    // ---------------------------------------------------------------------------------------
-    vec3  bh  = uBhView;
+    vec3 dir = normalize(vec3(ndc.x * uTanHalfFov * uAspect, ndc.y * uTanHalfFov, -1.0));
+    vec3 bh = uBhView;
+    vec3 n = normalize(uDiskNormal);
+    float rs = max(uRs, 1e-4);
+    float distanceToHole = length(bh);
     float tca = dot(bh, dir);
-    float b   = length(cross(bh, dir)); // 避免洞心方向兩個近等大數相減失去精度。
-    float rs  = max(uRs, 1e-4);
-    float bn  = b / rs;
-
-    // ③ 把射线朝黑洞方向弯 α 角：在 (dir, 垂线) 张成的平面里转
-    //    α 再乘运行期"偏折强度"（/shanhai bh strength）：0 = 背景不弯（盘/环照旧），1 = 物理弱场，2 = 夸张
-    float alpha = deflectAngle(bn) * max(uStrength, 0.0);
-    vec3  perp  = bh - dir * tca;
-    float perpLen = length(perp);
-    vec3  dirBent = dir;
-    if (perpLen > 1e-6) {
-        dirBent = normalize(dir * cos(alpha) + (perp / perpLen) * sin(alpha));
-    }
-
-    // ---------------------------------------------------------------------------------------
-    // ④ 背景：把"弯折后的方向"投回屏幕，采样同一帧的颜色拷贝
-    //    在 rect 边缘把 warp 收到 0 ⇒ 采样点回到"自己这个像素"⇒ 与已经画好的背景逐像素
-    //    相同（无缝），同时保证永远不会采到 rect 之外（那里没有拷贝，采了就是脏数据）。
-    // ---------------------------------------------------------------------------------------
+    float bn = length(cross(bh, dir)) / rs;
     float dHole = length(px - uHolePx) / max(uLensRadiusPx, 1.0);
-    float maskRadius = 1.0 - smoothstep(0.70, 1.0, dHole);
-
-    vec2  edgePx   = min(px - uBgRect.xy, uBgRect.xy + uBgRect.zw - px);
-    float edgeDist = min(edgePx.x, edgePx.y);
-    float maskEdge = smoothstep(0.0, max(4.0, uLensRadiusPx * 0.10), edgeDist);
-
-    // 🔴 边缘淡出（2026-10-25，用户「左右有明显的分割线」）：
-    //    改前 warp 有两道掩码（maskRadius/maskEdge）⇒ 边界处已经是 0，
-    //    但 **盘 / 光子环 / 光晕完全没有掩码**（下面 col += diskCol; col += ringCol; 直接加），
-    //    只要矩形边界切到盘或环，就是一条硬边。像素预算一收矩形（近距常见）就切在 6~7 Rs 处。
-    //    ⇒ 现在用同一个 fade 乘【全部四项】，dHole 按"到矩形中心的最大半径"归一化，四边一致，
-    //      最后 14%（0.86..1.0）用 smoothstep 淡出。
     float maskFade = 1.0 - smoothstep(EDGE_FADE_INNER, 1.0, dHole);
-    float warp     = maskRadius * maskEdge * maskFade;
+    KerrRay ray = cameraRay(-bh / distanceToHole, dir, n, distanceToHole * 2.0 / rs);
 
-    vec2 uvSelf = (px - uBgRect.xy) * uBgTexel;
-    vec2 uvBent = uvSelf;
-    vec4 clipB  = uProjMat * vec4(dirBent, 0.0);
-    if (clipB.w > 1e-4) {
-        vec2 bentPx = (clipB.xy / clipB.w * 0.5 + 0.5) * uScreenSize;
-        uvBent = (bentPx - uBgRect.xy) * uBgTexel;
-    }
-    vec2 uvMax  = uBgRect.zw * uBgTexel;
-    vec2 uvBentC = clamp(uvBent, vec2(0.0), uvMax);
-    vec2 uvSelfC = clamp(uvSelf, vec2(0.0), uvMax);
-    vec2 uv     = clamp(mix(uvSelfC, uvBentC, warp), vec2(0.0), uvMax);
+    float edge = shadowDistance(ray);
+    float edgeWidth = fwidth(edge);
+    float aa = max(edgeWidth, 1e-4) * 1.25;
+    float surfaceDetail = 1.0 - smoothstep(0.014, 0.055, edgeWidth / B_CRIT);
+    vec2 surfaceOffset = px - uHolePx;
+    float surfaceAngle = atan(surfaceOffset.y, surfaceOffset.x + 1e-6);
+    edge -= surfaceRadius(surfaceAngle, surfaceDetail) - B_CRIT;
+    float shadowMask = 1.0 - smoothstep(-aa, aa, edge);
+    float surfaceRho = sqrt(max(0.0, 1.0 + 2.0 * edge / B_CRIT));
+    float wavePhase = surfacePhase(surfaceRho, surfaceAngle);
+    float waveWidth = max(0.075, fwidth(wavePhase) * 0.55);
 
-    // ---------------------------------------------------------------------------------------
-    // ④b 🔴 采样侧深度门（2026-10-25，2026-10-25 深夜【判据改过一次】，看下面的"为什么不再和洞心比"）
-    //    · dSamp：**实际采样点**（已经过 mix 的那个点）的深度；
-    //    · dSelf：**这个像素自己**的深度（uvSelfC 就是它自己的 texel）；
-    //    · 判据：采样点比"我要替换掉的那个像素"更近（差超过 uGateEps）⇒ 它采到了前景 ⇒ 退回 uvSelfC
-    //      （= 这个像素原本的颜色，warp 归 0）⇒ 前景的颜色绝不会被搬到别处。
-    //
-    //    🔴 为什么**不**和洞心平面常数比（改前写法 `dSamp < uHoleDepth - 1e-6` 的三个毛病）：
-    //      ① 语义不对：鬼影的定义是"我采到的那个点比我要替换的像素更近"，与洞心在哪个深度无关；
-    //      ② 整条门押在一个常数上：uHoleDepth ≈ 0.9999（远处黑洞），它偏一丁点就【全拦】或【全放】——
-    //         并且全拦的表现是"整屏一点弯折都没有"，正是用户报的那句
-    //         「现在它连黑洞后面的方块也不影响了」；
-    //      ③ 贴图没数据（dSamp 恒 0）时，`0 < 0.9999 - 1e-6` 恒成立 ⇒ 每个像素都被判成前景 ⇒
-    //         **失败形态是"完全不弯折"**。现在换成自比之后，dSamp=0 ⇒ 条件不成立 ⇒ 退回"全都弯折"
-    //         （= 2026-10-25 之前的行为）。**门的失败形态从此变成"少拦"，不可能再变成"一点都不弯"**。
-    //
-    //    ④ 🔴 2026-10-25 第四改：参照深度 = **max(dSelf, uHoleDepth)**，不是纯 dSelf。
-    //       · 为什么不是纯 dSelf：dSelf 只是"这一个像素的深度"，它可能没有数据（0）、也可能被 clamp
-    //         到洞面之前。这时门就整体失效（或反过来整体收紧）。而"背景不可能比洞面更近"是硬约束
-    //         ⇒ 用洞面深度给 dSelf 一个**下界**：dSelf 正常（≈ 洞面之后）时 max 就等于 dSelf，
-    //         与改前逐像素等价；dSelf 落到洞面之前时用洞面兜住，门退化成"比洞面近就拦"，仍比全放安全。
-    //         （**门不再"整条押在一个常数上"**：常数只当下界参与 max，正常情形由 dSelf 决定。）
-    //       · 为什么**必须**在这里保留对 uHoleDepth 的读取（结构原因，比语义原因更要命）：
-    //         GLSL 编译器会删掉"只声明、从不读取"的 uniform ⇒ 程序里没有 location ⇒
-    //         Java 侧 getUniform 返回 null ⇒ 「必需 uniform 缺失 ⇒ 降二级」把整条一级透镜永久降成
-    //         静态贴图（实机：`fallback=2 reason=uniform_missing:uHoleDepth`，透镜完全消失）。
-    //         本工程第二次踩这个坑（前一次 uScreenSize）；另一侧的双保险是
-    //         BlackHoleLensSpec.OPTIONAL_UNIFORMS 里登记了 uHoleDepth —— 但**别指望它**：
-    //         一个 uniform 只该在"缺了画面逐像素不变"时才登记成可选，而这里它本来就该被读到。
-    //    · `dSamp > 1e-6 && dSamp < 0.999999`：这张贴图这一格**确实有深度数据**（0 = 近平面/没数据，
-    //      1 = 远平面/天空），挡住 0/1 两种坏值把门变成"全拦"。
-    //    · `uGateEps` 由 Java 侧按"沿视线轴 0.75 格"换算成窗口深度差（下限 1e-5 ⇒ 近距离时物理项胜出，
-    //      约 60 格以外才由下限接手），见 Frame#gateEps。⚠️ 别把"下限"写成 2e-4：那个数在 55 格处
-    //      ≈ **12 格**容差，门会形同虚设（2026-10-25 实机回滚过一次，就是这条）。
-    //    ⚠️ 这里【故意不做 discard】：写入门交给 GL depth test（2026-10-24 起就在、实机 447/447 帧验过）。
-    //      原因：万一 Sampler1 没绑上（取到的是 0 号纹理 = 黑），discard 会把整张 pass 吞掉 → 黑洞整块消失；
-    //      而只做采样门的最坏结果是"背景不弯折"，黑洞本体/光子环/盘照旧在 ⇒ 失败形态是"退化"，不是"消失"。
-    //    uDepthGate = 0（光影生效 / 深度拷不出来 / /shanhai bh depthgate off）时整段跳过
-    //    ⇒ 行为与改前逐字一致。
-    // ---------------------------------------------------------------------------------------
-    if (uDepthGate > 0.5) {
-        float dSamp = texture(Sampler1, uv).r;          // 采样点深度
-        float dSelf = texture(Sampler1, uvSelfC).r;     // 本像素深度（写入门已保证它在洞面之后）
-        // 🔴 参照深度 = max(本像素深度, 洞心平面深度)：正常情形 = dSelf（与改前逐像素等价），
-        //    dSelf 落在洞面之前时由洞面兜住 —— 语义上"背景不可能比洞面更近"，结构上保证
-        //    uHoleDepth 被真的读到（读不到 = 被 GLSL 优化掉 = 一级透镜整条降级，见 ④b ④ 与声明处注释）。
-        float refDepth = max(dSelf, uHoleDepth);
-        if (dSamp > 1e-6 && dSamp < 0.999999 && dSamp < refDepth - uGateEps) {
-            uv = uvSelfC;                               // 采样点压在前景上 ⇒ 不弯折（采自己）
+    // 远场薄透镜在最近接近点拼接入射与出射。强场带平滑切到克尔积分。
+    float strength = max(uStrength, 0.0);
+    float alpha = deflectAngle(bn);
+    vec3 toward = (bh - dir * tca) / max(bn * rs, 1e-6);
+    vec3 outgoing = dir * cos(alpha) + toward * sin(alpha);
+    float strong = 1.0 - smoothstep(3.25, 4.85, bn);
+    vec3 primary = vec3(0.0), secondary = vec3(0.0), escaped = vec3(0.0);
+    vec3 thinHit = vec3(0.0);
+    if (shadowMask < 1.0 && maskFade > 0.0) {
+        if (strong > 0.0 && (uDiskGain > 0.0 || (uSampleBackground > 0.5 && strength > 0.0))) {
+            traceKerr(ray, n, primary, secondary, escaped);
         }
-    }
-    vec3 bg     = texture(Sampler0, uv).rgb;
-
-    // ---------------------------------------------------------------------------------------
-    // ⑤ 吸积盘：弯折后的射线与"过黑洞、法线 uDiskNormal"的薄盘求交（解析解，一次求交，零步进）
-    // ---------------------------------------------------------------------------------------
-    vec3  n      = normalize(uDiskNormal);
-    vec3  basisX = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-    vec3  basisZ = cross(n, basisX);
-
-    vec3  diskCol = vec3(0.0);
-    float denom   = dot(dirBent, n);
-    // 導數必須在一致控制流程中求值，不放在盤面求交的分支內。
-    float safeDenom = abs(denom) < 1e-4 ? (denom < 0.0 ? -1e-4 : 1e-4) : denom;
-    float tDisk = dot(bh, n) / safeDenom;
-    vec3 diskRel = dirBent * tDisk - bh;
-    float diskRadius = length(diskRel) / rs;
-    float diskAngle = atan(dot(diskRel, basisZ), dot(diskRel, basisX));
-    float spin = uTime * 2.6 / pow(max(diskRadius, 1.0), 1.5);
-    // sin 方位座標消除 atan 在 -pi/pi 的雜訊接縫；徑向相位向內推進。
-    vec2 noiseCoord = vec2(min(diskRadius, 64.0) * 1.35 + uTime * 0.45, sin(diskAngle + spin) * 2.6);
-    float footprint = noiseFootprint(noiseCoord);
-    if (abs(denom) > 1e-4) {
-        float tHit = dot(bh, n) / denom;
-        if (tHit > 0.0) {
-            vec3  hit = dirBent * tHit;
-            vec3  rel = hit - bh;
-            float rn  = length(rel) / rs;
-            if (rn > DISK_INNER && rn < DISK_OUTER) {
-                // 内/外缘软过渡
-                float band = smoothstep(DISK_INNER, DISK_INNER * 1.12, rn)
-                           * (1.0 - smoothstep(DISK_OUTER * 0.72, DISK_OUTER, rn));
-
-                // 开普勒湍流：方位角 + 半径，按 ω ∝ r^-1.5 平移 ⇒ 内圈转得快（真吸积盘的样子）
-                float turb = fbm(noiseCoord, footprint);
-                float shade = band * (0.35 + 1.30 * turb) * 1.15;
-
-                // 多普勒集束：盘沿 +φ 方向转，速度朝相机的一侧更亮（1/(1-βcosθ)³）
-                vec3  velDir = normalize(cross(n, rel));
-                float beta   = clamp(0.62 * inversesqrt(max(rn, 1.0)), 0.0, 0.80);
-                float cosT   = dot(velDir, -dirBent);
-                float beam   = 1.0 / pow(max(0.35, 1.0 - beta * cosT), 3.0);
-
-                // 温度梯度：内白热 → 中橙 → 外暗红
-                vec3 cHot = vec3(1.00, 0.97, 0.92);
-                vec3 cMid = vec3(1.00, 0.62, 0.24);
-                vec3 cLow = vec3(0.62, 0.13, 0.05);
-                vec3 dc   = mix(cHot, cMid, smoothstep(DISK_INNER * 1.05, DISK_INNER * 3.0, rn));
-                dc        = mix(dc,   cLow, smoothstep(DISK_INNER * 3.0,  DISK_OUTER,      rn));
-
-                diskCol = dc * (shade * beam) * max(uDiskGain, 0.0);
+        if (strong < 1.0 && uDiskGain > 0.0) {
+            float heightToPlane = dot(bh, n);
+            float incomingSlope = dot(dir, n);
+            float outgoingSlope = dot(outgoing, n);
+            if (incomingSlope * heightToPlane > 0.0 && abs(heightToPlane) <= abs(tca * incomingSlope)) {
+                thinHit = (dir * (heightToPlane / incomingSlope) - bh) * (2.0 / rs);
+            } else {
+                float afterLens = heightToPlane - tca * incomingSlope;
+                if (abs(outgoingSlope) > 1e-5 && outgoingSlope * afterLens > 0.0) {
+                    thinHit = (tca * dir + outgoing * (afterLens / outgoingSlope) - bh) * (2.0 / rs);
+                }
             }
         }
     }
+    // 在一致控制流量测足迹，跨越相邻像素的盘面边界时自动淡掉细纹。
+    vec3 basisX = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 basisZ = cross(n, basisX);
+    float r0 = length(primary), r1 = length(secondary), rFar = length(thinHit);
+    vec4 material0 = diskMaterial(primary, basisX, basisZ, clamp(r0, DISK_INNER, DISK_OUTER));
+    vec4 material1 = diskMaterial(secondary, basisX, basisZ, clamp(r1, DISK_INNER, DISK_OUTER));
+    vec4 materialFar = diskMaterial(thinHit, basisX, basisZ, clamp(rFar, DISK_INNER, DISK_OUTER));
+    vec2 footprint0 = diskFootprint(material0), footprint1 = diskFootprint(material1);
+    vec2 footprintFar = diskFootprint(materialFar);
+    // 侧面看到的是有厚度的光球。靠近盘中面更亮，向上下两侧过渡到稀薄的热气层。
+    vec3 tangentPoint = (dir * tca - bh) * (2.0 / rs);
+    float height = dot(tangentPoint, n);
+    vec3 grazingHit = tangentPoint - n * height;
+    float rGrazing = length(grazingHit);
+    float scaleHeight = 0.54 + 0.118 * clamp(rGrazing, DISK_INNER, DISK_OUTER);
+    float grazingHeight = abs(height) / scaleHeight;
+    float sideView = 1.0 - smoothstep(0.04, 0.29, abs(dot(ray.direction, n)));
+    float grazingCore = 1.0 - smoothstep(0.17, 0.82, grazingHeight);
+    float grazingAtmosphere = 1.0 - smoothstep(0.48, 1.36, grazingHeight);
+    float grazing = sideView * (0.69 * grazingCore + 0.31 * grazingAtmosphere);
+    vec4 materialGrazing = diskMaterial(grazingHit, basisX, basisZ, clamp(rGrazing, DISK_INNER, DISK_OUTER));
+    vec2 footprintGrazing = diskFootprint(materialGrazing);
 
-    // ---------------------------------------------------------------------------------------
-    // ⑥ 黑影 + 光子环
-    //    b < b_crit ⇒ 光子逃不出来 ⇒ 背景被完全遮住；
-    //    b ≈ b_crit 的一薄层是"绕光子球转了几圈、最后擦边逃出来"的光 ⇒ 强亮环（解析高斯）。
-    // ---------------------------------------------------------------------------------------
-    float aa         = max(fwidth(bn), 1e-4) * 1.25;
-    float surfaceDetail = 1.0 - smoothstep(0.014, 0.055, fwidth(bn) / B_CRIT);
-    vec2 surfaceOffset = px - uHolePx;
-    float surfaceAngle = atan(surfaceOffset.y, surfaceOffset.x + 1e-6);
-    float waveRadius = surfaceRadius(surfaceAngle, surfaceDetail);
-    float shadowMask = 1.0 - smoothstep(waveRadius - aa, waveRadius + aa, bn);
-
-    float surfaceRho = bn / waveRadius;
-    float wavePhase = surfacePhase(surfaceRho, surfaceAngle);
-    float waveWidth = max(0.075, fwidth(wavePhase) * 0.55);
-    float waveCrest = exp(-pow(sin(wavePhase * 0.5) / waveWidth, 2.0));
-    float surfaceRipple = 0.80 * waveCrest * surfaceDetail * shadowMask
-                        * smoothstep(0.60, 0.67, surfaceRho)
-                        * (1.0 - smoothstep(0.92, 0.98, surfaceRho));
+    float surfaceRipple = 0.0;
+    if (surfaceDetail > 0.0 && shadowMask > 0.0 && surfaceRho > 0.60 && surfaceRho < 0.98) {
+        float crest = sin(0.5 * wavePhase) / waveWidth;
+        surfaceRipple = 0.64 * exp(-crest * crest) * surfaceDetail * shadowMask
+                      * smoothstep(0.60, 0.67, surfaceRho)
+                      * (1.0 - smoothstep(0.92, 0.98, surfaceRho));
+    }
+    if (shadowMask >= 1.0) {
+        fragColor = vec4(vec3(surfaceRipple * maskFade), 1.0);
+        return;
+    }
+    vec3 background = vec3(0.0);
+    float coverage = shadowMask;
+    float backgroundCoverage = 0.0;
+    if (uSampleBackground > 0.5) {
+        float maskRadius = 1.0 - smoothstep(0.70, 1.0, dHole);
+        vec2 edgePx = min(px - uBgRect.xy, uBgRect.xy + uBgRect.zw - px);
+        float edgeDistance = min(edgePx.x, edgePx.y);
+        backgroundCoverage = smoothstep(0.0, 4.0, edgeDistance);
+        if (backgroundCoverage > 0.0) {
+            float maskEdge = smoothstep(0.0, max(4.0, uLensRadiusPx * 0.10), edgeDistance);
+            vec2 uvSelf = clamp(px - uBgRect.xy, vec2(0.5), uBgRect.zw - 0.5) * uBgTexel;
+            float bend = alpha * strength;
+            vec3 dirBent = dir * cos(bend) + toward * sin(bend);
+            // 屏幕缓存只能采样镜头前方的逃逸光线，过渡带内混合解析方向。
+            float tracedWarp = strong * smoothstep(0.10, 0.65, dot(escaped, dir));
+            vec3 scaledEscape = mix(dir, escaped, min(strength, 1.0));
+            dirBent = mix(dirBent, scaledEscape, tracedWarp);
+            float warp = strength > 0.0 ? maskRadius * maskEdge * maskFade : 0.0;
+            background = sampleBackground(uvSelf, dirBent, warp) * (1.0 - shadowMask) * backgroundCoverage;
+            coverage = mix(shadowMask, 1.0, backgroundCoverage);
+        }
+    }
+    if (maskFade <= 0.0) {
+        fragColor = vec4(background, coverage);
+        return;
+    }
 
     float ringWidth = max(RING_WIDTH, aa);
-    float ringCore = exp(-pow((bn - waveRadius) / ringWidth, 2.0)) * RING_WIDTH / ringWidth;
-    float ringHalo = exp(-pow((bn - waveRadius) / HALO_WIDTH, 2.0)) * HALO_GAIN;
-    vec3  ringCol  = vec3((ringCore * RING_GAIN + ringHalo) * max(uRingGain, 0.0));
+    float coreOffset = edge / ringWidth;
+    float haloOffset = edge / HALO_WIDTH;
+    float ringCore = exp(-(coreOffset * coreOffset)) * RING_WIDTH / ringWidth;
+    float ringHalo = exp(-(haloOffset * haloOffset)) * HALO_GAIN;
+    float ringShift = diskShift(5.8, ray);
+    vec3 ringTint = mix(vec3(1.0, 0.37, 0.12), vec3(0.90, 0.94, 1.0), smoothstep(0.47, 1.14, ringShift));
+    float phase = surfaceAngle - uTime * 1.25663706;
+    float beam = clamp(ringShift * ringShift, 0.25, 1.35);
+    // 先压缩亮环峰值，让亮弧经过趋近侧时也保留亮度变化。
+    float coreLight = (1.0 - exp(-ringCore * RING_GAIN * beam)) * photonFlow(phase);
+    float haloLight = ringHalo * beam * photonFlow(phase + 0.58);
+    vec3 ringCol = ringTint * (coreLight + haloLight) * max(uRingGain, 0.0);
 
-    // ---------------------------------------------------------------------------------------
-    // ⑦ 合成：背景 → 被黑影吃掉 → 盘与环叠在上面（盘/环在黑洞前面，应该压在黑影上）
-    // ---------------------------------------------------------------------------------------
-    vec3 col = mix(bg, vec3(0.0), shadowMask);
-    // 盘 / 环 / 光晕一起乘边缘淡出（改前是直接加 ⇒ 矩形边界处一条硬边）
-    col += diskCol * (1.0 - shadowMask) * maskFade;
-    col += ringCol * (1.0 - shadowMask) * maskFade;
-    col += vec3(surfaceRipple) * maskFade;
+    vec3 diskCol = vec3(0.0);
+    if (uDiskGain > 0.0) {
+        vec3 first = diskLight(r0, material0, footprint0, ray);
+        // 第二次盘面穿越的光先经过近侧盘层，取低透射率表现光学厚度。
+        vec3 second = diskLight(r1, material1, footprint1, ray);
+        float transmission = 0.86 - 0.46 * smoothstep(0.0, 0.48, max(first.r, first.g));
+        vec3 farDisk = diskLight(rFar, materialFar, footprintFar, ray);
+        diskCol = mix(farDisk, first + second * transmission, strong);
+        if (grazing > 0.0) {
+            vec3 photosphere = diskLight(rGrazing, materialGrazing, footprintGrazing, ray);
+            photosphere *= mix(vec3(0.88, 0.55, 0.38), vec3(1.0), grazingCore);
+            diskCol = max(diskCol, photosphere * (0.96 * grazing));
+        }
+        diskCol *= uDiskGain;
+    }
 
-    fragColor = vec4(col, 1.0);
+    float outsideShadow = (1.0 - shadowMask) * maskFade;
+    vec3 emission = ringCol * outsideShadow + vec3(surfaceRipple) * maskFade;
+    float diskEnergy = max(diskCol.r, max(diskCol.g, diskCol.b));
+    // 同一层薄盘同时吸收背景光并叠加发射，拷贝范围内外的盘面曝光一致。
+    float diskOpacity = 0.62 * diskEnergy / (diskEnergy + 0.72) * maskFade;
+    background *= 1.0 - diskOpacity;
+    coverage += diskOpacity * (1.0 - shadowMask) * (1.0 - backgroundCoverage);
+    float diskExposure = 1.30 / (1.0 + 1.44 * diskEnergy);
+    emission += diskCol * diskExposure * outsideShadow;
+    fragColor = vec4(background + emission, coverage);
 }

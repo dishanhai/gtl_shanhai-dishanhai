@@ -1,22 +1,40 @@
 package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 
+import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensSpec;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.core.Direction;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
+
+import java.util.List;
 
 /** 山海：星芒與彎曲軌跡的短拖尾，共用既有加性層，一批提交、不寫深度。 */
 public final class GuixuStarRenderer {
+    // Blandford–Znajek：固定磁通下喷流功率近似正比于视界角速度平方。
+    private static final double SPIN = BlackHoleLensSpec.KERR_SPIN;
+    private static final double HORIZON_OMEGA = SPIN / (2.0 * (1.0 + Math.sqrt(1.0 - SPIN * SPIN)));
+    private static final float JET_POWER = (float) (24.0 * HORIZON_OMEGA * HORIZON_OMEGA);
+
     private GuixuStarRenderer() {}
 
     /** 呼叫方已將 PoseStack 放到環心並套用機器朝向，相機也使用同一座標系。 */
     public static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
                               float density, float brightness, float jets, boolean infallEnabled, boolean ambientEnabled) {
-        if (!infallEnabled && !ambientEnabled) return;
-        if (ambientEnabled && infallEnabled) GuixuDeepSpaceBackdrop.render(pose, camera, surfaceRadius);
+        render(pose, camera, seconds, surfaceRadius, density, brightness, jets, infallEnabled, infallEnabled, ambientEnabled,
+                Direction.EAST, List.of(), GuixuStarField.ACCRETION_TRAILS, 0);
+    }
+
+    static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
+                       float density, float brightness, float jets, boolean blackHoleEnabled, boolean backgroundInfall,
+                       boolean ambientEnabled,
+                       Direction facing, List<GuixuStellarEnd.GravityWave> stellarWaves, int accretionTrails, float diskHeat) {
+        if (!blackHoleEnabled && !ambientEnabled) return;
+        if (ambientEnabled && blackHoleEnabled) GuixuDeepSpaceBackdrop.render(pose, camera, surfaceRadius);
         var layer = HostFxDraw.beamLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer vertices = buffers.getBuffer(layer);
@@ -24,7 +42,7 @@ public final class GuixuStarRenderer {
         Matrix4f clip = new Matrix4f(RenderSystem.getProjectionMatrix()).mul(matrix);
         Vector3f head = new Vector3f(), tail = new Vector3f(), view = new Vector3f();
         Vector3f right = new Vector3f(), up = new Vector3f(), width = new Vector3f();
-        for (int i = 0; infallEnabled && i < GuixuStarField.PARTICLE_COUNT; i++) {
+        for (int i = 0; backgroundInfall && i < GuixuStarField.PARTICLE_COUNT; i++) {
             float visibility = Math.max(0.0F, Math.min(1.0F, (density * GuixuStarField.PARTICLE_COUNT - i) / 8.0F));
             if (visibility <= 0) continue;
             var star = GuixuStarField.sample(i, seconds, surfaceRadius);
@@ -58,17 +76,75 @@ public final class GuixuStarRenderer {
             ambientGlint(vertices, matrix, head, right, up, star.size() * 0.55F, star.size() * 0.55F,
                     1.0F, 0.96F, 0.90F, alpha);
         }
-        if (infallEnabled && jets > 0.001F) drawJets(vertices, matrix, seconds, surfaceRadius, jets);
+        if (backgroundInfall) {
+            drawAccretionTrails(vertices, matrix, clip, camera, facing, seconds, surfaceRadius, accretionTrails, diskHeat);
+        }
+        if (blackHoleEnabled && jets > 0.001F) {
+            drawJets(vertices, matrix, camera, facing, seconds, surfaceRadius, jets);
+        }
         if (ambientEnabled) {
-            drawAmbient(vertices, matrix, clip, camera, HostFxSwitch.spinSeconds(), infallEnabled ? surfaceRadius : 0,
-                    density, brightness, HostFxSwitch.degraded());
+            drawAmbient(vertices, matrix, clip, camera, HostFxSwitch.spinSeconds(), blackHoleEnabled ? surfaceRadius : 0,
+                    density, brightness, HostFxSwitch.degraded(), stellarWaves);
         }
         buffers.endBatch(layer);
     }
 
+    static Quaternionf diskRotation(Direction facing) {
+        // 环心已套机器朝向，局部旋转还原到同一个世界盘面。
+        Vector3f axis = new Vector3f(BlackHoleLensSpec.diskNormal())
+                .rotateY((float) -Math.toRadians(HostFxGeometry.yawDegrees(facing)));
+        return new Quaternionf().rotationTo(0, 1, 0, axis.x, axis.y, axis.z);
+    }
+
+    static void drawAccretionTrails(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera,
+                                    Direction facing, double seconds, double horizon, int count, float heat) {
+        Quaternionf rotation = diskRotation(facing);
+        Vector3f head = new Vector3f(), start = new Vector3f(), end = new Vector3f();
+        Vector3f eye = new Vector3f(camera), sight = new Vector3f(), width = new Vector3f(), up = new Vector3f();
+        for (int i = 0; i < count; i++) {
+            double phase = GuixuStarField.accretionPhase(i, seconds);
+            float opacity = (float) Math.min(1, Math.min(phase / .07, (1 - phase) / .085));
+            if (opacity < .01F) continue;
+            accretionPoint(head, rotation, i, phase, horizon);
+            if (!HostFxVisibility.isVisible(clip, head.x, head.y, head.z, (float) horizon * 2F)) continue;
+            float hot = Math.clamp(.72F * (float) phase + .52F * heat, 0, 1);
+            float red = 1F - hot * .10F, green = .46F + hot * .43F, blue = .19F + hot * .77F;
+            float size = (float) (horizon * .011 + .035) * (1F + .42F * hot);
+            float glow = opacity * (.40F + .47F * hot);
+            double tail = Math.max(0, phase - .19);
+            accretionPoint(start, rotation, i, tail, horizon);
+            for (int segment = 0; segment < 5; segment++) {
+                double fraction = (segment + 1) / 5.0;
+                accretionPoint(end, rotation, i, tail + (phase - tail) * fraction, horizon);
+                width.set(end).sub(start).cross(sight.set(eye).sub(end));
+                if (width.lengthSquared() > 1e-9F) {
+                    width.normalize().mul(size * (.28F + .72F * (float) fraction));
+                    float a = glow * segment / 5F, b = glow * (float) fraction;
+                    ambientVertex(vertices, matrix, start.x + width.x, start.y + width.y, start.z + width.z, red, green, blue, a);
+                    ambientVertex(vertices, matrix, end.x + width.x, end.y + width.y, end.z + width.z, red, green, blue, b);
+                    ambientVertex(vertices, matrix, end.x - width.x, end.y - width.y, end.z - width.z, red, green, blue, b);
+                    ambientVertex(vertices, matrix, start.x - width.x, start.y - width.y, start.z - width.z, red, green, blue, a);
+                }
+                start.set(end);
+            }
+            sight.set(eye).sub(head);
+            width.set(sight).cross(0, 1, 0);
+            if (width.lengthSquared() < 1e-9F) width.set(1, 0, 0);
+            if (sight.lengthSquared() < 1e-9F) sight.set(0, 0, 1);
+            up.set(width.normalize()).cross(sight).normalize();
+            ambientGlint(vertices, matrix, head, width, up, size * 1.55F, size * 1.55F, red, green, blue, glow);
+        }
+    }
+
+    private static void accretionPoint(Vector3f out, Quaternionf rotation, int index, double phase, double horizon) {
+        var point = GuixuStarField.accretionPosition(index, phase, horizon);
+        rotation.transform(out.set((float) point.x(), (float) point.y(), (float) point.z()));
+    }
+
     /** 山海：共用一批頂點；背景、星塵與流星均有固定數量上限，不建立粒子實體。 */
     private static void drawAmbient(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera,
-                                    double seconds, double horizon, float density, float brightness, boolean degraded) {
+                                    double seconds, double horizon, float density, float brightness, boolean degraded,
+                                    List<GuixuStellarEnd.GravityWave> stellarWaves) {
         int[] counts = {GuixuStarField.skyCount(density, degraded),
                 degraded ? 0 : Math.round(GuixuStarField.ORBIT_COUNT * Math.max(0.25F, Math.min(1F, density))),
                 degraded ? 0 : GuixuStarField.METEOR_COUNT,
@@ -87,7 +163,15 @@ public final class GuixuStarRenderer {
                     default -> GuixuStarField.sampleDust(i, seconds, horizon);
                 };
                 float alpha = star.alpha() * light;
-                if (alpha <= 0.001F || !visible(clip, star) || GuixuStarField.hiddenByShadow(camera, star, horizon)) continue;
+                if (alpha <= 0.001F) continue;
+                GuixuStellarEnd.StarBend bend = null;
+                if (!stellarWaves.isEmpty()) {
+                    bend = strongestBend(stellarWaves, camera, star.headX(), star.headY(), star.headZ());
+                    var tail = kind == 1 || kind == 2
+                            ? strongestBend(stellarWaves, camera, star.tailX(), star.tailY(), star.tailZ()) : bend;
+                    if (bend != null || tail != null) star = refract(star, bend, tail);
+                }
+                if (!visible(clip, star) || GuixuStarField.hiddenByShadow(camera, star, horizon)) continue;
                 center.set((float) star.headX(), (float) star.headY(), (float) star.headZ());
                 view.set(camera[0], camera[1], camera[2]).sub(center);
                 if (kind >= 3) alpha *= Math.max(0, Math.min(1, (view.length() - 1.5F) / 4F));
@@ -130,12 +214,48 @@ public final class GuixuStarRenderer {
                 }
                 ambientGlint(vertices, matrix, center, right, up, star.size() * 0.7F, star.size() * 0.7F,
                         0.95F, 0.97F, 1F, alpha);
+                if (bend != null && bend.strength() > .012F) {
+                    width.set(view).cross(center);
+                    if (width.lengthSquared() < 1e-8F) width.set(right);
+                    width.normalize();
+                    up.set(width).cross(view);
+                    float stretch = star.size() * (1.35F + 7.7F * bend.strength());
+                    ambientGlint(vertices, matrix, center, width, up, stretch, star.size() * .29F,
+                            .51F, .74F, 1F, Math.min(1, alpha * (1.3F * bend.strength())));
+                }
             }
         }
     }
 
+    private static GuixuStellarEnd.StarBend strongestBend(List<GuixuStellarEnd.GravityWave> waves,
+                                                         float[] camera, double x, double y, double z) {
+        GuixuStellarEnd.StarBend strongest = null;
+        for (var wave : waves) {
+            var bend = wave.bend(camera, x, y, z);
+            if (bend != null && (strongest == null || bend.strength() > strongest.strength())) strongest = bend;
+        }
+        return strongest;
+    }
+
+    private static GuixuStarField.Sample refract(GuixuStarField.Sample star, GuixuStellarEnd.StarBend head,
+                                                GuixuStellarEnd.StarBend tail) {
+        double headX = star.headX(), headY = star.headY(), headZ = star.headZ();
+        double tailX = star.tailX(), tailY = star.tailY(), tailZ = star.tailZ();
+        if (head != null) {
+            headX += head.x();
+            headY += head.y();
+            headZ += head.z();
+        }
+        if (tail != null) {
+            tailX += tail.x();
+            tailY += tail.y();
+            tailZ += tail.z();
+        }
+        return new GuixuStarField.Sample(headX, headY, headZ, tailX, tailY, tailZ, star.size(), star.alpha(), star.warm());
+    }
+
     /** 重用迴圈中的向量，避免每個星芒頂點再分配 Vector3f。 */
-    private static void ambientGlint(VertexConsumer vertices, Matrix4f matrix, Vector3f center,
+    static void ambientGlint(VertexConsumer vertices, Matrix4f matrix, Vector3f center,
                                      Vector3f right, Vector3f up, float horizontal, float vertical,
                                      float red, float green, float blue, float alpha) {
         ambientVertex(vertices, matrix, center.x + right.x * horizontal, center.y + right.y * horizontal,
@@ -148,7 +268,7 @@ public final class GuixuStarRenderer {
                 center.z - up.z * vertical, red, green, blue, alpha);
     }
 
-    private static void ambientVertex(VertexConsumer vertices, Matrix4f matrix, float x, float y, float z,
+    static void ambientVertex(VertexConsumer vertices, Matrix4f matrix, float x, float y, float z,
                                       float red, float green, float blue, float alpha) {
         vertices.vertex(matrix, x, y, z).color(red, green, blue, alpha).endVertex();
     }
@@ -162,35 +282,51 @@ public final class GuixuStarRenderer {
         return HostFxVisibility.isVisible(clip, x, y, z, trail + star.size() * 2.6F);
     }
 
-    /** 發電時的雙極噴流，使用同一批加性頂點，兩端淡出。 */
-    private static void drawJets(VertexConsumer vertices, Matrix4f matrix, double seconds, double horizon, float strength) {
-        for (int sign : new int[]{-1, 1}) {
-            for (int segment = 0; segment < 12; segment++) {
-                float t0 = segment / 12.0F, t1 = (segment + 1) / 12.0F;
-                float r0 = 0.18F + 0.32F * (float) Math.sin(t0 * Math.PI);
-                float r1 = 0.18F + 0.32F * (float) Math.sin(t1 * Math.PI);
-                float y0 = sign * (float) (horizon + 0.5 + t0 * 28.0);
-                float y1 = sign * (float) (horizon + 0.5 + t1 * 28.0);
-                float a0 = jetAlpha(t0, seconds, strength), a1 = jetAlpha(t1, seconds, strength);
+    /** 沿主黑洞的盘法线画有螺旋亮纹的双极外流，沿用星场加性层。 */
+    static void drawJets(VertexConsumer vertices, Matrix4f matrix, float[] camera, Direction facing,
+                         double seconds, double horizon, float strength) {
+        Quaternionf rotation = diskRotation(facing);
+        Vector3f axis = rotation.transform(new Vector3f(0, 1, 0));
+        Matrix4f jetMatrix = new Matrix4f(matrix).rotate(rotation);
+        Vector3f view = new Vector3f(camera);
+        float alignment = axis.dot(view) / Math.max(view.length(), 1e-4F);
+        double phase = seconds * (9.0 * HORIZON_OMEGA);
+        for (int sign = -1; sign <= 1; sign += 2) {
+            // 内段仍在加速，适度减弱失束侧的衰减，让两极都可以看见。
+            double shift = GuixuQuasarOptics.jetShift(alignment * sign * 0.72);
+            float blueShift = Math.clamp((float) (shift * 0.76), 0.0F, 1.0F);
+            for (int segment = 0; segment < 20; segment++) {
+                JetSection start = jetSection(segment / 20.0F, sign, horizon, seconds, strength);
+                JetSection end = jetSection((segment + 1) / 20.0F, sign, horizon, seconds, strength);
                 for (int facet = 0; facet < 8; facet++) {
-                    double p0 = facet * Math.PI / 4.0, p1 = (facet + 1) * Math.PI / 4.0;
-                    jetVertex(vertices, matrix, p0, r0, y0, a0);
-                    jetVertex(vertices, matrix, p1, r0, y0, a0);
-                    jetVertex(vertices, matrix, p1, r1, y1, a1);
-                    jetVertex(vertices, matrix, p0, r1, y1, a1);
+                    double p0 = facet * Math.PI / 4.0;
+                    double p1 = (facet + 1) * Math.PI / 4.0;
+                    jetVertex(vertices, jetMatrix, start, p0, phase, shift, blueShift);
+                    jetVertex(vertices, jetMatrix, start, p1, phase, shift, blueShift);
+                    jetVertex(vertices, jetMatrix, end, p1, phase, shift, blueShift);
+                    jetVertex(vertices, jetMatrix, end, p0, phase, shift, blueShift);
                 }
             }
         }
     }
 
-    private static float jetAlpha(float t, double seconds, float strength) {
-        return strength * 0.48F * (float) Math.sin(t * Math.PI)
-                * (0.75F + 0.25F * (float) Math.sin(seconds * 6.0 - t * 18.0));
+    private record JetSection(float distance, float radius, double twist, double emission) {}
+
+    private static JetSection jetSection(float t, int sign, double horizon, double seconds, float strength) {
+        float distance = sign * (float) (horizon + 0.5 + t * 28.0);
+        float radius = 0.15F + 0.62F * (float) Math.sqrt(t);
+        double knots = 0.72 + 0.28 * Math.cos(seconds * 4.5 - t * 21.0);
+        return new JetSection(distance, radius, t * 16.0, JET_POWER * strength * Math.sin(t * Math.PI) * knots);
     }
 
-    private static void jetVertex(VertexConsumer vertices, Matrix4f matrix, double angle, float radius, float y, float alpha) {
-        vertices.vertex(matrix, (float) Math.cos(angle) * radius, y, (float) Math.sin(angle) * radius)
-                .color(0.35F, 0.8F, 1.0F, alpha).endVertex();
+    private static void jetVertex(VertexConsumer vertices, Matrix4f matrix, JetSection section,
+                                  double angle, double phase, double shift, float blueShift) {
+        double crest = 0.5 + 0.5 * Math.cos(2.0 * (angle + section.twist() - phase));
+        float alpha = GuixuQuasarOptics.beamedLight(section.emission() * (0.22 + 1.08 * crest * crest), shift);
+        float x = section.radius() * (float) Math.cos(angle);
+        float z = -section.radius() * (float) Math.sin(angle);
+        vertices.vertex(matrix, x, section.distance(), z)
+                .color(0.68F - 0.34F * blueShift, 0.48F + 0.43F * blueShift, 1.0F, alpha).endVertex();
     }
 
 }

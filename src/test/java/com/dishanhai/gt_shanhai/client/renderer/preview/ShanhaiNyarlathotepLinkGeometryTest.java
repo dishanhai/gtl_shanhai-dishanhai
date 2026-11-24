@@ -96,7 +96,9 @@ class ShanhaiNyarlathotepLinkGeometryTest {
         int pivot=host.lastIndexOf("HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing)",portal);
         int pop=host.indexOf("poseStack.popPose()",pivot);
         assertTrue(pivot>=0 && portal>pivot && portal<pop,"Portal must use the existing orientation and cell-center pivot");
-        assertTrue(host.contains("host.isNyarlathotepLinkReady() && BlackHoleTuning.enabled() && blackHoleVisible"));
+        assertTrue(host.contains("drawBlackHole = BlackHoleTuning.enabled() && blackHoleVisible"));
+        assertTrue(host.contains("linkedMatterActive = host.isNyarlathotepLinkReady() && drawBlackHole"));
+        assertTrue(host.substring(portal, pop).contains("linkedMatterActive && host.isHostOuterStarsEnabled()"));
     }
 
     private double dot(ShanhaiInstabilityGeometry.Point a, ShanhaiInstabilityGeometry.Point b) {

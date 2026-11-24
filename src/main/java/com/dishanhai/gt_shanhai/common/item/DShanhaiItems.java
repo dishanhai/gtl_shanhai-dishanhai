@@ -28,6 +28,11 @@ public final class DShanhaiItems {
 
     public static ItemEntry<HostPatternMoverItem> HOST_PATTERN_MOVER;
     public static ItemEntry<ComponentItem> BLACKHOLE_EXTRACTION_MODULE;
+    public static ItemEntry<ComponentItem> KERR_ORBIT_BLANK;
+    public static ItemEntry<ComponentItem> KERR_ORBIT_PREFORM;
+    public static ItemEntry<ComponentItem> KERR_ORIENTED_CORE;
+    public static ItemEntry<ComponentItem> KERR_SPACETIME_LAMINATE;
+    public static ItemEntry<ComponentItem> KERR_FRACTURED_CORE;
 
     public static void init() {
         WORLDLINE_CRYSTAL_CORE = REGISTRATE.item("worldline_crystal_core", ComponentItem::create)
@@ -88,6 +93,15 @@ public final class DShanhaiItems {
         BLACKHOLE_EXTRACTION_MODULE = REGISTRATE.item("blackhole_extraction_module", ComponentItem::create)
                 .model(NonNullBiConsumer.noop())
                 .register();
+        KERR_ORBIT_BLANK = registerKerrComponent("kerr_orbit_blank");
+        KERR_ORBIT_PREFORM = registerKerrComponent("kerr_orbit_preform");
+        KERR_ORIENTED_CORE = registerKerrComponent("kerr_oriented_core");
+        KERR_SPACETIME_LAMINATE = registerKerrComponent("kerr_spacetime_laminate");
+        KERR_FRACTURED_CORE = registerKerrComponent("kerr_fractured_core");
+    }
+
+    private static ItemEntry<ComponentItem> registerKerrComponent(String id) {
+        return REGISTRATE.item(id, ComponentItem::create).model(NonNullBiConsumer.noop()).register();
     }
 
     private DShanhaiItems() {}

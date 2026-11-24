@@ -520,6 +520,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         } else {
             hostConnected = true;
         }
+        if (getHost() instanceof GuixuVisionCoreMachine guixu) guixu.recordMatrixModule(this);
     }
 
     @Override
@@ -1045,7 +1046,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                     Component.literal("§7提升本模块的跨配方线程数"),
                     Component.literal("§7多线程并行：增加独立运行批次数，共享整机并行上限"),
                     Component.literal("§7§6寰宇并行超限器 §7可启用超限模式"));
-        } else {
+        } else if (showsStandaloneThreadSlot()) {
             // 質能核心／零點感應銜鐵的下方槽與按鈕保持原位，僅補上方線程入口。
             addLabeledStorageSlot(page, threadBoostSlot.storage, page.getSize().width - 30,
                     page.getSize().height - 88, "§d线程",
@@ -1084,6 +1085,10 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     /** 物质模块槽 / 线程倍率槽是否在 UI 中显示。部分模块（如零点能发生器，并行由编程电路
      *  独立决定）对这两个槽位完全无感知，子类可覆写为 false 隐藏，避免误导玩家放物品。 */
     protected boolean showsModuleAndThreadSlots() {
+        return true;
+    }
+
+    protected boolean showsStandaloneThreadSlot() {
         return true;
     }
 

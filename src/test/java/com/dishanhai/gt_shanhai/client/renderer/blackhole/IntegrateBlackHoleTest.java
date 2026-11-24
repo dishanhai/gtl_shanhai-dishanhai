@@ -10,6 +10,23 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class IntegrateBlackHoleTest {
     @Test
+    void approachingTheVisibleShadowKeepsTheExteriorAndPreservesItsDrawArea() {
+        for (double rs : new double[]{0.4, 2, 4.6}) {
+            double shadow = BlackHoleLensSpec.shadowRadiusBlocks(rs);
+            assertEquals(shadow, BlackHoleLensSpec.insideThresholdBlocks(rs));
+            assertTrue(BlackHoleLensSpec.insideRatioOf(shadow * 1.02, rs) > 1);
+            assertTrue(BlackHoleLensSpec.insideRatioOf(shadow * .99, rs) < 1);
+        }
+        double pixels = 2560D * 1600D * .45D;
+        var near = BlackHoleLensMath.rectWithShadow(1280, 800, 1300, 1100, 2560, 1600, pixels);
+        assertEquals(2200, near.w);
+        assertEquals(1600, near.h);
+        assertEquals(256, BlackHoleLensMath.copyStart((int) near.x0, (int) (near.x0 + near.w), 2048, 1280));
+        assertEquals(0, BlackHoleLensMath.copyStart(0, 2560, 2048, 24));
+        assertEquals(512, BlackHoleLensMath.copyStart(0, 2560, 2048, 2536));
+    }
+
+    @Test
     void unresolvedSurfaceWavesFadeOutInsteadOfDrawingDenseWhiteRings() {
         var p = new BlackHoleShaderProbe.Params(new float[16], new float[]{0, 0, -240},
                 new float[]{0, .82F, .57F}, 768, 768, 0, 0, 768, 768, 376,
@@ -60,9 +77,60 @@ class IntegrateBlackHoleTest {
     void horizonCannotExposeDiskLightAndSubpixelNoiseIsFiltered() throws Exception {
         String shader = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/shaders/core/guixu_blackhole.fsh"));
         assertTrue(shader.contains("length(cross(bh, dir))"), "Avoid cancellation when looking toward the core");
-        assertTrue(shader.contains("diskCol * (1.0 - shadowMask)"), "Captured rays must not show small duplicate disks");
+        assertTrue(shader.contains("outsideShadow = (1.0 - shadowMask) * maskFade")
+                && shader.contains("emission += diskCol * diskExposure * outsideShadow")
+                && shader.contains("coverage += diskOpacity * (1.0 - shadowMask)"),
+                "Both exterior modes must mask the disk on captured rays");
+        assertTrue(shader.contains("background *= 1.0 - diskOpacity")
+                && shader.contains("coverage += diskOpacity * (1.0 - shadowMask) * (1.0 - backgroundCoverage)"),
+                "Disk absorption must apply exactly once where sampled and live backgrounds meet");
         assertTrue(shader.contains("dFdx(p)") && shader.contains("dFdy(p)"), "Filter noise at the actual pixel footprint");
         assertTrue(shader.contains("max(RING_WIDTH, aa)"), "Keep the photon ring resolved at distance");
+    }
+
+    @Test
+    void onlyTheExteriorLensWithAnEnabledDepthGateCopiesDepth() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/renderer/"
+                + "blackhole/BlackHoleLensRenderer.java"));
+        String backgroundCopy = source.substring(source.indexOf("private static boolean copyBackground("),
+                source.indexOf("private static void drainGlErrors("));
+        assertFalse(backgroundCopy.contains("copyDepthRect("), "The interior shares the color copy");
+        int gatedCopy = source.indexOf("if (sampleBackground && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {");
+        assertTrue(gatedCopy >= 0, "Only valid world depth may be copied for lens sampling");
+        assertTrue(source.substring(gatedCopy, source.indexOf('}', gatedCopy))
+                .contains("copyDepthRect(f.copyX0, f.copyY0, f.copyW, f.copyH);"));
+    }
+
+    @Test
+    void exteriorLensAppliesPremultipliedBlendingForPixelsOutsideTheBackgroundCopy() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/renderer/"
+                + "blackhole/BlackHoleLensRenderer.java"));
+        int apply = source.indexOf("public void apply()", source.indexOf("class ExteriorShader"));
+        assertTrue(apply >= 0);
+        String body = source.substring(apply, source.indexOf('}', apply));
+        int applySharedState = body.indexOf("super.apply();");
+        int blend = body.indexOf("RenderSystem.enableBlend();");
+        assertTrue(applySharedState >= 0 && blend > applySharedState);
+        assertTrue(body.indexOf("RenderSystem.blendFunc(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);") > blend);
+    }
+
+    @Test
+    void disabledLensUsesTheAnimatedExteriorWithoutCopyingTheBackground() throws Exception {
+        Path renderer = Path.of("src/main/java/com/dishanhai/gt_shanhai/client/renderer/blackhole/BlackHoleLensRenderer.java");
+        Path shaders = Path.of("src/main/resources/assets/gt_shanhai/shaders/core");
+        String source = Files.readString(renderer);
+        String fragment = Files.readString(shaders.resolve("guixu_blackhole.fsh"));
+        String program = Files.readString(shaders.resolve("guixu_blackhole.json"));
+        assertTrue(source.contains("drawExterior(g, f, depthOk, sampleBackground)"));
+        assertTrue(source.contains("sampleBackground && !ensureBgTexture("));
+        assertTrue(source.contains("sampleBackground && !copyBackground(g, main, f)"));
+        assertTrue(source.contains("\"uSampleBackground\").set(sampleBackground ? 1.0F : 0.0F)"));
+        assertTrue(fragment.contains("if (uSampleBackground > 0.5)"));
+        assertTrue(fragment.contains("float coverage = shadowMask;"));
+        assertTrue(fragment.contains("vec4(background + emission, coverage)"));
+        assertTrue(program.contains("\"srcrgb\": \"1\""));
+        assertTrue(program.contains("\"dstrgb\": \"1-srcalpha\""));
+        assertTrue(program.contains("\"name\": \"uSampleBackground\""));
     }
 
     private static Class<?> helper(String name) throws Exception {

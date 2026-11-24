@@ -20,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "23";
+    private static final String PROTOCOL_VERSION = "25";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 
@@ -636,6 +636,9 @@ public class ShanhaiNetwork {
         CHANNEL.registerMessage(packetId++, ShopPersonalHiddenSyncPacket.class,
                 ShopPersonalHiddenSyncPacket::encode, ShopPersonalHiddenSyncPacket::new,
                 ShopPersonalHiddenSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, GuixuAnnihilationPacket.class,
+                GuixuAnnihilationPacket::encode, GuixuAnnihilationPacket::new,
+                GuixuAnnihilationPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         RecipeSyncPacket.init();
     }
 
@@ -661,6 +664,10 @@ public class ShanhaiNetwork {
     // ========== 快捷发送 ==========
 
     public static void sendHideRingToClients(ServerLevel level, SHideRingPacket packet) {
+        CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension), packet);
+    }
+
+    public static void sendGuixuAnnihilation(ServerLevel level, GuixuAnnihilationPacket packet) {
         CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension), packet);
     }
 }

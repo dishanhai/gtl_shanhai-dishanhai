@@ -23,13 +23,7 @@ package com.dishanhai.gt_shanhai.client.renderer.blackhole;
  * 这样离线预览器（{@code temp/host-fx/probe/BlackHoleLookPng.java}）能直接 import 它，
  * 把"游戏里会画成什么样"逐像素复算出来，而<b>不必开游戏</b>。
  *
- * <h2>与着色器的契约（改这里必须同步改 {@code blackhole.fsh}）</h2>
- * <pre>
- *   blackhole.fsh : const float B_CRIT     = 2.5980762;   // 与本类 B_CRIT 同值
- *                   const float DISK_INNER = 3.0;         // = {@link #DISK_INNER_RS}
- *                   const float DISK_OUTER = 11.0;        // = {@link #DISK_OUTER_RS}
- *   blackhole.fsh 的盘半径以 uRs 为单位 ⇒ 只要本类把 rsBlocks 放大，盘也跟着放大（比例不变）
- * </pre>
+ * <p>洞外 GLSL 使用克尔盘缘与临界曲线，以下史瓦西比例用于场景定标、洞内切换与几何回退。
  */
 public final class BlackHoleLensSpec {
 
@@ -168,41 +162,10 @@ public final class BlackHoleLensSpec {
      */
     public static final double EDGE_FADE_INNER = 0.86D;
 
-    /**
-     * "相机在洞里"的判定倍率：{@code dist ≤ 可见黑盘半径 × 这个值} ⇒ 走<b>洞内视角</b>。
-     *
-     * <h2>🔴 2026-10-25 傍晚：{@code 1.02 → 1.6}（<b>这就是"里面往外看什么都不画"的真因</b>）</h2>
-     * 用户实机原话：「<b>黑洞我在里面往外看还是不能渲染</b>」。日志 {@code GTL山海9.10test\logs\latest.log}
-     * 里 15896 行、{@code inside=true} <b>0 行</b>；{@code dist=} 的最小值是 <b>5.3</b>
-     * （另有 7.8 / 13.1 / 17 / 18.8 / 22.1 / 28 / 28.3）。而改前的阈值恰好是：
-     * <pre>
-     *   可见黑盘半径 = B_CRIT × rsBlocks = 2.598 × 2.0 = 5.196 格
-     *   改前阈值     = 5.196 × 1.02        = 5.30 格   ← 与日志最小值 5.3 逐位相同
-     * </pre>
-     * ⇒ 那 2% 的"余量"小于玩家一帧的行走位移、也小于浮点误差的量级，<b>判据实际永远不成立</b>：
-     * 走得更近一点就 {@code inside=true}，可那一刻起日志行又被另一处早退吞掉了 —— 两头都看不见。
-     *
-     * <h2>改后的阈值（两个口径取大者，见 {@link #insideThresholdBlocks}）</h2>
-     * <pre>
-     *   ① 可见黑盘半径 × 1.6           = 8.31 格
-     *   ② 可见黑盘半径 + 2.0 格        = 7.20 格        ⇒ max = 8.31 格
-     * </pre>
-     * 为什么是"1.6 倍 / +2 格"而不是贴着脸（1.02）：视界半径 5.196 格的球，玩家身体宽 0.6 格、
-     * 眼高 1.62 格 ⇒ <b>相机"实际进到球里"时 dist 还在 4~6 格之间</b>；要把"刚跨进球面但还没到球心"
-     * 这一段也当成洞内，阈值必须比球面明显外扩。<b>+2 格</b>那条是给 {@code /shanhai bh scale}
-     * 调小的场合兜底（scale 很小时 1.6 倍只多出零点几格，会再次卡在边界上）。
-     */
-    public static final double INSIDE_FACTOR = 1.6D;
 
-    /** 洞内判据的<b>绝对余量</b>（格）：阈值再取 {@code 可见黑盘半径 + 这个值} 一起比大（见类注释）。 */
-    public static final double INSIDE_MARGIN_BLOCKS = 2.0D;
-
-    /** 改前的阈值倍率（只用于日志/报告的"改前 → 改后"对照，代码里不再使用）。 */
-    public static final double INSIDE_FACTOR_BEFORE = 1.02D;
-
-    /** 吸积盘内缘 / Rs（= 史瓦西 ISCO；与着色器 {@code DISK_INNER} 同值）。 */
+    /** 回退吸积盘内缘 / Rs（史瓦西 ISCO）。 */
     public static final double DISK_INNER_RS = 3.0D;
-    /** 吸积盘外缘 / Rs（与着色器 {@code DISK_OUTER} 同值）。 */
+    /** 吸积盘外缘 / Rs（洞外着色器以 M 为单位，取 22M）。 */
     public static final double DISK_OUTER_RS = 11.0D;
 
     /**
@@ -229,6 +192,19 @@ public final class BlackHoleLensSpec {
      * 抬到 32° 之后，环面视角下盘与视线夹角约 24~30° ⇒ 投影成明显的扁椭圆（短轴/长轴 ≈ 0.45）。
      */
     public static final double DISK_TILT_DEG = 32.0D;
+
+    /** 洞外着色器的无量纲克尔自旋 a/M，喷流按同一个自旋定标。 */
+    public static final double KERR_SPIN = 0.65D;
+
+    public record KerrParameters(float spin, float horizon, float diskInner) {}
+
+    public static KerrParameters kerrParameters(double spin) {
+        double spinSquared = spin * spin;
+        double z1 = 1 + Math.cbrt(1 - spinSquared) * (Math.cbrt(1 + spin) + Math.cbrt(1 - spin));
+        double z2 = Math.sqrt(3 * spinSquared + z1 * z1);
+        double isco = 3 + z2 - Math.sqrt((3 - z1) * (3 + z1 + 2 * z2));
+        return new KerrParameters((float) spin, (float) (1 + Math.sqrt(1 - spinSquared)), (float) isco);
+    }
 
     /** 盘法线的方位角（度）—— 只影响"盘朝哪边斜"，环是轴对称的，取 20° 让盘不与 4 条辐条共面。 */
     public static final double DISK_NORMAL_AZIMUTH_DEG = 20.0D;
@@ -269,32 +245,18 @@ public final class BlackHoleLensSpec {
         return DISK_OUTER_RS * rsBlocks;
     }
 
-    /**
-     * <b>洞内判据的阈值（格）</b>：{@code max(可见黑盘半径 × INSIDE_FACTOR, 可见黑盘半径 + INSIDE_MARGIN_BLOCKS)}。
-     *
-     * <p>这是"相机在洞里"这件事的<b>唯一</b>判据来源 —— 渲染器、日志里的 {@code insideThr=}、
-     * 离线出图器全都调这一个函数，不允许任何一处另写一遍"× 1.02"。
-     *
-     * @param rsBlocks 运行期视界半径（格）= {@code RS_BLOCKS × BlackHoleTuning.scale()}
-     */
+    /** 相机跨过场景中的可见黑盘半径才进入洞内视角。 */
     public static double insideThresholdBlocks(double rsBlocks) {
-        final double shadow = shadowRadiusBlocks(rsBlocks);
-        return Math.max(shadow * INSIDE_FACTOR, shadow + INSIDE_MARGIN_BLOCKS);
+        return shadowRadiusBlocks(rsBlocks);
     }
 
-    /** {@link #insideThresholdBlocks} 的反解：给定距离，返回 {@code dist / 阈值}（1.0 = 正好在判据边界）。 */
     public static double insideRatioOf(double distBlocks, double rsBlocks) {
-        final double thr = insideThresholdBlocks(rsBlocks);
-        return thr > 1.0E-9D ? distBlocks / thr : 0.0D;
+        final double threshold = insideThresholdBlocks(rsBlocks);
+        return threshold > 1e-9 ? distBlocks / threshold : 0;
     }
 
-    /** 一行写清"洞内阈值"（进日志的 {@code insideThr=} 与报告都用它，避免两处各写一遍口径）。 */
     public static String describeInside(double rsBlocks) {
-        final double shadow = shadowRadiusBlocks(rsBlocks);
-        return String.format(java.util.Locale.ROOT,
-                "可见黑盘半径=%.2f格 阈值=%.2f格(=max(%.2f×%.2f, %.2f+%.1f)) 改前阈值=%.2f格(×%.2f)",
-                shadow, insideThresholdBlocks(rsBlocks), shadow, INSIDE_FACTOR, shadow,
-                INSIDE_MARGIN_BLOCKS, shadow * INSIDE_FACTOR_BEFORE, INSIDE_FACTOR_BEFORE);
+        return String.format(java.util.Locale.ROOT, "洞内阈值=%.2f格（可见黑盘半径）", insideThresholdBlocks(rsBlocks));
     }
 
     /** 黑盘占"半宽"的比例（贴图里也是这个数，两条路靠它对齐）。 */
@@ -306,12 +268,12 @@ public final class BlackHoleLensSpec {
     public static String describe(double rsBlocks) {
         return String.format(java.util.Locale.ROOT,
                 "rs=%.2f格 黑盘半径=%.2f格 透镜半径=%.2f格 吸积盘=%.2f..%.2f格 盘/黑盘=%.2fx "
-                        + "盘倾角=%.1f° DISK_GAIN=%.2f RING_GAIN=%.2f 兜底贴图=%d² 洞内阈值=%.2f格(×%.2f)",
+                        + "盘倾角=%.1f° DISK_GAIN=%.2f RING_GAIN=%.2f 兜底贴图=%d² 洞内阈值=%.2f格",
                 rsBlocks, shadowRadiusBlocks(rsBlocks), lensRadiusBlocks(rsBlocks),
                 diskInnerBlocks(rsBlocks), diskOuterBlocks(rsBlocks),
                 diskOuterBlocks(rsBlocks) / Math.max(1.0E-9D, shadowRadiusBlocks(rsBlocks)),
                 DISK_TILT_DEG, (double) DISK_GAIN, (double) RING_GAIN, FALLBACK_TEX_SIDE,
-                insideThresholdBlocks(rsBlocks), INSIDE_FACTOR);
+                insideThresholdBlocks(rsBlocks));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════
