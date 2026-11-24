@@ -33,9 +33,6 @@ public class ClientInit {
                 com.dishanhai.gt_shanhai.client.gui.terminal.ShanhaiPatternManagementScreen::new,
                 "/screens/shanhai_wireless_pattern_management.json");
 
-        // 程序化注册 Guide（支持 config/gt_shanhai/guides/ 热重载）
-        GuideRegistration.register();
-
         // 注册模组列表「配置」按钮的界面工厂（cloth-config，客户端专用）
         net.minecraftforge.fml.ModLoadingContext.get().registerExtensionPoint(
                 net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory.class,

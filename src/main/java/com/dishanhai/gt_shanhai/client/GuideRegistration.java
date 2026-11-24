@@ -9,6 +9,10 @@ import com.dishanhai.gt_shanhai.api.guideme.RecipeTypeIndexTagCompiler;
 import com.dishanhai.gt_shanhai.api.guideme.RecipeTypeIndexLinkedTagCompiler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -21,12 +25,13 @@ import java.util.Optional;
  * 该目录下的文件**覆盖** jar 内同路径资源。
  * </p>
  */
+@Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class GuideRegistration {
 
     /**
      * 游戏运行时 dev sources 根目录（相对游戏根）。
      * <p>必须对齐 jar 内 {@code folder("guides/gt_shanhai/guide")} 那一层，
-     * 因为 GuideME 的 pageId = sourceFolder.relativize(file) 去掉 .md。
+     * 因为 GuideME 根据文件相对此目录的路径生成 pageId，保留 .md 后缀。
      * 这样 dev 文件 {@code .../gt_shanhai/guide/recipe/type/x.md}
      * → pageId {@code gt_shanhai:recipe/type/x.md}，与 jar 资源一致。</p>
      */
@@ -35,7 +40,9 @@ public final class GuideRegistration {
 
     private GuideRegistration() {}
 
-    public static void register() {
+    @SubscribeEvent
+    public static void onRegisterClientReloadListeners(RegisterClientReloadListenersEvent event) {
+        // FMLClientSetupEvent 与首次资源重载并行，GuideME 可能已完成指南扫描。
         ensureDevDirExists();
 
         // 复制 guide.json 的 item_settings（硬编码）
