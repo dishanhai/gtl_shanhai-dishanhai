@@ -13,6 +13,7 @@ NUL
 # 库和源码参考
 /lib/
 /lib_source/
+/origin-Integrate/
 /.idea/
 /tmp/
 /run/
