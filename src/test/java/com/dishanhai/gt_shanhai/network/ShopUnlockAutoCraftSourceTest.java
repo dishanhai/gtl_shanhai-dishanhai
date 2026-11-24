@@ -14,8 +14,8 @@ class ShopUnlockAutoCraftSourceTest {
         String text = source("common/shop/ShopAutoCraft.java");
         assertTrue(text.contains("beginStagePlan("));
         assertTrue(text.contains("ShopStageConfig.get(stagePath)"));
-        assertTrue(text.contains("startIngredientPlan(player, null, Target.STAGE, stagePath, requirements, grid)"));
-        assertTrue(text.contains("请先开启「AE模式」"));
+        assertTrue(text.contains("startPlan(player, grid, null, 1L, Target.STAGE, stagePath, List.of(), requestId)"));
+        assertTrue(text.contains("reject(player, requestId, \"enable_ae\")"));
     }
 
     @Test
@@ -23,7 +23,7 @@ class ShopUnlockAutoCraftSourceTest {
         String text = source("common/shop/ShopAutoCraft.java");
         assertTrue(text.contains("beginEntrySubmissionPlan("));
         assertTrue(text.contains("entry.getSubmissionItems()"));
-        assertTrue(text.contains("startIngredientPlan(player, entry, Target.ENTRY_SUBMISSION, entry.getStableId(), entry.getSubmissionItems(), grid)"));
+        assertTrue(text.contains("startPlan(player, grid, entry, 1L, Target.ENTRY_SUBMISSION, entry.getStableId(), List.of(), requestId)"));
     }
 
     @Test
@@ -31,9 +31,10 @@ class ShopUnlockAutoCraftSourceTest {
         String text = source("common/shop/ShopAutoCraft.java");
         assertTrue(text.contains("case STAGE"));
         assertTrue(text.contains("case ENTRY_SUBMISSION"));
-        assertTrue(text.contains("session.aeMode"));
         assertTrue(text.contains("ShopStageConfig.get(session.stagePath)"));
         assertTrue(text.contains("hasSubmissionRequirement()"));
+        assertTrue(text.contains("!hasSubmission(player, \"stage:\" + session.stagePath)"));
+        assertTrue(text.contains("!hasSubmission(player, \"entry:\" + session.stagePath)"));
     }
 
     @Test

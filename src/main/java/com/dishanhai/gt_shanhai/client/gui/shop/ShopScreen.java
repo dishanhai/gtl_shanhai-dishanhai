@@ -46,6 +46,7 @@ import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopActionPacket;
+import com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShopCostPreviewRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShopStagePreviewRequestPacket;
 
@@ -126,12 +127,10 @@ public class ShopScreen extends ShopScaledScreen {
     private static final int WHITE = -1;
     private static int NUMBER_BAR_BORDER = -15967888;
     private static int NUMBER_BAR_BG = -14935012;
-    private static final int NUMBER_BAR_TEXT = -1;
     private static int BUTTON_BG = -14935012;
     private static int BUTTON_HOVER = -12303292;
     // 上面去掉 final 的是「结构色」，每帧开头按 ShopTheme 回填（经典金框 / 动态玻璃）；文字语义色仍是常量。
     private static int FRAME = GOLD; // 亮框：选中格、选中页签、按钮 hover 边、滚动条把手
-    private static int CELL_EDGE = GREEN_DARK; // 商品格常态边
     private static ShopTheme theme = ShopTheme.CLASSIC;
     private final ShopVisuals shopVisuals = new ShopVisuals();
     private long visualGridSwitch;
@@ -232,7 +231,7 @@ public class ShopScreen extends ShopScaledScreen {
     private boolean enterHeld;
 
     private enum ToolbarAction {
-        BUY, SELL, PERSONAL_HIDDEN, CURRENCY, EXCHANGE, MEMBERSHIP, ADD, SETTINGS,
+        BUY, SELL, OPERATION_GUIDE, PERSONAL_HIDDEN, CURRENCY, EXCHANGE, MEMBERSHIP, ADD, SETTINGS,
         FAVORITES, CART, BACKPACK, AE, DEPOSIT, CLOSE
     }
 
@@ -497,6 +496,13 @@ public class ShopScreen extends ShopScaledScreen {
         selected = entry;
     }
 
+    private void openGridEntry(long entryKey, ShopEntry entry, int index) {
+        setFocused(null);
+        int cols = gridColumns();
+        beginCardFlight(entry, cellX(index % cols), cellY(index / cols));
+        selectEntry(entryKey, entry);
+    }
+
     private void clearSelection() {
         cancelPendingGuide();
         closeDescOverlay();
@@ -618,6 +624,7 @@ public class ShopScreen extends ShopScaledScreen {
     private int guideOverlayScroll;
     // 「补齐全部缺口」按钮：花费预览格有确定不够的项、且开着 AE 模式才出现，跟链接/指南同一套暂存坐标+点击消费的路数
     private boolean autoCraftBtnVisible;
+    private int latestAutoCraftRequest;
     private int autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH;
     /** 「收藏缺失」：把花费里已经确定不够的物品/流体写入 JEI 书签，和 GTLCore 合成确认页同一用途。 */
     private boolean favoriteMissingBtnVisible;
@@ -1157,9 +1164,13 @@ public class ShopScreen extends ShopScaledScreen {
             final int fx = Math.round(ix);
             final int fw = Math.max(1, Math.round(iw));
             // 高亮块跟着被选中的那格一起压下，否则底盒缩了高亮块不动
-            final int selFill = GuiMotion.lerpColor(ROW_BG, GOLD_DARK, 0.7f * glow[sel]);
-            GuiRenderUtil.withButtonMotion(g, xs[sel], y, ws[sel], h, sc[sel], fb[sel].shakeX(), () ->
-                    renderBox(g, fx, y, fw, h, FRAME, selFill));
+            final int selFill = GuiMotion.lerpColor(SELECT_BG, GOLD_DARK, 0.7f * glow[sel]);
+            GuiRenderUtil.withButtonMotion(g, xs[sel], y, ws[sel], h, sc[sel], fb[sel].shakeX(), () -> {
+                renderBox(g, fx, y, fw, h, FRAME, selFill);
+                if (fw > 6) {
+                    g.fill(fx + 3, y + h - 3, fx + fw - 3, y + h - 2, selectionMarkerColor());
+                }
+            });
         } else {
             ind.reset();
         }
@@ -1464,7 +1475,11 @@ public class ShopScreen extends ShopScaledScreen {
     private int buyTabW() { return BUY_TAB_W; }
     private int sellTabX() { return buyTabX() + buyTabW() + 2; }
     private int sellTabW() { return SELL_TAB_W; }
-    private int hiddenDrawerBtnX() { return sellTabX() + sellTabW() + 6; }
+    private int operationGuideBtnX() { return sellTabX() + sellTabW() + 6; }
+    private int operationGuideBtnW() {
+        return ShopToolbarIcons.contentWidth(62, 96, this.font.width(toolbarLabel(ToolbarAction.OPERATION_GUIDE)));
+    }
+    private int hiddenDrawerBtnX() { return operationGuideBtnX() + operationGuideBtnW() + 4; }
     private int hiddenDrawerBtnW() { return Math.max(64, font.width(toolbarLabel(ToolbarAction.PERSONAL_HIDDEN)) + 10); }
 
     // 「货币中心」按钮：购买／出售与个人隐藏入口右侧。
@@ -1540,6 +1555,7 @@ public class ShopScreen extends ShopScaledScreen {
         String key = switch (action) {
             case BUY -> "gt_shanhai.shop.toolbar.buy";
             case SELL -> "gt_shanhai.shop.toolbar.sell";
+            case OPERATION_GUIDE -> "gt_shanhai.shop.operation_guide.button";
             case PERSONAL_HIDDEN -> "gt_shanhai.shop.hidden.button";
             case CURRENCY -> "gt_shanhai.shop.toolbar.currency";
             case EXCHANGE -> "gt_shanhai.shop.toolbar.exchange";
@@ -1569,14 +1585,16 @@ public class ShopScreen extends ShopScaledScreen {
             ToolbarAction action = entry.getKey();
             ShopNativeButton button = entry.getValue();
             int x = switch (action) {
-                case BUY -> buyTabX(); case SELL -> sellTabX(); case PERSONAL_HIDDEN -> hiddenDrawerBtnX(); case CURRENCY -> currencyBtnX();
+                case BUY -> buyTabX(); case SELL -> sellTabX(); case OPERATION_GUIDE -> operationGuideBtnX();
+                case PERSONAL_HIDDEN -> hiddenDrawerBtnX(); case CURRENCY -> currencyBtnX();
                 case EXCHANGE -> exchangeBtnX(); case MEMBERSHIP -> memberBtnX(); case ADD -> addBtnX();
                 case SETTINGS -> settingsBtnX(); case FAVORITES -> favBtnX(); case CART -> cartBtnX();
                 case BACKPACK -> backpackBtnX(); case AE -> aeBtnX(); case DEPOSIT -> rechargeBtnX();
                 case CLOSE -> closeBtnX();
             };
             int width = switch (action) {
-                case BUY -> buyTabW(); case SELL -> sellTabW(); case PERSONAL_HIDDEN -> hiddenDrawerBtnW(); case CURRENCY -> currencyBtnW();
+                case BUY -> buyTabW(); case SELL -> sellTabW(); case OPERATION_GUIDE -> operationGuideBtnW();
+                case PERSONAL_HIDDEN -> hiddenDrawerBtnW(); case CURRENCY -> currencyBtnW();
                 case EXCHANGE -> exchangeBtnW(); case MEMBERSHIP -> memberBtnW(); case ADD -> addBtnW();
                 case SETTINGS -> settingsBtnW(); case FAVORITES -> favBtnW(); case CART -> cartBtnW();
                 case BACKPACK -> backpackBtnW(); case AE -> aeBtnW(); case DEPOSIT -> rechargeBtnW();
@@ -1609,6 +1627,7 @@ public class ShopScreen extends ShopScaledScreen {
         // 买卖页签保留共用滑动高亮；此处由适配控件补焦点与旁白。
         if (action == ToolbarAction.BUY || action == ToolbarAction.SELL) return;
         GraphicIcon icon = switch (action) {
+            case OPERATION_GUIDE -> GraphicIcon.INFO;
             case CURRENCY -> GraphicIcon.CURRENCY; case EXCHANGE -> GraphicIcon.REDEEM;
             case MEMBERSHIP -> GraphicIcon.MEMBERSHIP; case SETTINGS -> GraphicIcon.SETTINGS;
             case FAVORITES -> GraphicIcon.FAVORITE; case CART -> SHOPPING_CART_ICON;
@@ -1616,10 +1635,11 @@ public class ShopScreen extends ShopScaledScreen {
             case DEPOSIT -> GraphicIcon.PAYMENT; case CLOSE -> GraphicIcon.CLOSE; default -> null;
         };
         String color = switch (action) {
-            case CURRENCY -> "§6"; case EXCHANGE -> "§d"; case MEMBERSHIP, DEPOSIT -> "§b";
             case ADD -> "§a"; case FAVORITES -> favoritesOnly ? "§e" : "§7";
-            case CART -> "§e"; case BACKPACK -> backpackMode ? "§a" : "§8";
-            case AE -> aeMode ? "§a" : "§8"; case CLOSE -> "§c"; default -> "";
+            case CART -> ClientShopCart.size() > 0 ? "§e" : "";
+            case BACKPACK -> backpackMode ? "§a" : "§7";
+            case AE -> aeMode ? "§a" : "§7";
+            default -> "";
         };
         String label = button.getMessage().getString();
         drawIconButton(graphics, button.getX(), button.getY(), button.getWidth(), button.getHeight(),
@@ -1689,6 +1709,10 @@ public class ShopScreen extends ShopScaledScreen {
                 showMessage(Component.translatable("gt_shanhai.shop.toolbar.notice.backpack_" + (backpackMode ? "on" : "off")));
             }
             case DEPOSIT -> send(ShopActionPacket.Action.DEPOSIT, null, 1L);
+            case OPERATION_GUIDE -> {
+                setFocused(button);
+                Minecraft.getInstance().setScreen(new ShopOperationGuideScreen(this));
+            }
             case CURRENCY -> Minecraft.getInstance().setScreen(new CurrencyAtmScreen(this));
             case EXCHANGE -> Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
             case MEMBERSHIP -> Minecraft.getInstance().setScreen(new ShopMembershipScreen(this));
@@ -2293,7 +2317,7 @@ public class ShopScreen extends ShopScaledScreen {
         int by = balanceY();
         int balW = panelWidth - 28;
         theme.regionBackdrop(g, left + 14, by, balW, balanceHeight());
-        renderBox(g, left + 14, by, balW, balanceHeight(), GOLD_DARK, BOX_BG);
+        renderBox(g, left + 14, by, balW, balanceHeight(), NUMBER_BAR_BORDER, BOX_BG);
         drawCurrencyBar(g, left + 14 + 6, by, balW - 12, mx, my);
 
         // 分类页签（主/二级/三级/四级，见 rowXxx/renderTabRow 统一实现；拖拽排序时被拖的页签
@@ -2383,7 +2407,6 @@ public class ShopScreen extends ShopScaledScreen {
         BUTTON_HOVER = t.buttonHover;
         NUMBER_BAR_BORDER = t.barBorder;
         NUMBER_BAR_BG = t.barBg;
-        CELL_EDGE = t.cellEdge;
     }
 
     /** 右键菜单、各大图层、阶段锁定任一盖在商店内容区上。它们打开时底层控件被遮罩压暗，也不响应点击。 */
@@ -3227,45 +3250,30 @@ public class ShopScreen extends ShopScaledScreen {
         return r[0] + r[2] - 8 - CART_CTRL_BLOCK_W;
     }
 
-    private static final String CART_AUTO_CRAFT_IDLE = "§b⚙ AE下单补齐缺口";
+    private static final long CART_AUTO_CRAFT_KEY = 0x2B7E151628AED2A6L;
 
     /** 购物车「AE下单补齐缺口」按钮：标题行右侧、关闭键左边。宽度按常态文案定，换状态文字不跳位。 */
     private int[] cartAutoCraftBounds(int[] r) {
-        int w = this.font.width(CART_AUTO_CRAFT_IDLE) + 12;
+        int w = Math.max(this.font.width(autoCraftText("button_cost")), this.font.width(autoCraftText("button_pending"))) + 12;
         int x = r[0] + r[2] - DESC_OVERLAY_CLOSE_W - 4 - 4 - w;
         return new int[]{x, r[1] + 4, w, DESC_OVERLAY_CLOSE_H};
     }
 
-    private long cartAutoCraftKey(int[] b) {
-        return pressKey(b[0], b[1], b[2], b[3]) ^ 0x2B7E151628AED2A6L;
-    }
-
-    private String cartAutoCraftLabel(long key) {
+    private String autoCraftLabel(long key, String idleKey) {
         long now = System.currentTimeMillis();
         ButtonFeedback.Phase phase = buttonFeedback.phase(key, now);
-        if (phase == ButtonFeedback.Phase.PENDING) return "§b正在计算合成方案…";
-        if (phase != ButtonFeedback.Phase.FLASH) return CART_AUTO_CRAFT_IDLE;
+        if (phase == ButtonFeedback.Phase.PENDING) return "§b" + autoCraftText("button_pending");
+        if (phase != ButtonFeedback.Phase.FLASH) return "§b" + autoCraftText(idleKey);
         return switch (buttonFeedback.flashTone(key, now)) {
-            case SUCCESS -> "§a✓ 方案已就绪";
-            case PARTIAL -> "§6~ 部分可合成";
-            case FAILED -> "§c✗ 无可用合成方案";
-            default -> CART_AUTO_CRAFT_IDLE;
+            case SUCCESS -> "§a" + autoCraftText("button_ready");
+            case PARTIAL -> "§6" + autoCraftText("button_partial");
+            case FAILED -> "§c" + autoCraftText("button_failed");
+            default -> "§b" + autoCraftText(idleKey);
         };
     }
 
-    /** 把购物车全部候选的缺口合并，向绑定的 AE 网络算一份合成方案；算好后弹确认窗。 */
-    private void requestCartAutoCraft(int[] b) {
-        long now = System.currentTimeMillis();
-        long key = cartAutoCraftKey(b);
-        if (!buttonFeedback.tryBegin(key, now)) {
-            buttonFeedback.nudge(pressKey(b[0], b[1], b[2], b[3]), now);
-            ShopUiSounds.busy();
-            return;
-        }
-        int requestId = ClientShopActionResults.nextRequestId();
-        buttonFeedback.pending(key, requestId, now, Long.MAX_VALUE);
-        ShanhaiNetwork.CHANNEL.sendToServer(com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.cart(
-                ClientShopCatalog.revision(), aeMode, requestId));
+    private static String autoCraftText(String key) {
+        return Component.translatable("gt_shanhai.shop.confirmation.auto_craft." + key).getString();
     }
 
     /** 购物车条目行的花费预览请求节流：跟详情页那套（previewRequestedKey 单槽）各自独立，
@@ -3309,9 +3317,8 @@ public class ShopScreen extends ShopScaledScreen {
         int closeX = ox + ow - DESC_OVERLAY_CLOSE_W - 4, closeY = oy + 4;
         drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
         if (showCartAutoCraft) {
-            long autoCraftKey = cartAutoCraftKey(autoCraftB);
             drawButton(g, autoCraftB[0], autoCraftB[1], autoCraftB[2], autoCraftB[3],
-                    cartAutoCraftLabel(autoCraftKey), mx, my, autoCraftKey);
+                    autoCraftLabel(CART_AUTO_CRAFT_KEY, "button_cost"), mx, my, CART_AUTO_CRAFT_KEY);
         }
 
         if (stableIds.isEmpty()) {
@@ -3442,7 +3449,7 @@ public class ShopScreen extends ShopScaledScreen {
         if (aeMode && cartMap.keySet().stream().anyMatch(id -> cartEntryKey(id) >= 0L)) {
             int[] autoCraftB = cartAutoCraftBounds(r);
             if (buttonHit(mx, my, autoCraftB[0], autoCraftB[1], autoCraftB[2], autoCraftB[3])) {
-                requestCartAutoCraft(autoCraftB);
+                requestAutoCraft(CART_AUTO_CRAFT_KEY, ShopAutoCraftRequestPacket.Target.CART, 0L, 1L, "");
                 return true;
             }
         }
@@ -3796,6 +3803,7 @@ public class ShopScreen extends ShopScaledScreen {
     private void drawGrid(GuiGraphics g, int mx, int my) {
         int cols = gridColumns();
         int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = gridHeight();
+        int hoveredIndex = !modalLayerOpen() && !searchSuggestions.contains(mx, my) ? entryIndexAt(mx, my) : -1;
 
         // 像素级平滑滚动：内容整体按 -scroll 平移，用 scissor 裁到网格矩形内。
         enableGridScissor(g, gx, gy, gx + gw, gy + gh);
@@ -3806,6 +3814,8 @@ public class ShopScreen extends ShopScaledScreen {
         resetLoadBlurScan();
         int drawnCellW = cellW();
         int drawnCellH = cellH();
+        int productInk = theme.ink("", WHITE);
+        int metadataInk = theme.ink("§7", GRAY);
         long frameNow = System.currentTimeMillis();
         for (int idx = range.fromInclusive(); idx < range.toExclusive(); idx++) {
             int col = idx % cols;
@@ -3832,7 +3842,7 @@ public class ShopScreen extends ShopScaledScreen {
                 } else {
                     loadingCellAtMs.remove(entryKey);
                     closeLoadBlurRun();
-                    drawCell(g, entry, entryKey, cx, cy, mx, my);
+                    drawCell(g, entry, entryKey, cx, cy, idx == hoveredIndex, productInk, metadataInk);
                 }
             } finally { if (staggered) { g.flush(); g.setColor(1f, 1f, 1f, 1f); g.pose().popPose(); } }
         }
@@ -3870,7 +3880,7 @@ public class ShopScreen extends ShopScaledScreen {
         int cellW = cellW();
         int cellH = cellH();
         ShopCardLayout layout = ShopCardLayout.of(cellW, cellH, 26, 0, false);
-        renderBox(g, cx, cy, cellW, cellH, CELL_EDGE, ROW_BG);
+        renderBox(g, cx, cy, cellW, cellH, NUMBER_BAR_BORDER, ROW_BG);
         int slotX = cx + 3, slotY = cy + 3;
         g.pose().pushPose();
         try {
@@ -4281,20 +4291,18 @@ public class ShopScreen extends ShopScaledScreen {
     }
 
     /** KE 风格横向格：完整棋盘物品槽 + 右侧名称/状态及价格数字条 + 货币小图标。 */
-    private void drawCell(GuiGraphics g, ShopEntry entry, long entryKey, int cx, int cy, int mx, int my) {
+    private void drawCell(GuiGraphics g, ShopEntry entry, long entryKey, int cx, int cy, boolean hover,
+                          int productInk, int metadataInk) {
         boolean sel = selected == entry;
         int cellW = cellW();
         int cellH = cellH();
-        boolean hover = !modalLayerOpen() && !searchSuggestions.contains(mx, my)
-                && GuiRenderUtil.isHovering(mx, my, cx, cy, cellW, cellH);
-        float hv = hoverCells.follow(entryKey, hover ? 1f : 0f, System.currentTimeMillis());
-        // 限时折扣：格子太小塞不下额外文字（见 CurrencyAtmScreen 教训，不硬挤新元素），改用边框/价格变色示意，
-        // 具体折扣%和倒计时留给悬浮 tooltip（buildTooltip）和详情页（drawDetail）精确显示
+        float hv = visualFeedback.hoverAnimation() && !reduceMotionFrame
+                ? hoverCells.follow(entryKey, hover ? 1f : 0f, System.currentTimeMillis()) : (hover ? 1f : 0f);
+        // 折扣标在价格上，描边与左侧标记用于定位当前商品。
         boolean onSale = entry.isDiscountActive();
-        int border = sel ? FRAME : (onSale ? RED_DARK : CELL_EDGE);
+        int border = sel ? FRAME : GuiMotion.lerpColor(NUMBER_BAR_BORDER, FRAME, 0.35f * hv);
         int fill = sel ? SELECT_BG : GuiMotion.lerpColor(ROW_BG, ROW_HOVER, hv);
         renderBox(g, cx, cy, cellW, cellH, border, fill);
-        if (sel) renderSelectionOutline(g, cx, cy, cellW, cellH);
         if (isBatchSelected(entry)) renderBatchSelectionOutline(g, cx, cy, cellW, cellH);
 
         CellCache cc = cellCacheFor(entry);
@@ -4318,14 +4326,16 @@ public class ShopScreen extends ShopScaledScreen {
                 g.renderItemDecorations(this.font, cc.goodsStack, 2, 2);
             }
         } finally { g.pose().popPose(); }
+        if (sel) drawSelectionMarker(g, cx, cy, cellH);
 
         // 商品名（右上，截断宽度对所有格恒定，缓存好的结果直接画）
         int textX = cx + layout.textX();
-        g.drawString(this.font, favorite ? cc.favoriteName : cc.trimmedName, textX, cy + 4, WHITE, true);
+        g.drawString(this.font, favorite ? cc.favoriteName : cc.trimmedName,
+                textX, cy + 4, productInk, !theme.glass);
 
         String categoryBadge = cachedCategoryBadge(cc, favorite);
         if (!categoryBadge.isEmpty()) {
-            g.drawString(this.font, categoryBadge, textX, cy + 14, CYAN, false);
+            g.drawString(this.font, categoryBadge, textX, cy + 14, metadataInk, false);
         }
 
         // 收藏角标（名称行与底部价格条之间的空白带，右对齐，不挤占任何已有元素）
@@ -4338,7 +4348,7 @@ public class ShopScreen extends ShopScaledScreen {
         int numX = cx + layout.priceX();
         int numY = cy + layout.priceY();
         renderNumberBar(g, numX, numY, layout.numberWidth());
-        g.drawString(this.font, cc.amtText, numX + 4, numY + 2, onSale ? RED : NUMBER_BAR_TEXT, false);
+        g.drawString(this.font, cc.amtText, numX + 4, numY + 2, onSale ? RED : productInk, false);
         int iconX = cx + layout.costX();
         if (layout.showCost()) {
             if (cc.sparkPrimary) {
@@ -4445,19 +4455,19 @@ public class ShopScreen extends ShopScaledScreen {
 
     /** KE 风格按钮：外框 + 内填充（hover 变色）+ 居中文字。 */
     private void renderButton(GuiGraphics g, int x, int y, int w, int h, boolean hover, String text, int border, int textColor) {
-        renderButton(g, x, y, w, h, hover, text, border, textColor, pressKey(x, y, w, h));
+        renderButton(g, x, y, w, h, text, hover ? BUTTON_HOVER : BUTTON_BG, border, textColor, pressKey(x, y, w, h));
     }
 
     /**
      * 同上，另带反馈：压下按几何 key，等待流光与结果闪色按 {@code actionKey}
      * （确认购买按钮混入了商品与买卖模式，换商品后旧结果不会闪到新商品上）。
      */
-    private void renderButton(GuiGraphics g, int x, int y, int w, int h, boolean hover, String text,
-                              int border, int textColor, long actionKey) {
+    private void renderButton(GuiGraphics g, int x, int y, int w, int h, String text,
+                              int background, int border, int textColor, long actionKey) {
         ButtonFeedback.Visual v = buttonFeedback.visual(pressKey(x, y, w, h), actionKey, true,
                 System.currentTimeMillis(), reduceMotionFrame || !visualFeedback.pressAnimation());
         int edge = ButtonFeedback.tint(border, v);
-        int fill = ButtonFeedback.shade(hover ? BUTTON_HOVER : BUTTON_BG, v);
+        int fill = ButtonFeedback.shade(background, v);
         int ink = ButtonFeedback.tint(theme.ink(text, textColor), v);
         GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), () -> {
             theme.controlBackdrop(g, x, y, w, h);
@@ -4470,12 +4480,13 @@ public class ShopScreen extends ShopScaledScreen {
         });
     }
 
-    /** 选中格的青色四边描边。 */
-    private static void renderSelectionOutline(GuiGraphics g, int x, int y, int w, int h) {
-        g.fill(x - 1, y - 1, x + w + 1, y, CYAN);
-        g.fill(x - 1, y + h, x + w + 1, y + h + 1, CYAN);
-        g.fill(x - 1, y, x, y + h, CYAN);
-        g.fill(x + w, y, x + w + 1, y + h, CYAN);
+    private static void drawSelectionMarker(GuiGraphics g, int x, int y, int h) {
+        g.fill(x + 1, y + 4, x + 3, y + h - 4, selectionMarkerColor());
+    }
+
+    private static int selectionMarkerColor() {
+        return UiPreferences.configured().highContrast() ? WHITE
+                : ThemeEffects.material(theme.materialGroup()).accent(FRAME);
     }
 
     /** 批量选中态：金色双层外框，包住原卡片边缘并与详情的青色单层框区分。 */
@@ -4539,7 +4550,7 @@ public class ShopScreen extends ShopScaledScreen {
                 && !UiPreferences.configured().highContrast()) {
             detailFill = Math.min(0xB3, detailFill >>> 24) << 24 | detailFill & 0xFFFFFF;
         }
-        renderBox(g, dx, dy, dw, dh, GOLD_DARK, detailFill);
+        renderBox(g, dx, dy, dw, dh, NUMBER_BAR_BORDER, detailFill);
 
         if (selected == null) {
             drawEmptyDetailGuide(g, dx, dy, dw, dh);
@@ -4563,7 +4574,7 @@ public class ShopScreen extends ShopScaledScreen {
         // 名称
         int textX = cx + 24;
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, selected.goodsDisplayName(), dx + dw - 6 - textX),
-                textX, dy + 10, WHITE, true);
+                textX, dy + 10, theme.ink("", WHITE), !theme.glass);
         String countLine = selected.hasEnergyGoods() ? "§7每份无线 EU（完整数量见下方）" : selected.hasMultipleGoods()
                 ? "§7组合商品 §f" + selected.getGoodsList().size() + " §7种"
                 : "§7每份 §f" + selected.getGoodsCount() + (selected.isPrimaryGoodsFluid() ? " §7mB" : " §7个");
@@ -4572,6 +4583,9 @@ public class ShopScreen extends ShopScaledScreen {
                     : " §7个人剩§d" + formatBig(java.math.BigInteger.valueOf(ClientWalletAccount.getRemainingUses(selected))) + "§7次";
         }
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, countLine, dx + dw - 6 - textX), textX, dy + 24, GRAY, true);
+        var material = ThemeEffects.material(theme.materialGroup());
+        int sectionEdge = material.edge(NUMBER_BAR_BORDER);
+        g.fill(cx, dy + 35, cx + detailInnerW, dy + 36, sectionEdge);
 
         // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行。限时折扣 + 会员折扣（见 ShopMembership）生效时
         // 原价→折后价+各自标注挤进同一行，不另起一行（详情页下面一串固定 Y 坐标的内容，插一行要连带改一串
@@ -4619,6 +4633,7 @@ public class ShopScreen extends ShopScaledScreen {
                 ? selected.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier()))
                 : selected.getEffectiveCost(memberPct).scaledTo(ShopPurchase.sellRatioPercent());
         int py = dy + 128;
+        g.fill(cx, py - 4, cx + detailInnerW, py - 3, sectionEdge);
         int costTrimW = dx + dw - 10 - cx;
         String key = WalletAccountAPI.purchaseKey(selected);
         long bought = ClientWalletAccount.getPurchaseCount(key);
@@ -4816,7 +4831,7 @@ public class ShopScreen extends ShopScaledScreen {
         if (showAutoCraftBtn) {
             autoCraftBtnX = cx; autoCraftBtnY = actionY - detailScroll; autoCraftBtnW = detailInnerW; autoCraftBtnH = 10;
             drawButton(g, cx, actionY, autoCraftBtnW, autoCraftBtnH,
-                    detailActionLabel(DETAIL_AUTO_CRAFT, "§b⚙ 补齐全部缺口（AE自动合成）"),
+                    autoCraftLabel(detailActionKey(DETAIL_AUTO_CRAFT), "button_cost"),
                     mx, hoverMy, detailActionKey(DETAIL_AUTO_CRAFT));
             actionY += 12;
         }
@@ -4856,7 +4871,8 @@ public class ShopScreen extends ShopScaledScreen {
             if (submissionAutoCraftVisible) {
                 submissionAutoCraftX = cx; submissionAutoCraftY = actionY - detailScroll;
                 submissionAutoCraftW = detailInnerW; submissionAutoCraftH = 18;
-                drawButton(g, cx, actionY, detailInnerW, 18, "§b⚙ AE下单补齐商品前置", mx, hoverMy);
+                long craftKey = entrySubmissionCraftKey();
+                drawButton(g, cx, actionY, detailInnerW, 18, autoCraftLabel(craftKey, "button_entry"), mx, hoverMy, craftKey);
                 actionY += 21;
             }
             submissionBtnX = cx; submissionBtnY = actionY - detailScroll; submissionBtnW = detailInnerW; submissionBtnH = 18;
@@ -4876,7 +4892,8 @@ public class ShopScreen extends ShopScaledScreen {
             if (stageSubmissionAutoCraftVisible) {
                 stageSubmissionAutoCraftX = cx; stageSubmissionAutoCraftY = actionY - detailScroll;
                 stageSubmissionAutoCraftW = detailInnerW; stageSubmissionAutoCraftH = 18;
-                drawButton(g, cx, actionY, detailInnerW, 18, "§b⚙ AE下单补齐阶段前置", mx, hoverMy);
+                long craftKey = stageCraftKey(missingStage);
+                drawButton(g, cx, actionY, detailInnerW, 18, autoCraftLabel(craftKey, "button_stage"), mx, hoverMy, craftKey);
                 actionY += 21;
             }
             stageSubmissionBtnX = cx; stageSubmissionBtnY = actionY - detailScroll; stageSubmissionBtnW = detailInnerW; stageSubmissionBtnH = 18;
@@ -4912,6 +4929,7 @@ public class ShopScreen extends ShopScaledScreen {
         detailScrollTarget = clampDetailScroll(detailScrollTarget);
         drawDetailScrollbar(g, mx, my);
 
+        g.fill(cx, btnY - 3, cx + detailInnerW, btnY - 2, sectionEdge);
         // 确认按钮（KE 风格 border+fill，颜色随可交易性）
         // 前置任务未配置视为满足；配置了则须客户端已解析到且已完成——跟服务端 doBuy 的门槛口径一致（见反馈：
         // 花费预览格全绿时按钮不能还显示红，前置任务同理，不能光看成本够不够）
@@ -4923,9 +4941,10 @@ public class ShopScreen extends ShopScaledScreen {
                     && (selected.isPrimaryGoodsFluid() || ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount()));
         boolean btnHover = hit(mx, my, cx, btnY, detailInnerW, 20);
         long confirmKey = confirmActionKey();
-        renderButton(g, cx, btnY, detailInnerW, 20, btnHover,
+        renderButton(g, cx, btnY, detailInnerW, 20,
                 confirmLabel(confirmKey, System.currentTimeMillis()),
-                canTrade ? GREEN_DARK : DEEP_RED, canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED, confirmKey);
+                theme.tradeButtonFill(btnHover, canTrade), canTrade ? GREEN_DARK : DEEP_RED,
+                canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED, confirmKey);
 
         // 编辑/删除按钮：都折进了编辑模式（catalogEditUnlocked），没开时两行一起隐藏
         if (catalogEditUnlocked) {
@@ -5073,7 +5092,7 @@ public class ShopScreen extends ShopScaledScreen {
             int nameY = Math.round(cardFlightSrcY + 4f + (cardFlightDstY + 10f - (cardFlightSrcY + 4f)) * p);
             int nameW = Math.max(12, rw - 38);
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, cardFlightEntry.goodsDisplayName(), nameW),
-                    nameX, nameY, WHITE, !theme.glass);
+                    nameX, nameY, theme.ink("", WHITE), !theme.glass);
         } finally {
             g.setColor(1f, 1f, 1f, 1f);
             g.pose().popPose();
@@ -5344,8 +5363,11 @@ public class ShopScreen extends ShopScaledScreen {
         stageLockAutoCraftVisible = aeMode && !requirements.isEmpty();
         stageLockAutoCraftW = ow - 18; stageLockAutoCraftH = 18;
         stageLockAutoCraftX = ox + 9; stageLockAutoCraftY = stageLockSubmitY - 21;
-        if (stageLockAutoCraftVisible) drawButton(g, stageLockAutoCraftX, stageLockAutoCraftY,
-                stageLockAutoCraftW, stageLockAutoCraftH, "§b⚙ AE下单补齐阶段前置", mx, my);
+        if (stageLockAutoCraftVisible) {
+            long key = stageCraftKey(stageLockPath);
+            drawButton(g, stageLockAutoCraftX, stageLockAutoCraftY, stageLockAutoCraftW, stageLockAutoCraftH,
+                    autoCraftLabel(key, "button_stage"), mx, my, key);
+        }
         drawButton(g, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH,
                 "§a提交阶段固定物品", mx, my);
     }
@@ -5415,9 +5437,7 @@ public class ShopScreen extends ShopScaledScreen {
                 && hit(mx, my, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight())) {
             if (stageLockAutoCraftVisible && buttonHit(mx, my, stageLockAutoCraftX, stageLockAutoCraftY,
                     stageLockAutoCraftW, stageLockAutoCraftH) && stageLockPath != null) {
-                ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
-                        com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.STAGE,
-                        0L, -1L, 1L, stageLockPath, aeMode));
+                requestAutoCraft(stageCraftKey(stageLockPath), ShopAutoCraftRequestPacket.Target.STAGE, -1L, 1L, stageLockPath);
                 return true;
             }
             if (buttonHit(mx, my, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH)
@@ -5568,15 +5588,16 @@ public class ShopScreen extends ShopScaledScreen {
         // 网格格子：坐标直接反算索引，不再线性扫描当前分类全部商品。左键=选中打开详情页，右键=快捷菜单。
         int entryIndex = entryIndexAt(mx, my);
         if (entryIndex >= 0) {
+            if (btn != 0 && btn != 1) return true;
             ShopEntry entry = visibleEntry(entryIndex);
             if (entry != null) {
                 armClickWave(mx, my);
                 if (btn == 1) {
                     openContextMenu(entry, visibleEntryKeys.get(entryIndex), (int) mx, (int) my);
-                } else if (btn == 0 && net.minecraft.client.gui.screens.Screen.hasAltDown()) {
+                } else if (net.minecraft.client.gui.screens.Screen.hasAltDown()) {
                     // Alt + 左键只切换批量名单，不触发详情、购物车或商品拖拽。
                     toggleBatchSelection(entry);
-                } else if (btn == 0 && net.minecraft.client.gui.screens.Screen.hasControlDown()) {
+                } else if (net.minecraft.client.gui.screens.Screen.hasControlDown()) {
                     // Ctrl+左键：加入购物车候选（不影响详情页选中），已在购物车里则忽略，去购物车面板调数量
                     boolean already = ClientShopCart.contains(entry.getStableId());
                     ClientShopCart.add(entry.getStableId(), 1L);
@@ -5595,11 +5616,7 @@ public class ShopScreen extends ShopScaledScreen {
                     dragCardMx = mx; dragCardMy = my;
                     dragCardMoving = false;
                 } else {
-                    long entryKey = visibleEntryKeys.get(entryIndex);
-                    int flightCol = entryIndex % gridColumns();
-                    int flightRow = entryIndex / gridColumns();
-                    beginCardFlight(entry, cellX(flightCol), cellY(flightRow));
-                    selectEntry(entryKey, entry);
+                    openGridEntry(visibleEntryKeys.get(entryIndex), entry, entryIndex);
                 }
             }
             return true;
@@ -5654,10 +5671,7 @@ public class ShopScreen extends ShopScaledScreen {
                 && buttonHit(mx, my, stageSubmissionAutoCraftX, stageSubmissionAutoCraftY,
                     stageSubmissionAutoCraftW, stageSubmissionAutoCraftH)) {
             String stage = missingStageSubmission(selected.getCategory());
-            if (stage != null) ShanhaiNetwork.CHANNEL.sendToServer(
-                    new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
-                            com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.STAGE,
-                            0L, -1L, 1L, stage, aeMode));
+            if (stage != null) requestAutoCraft(stageCraftKey(stage), ShopAutoCraftRequestPacket.Target.STAGE, -1L, 1L, stage);
             return true;
         }
         if (inDetailViewport && stageSubmissionBtnVisible && selected != null
@@ -5693,7 +5707,7 @@ public class ShopScreen extends ShopScaledScreen {
             int btnW = DETAIL_W - 16;
             int btnY = dy + dh - 24;
             // 确认购买/出售（与 Enter 共用 performConfirmTrade）
-            if (buttonHit(mx, my, cx, btnY, btnW, 20)) {
+            if (btn == 0 && buttonHit(mx, my, cx, btnY, btnW, 20)) {
                 performConfirmTrade(false);
                 return true;
             }
@@ -5755,9 +5769,8 @@ public class ShopScreen extends ShopScaledScreen {
         }
         if (inDetailViewport && submissionAutoCraftVisible && selected != null
                 && buttonHit(mx, my, submissionAutoCraftX, submissionAutoCraftY, submissionAutoCraftW, submissionAutoCraftH)) {
-            ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
-                    com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.ENTRY_SUBMISSION,
-                    ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), 1L, "", aeMode));
+            requestAutoCraft(entrySubmissionCraftKey(), ShopAutoCraftRequestPacket.Target.ENTRY_SUBMISSION,
+                    ClientShopCatalog.keyOf(selected), 1L, "");
             return true;
         }
 
@@ -5879,23 +5892,41 @@ public class ShopScreen extends ShopScaledScreen {
     }
 
     private void requestCostAutoCraft() {
+        requestAutoCraft(detailActionKey(DETAIL_AUTO_CRAFT), ShopAutoCraftRequestPacket.Target.COST,
+                ClientShopCatalog.keyOf(selected), amount, "");
+    }
+
+    private long entrySubmissionCraftKey() {
+        return 0x2E2B7E586EA2F8A1L ^ selectedEntryKey ^ ClientShopCatalog.revision() * 0x165667B19E3779F9L;
+    }
+
+    private static long stageCraftKey(String path) {
+        return 0x761D7A6BC910BA49L ^ path.hashCode();
+    }
+
+    private void requestAutoCraft(long key, ShopAutoCraftRequestPacket.Target target, long entryKey, long times, String path) {
         long now = System.currentTimeMillis();
-        long key = detailActionKey(DETAIL_AUTO_CRAFT);
         if (!buttonFeedback.tryBegin(key, now)) {
-            buttonFeedback.nudge(pressKey(autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH), now);
+            buttonFeedback.nudge(key, now);
             ShopUiSounds.busy();
             return;
         }
         int requestId = ClientShopActionResults.nextRequestId();
+        latestAutoCraftRequest = requestId;
         // 多目標逐項計算由服務端逐項逾時回執結束，不能以短的整輪牆鐘期限截斷合法方案。
         buttonFeedback.pending(key, requestId, now, Long.MAX_VALUE);
-        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
-                ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), amount, aeMode, requestId));
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftRequestPacket(
+                target, ClientShopCatalog.revision(), entryKey, times, path, aeMode, requestId));
+    }
+
+    public boolean acceptsAutoCraftPlan(int requestId) {
+        return requestId != 0 && requestId == latestAutoCraftRequest && aeMode && !ClientShopAvailability.isDisabled();
     }
 
     /** 即時錯誤立即消化；帶確認窗的結果保留到返回商店才開始閃色。 */
     public void drainAutoCraftResults() {
         ClientShopActionResults.drainAutoCraft(System.currentTimeMillis(), result -> {
+            if (result.requestId() == latestAutoCraftRequest) latestAutoCraftRequest = 0;
             ButtonFeedback.Tone tone = result.planned() <= 0 ? ButtonFeedback.Tone.FAILED
                     : result.planned() < result.total() ? ButtonFeedback.Tone.PARTIAL : ButtonFeedback.Tone.SUCCESS;
             if (buttonFeedback.resolve(result.requestId(), tone, System.currentTimeMillis())) {
@@ -6122,7 +6153,7 @@ public class ShopScreen extends ShopScaledScreen {
             return true;
         }
         if (selected != null && GuiRenderUtil.isHovering(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight())) {
-            int wanted = detailScrollTarget - (int) d * 18;
+            int wanted = detailScrollTarget - (int) Math.round(d * 18);
             detailBouncePending = bounceForce(wanted, detailScrollMax, 18, detailBouncePending);
             detailScrollTarget = clampDetailScroll(wanted);
             return true;
@@ -6130,7 +6161,7 @@ public class ShopScreen extends ShopScaledScreen {
         int gx = listLeft(), gy = contentTop(), gh = contentHeight();
         if (GuiRenderUtil.isHovering(mx, my, gx, gy, listWidth(), gh)) {
             int maxScroll = maxGridScroll();
-            int wanted = scrollTarget - (int) d * rowStride();
+            int wanted = scrollTarget - (int) Math.round(d * rowStride());
             gridBouncePending = bounceForce(wanted, maxScroll, rowStride(), gridBouncePending);
             scrollTarget = Math.max(0, Math.min(maxScroll, wanted));
             return true;
@@ -6246,10 +6277,7 @@ public class ShopScreen extends ShopScaledScreen {
                 }
             } else {
                 // 没越过拖拽阈值 = 普通点击，按原逻辑打开详情；编辑权限下也走同一段飞行动画
-                int flightCol = oldIndex % gridColumns();
-                int flightRow = oldIndex / gridColumns();
-                beginCardFlight(entry, cellX(flightCol), cellY(flightRow));
-                selectEntry(entryKey, entry);
+                openGridEntry(entryKey, entry, oldIndex);
             }
             return true;
         }
@@ -7033,8 +7061,9 @@ public class ShopScreen extends ShopScaledScreen {
     /** KE 货币栏：「余额」标签 + 每种货币一格（物品图标/星火★ + 紧凑数字）。悬停显示货币全名。 */
     private void drawCurrencyBar(GuiGraphics g, int x, int y, int width, int mx, int my) {
         String label = balanceLabel();
-        drawToolbarIcon(g, x, y, balanceHeight(), CYAN, GraphicIcon.BALANCE);
-        g.drawString(this.font, label, x + TOOLBAR_ICON_SPACE, y + 4, CYAN, true);
+        int labelColor = theme.ink("§7", GRAY);
+        drawToolbarIcon(g, x, y, balanceHeight(), labelColor, GraphicIcon.BALANCE);
+        g.drawString(this.font, label, x + TOOLBAR_ICON_SPACE, y + 4, labelColor, !theme.glass);
         int cellStart = balanceCellStart(x, label);
 
         java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> list = currencyBarList();
@@ -7043,6 +7072,7 @@ public class ShopScreen extends ShopScaledScreen {
             return;
         }
 
+        int amountColor = theme.ink("", WHITE);
         int maxCells = Math.max(1, (width - (cellStart - x)) / BALANCE_CELL_WIDTH);
         for (int i = 0; i < list.size() && i < maxCells; i++) {
             Map.Entry<ResourceLocation, java.math.BigInteger> e = list.get(i);
@@ -7053,7 +7083,7 @@ public class ShopScreen extends ShopScaledScreen {
                 g.renderItem(currencyStack(e.getKey()), cx, y - 1); // 图标（居中于 16px）
             }
             // 紧凑数字
-            g.drawString(this.font, formatBig(e.getValue()), cx + 18, y + 4, GOLD, true);
+            g.drawString(this.font, formatBig(e.getValue()), cx + 18, y + 4, amountColor, !theme.glass);
         }
         if (list.size() > maxCells) {
             g.drawString(this.font, "§7+" + (list.size() - maxCells),

@@ -132,4 +132,28 @@ class ShopAutoCraftSourceTest {
         assertFalse(text.contains("BigInteger.valueOf(output.amount())"),
                 "Vanilla CPU status contains the original order size, not the remaining size");
     }
+
+    @Test
+    void prerequisitesAndPurchasesShareStockAndPendingOutputs() throws Exception {
+        String text = source("common/shop/ShopAutoCraft.java");
+        String ingredients = text.substring(text.indexOf("private static Snapshot snapshotIngredients("),
+                text.indexOf("private static Snapshot snapshotLines("));
+        assertTrue(ingredients.contains("return snapshotDemand(player, demand, grid, identity);"));
+        String purchases = text.substring(text.indexOf("private static Snapshot snapshotLines("),
+                text.indexOf("private static Snapshot snapshotDemand("));
+        assertTrue(purchases.contains("return snapshotDemand(player, demand, grid, identity);"));
+        assertTrue(text.contains("ShopAutoCraftAmounts.missing(demand, stock, pending)"));
+    }
+
+    @Test
+    void aTimedOutGoalKeepsTheRestOfTheBatchAndCartChangesInvalidateIt() throws Exception {
+        String text = source("common/shop/ShopAutoCraft.java");
+        int timeout = text.indexOf("if (session.ticks <= CALC_TIMEOUT_TICKS) continue;");
+        int advance = text.indexOf("session.nextItem++", timeout);
+        String handling = text.substring(timeout, advance);
+        assertTrue(handling.contains("item.future.cancel(true)"));
+        assertTrue(handling.contains("item.errorKey = \"calculation_timeout\""));
+        assertFalse(handling.contains("CALCULATING.remove("));
+        assertTrue(text.contains("case CART -> session.lines.equals(cartLines(player))"));
+    }
 }

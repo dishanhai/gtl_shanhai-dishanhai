@@ -20,7 +20,9 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import appeng.me.cluster.implementations.CraftingCPUCluster;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -36,6 +38,7 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -72,7 +75,7 @@ public final class ShopAutoCraft {
         final long amount;
         Future<ICraftingPlan> future;
         ICraftingPlan result;
-        String error;
+        String errorKey;
         Map<AEKey, BigInteger> used = Map.of();
 
         PlanItem(AEKey key, long amount) {
@@ -96,212 +99,163 @@ public final class ShopAutoCraft {
         final IGrid grid;
         final ShopEntry entry;
         final long times;
-        final boolean aeMode;
         final Target target;
         final String stagePath;
         final Map<AEKey, BigInteger> shortages;
-        final Map<AEKey, BigInteger> retained;
         final List<CartLine> lines;
         final Map<AEKey, BigInteger> reserved = new LinkedHashMap<>();
         final List<PlanItem> items = new ArrayList<>();
-        final List<String> notes = new ArrayList<>();
+        final List<Component> notes = new ArrayList<>();
         Map<AEKey, Long> planningStock;
         int nextItem;
         long ticks;
         int requestId;
 
-        Session(IGrid grid, ShopEntry entry, long times, Snapshot snapshot) {
-            this(grid, entry, times, Target.COST, "", true, snapshot);
-        }
-
-        Session(IGrid grid, ShopEntry entry, long times, Target target, String stagePath, boolean aeMode, Snapshot snapshot) {
-            this(grid, entry, times, target, stagePath, aeMode, snapshot, List.of());
-        }
-
-        Session(IGrid grid, ShopEntry entry, long times, Target target, String stagePath, boolean aeMode,
+        Session(IGrid grid, ShopEntry entry, long times, Target target, String stagePath,
                 Snapshot snapshot, List<CartLine> lines) {
             this.grid = grid;
             this.lines = lines;
             this.entry = entry;
             this.times = times;
-            this.aeMode = aeMode;
-            this.target = target == null ? Target.COST : target;
-            this.stagePath = stagePath == null ? "" : stagePath;
+            this.target = target;
+            this.stagePath = stagePath;
             this.shortages = snapshot.shortages;
-            this.retained = snapshot.retained;
-            this.reserved.putAll(retained);
+            this.reserved.putAll(snapshot.retained);
         }
     }
 
-    public static void beginPlan(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
-        beginPlan(player, entry, times, aeMode, 0);
-    }
-
-    /** 山海：結果跟隨原始請求，不能在發包瞬間就宣稱補齊成功。 */
     public static void beginPlan(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int requestId) {
-        if (player == null) return;
-        if (entry == null || !entry.isValid()) {
-            sendPlanFeedback(player, requestId, false);
+        if (!canPlanPurchase(player, entry)) {
+            reject(player, requestId, "target_changed");
             return;
         }
-        if (!aeMode) {
-            message(player, "§c请先开启「AE模式」");
-            sendPlanFeedback(player, requestId, false);
-            return;
-        }
-        IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (grid == null) {
-            message(player, "§c未绑定在线 AE 网络");
-            sendPlanFeedback(player, requestId, false);
-            return;
-        }
+        IGrid grid = resolveGrid(player, aeMode, requestId);
+        if (grid == null) return;
         times = Math.max(1L, times);
-        Session existing = CALCULATING.get(player.getUUID());
-        if (existing == null) existing = READY.get(player.getUUID());
-        if (existing != null && existing.target == Target.COST
-                && existing.entry == entry && existing.times == times && existing.grid == grid) {
-            if (requestId != 0) {
-                if (existing.requestId != requestId) sendPlanFeedback(player, existing.requestId, false);
-                existing.requestId = requestId;
-            }
-            if (READY.get(player.getUUID()) == existing) sendPlanToClient(player, existing);
-            return;
-        }
-        cancelAll(player.getUUID());
-        Session session = new Session(grid, entry, times, snapshot(player, entry, times, grid));
-        launchCostSession(player, session, requestId);
+        startPlan(player, grid, entry, times, Target.COST, "", List.of(), requestId);
     }
 
     /** 购物车「AE下单补齐缺口」：把购物车里所有可买候选的成本合并成一份缺口，一次出方案、一次确认。 */
     public static void beginCartPlan(ServerPlayer player, boolean aeMode, int requestId) {
-        if (player == null) return;
-        if (!aeMode) {
-            message(player, "§c请先开启「AE模式」");
-            sendPlanFeedback(player, requestId, false);
+        IGrid grid = resolveGrid(player, aeMode, requestId);
+        if (grid == null) return;
+        List<CartLine> lines = cartLines(player);
+        if (lines.isEmpty()) {
+            reject(player, requestId, "cart_empty");
             return;
         }
-        IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (grid == null) {
-            message(player, "§c未绑定在线 AE 网络");
-            sendPlanFeedback(player, requestId, false);
-            return;
-        }
+        startPlan(player, grid, null, 1L, Target.CART, "", lines, requestId);
+    }
+
+    private static List<CartLine> cartLines(ServerPlayer player) {
         List<CartLine> lines = new ArrayList<>();
-        boolean catalogEditor = ShopEditPermission.canEditCatalog(player);
         for (Map.Entry<String, Long> candidate : ShopCartAPI.getAll(player.getServer(), player.getUUID()).entrySet()) {
             ShopEntry entry = ShopConfig.resolveByStableId(candidate.getKey());
-            long times = candidate.getValue() == null ? 0L : candidate.getValue();
-            if (entry == null || (!catalogEditor && entry.isHidden()) || times <= 0L
-                    || !entry.isValid() || !entry.allowsBuy() || entry.hasMissingItems()) continue;
-            lines.add(new CartLine(entry, times));
+            long times = candidate.getValue();
+            if (times > 0L && canPlanPurchase(player, entry)) lines.add(new CartLine(entry, times));
         }
-        if (lines.isEmpty()) {
-            message(player, "§c购物车里没有可补齐的商品");
-            sendPlanFeedback(player, requestId, false);
+        return lines;
+    }
+
+    private static boolean canPlanPurchase(ServerPlayer player, ShopEntry entry) {
+        return canAccessEntry(player, entry) && entry.allowsBuy() && !entry.hasMissingItems();
+    }
+
+    private static boolean canAccessEntry(ServerPlayer player, ShopEntry entry) {
+        return entry != null && entry.isValid() && (!entry.isHidden() || ShopEditPermission.canEditCatalog(player));
+    }
+
+    public static void beginStagePlan(ServerPlayer player, String stagePath, boolean aeMode, int requestId) {
+        if (ShopStageConfig.get(stagePath).isEmpty() || hasSubmission(player, "stage:" + stagePath)) {
+            reject(player, requestId, "target_changed");
+            return;
+        }
+        IGrid grid = resolveGrid(player, aeMode, requestId);
+        if (grid != null) startPlan(player, grid, null, 1L, Target.STAGE, stagePath, List.of(), requestId);
+    }
+
+    public static void beginEntrySubmissionPlan(ServerPlayer player, ShopEntry entry, boolean aeMode, int requestId) {
+        if (!canAccessEntry(player, entry) || !entry.hasSubmissionRequirement()
+                || hasSubmission(player, "entry:" + entry.getStableId())) {
+            reject(player, requestId, "target_changed");
+            return;
+        }
+        IGrid grid = resolveGrid(player, aeMode, requestId);
+        if (grid != null) startPlan(player, grid, entry, 1L, Target.ENTRY_SUBMISSION, entry.getStableId(), List.of(), requestId);
+    }
+
+    private static boolean hasSubmission(ServerPlayer player, String key) {
+        return ShopSubmissionSavedData.get(player.getServer()).has(player, key);
+    }
+
+    private static IGrid resolveGrid(ServerPlayer player, boolean aeMode, int requestId) {
+        if (!aeMode) {
+            reject(player, requestId, "enable_ae");
+            return null;
+        }
+        IGrid grid = ShopAeNetwork.findBoundGrid(player);
+        if (grid == null) reject(player, requestId, "no_network");
+        return grid;
+    }
+
+    private static void startPlan(ServerPlayer player, IGrid grid, ShopEntry entry, long times, Target target,
+                                  String stagePath, List<CartLine> lines, int requestId) {
+        Session existing = CALCULATING.get(player.getUUID());
+        if (existing != null && existing.target == target && existing.grid == grid && existing.entry == entry
+                && existing.times == times && existing.stagePath.equals(stagePath) && existing.lines.equals(lines)) {
+            if (existing.requestId != requestId) sendPlanFeedback(player, existing.requestId, false);
+            existing.requestId = requestId;
             return;
         }
         cancelAll(player.getUUID());
-        Session session = new Session(grid, null, 1L, Target.CART, "", true, snapshotLines(player, lines, grid), lines);
-        launchCostSession(player, session, requestId);
-    }
-
-    private static void launchCostSession(ServerPlayer player, Session session, int requestId) {
-        IGrid grid = session.grid;
+        IActionSource identity = source(player);
+        Snapshot snapshot = switch (target) {
+            case STAGE -> snapshotIngredients(player, ShopStageConfig.get(stagePath), grid, identity);
+            case ENTRY_SUBMISSION -> snapshotIngredients(player, entry.getSubmissionItems(), grid, identity);
+            case CART -> snapshotLines(player, lines, grid, identity);
+            case COST -> snapshotLines(player, List.of(new CartLine(entry, times)), grid, identity);
+        };
+        if (snapshot.shortages.isEmpty()) {
+            message(player, "covered", ChatFormatting.GREEN);
+            sendPlanFeedback(player, requestId, true);
+            return;
+        }
+        Session session = new Session(grid, entry, times, target, stagePath, snapshot, lines);
         session.requestId = requestId;
         for (Map.Entry<AEKey, BigInteger> shortage : session.shortages.entrySet()) {
             AEKey key = shortage.getKey();
-            String name = key.getDisplayName().getString();
-            if (shortage.getValue().compareTo(LONG_MAX) > 0) {
-                session.notes.add("§c" + name + " 缺口超出 AE 单次数量上限，请减少购买次数");
-            } else if (!grid.getCraftingService().isCraftable(key)) {
-                session.notes.add("§7✗ " + name + " §c无可用合成流程");
-            } else if (session.items.size() >= MAX_PLAN_ITEMS) {
-                session.notes.add("§c目标种类过多，请拆分下单");
+            BigInteger amount = shortage.getValue();
+            if (session.items.size() >= MAX_PLAN_ITEMS) {
+                session.notes.add(label("plan_limit").withStyle(ChatFormatting.YELLOW));
                 break;
+            } else if (amount.compareTo(LONG_MAX) > 0) {
+                session.notes.add(issue(key, amount, "amount_limit"));
+            } else if (!grid.getCraftingService().isCraftable(key)) {
+                session.notes.add(issue(key, amount, "no_pattern"));
             } else {
-                session.items.add(new PlanItem(key, shortage.getValue().longValueExact()));
+                session.items.add(new PlanItem(key, amount.longValueExact()));
             }
         }
         if (session.items.isEmpty()) {
-            if (session.notes.isEmpty()) {
-                message(player, "§a目前没有未下单的缺口（已扣除 AE 在制成品）");
-                sendPlanFeedback(player, requestId, true);
-            } else {
-                READY.put(player.getUUID(), session);
-                sendPlanToClient(player, session);
-            }
+            sendPlanToClient(player, session);
             return;
         }
         CALCULATING.put(player.getUUID(), session);
         startNextCalculation(player, session);
-        message(player, "§7正在计算合成方案（" + session.items.size() + " 项）");
     }
 
-    public static void beginStagePlan(ServerPlayer player, String stagePath, boolean aeMode) {
-        if (player == null || stagePath == null || stagePath.isBlank()) return;
-        if (!aeMode) { message(player, "§c请先开启「AE模式」"); return; }
-        IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (grid == null) { message(player, "§c未绑定在线 AE 网络"); return; }
-        List<ExchangeEntry.Ingredient> requirements = ShopStageConfig.get(stagePath);
-        if (requirements.isEmpty()) return;
-        startIngredientPlan(player, null, Target.STAGE, stagePath, requirements, grid);
-    }
-
-    public static void beginEntrySubmissionPlan(ServerPlayer player, ShopEntry entry, boolean aeMode) {
-        if (player == null || entry == null || !entry.isValid() || !entry.hasSubmissionRequirement()) return;
-        if (!aeMode) { message(player, "§c请先开启「AE模式」"); return; }
-        IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (grid == null) { message(player, "§c未绑定在线 AE 网络"); return; }
-        startIngredientPlan(player, entry, Target.ENTRY_SUBMISSION, entry.getStableId(), entry.getSubmissionItems(), grid);
-    }
-
-    private static void startIngredientPlan(ServerPlayer player, ShopEntry entry, Target target, String path,
-                                             List<ExchangeEntry.Ingredient> requirements, IGrid grid) {
-        cancelAll(player.getUUID());
-        Session session = new Session(grid, entry, 1L, target, path, true,
-                snapshotIngredients(player, requirements, grid));
-        prepareAndStart(player, session);
-    }
-
-    private static void prepareAndStart(ServerPlayer player, Session session) {
-        for (Map.Entry<AEKey, BigInteger> shortage : session.shortages.entrySet()) {
-            AEKey key = shortage.getKey();
-            if (shortage.getValue().compareTo(LONG_MAX) > 0) {
-                session.notes.add("§c" + key.getDisplayName().getString() + " 缺口超出 AE 单次数量上限");
-            } else if (!session.grid.getCraftingService().isCraftable(key)) {
-                session.notes.add("§7✗ " + key.getDisplayName().getString() + " §c无可用合成流程");
-            } else if (session.items.size() < MAX_PLAN_ITEMS) {
-                session.items.add(new PlanItem(key, shortage.getValue().longValueExact()));
-            }
-        }
-        if (session.items.isEmpty()) { READY.put(player.getUUID(), session); sendPlanToClient(player, session); return; }
-        CALCULATING.put(player.getUUID(), session);
-        startNextCalculation(player, session);
-        message(player, "§7正在计算合成方案（" + session.items.size() + " 项）");
-    }
-
-    private static Snapshot snapshotIngredients(ServerPlayer player, List<ExchangeEntry.Ingredient> requirements, IGrid grid) {
+    private static Snapshot snapshotIngredients(ServerPlayer player, List<ExchangeEntry.Ingredient> requirements,
+                                                IGrid grid, IActionSource identity) {
         Map<AEKey, BigInteger> demand = new LinkedHashMap<>();
         for (ExchangeEntry.Ingredient ingredient : requirements) {
             if (ingredient == null || ingredient.isFluid) continue;
             ShopAutoCraftAmounts.add(demand, AEItemKey.of(ingredient.makeUnitStack()), BigInteger.valueOf(ingredient.count));
         }
-        Map<AEKey, BigInteger> carried = new LinkedHashMap<>();
-        for (int i = 0; i < player.getInventory().getContainerSize(); i++) addCarried(carried, player.getInventory().getItem(i));
-        ShopBackpack.equipped(player).ifPresent(backpack -> { for (int i = 0; i < backpack.getSlots(); i++) addCarried(carried, backpack.getStackInSlot(i)); });
-        for (Map.Entry<AEKey, BigInteger> stack : carried.entrySet()) stack.setValue(stack.getValue().subtract(ShopAutoCraftAmounts.consume(demand, stack.getKey(), stack.getValue())));
-        Map<AEKey, BigInteger> stock = new LinkedHashMap<>();
-        IActionSource source = source(player);
-        for (AEKey key : demand.keySet()) ShopAutoCraftAmounts.add(stock, key, BigInteger.valueOf(Math.max(0L, grid.getStorageService().getInventory().extract(key, Long.MAX_VALUE, Actionable.SIMULATE, source))));
-        return new Snapshot(ShopAutoCraftAmounts.missing(demand, stock, Map.of()), ShopAutoCraftAmounts.reserve(demand, stock));
-    }
-
-    private static Snapshot snapshot(ServerPlayer player, ShopEntry entry, long times, IGrid grid) {
-        return snapshotLines(player, List.of(new CartLine(entry, times)), grid);
+        return snapshotDemand(player, demand, grid, identity);
     }
 
     /** 多件商品的成本合并成一份需求：錢包餘額、隨身物品、AE 庫存都只扣一次，不按件重複抵銷。 */
-    private static Snapshot snapshotLines(ServerPlayer player, List<CartLine> lines, IGrid grid) {
+    private static Snapshot snapshotLines(ServerPlayer player, List<CartLine> lines, IGrid grid, IActionSource identity) {
         Map<AEKey, BigInteger> demand = new LinkedHashMap<>();
         Map<ResourceLocation, BigInteger> coinTotals = new LinkedHashMap<>();
         List<ShopCost> costs = new ArrayList<>(lines.size());
@@ -338,6 +292,12 @@ public final class ShopAutoCraft {
                 ShopAutoCraftAmounts.add(demand, key, BigInteger.valueOf(ingredient.count).multiply(multipliers.get(i)));
             }
         }
+        return snapshotDemand(player, demand, grid, identity);
+    }
+
+    private static Snapshot snapshotDemand(ServerPlayer player, Map<AEKey, BigInteger> demand,
+                                           IGrid grid, IActionSource identity) {
+        if (demand.isEmpty()) return new Snapshot(Map.of(), Map.of());
         Map<AEKey, BigInteger> carried = new LinkedHashMap<>();
         var inventory = player.getInventory();
         for (int i = 0; i < inventory.getContainerSize(); i++) addCarried(carried, inventory.getItem(i));
@@ -354,17 +314,17 @@ public final class ShopAutoCraft {
             ShopAutoCraftAmounts.consume(demand, AEItemKey.of(key.getItem()), stack.getValue());
         }
         Map<AEKey, BigInteger> stock = new LinkedHashMap<>();
-        IActionSource source = source(player);
+        if (demand.isEmpty()) return new Snapshot(Map.of(), Map.of());
+        var storage = grid.getStorageService().getInventory();
         for (AEKey key : demand.keySet()) {
-            long available = grid.getStorageService().getInventory()
-                    .extract(key, Long.MAX_VALUE, Actionable.SIMULATE, source);
+            long available = storage.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, identity);
             ShopAutoCraftAmounts.add(stock, key, BigInteger.valueOf(Math.max(0L, available)));
         }
         Map<AEKey, BigInteger> pending = new LinkedHashMap<>();
         // 在途的中間物不是承諾交付的成品；只統計 CPU 尚未交付的最終產出。
         for (var cpu : grid.getCraftingService().getCpus()) {
             var status = cpu.getJobStatus();
-            if (status == null || status.crafting() == null) continue;
+            if (status == null || status.crafting() == null || !demand.containsKey(status.crafting().what())) continue;
             var output = status.crafting();
             ShopAutoCraftAmounts.add(pending, output.what(), BigInteger.valueOf(pendingOutputAmount(cpu, output)));
         }
@@ -413,7 +373,7 @@ public final class ShopAutoCraft {
             item.future = session.grid.getCraftingService().beginCraftingCalculation(
                     player.level(), () -> source, item.key, item.amount, CalculationStrategy.REPORT_MISSING_ITEMS);
         } catch (RuntimeException exception) {
-            item.error = "计算启动失败";
+            item.errorKey = "calculation_failed";
             GTDishanhaiMod.LOGGER.warn("Shop crafting calculation could not start", exception);
         }
         session.ticks = 0L;
@@ -423,8 +383,7 @@ public final class ShopAutoCraft {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         if (ShopAvailability.isDisabled()) {
-            CALCULATING.values().forEach(ShopAutoCraft::cancelSession);
-            CALCULATING.clear();
+            CALCULATING.keySet().forEach(ShopAutoCraft::cancelAll);
             READY.clear();
             return;
         }
@@ -442,19 +401,17 @@ public final class ShopAutoCraft {
             if (player == null || ShopAvailability.isDisabled(player) || ShopAeNetwork.findBoundGrid(player) != session.grid) {
                 if (CALCULATING.remove(uuid, session)) {
                     cancelSession(session);
-                    if (player != null) sendPlanFeedback(player, session.requestId, false);
+                    if (player != null) reject(player, session.requestId, "target_changed");
                 }
                 continue;
             }
             PlanItem item = session.items.get(session.nextItem);
             session.ticks++;
             if (item.future != null && !item.future.isDone()) {
-                if (session.ticks > CALC_TIMEOUT_TICKS && CALCULATING.remove(uuid, session)) {
-                    cancelSession(session);
-                    message(player, "§c合成方案计算逾时，已取消");
-                    sendPlanFeedback(player, session.requestId, false);
-                }
-                continue;
+                if (session.ticks <= CALC_TIMEOUT_TICKS) continue;
+                item.future.cancel(true);
+                item.future = null;
+                item.errorKey = "calculation_timeout";
             }
             if (item.future != null) {
                 try {
@@ -464,10 +421,10 @@ public final class ShopAutoCraft {
                             || item.result.finalOutput().amount() != item.amount
                             || !CraftingPlanOverflowDetector.collectOverflowKeys(item.result).isEmpty()) {
                         item.result = null;
-                        item.error = "计算数量不可信，请减少购买次数";
+                        item.errorKey = "invalid_amount";
                     }
                 } catch (Exception exception) {
-                    item.error = "计算失败";
+                    item.errorKey = "calculation_failed";
                     GTDishanhaiMod.LOGGER.warn("Shop crafting calculation failed", exception);
                 }
             }
@@ -484,13 +441,13 @@ public final class ShopAutoCraft {
             if (!CALCULATING.remove(uuid, session)) continue;
             session.ticks = 0L;
             session.planningStock = null; // Only required while calculating, not for the confirmation timeout.
-            READY.put(uuid, session);
+            if (session.items.stream().anyMatch(ShopAutoCraft::submittable)) READY.put(uuid, session);
             sendPlanToClient(player, session);
         }
     }
 
     private static boolean submittable(PlanItem item) {
-        return item.result != null && item.error == null && !item.result.simulation();
+        return item.result != null && item.errorKey == null && !item.result.simulation();
     }
 
     private static Map<AEKey, BigInteger> realUsedItems(ICraftingPlan plan) {
@@ -507,36 +464,47 @@ public final class ShopAutoCraft {
     }
 
     private static void sendPlanToClient(ServerPlayer player, Session session) {
-        List<String> notes = new ArrayList<>(session.notes);
-        List<String> willCraft = new ArrayList<>();
+        List<Component> notes = new ArrayList<>(session.notes);
+        List<Component> willCraft = new ArrayList<>();
         Map<AEKey, BigInteger> merged = new LinkedHashMap<>();
         for (PlanItem item : session.items) {
-            String name = item.key.getDisplayName().getString();
+            BigInteger amount = BigInteger.valueOf(item.amount);
             if (submittable(item)) {
-                willCraft.add("§b" + name + " §7×" + item.amount);
-                item.used.forEach((key, amount) -> ShopAutoCraftAmounts.add(merged, key, amount));
+                willCraft.add(quantity(item.key, amount));
+                item.used.forEach((key, used) -> ShopAutoCraftAmounts.add(merged, key, used));
             } else if (item.result != null && item.result.simulation()) {
-                notes.add("§c" + name + " 基础材料不足，未下单");
+                notes.add(issue(item.key, amount, "missing_materials"));
                 int shown = 0;
                 for (var missing : item.result.missingItems()) {
-                    if (shown++ >= 6) { notes.add("§7其余缺料已省略"); break; }
-                    notes.add("§7  " + missing.getKey().getDisplayName().getString() + " ×" + missing.getLongValue());
+                    if (shown++ >= 6) {
+                        notes.add(label("more_materials").withStyle(ChatFormatting.GRAY));
+                        break;
+                    }
+                    notes.add(label("missing_input", quantity(missing.getKey(), BigInteger.valueOf(missing.getLongValue())))
+                            .withStyle(ChatFormatting.GRAY));
                 }
             } else {
-                notes.add("§c" + name + " " + (item.error == null ? "计算失败" : item.error));
+                notes.add(issue(item.key, amount, item.errorKey == null ? "calculation_failed" : item.errorKey));
             }
         }
-        List<String> useLines = new ArrayList<>();
-        if (!willCraft.isEmpty()) {
-            useLines.add("§b将会补齐（" + willCraft.size() + " 项任务）");
-            useLines.addAll(willCraft);
-            useLines.add("§a将会消耗");
-        }
-        merged.forEach((key, amount) -> useLines.add("§a" + key.getDisplayName().getString() + " §7×" + amount));
+        List<Component> useLines = new ArrayList<>();
+        merged.forEach((key, amount) -> useLines.add(quantity(key, amount)));
         ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new ShopAutoCraftPlanPacket(session.planId, !willCraft.isEmpty(), useLines, notes,
-                        session.requestId, willCraft.size(), session.items.size() + session.notes.size()));
-        session.requestId = 0;
+                new ShopAutoCraftPlanPacket(session.planId, willCraft, useLines, notes,
+                        session.requestId, session.shortages.size()));
+    }
+
+    private static Component quantity(AEKey key, BigInteger amount) {
+        return label(key instanceof AEFluidKey ? "fluid_quantity" : "item_quantity", key.getDisplayName(), amount.toString());
+    }
+
+    private static Component issue(AEKey key, BigInteger amount, String errorKey) {
+        return label("issue", quantity(key, amount), label(errorKey)).withStyle(ChatFormatting.RED);
+    }
+
+    public static void reject(ServerPlayer player, int requestId, String reason) {
+        message(player, reason, ChatFormatting.RED);
+        sendPlanFeedback(player, requestId, false);
     }
 
     public static void sendPlanFeedback(ServerPlayer player, int requestId, boolean success) {
@@ -549,15 +517,19 @@ public final class ShopAutoCraft {
         if (player == null) return;
         if (!ShopAvailability.requireEnabled(player)) return;
         Session session = READY.get(player.getUUID());
-        if (session == null || !session.planId.equals(planId)) return;
+        if (session == null || !session.planId.equals(planId)) {
+            message(player, "expired", ChatFormatting.YELLOW);
+            return;
+        }
         // 先消費這份方案；重複確認、舊視窗確認均不能提交第二次。
         if (!READY.remove(player.getUUID(), session)) return;
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (session.grid != grid || !targetStillValid(session)) {
-            message(player, "§cAE 网络或商品已改变，请重新计算");
+        if (session.grid != grid || !targetStillValid(player, session)) {
+            message(player, "target_changed", ChatFormatting.RED);
             return;
         }
-        Snapshot current = snapshotForSession(player, session, grid);
+        IActionSource source = source(player);
+        Snapshot current = snapshotForSession(player, session, grid, source);
         Map<AEKey, BigInteger> plannedOutputs = new LinkedHashMap<>();
         List<Map<AEKey, BigInteger>> consumptions = new ArrayList<>();
         for (PlanItem item : session.items) {
@@ -568,57 +540,59 @@ public final class ShopAutoCraft {
         // A completed CPU can move items from "pending" to storage without changing the gap.
         // Retained stock is therefore recomputed, not compared with the old preview snapshot.
         if (!ShopAutoCraftAmounts.matchesPlannedOutputs(plannedOutputs, current.shortages)) {
-            message(player, "§e待补齐数量已改变，本次未下单。请手动重新计算并确认");
+            message(player, "shortage_changed", ChatFormatting.YELLOW);
             return;
         }
         Map<AEKey, BigInteger> required = ShopAutoCraftAmounts.submissionStock(current.retained, consumptions);
-        if (!hasReservedStock(player, session, required)) {
-            message(player, "§e合成材料或需保留的现货不足，本次未下单。请补齐材料后重新计算");
+        if (!hasReservedStock(player, session, required, source)) {
+            message(player, "stock_changed", ChatFormatting.YELLOW);
             return;
         }
         int submitted = 0;
-        List<String> failures = new ArrayList<>();
-        IActionSource source = source(player);
+        List<Component> failures = new ArrayList<>();
         // 計算時各計畫已預留互不重複的實物；按同一順序提交，不再擴張或追加依賴單。
         for (PlanItem item : session.items) {
             if (!submittable(item)) continue;
             try {
                 var result = grid.getCraftingService().submitJob(item.result, null, null, true, source);
                 if (result.successful()) submitted++;
-                else failures.add(item.key.getDisplayName().getString() + "(" + result.errorCode() + ")");
+                else failures.add(label("issue", item.key.getDisplayName(),
+                        label("submit_error." + result.errorCode().name().toLowerCase(Locale.ROOT))));
             } catch (RuntimeException exception) {
-                failures.add(item.key.getDisplayName().getString());
+                failures.add(label("issue", item.key.getDisplayName(), label("submit_error.exception")));
                 GTDishanhaiMod.LOGGER.warn("Shop crafting submission failed", exception);
             }
         }
-        if (submitted > 0) message(player, "§a已提交 " + submitted + " 项合成任务到 AE 网络");
-        if (!failures.isEmpty()) message(player, "§c提交失败：" + String.join("、", failures));
-    }
-
-    private static boolean targetStillValid(Session session) {
-        if (!session.aeMode) return false;
-        if (session.target == Target.CART) {
-            for (CartLine line : session.lines) {
-                if (!ShopConfig.getEntries().contains(line.entry())) return false;
-            }
-            return !session.lines.isEmpty();
+        int attempted = plannedOutputs.size();
+        message(player, "submitted", failures.isEmpty() ? ChatFormatting.GREEN : ChatFormatting.YELLOW, submitted, attempted);
+        if (!failures.isEmpty()) {
+            List<Component> shown = new ArrayList<>(failures.subList(0, Math.min(6, failures.size())));
+            if (failures.size() > shown.size()) shown.add(label("more_failures", failures.size() - shown.size()));
+            message(player, "submit_failed", ChatFormatting.RED, ComponentUtils.formatList(shown, Component.literal("; ")));
         }
-        if (session.target == Target.COST) return session.entry != null && ShopConfig.getEntries().contains(session.entry);
-        if (session.target == Target.STAGE) return !session.stagePath.isBlank() && !ShopStageConfig.get(session.stagePath).isEmpty();
-        return session.entry != null && ShopConfig.getEntries().contains(session.entry) && session.entry.hasSubmissionRequirement();
     }
 
-    private static Snapshot snapshotForSession(ServerPlayer player, Session session, IGrid grid) {
+    private static boolean targetStillValid(ServerPlayer player, Session session) {
         return switch (session.target) {
-            case STAGE -> snapshotIngredients(player, ShopStageConfig.get(session.stagePath), grid);
-            case ENTRY_SUBMISSION -> snapshotIngredients(player, session.entry.getSubmissionItems(), grid);
-            case CART -> snapshotLines(player, session.lines, grid);
-            default -> snapshot(player, session.entry, session.times, grid);
+            case CART -> session.lines.equals(cartLines(player));
+            case COST -> canPlanPurchase(player, session.entry) && ShopConfig.getEntries().contains(session.entry);
+            case STAGE -> !ShopStageConfig.get(session.stagePath).isEmpty()
+                    && !hasSubmission(player, "stage:" + session.stagePath);
+            case ENTRY_SUBMISSION -> canAccessEntry(player, session.entry) && ShopConfig.getEntries().contains(session.entry)
+                    && session.entry.hasSubmissionRequirement() && !hasSubmission(player, "entry:" + session.stagePath);
         };
     }
 
-    private static boolean hasReservedStock(ServerPlayer player, Session session, Map<AEKey, BigInteger> required) {
-        IActionSource source = source(player);
+    private static Snapshot snapshotForSession(ServerPlayer player, Session session, IGrid grid, IActionSource source) {
+        return switch (session.target) {
+            case STAGE -> snapshotIngredients(player, ShopStageConfig.get(session.stagePath), grid, source);
+            case ENTRY_SUBMISSION -> snapshotIngredients(player, session.entry.getSubmissionItems(), grid, source);
+            case CART -> snapshotLines(player, session.lines, grid, source);
+            case COST -> snapshotLines(player, List.of(new CartLine(session.entry, session.times)), grid, source);
+        };
+    }
+
+    private static boolean hasReservedStock(ServerPlayer player, Session session, Map<AEKey, BigInteger> required, IActionSource source) {
         for (var requirement : required.entrySet()) {
             if (requirement.getValue().compareTo(LONG_MAX) > 0) return false;
             long available = session.grid.getStorageService().getInventory()
@@ -672,8 +646,12 @@ public final class ShopAutoCraft {
         READY.clear();
     }
 
-    private static void message(ServerPlayer player, String text) {
-        player.sendSystemMessage(Component.literal("§b[山海商店] " + text));
+    private static void message(ServerPlayer player, String key, ChatFormatting color, Object... args) {
+        player.sendSystemMessage(label("shop_message", label(key, args).withStyle(color)));
+    }
+
+    private static net.minecraft.network.chat.MutableComponent label(String key, Object... args) {
+        return Component.translatable("gt_shanhai.shop.confirmation.auto_craft." + key, args);
     }
 
     private static ServerPlayer findPlayer(UUID uuid) {

@@ -27,32 +27,14 @@ public class ShopAutoCraftRequestPacket {
     private final String stagePath;
     private final int requestId;
 
-    public ShopAutoCraftRequestPacket(long catalogRevision, long entryKey, long times, boolean aeMode) {
-        this(Target.COST, catalogRevision, entryKey, times, "", aeMode);
-    }
-
-    public ShopAutoCraftRequestPacket(long catalogRevision, long entryKey, long times, boolean aeMode, int requestId) {
-        this(Target.COST, catalogRevision, entryKey, times, "", aeMode, requestId);
-    }
-
-    /** 购物车「AE下单补齐缺口」：购物车内容存在服务端，请求里不带商品。 */
-    public static ShopAutoCraftRequestPacket cart(long catalogRevision, boolean aeMode, int requestId) {
-        return new ShopAutoCraftRequestPacket(Target.CART, catalogRevision, 0L, 1L, "", aeMode, requestId);
-    }
-
     public ShopAutoCraftRequestPacket(Target target, long catalogRevision, long entryKey,
-                                      long times, String stagePath, boolean aeMode) {
-        this(target, catalogRevision, entryKey, times, stagePath, aeMode, 0);
-    }
-
-    private ShopAutoCraftRequestPacket(Target target, long catalogRevision, long entryKey,
                                       long times, String stagePath, boolean aeMode, int requestId) {
-        this.target = target == null ? Target.COST : target;
+        this.target = target;
         this.catalogRevision = catalogRevision;
         this.entryKey = entryKey;
         this.times = times;
         this.aeMode = aeMode;
-        this.stagePath = stagePath == null ? "" : stagePath;
+        this.stagePath = stagePath;
         this.requestId = requestId;
     }
 
@@ -86,7 +68,7 @@ public class ShopAutoCraftRequestPacket {
                 return;
             }
             if (pkt.target == Target.STAGE) {
-                ShopAutoCraft.beginStagePlan(player, pkt.stagePath, pkt.aeMode);
+                ShopAutoCraft.beginStagePlan(player, pkt.stagePath, pkt.aeMode, pkt.requestId);
                 return;
             }
             if (pkt.target == Target.CART) {
@@ -95,11 +77,11 @@ public class ShopAutoCraftRequestPacket {
             }
             ShopEntry entry = ShopConfig.resolve(pkt.catalogRevision, pkt.entryKey);
             if (entry == null) {
-                ShopAutoCraft.sendPlanFeedback(player, pkt.requestId, false);
+                ShopAutoCraft.reject(player, pkt.requestId, "target_changed");
                 return;
             }
             if (pkt.target == Target.ENTRY_SUBMISSION) {
-                ShopAutoCraft.beginEntrySubmissionPlan(player, entry, pkt.aeMode);
+                ShopAutoCraft.beginEntrySubmissionPlan(player, entry, pkt.aeMode, pkt.requestId);
             } else {
                 ShopAutoCraft.beginPlan(player, entry, Math.max(1L, pkt.times), pkt.aeMode, pkt.requestId);
             }

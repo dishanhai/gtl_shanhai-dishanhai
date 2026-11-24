@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.client.shop;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.client.gui.shop.ShopOperationGuideScreen;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopWelcomeScreen;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener;
@@ -37,6 +38,7 @@ public final class ClientShopAvailability {
         } else if (isDisabled() && mc.screen instanceof ShopScreen shop) {
             shop.onAvailabilityChanged();
         } else if (isDisabled() && mc.screen != null && !(mc.screen instanceof ShopSettingsScreen)
+                && !(mc.screen instanceof ShopOperationGuideScreen)
                 && mc.screen.getClass().getPackageName().equals("com.dishanhai.gt_shanhai.client.gui.shop")) {
             ShopScreenOpener.returnToShop();
         }

@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.UiButton;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -23,9 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 自动合成方案确认框（山海署名，客户端）：花费预览「补齐全部缺口」算完后弹出，展示会消耗的用料
- * 和跳过/材料不足的提示，玩家确认才真正提交（{@link ShopAutoCraftConfirmPacket}）。仿 {@link RewardChoiceScreen}
- * 的列表+确认/取消布局，只是这里是纯文本行，不需要选中态。
+ * AE 下单确认显示可提交的产出、预计消耗和未排单原因。
  *
  * <p>长行换行不截断；清单很长时可滚轮、拖右侧滚动条或用 ↑↓/PageUp/PageDown/Home/End 翻；Enter 确认、Esc 取消。
  * 按钮反馈走 {@link ShopDialogUi}。</p>
@@ -39,24 +36,26 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
     private static final int BTN_BG = -14935012;
     private static final int BTN_HOVER = -12303292;
 
-    private static final int TARGET_W = 260;
+    private static final int TARGET_W = 310;
     private static final int TARGET_H = 300;
     private static final int ROW_H = 11;
     /** 列表下面：页码行（10）+ 间隔 + 按钮（18）+ 底边，页码不再压到按钮上。 */
     private static final int FOOTER_H = 36;
     private static final int WHEEL_ROWS = 3;
 
-    private final UUID planId;
-    private final Screen parentScreen;
     private final boolean anySubmittable;
-    private final List<String> useLines;
-    private final List<String> noteLines;
+    private final int planned;
+    private final int total;
+    private final List<Component> outputLines;
+    private final List<Component> useLines;
+    private final List<Component> noteLines;
     private final ShopDialogUi ui = new ShopDialogUi(GOLD_DARK, GOLD, BTN_BG, BTN_HOVER);
     private final ShopConfirmationReturn returnToParent;
     private final ShopConfirmationActions actions;
     private UiButton confirmButton;
     private UiButton cancelButton;
     private boolean spaceHeld;
+    private List<FormattedCharSequence> summaryRows = List.of();
 
     private int left, top, panelWidth, panelHeight;
     private int listX, listY, listW, listH;
@@ -65,23 +64,24 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
     private List<FormattedCharSequence> rows = List.of();
     private int[] heights = new int[0];
 
-    private ShopAutoCraftConfirmScreen(UUID planId, boolean anySubmittable,
-            List<String> useLines, List<String> noteLines, Screen parentScreen) {
-        super(label("auto_craft.title"));
-        this.planId = planId;
-        this.anySubmittable = anySubmittable;
+    private ShopAutoCraftConfirmScreen(Screen parentScreen, UUID planId, int planned, int total,
+            List<Component> outputLines, List<Component> useLines, List<Component> noteLines) {
+        super(label("title"));
+        this.planned = planned;
+        this.total = total;
+        this.anySubmittable = planned > 0;
+        this.outputLines = List.copyOf(outputLines);
         this.useLines = List.copyOf(useLines);
         this.noteLines = List.copyOf(noteLines);
-        this.parentScreen = parentScreen;
         returnToParent = new ShopConfirmationReturn(this, parentScreen);
         actions = new ShopConfirmationActions(() -> {
             ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, true));
             returnToParent.restore();
         }, () -> {
-            ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
+            if (anySubmittable) ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
             returnToParent.restore();
         }, () -> {
-            if (Minecraft.getInstance().getConnection() != null) {
+            if (anySubmittable && Minecraft.getInstance().getConnection() != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
             }
         });
@@ -92,28 +92,32 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
         this.maxScale = Float.MAX_VALUE;
     }
 
-    /** 相同方案不重開；新方案使用獨立視窗狀態，舊視窗取消不能誤刪新方案。 */
-    public static void openOrUpdate(UUID planId, boolean anySubmittableIn, List<String> useLinesIn, List<String> noteLinesIn) {
-        Screen current = Minecraft.getInstance().screen;
-        Screen parent = current;
-        if (current instanceof ShopAutoCraftConfirmScreen existing) {
-            if (existing.planId.equals(planId)) return;
-            parent = existing.parentScreen;
-        }
+    public static void open(ShopScreen parent, UUID planId, int planned, int total,
+            List<Component> outputLines, List<Component> useLines, List<Component> noteLines) {
         Minecraft.getInstance().setScreen(new ShopAutoCraftConfirmScreen(
-                planId, anySubmittableIn, useLinesIn, noteLinesIn, parent));
+                parent, planId, planned, total, outputLines, useLines, noteLines));
+    }
+
+    private Component summary() {
+        return label("summary", planned, total).withStyle(planned == 0 ? ChatFormatting.RED
+                : planned < total ? ChatFormatting.GOLD : ChatFormatting.GREEN);
     }
 
     private List<Component> displayLines() {
         List<Component> lines = new ArrayList<>();
+        if (anySubmittable) {
+            lines.add(label("outputs").withStyle(ChatFormatting.AQUA));
+            lines.addAll(outputLines);
+            lines.add(CommonComponents.EMPTY);
+            lines.add(label("materials").withStyle(ChatFormatting.AQUA));
+            if (useLines.isEmpty()) lines.add(label("no_materials").withStyle(ChatFormatting.GRAY));
+            else lines.addAll(useLines);
+        }
         if (!noteLines.isEmpty()) {
-            lines.add(label("auto_craft.notes").withStyle(ChatFormatting.RED));
-            for (String line : noteLines) lines.add(DShanhaiTextUtil.fromLegacy(line));
+            if (!lines.isEmpty()) lines.add(CommonComponents.EMPTY);
+            lines.add(label("notes").withStyle(ChatFormatting.GOLD));
+            lines.addAll(noteLines);
         }
-        if (!useLines.isEmpty()) {
-            for (String line : useLines) lines.add(DShanhaiTextUtil.fromLegacy(line));
-        }
-        if (lines.isEmpty()) lines.add(label("auto_craft.empty").withStyle(ChatFormatting.GRAY));
         return lines;
     }
 
@@ -127,9 +131,11 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
         listX = left + 8;
-        listY = top + 26;
         listW = panelWidth - 16;
-        listH = Math.max(ROW_H, panelHeight - 26 - FOOTER_H);
+        summaryRows = this.font.split(summary(), listW);
+        int headerH = 18 + summaryRows.size() * ROW_H;
+        listY = top + headerH;
+        listH = Math.max(ROW_H, panelHeight - headerH - FOOTER_H);
         // 右缘留给滚动条
         int textW = Math.max(16, listW - ShopDialogUi.BAR_W - 3);
         List<FormattedCharSequence> wrapped = new ArrayList<>();
@@ -143,14 +149,15 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
         Arrays.fill(heights, ROW_H);
         scroll = Math.min(scroll, maxScroll());
         confirmButton = addWidget(new UiButton(left + 8, btnY(), confirmW(), 18,
-                label(anySubmittable ? "auto_craft.confirm" : "auto_craft.disabled")
+                label(anySubmittable ? (planned < total ? "confirm_partial" : "confirm") : "disabled")
                         .withStyle(anySubmittable ? ChatFormatting.GREEN : ChatFormatting.DARK_GRAY),
                 button -> confirm(), ShopVisuals.preferences(), true));
         confirmButton.active = anySubmittable;
         cancelButton = addWidget(new UiButton(left + panelWidth - 8 - 52, btnY(), 52, 18,
-                CommonComponents.GUI_CANCEL.copy().withStyle(ChatFormatting.RED), button -> cancel(),
+                (anySubmittable ? CommonComponents.GUI_CANCEL.copy().withStyle(ChatFormatting.RED) : label("close")),
+                button -> cancel(),
                 ShopVisuals.preferences(), false));
-        if (anySubmittable) setInitialFocus(confirmButton);
+        setInitialFocus(anySubmittable ? confirmButton : cancelButton);
     }
 
     private int visibleRows() {
@@ -190,9 +197,9 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
                 left + 5, top + 18, panelWidth - 10, panelHeight - 23);
 
         g.drawString(this.font, getTitle(), left + 8, top + 5, GOLD, true);
-        g.drawString(this.font, label(anySubmittable ? "auto_craft.details" : "auto_craft.unavailable")
-                        .withStyle(anySubmittable ? ChatFormatting.GRAY : ChatFormatting.RED),
-                left + 8, top + 14, GRAY, true);
+        for (int i = 0; i < summaryRows.size(); i++) {
+            g.drawString(this.font, summaryRows.get(i), left + 8, top + 15 + i * ROW_H, WHITE, true);
+        }
 
         int visible = visibleRows();
         for (int i = 0; i < visible; i++) {
@@ -336,12 +343,12 @@ public class ShopAutoCraftConfirmScreen extends ShopScaledScreen {
     public Component getNarrationMessage() {
         List<Component> details = new ArrayList<>();
         details.add(getTitle());
-        details.add(label(anySubmittable ? "auto_craft.details" : "auto_craft.unavailable"));
+        details.add(summary());
         details.addAll(displayLines());
         return CommonComponents.joinLines(details);
     }
 
-    private static net.minecraft.network.chat.MutableComponent label(String key) {
-        return Component.translatable("gt_shanhai.shop.confirmation." + key);
+    private static net.minecraft.network.chat.MutableComponent label(String key, Object... args) {
+        return Component.translatable("gt_shanhai.shop.confirmation.auto_craft." + key, args);
     }
 }

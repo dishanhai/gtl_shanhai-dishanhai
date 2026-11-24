@@ -28,7 +28,7 @@ class ShopDetailFeedbackSourceTest {
         assertTrue(bookmark.contains("case ALREADY") && bookmark.contains("case UNAVAILABLE"));
         assertTrue(extractBlock(shop, "private long detailActionKey(").contains("ClientShopCatalog.revision()"),
                 "entryKey 是快照索引，必須隔離目錄重排後佔用同一索引的商品");
-        assertTrue(extractBlock(shop, "private void requestCostAutoCraft()").contains("Long.MAX_VALUE"),
+        assertTrue(extractBlock(shop, "private void requestAutoCraft(").contains("Long.MAX_VALUE"),
                 "整輪 AE 計算不能被比服務端合法計算時間短的客戶端期限截斷");
     }
 
@@ -41,10 +41,12 @@ class ShopDetailFeedbackSourceTest {
         }
         String server = read("common/shop/ShopAutoCraft.java");
         assertTrue(server.contains("session.requestId = requestId"));
-        assertTrue(server.contains("sendPlanFeedback(player, session.requestId, false)"),
-                "計算逾時或網路離線也要結束等待");
-        assertTrue(server.contains("session.requestId, willCraft.size()"),
-                "以真正可提交的項目數判定成功或失敗");
+        assertTrue(server.contains("reject(player, session.requestId, \"target_changed\")"),
+                "网络变更时也要结束等待");
+        String preview = read("network/ShopAutoCraftPlanPacket.java");
+        assertTrue(preview.contains("planned = outputLines.size()"));
+        assertTrue(preview.contains("shop.acceptsAutoCraftPlan(pkt.requestId)"));
+        assertTrue(preview.contains("new ShopAutoCraftConfirmPacket(pkt.planId, false)"));
     }
 
     @Test

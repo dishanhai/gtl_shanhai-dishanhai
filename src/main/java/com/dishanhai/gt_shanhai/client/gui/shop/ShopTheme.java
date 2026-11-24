@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import com.dishanhai.sh_better_ui.client.api.MaterialsApi.ThemeChoice;
 import com.dishanhai.sh_better_ui.client.api.ShBetterUiApi;
 import com.dishanhai.sh_better_ui.client.glass.GlassTheme;
+import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.client.shop.ShopAppearance;
 import net.minecraft.network.chat.Component;
@@ -32,6 +33,11 @@ public final class ShopTheme extends GlassTheme {
 
     private static synchronized ShopTheme adapt(GlassTheme source) {
         return ADAPTED.computeIfAbsent(source, ShopTheme::new);
+    }
+
+    int tradeButtonFill(boolean hovered, boolean canTrade) {
+        int base = hovered ? buttonHover : buttonBg;
+        return canTrade ? GuiMotion.lerpColor(base, frame, hovered ? 0.36f : 0.22f) : base;
     }
 
     public static ShopTheme current() {

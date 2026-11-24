@@ -91,6 +91,8 @@ public class ShopWelcomeScreen extends ShopScaledScreen {
     private boolean availabilityOnly;
     private boolean focusGlobalSetting;
     private int left, top, panelWidth, panelHeight;
+    private ShopNativeButton operationGuideButton;
+    private final ShopControlInput footerInput = new ShopControlInput();
 
     /** @param next 向导结束后要去的界面（首次打开=商店本体，从设置页重看=回设置页）。 */
     public ShopWelcomeScreen(Supplier<Screen> next) {
@@ -141,10 +143,26 @@ public class ShopWelcomeScreen extends ShopScaledScreen {
 
     @Override
     protected void initScaled() {
+        if (!globalEdited) globalDisabled = ClientShopAvailability.globalDisabled();
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
         left = (vWidth - panelWidth) / 2;
         top = (vHeight - panelHeight) / 2;
+        Component practice = Component.translatable("gt_shanhai.shop.operation_guide.start");
+        operationGuideButton = addWidget(new ShopNativeButton(practice,
+                () -> Minecraft.getInstance().setScreen(new ShopOperationGuideScreen(this)),
+                (button, graphics, mx, my) -> drawBtn(graphics, screenTheme(),
+                        button.getX(), button.getY(), button.getWidth(), button.getHeight(),
+                        button.getMessage().getString(), mx, my)));
+        int practiceX = skipX() + 66;
+        int practiceW = Math.min(nextX() - practiceX - 6, Math.max(76, this.font.width(practice) + 12));
+        operationGuideButton.sync(practiceX, footerY(), Math.max(0, practiceW), BTN_H,
+                practice, false, false, left, left + panelWidth);
+        setPage(page);
+        long window = Minecraft.getInstance().getWindow().getWindow();
+        footerInput.reset(GLFW.glfwGetKey(window, GLFW.GLFW_KEY_ENTER) == GLFW.GLFW_PRESS,
+                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_KP_ENTER) == GLFW.GLFW_PRESS,
+                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS);
     }
 
     @Override
@@ -218,7 +236,7 @@ public class ShopWelcomeScreen extends ShopScaledScreen {
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         openMotion.update(System.currentTimeMillis());
-        float scale = GuiMotion.panelScale(openMotion.value());
+        float scale = screenReducedMotion() ? 1f : GuiMotion.panelScale(openMotion.value());
         boolean opening = scale < 0.9995f;
         if (opening) {
             g.pose().pushPose();
@@ -353,6 +371,7 @@ public class ShopWelcomeScreen extends ShopScaledScreen {
     private void drawFooter(GuiGraphics g, ShopTheme t, int mx, int my) {
         int y = footerY();
         drawBtn(g, t, skipX(), y, 60, BTN_H, "§7跳过", mx, my);
+        operationGuideButton.render(g, mx, my, 0f);
         if (page > 0 && !availabilityOnly) drawBtn(g, t, prevX(), y, 60, BTN_H, "§e上一页", mx, my);
         drawBtn(g, t, nextX(), y, nextW(), BTN_H, awaitingGlobalSave ? "§7保存中"
                 : availabilityOnly || page == PAGE_COUNT - 1 ? "§a完成" : "§b下一页", mx, my);
@@ -384,8 +403,12 @@ public class ShopWelcomeScreen extends ShopScaledScreen {
             finish(false);
             return true;
         }
+        if (operationGuideButton.isMouseOver(mx, my)) {
+            setFocused(operationGuideButton);
+            return operationGuideButton.mouseClicked(mx, my, btn);
+        }
         if (page > 0 && !availabilityOnly && GuiRenderUtil.isHovering(mx, my, prevX(), fy, 60, BTN_H)) {
-            page--;
+            setPage(page - 1);
             return true;
         }
         if (GuiRenderUtil.isHovering(mx, my, nextX(), fy, nextW(), BTN_H)) {
@@ -438,26 +461,50 @@ public class ShopWelcomeScreen extends ShopScaledScreen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (awaitingGlobalSave) return true;
+        boolean guideFocused = getFocused() == operationGuideButton && operationGuideButton.active;
+        if (ShopControlInput.activationKey(keyCode) && (guideFocused || keyCode != GLFW.GLFW_KEY_SPACE)) {
+            if (footerInput.press(keyCode, true)) {
+                if (guideFocused) operationGuideButton.keyPressed(keyCode, scanCode, modifiers);
+                else advance();
+            }
+            return true;
+        }
         if (page == PAGE_SETUP && (keyCode == GLFW.GLFW_KEY_UP || keyCode == GLFW.GLFW_KEY_DOWN)) {
             selectTheme(ShopTheme.adjacent(visibleThemeId(), keyCode == GLFW.GLFW_KEY_UP ? -1 : 1));
             showTheme(shopTheme);
             return true;
         }
-        // GLFW: 右 262 / 左 263 / 回车 257 / 小键盘回车 335
-        if (keyCode == 262 || keyCode == 257 || keyCode == 335) {
+        if (keyCode == GLFW.GLFW_KEY_RIGHT) {
             advance();
             return true;
         }
-        if (keyCode == 263 && page > 0 && !availabilityOnly) {
-            page--;
+        if (keyCode == GLFW.GLFW_KEY_LEFT && page > 0 && !availabilityOnly) {
+            setPage(page - 1);
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        footerInput.release(keyCode);
+        return super.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    private void setPage(int page) {
+        this.page = page;
+        boolean showGuide = page == 0 && !availabilityOnly && operationGuideButton.getWidth() > 0;
+        operationGuideButton.visible = showGuide;
+        operationGuideButton.active = showGuide;
+        if (!showGuide && getFocused() == operationGuideButton) setFocused(null);
+    }
+
     private void advance() {
         if (availabilityOnly || page >= PAGE_COUNT - 1) finish(true);
-        else if (++page == PAGE_SETUP) showTheme(visibleThemeId());
+        else {
+            setPage(page + 1);
+            if (page == PAGE_SETUP) showTheme(visibleThemeId());
+        }
     }
 
     /** ESC 等同「跳过」：只记已完成，不改设置。 */

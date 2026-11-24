@@ -1,9 +1,13 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.shop.ShopCatalogSearchIndex.Suggestion;
+import com.dishanhai.sh_better_ui.client.gui.display.GraphicDisplayLayout.Bounds;
+import com.dishanhai.sh_better_ui.client.gui.scaled.DarkModeTheme;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiMotion;
 import com.dishanhai.sh_better_ui.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.sh_better_ui.client.gui.scaled.Spring;
+import com.dishanhai.sh_better_ui.client.gui.scaled.ThemeEffects;
+import com.dishanhai.sh_better_ui.client.gui.scaled.UiPreferences;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -18,6 +22,7 @@ import org.lwjgl.glfw.GLFW;
 
 /** 山海：商店与多选器共用玻璃搜索框、预测及不会向下穿透的联想清单。 */
 final class ShopSearchSuggestions {
+    private static final int PAGE_FOOTER_HEIGHT = 16;
     private record Row(int index, int y, int height, List<String> lines) {}
     private final Font font;
     private final EditBox box;
@@ -74,6 +79,11 @@ final class ShopSearchSuggestions {
         if (pages.movePage(delta)) rebuildPage();
     }
 
+    private boolean canChangePage(int delta) {
+        int next = pages.pageIndex() + delta;
+        return next >= 0 && next < pages.pageCount();
+    }
+
     void reopen() { dismissed = false; }
 
     boolean open() {
@@ -89,11 +99,23 @@ final class ShopSearchSuggestions {
     }
 
     private int listY() {
-        return y + height + 2 + (com.dishanhai.sh_better_ui.client.gui.scaled.UiPreferences.configured().reducedMotion() ? 0
+        return y + height + 2 + (UiPreferences.configured().reducedMotion() ? 0
                 : Math.round(3f * (1f - GuiMotion.clamp01(motion.value()))));
     }
 
-    private int footerHeight() { return pages.pageCount() > 1 ? 16 : 0; }
+    private int footerHeight() { return pages.pageCount() > 1 ? PAGE_FOOTER_HEIGHT : 0; }
+
+    private String pageLabel() {
+        return Component.translatable("gt_shanhai.shop.search.page", pages.pageIndex() + 1, pages.pageCount()).getString();
+    }
+
+    private Bounds pageButton(int footerY, int labelWidth, int delta) {
+        int buttonWidth = Math.min(18, (width - labelWidth) / 2 - 5);
+        if (buttonWidth < 10) buttonWidth = 0;
+        int buttonX = delta < 0 ? x + 3 : x + width - 3 - buttonWidth;
+        return new Bounds(buttonX, footerY + 2, buttonWidth, PAGE_FOOTER_HEIGHT - 4);
+    }
+
     private int listHeight() {
         return Math.max(0, Math.min(contentHeight, Math.min(140, bottom - listY() - 4) - footerHeight()));
     }
@@ -140,10 +162,16 @@ final class ShopSearchSuggestions {
 
     boolean mouseClicked(double mx, double my, int button) {
         if (contains(mx, my)) {
-            if (footerHeight() > 0 && my >= listY() + 2 + listHeight()) {
+            int footerY = listY() + 2 + listHeight();
+            if (footerHeight() > 0 && my >= footerY) {
                 if (button == 0) {
-                    if (mx < x + width / 3.0) changePage(-1);
-                    else if (mx >= x + width * 2 / 3.0) changePage(1);
+                    int labelWidth = font.width(pageLabel());
+                    for (int delta = -1; delta <= 1; delta += 2) {
+                        if (canChangePage(delta) && pageButton(footerY, labelWidth, delta).contains(mx, my)) {
+                            changePage(delta);
+                            break;
+                        }
+                    }
                 }
                 return true;
             }
@@ -197,6 +225,10 @@ final class ShopSearchSuggestions {
         motion.update(now);
         if (!show) return;
         ShopTheme theme = ShopTheme.current();
+        UiPreferences preferences = UiPreferences.configured();
+        int selectionInk = preferences.highContrast() ? -1 : ThemeEffects.material(theme.materialGroup()).accent(theme.frame);
+        int selectionFill = preferences.highContrast() ? DarkModeTheme.BORDER : theme.selectBg;
+        int hoverFill = preferences.highContrast() ? DarkModeTheme.BORDER_HOVER : theme.rowHover;
         int ly = listY(), h = listHeight();
         scroll = ShopDialogRows.clampPixelScroll(scroll, contentHeight, h);
         theme.rootShadow(g, x, ly, width, h + footerHeight() + 4);
@@ -208,8 +240,11 @@ final class ShopSearchSuggestions {
             for (Row row : rows) {
                 int ry = ly + 2 + row.y() - scroll;
                 if (ry + row.height() <= ly + 2 || ry >= ly + h + 2) continue;
-                float hv = ui.rowHover(row.index(), hovered == row.index() || pages.selectedIndex() == row.index());
-                g.fill(x + 2, ry, x + width - 3, ry + row.height(), GuiMotion.lerpColor(0, theme.selectBg, hv));
+                boolean selected = pages.selectedIndex() == row.index();
+                float hv = ui.rowHover(row.index(), hovered == row.index());
+                int fill = GuiMotion.lerpColor(selected ? selectionFill : 0, hoverFill, hv);
+                g.fill(x + 2, ry, x + width - 3, ry + row.height(), fill);
+                if (selected) g.fill(x + 2, ry + 3, x + 4, ry + row.height() - 3, selectionInk);
                 for (int i = 0; i < row.lines().size(); i++)
                     g.drawString(font, row.lines().get(i), x + 6, ry + 3 + i * 10, -1, !theme.glass);
             }
@@ -220,15 +255,36 @@ final class ShopSearchSuggestions {
             }
         } finally { g.disableScissor(); }
         if (footerHeight() > 0) {
-            int fy = ly + h + 2;
-            g.fill(x + 2, fy, x + width - 2, fy + 1, theme.frameDark);
-            String label = Component.translatable("gt_shanhai.shop.search.page", pages.pageIndex() + 1, pages.pageCount()).getString();
-            g.drawString(font, label, x + (width - font.width(label)) / 2, fy + 4, -1, !theme.glass);
-            g.drawString(font, Component.translatable("gt_shanhai.shop.search.previous_page"), x + 6, fy + 4,
-                    pages.pageIndex() > 0 ? -1 : theme.frameDark, !theme.glass);
-            var next = Component.translatable("gt_shanhai.shop.search.next_page");
-            g.drawString(font, next, x + width - 6 - font.width(next), fy + 4,
-                    pages.pageIndex() + 1 < pages.pageCount() ? -1 : theme.frameDark, !theme.glass);
+            int footerY = ly + h + 2;
+            g.fill(x + 2, footerY, x + width - 2, footerY + 1, theme.frameDark);
+            String label = pageLabel();
+            int labelWidth = font.width(label);
+            if (labelWidth > width - 4) label = font.plainSubstrByWidth(label, width - 4);
+            g.drawString(font, label, x + (width - font.width(label)) / 2, footerY + 4, -1, !theme.glass);
+            drawPageButton(g, theme, preferences, footerY, labelWidth, -1, mx, my);
+            drawPageButton(g, theme, preferences, footerY, labelWidth, 1, mx, my);
         }
+    }
+
+    private void drawPageButton(GuiGraphics g, ShopTheme theme, UiPreferences preferences, int footerY,
+                                int labelWidth, int delta, int mx, int my) {
+        Bounds bounds = pageButton(footerY, labelWidth, delta);
+        if (bounds.width() == 0) return;
+        boolean enabled = canChangePage(delta);
+        float hover = ui.hoverAt(bounds.x(), bounds.y(), bounds.width(), bounds.height(), enabled && bounds.contains(mx, my));
+        if (enabled) {
+            theme.box(g, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                    GuiMotion.lerpColor(theme.frameDark, theme.frame, hover),
+                    GuiMotion.lerpColor(theme.buttonBg, theme.buttonHover, hover));
+            if (preferences.highContrast() && hover > 0f) {
+                g.fill(bounds.x() + 2, bounds.bottom() - 2, bounds.right() - 2, bounds.bottom() - 1,
+                        GuiMotion.lerpColor(0, -1, hover));
+            }
+        }
+        Component arrow = Component.translatable(delta < 0
+                ? "gt_shanhai.shop.search.previous_page" : "gt_shanhai.shop.search.next_page");
+        int ink = enabled ? -1 : preferences.highContrast() ? DarkModeTheme.TEXT_MUTED : theme.tabIdle();
+        g.drawString(font, arrow, bounds.x() + (bounds.width() - font.width(arrow)) / 2,
+                bounds.y() + 2, ink, !theme.glass);
     }
 }

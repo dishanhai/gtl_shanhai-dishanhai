@@ -76,8 +76,10 @@ class ShopMotionSourceTest {
                 () -> assertTrue(shop.contains("private void advanceGridScroll(long now)")),
                 () -> assertTrue(shop.contains("private void advanceDetailScroll(long now)")),
                 // 滚轮只改目标
-                () -> assertTrue(shop.contains("scrollTarget = Math.max(0, Math.min(maxScroll, wanted))") && shop.contains("scrollTarget - (int) d * rowStride()")),
-                () -> assertTrue(shop.contains("detailScrollTarget = clampDetailScroll(wanted)") && shop.contains("detailScrollTarget - (int) d * 18")),
+                () -> assertTrue(shop.contains("scrollTarget = Math.max(0, Math.min(maxScroll, wanted))")
+                        && shop.contains("scrollTarget - (int) Math.round(d * rowStride())")),
+                () -> assertTrue(shop.contains("detailScrollTarget = clampDetailScroll(wanted)")
+                        && shop.contains("detailScrollTarget - (int) Math.round(d * 18)")),
                 // 搜索清空、切分组、收藏筛选这些“上下文变了”的写入点直接到位
                 () -> assertTrue(shop.contains("searchBox.setResponder(this::onShopSearchChanged)")
                         && shop.substring(shop.indexOf("private void onShopSearchChanged("),

@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.network;
 
 import io.netty.handler.codec.DecoderException;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.network.NetworkEvent;
@@ -12,35 +14,31 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 自动合成方案就绪（S→C）：{@link ShopAutoCraftRequestPacket} 的回包，把
- * {@code ShopAutoCraft} 算好的用料预览（会消耗什么 + 哪些项跳过/材料不足）推给客户端，
- * 弹出确认框——{@code anySubmittable=false} 时确认框只能取消（没有任何一项真能提交）。
+ * 自动合成预览和预检结果。预览保留客户端本地化所需的文本组件。
  */
 public class ShopAutoCraftPlanPacket {
 
-    private static final int MAX_LINES = 512;
+    private static final int MAX_LINES = 256;
+    // 三栏的 UTF-8 总大小须低于 Forge 客户端自定义载荷的 1 MiB 上限。
+    private static final int MAX_LINE_JSON = 384;
 
     private final UUID planId;
-    private final boolean anySubmittable;
-    private final List<String> useLines;    // 会消耗的合并用料（"物品 ×数量"，已带颜色码）
-    private final List<String> noteLines;   // 无样板/材料不足/计算失败的提示（已带颜色码）
+    private final List<Component> outputLines;
+    private final List<Component> useLines;
+    private final List<Component> noteLines;
     private final int requestId;
     private final int planned;
     private final int total;
     private final boolean openConfirmation;
 
-    public ShopAutoCraftPlanPacket(UUID planId, boolean anySubmittable, List<String> useLines, List<String> noteLines) {
-        this(planId, anySubmittable, useLines, noteLines, 0, anySubmittable ? 1 : 0, 1);
-    }
-
-    public ShopAutoCraftPlanPacket(UUID planId, boolean anySubmittable, List<String> useLines, List<String> noteLines,
-                                   int requestId, int planned, int total) {
+    public ShopAutoCraftPlanPacket(UUID planId, List<Component> outputLines, List<Component> useLines,
+                                   List<Component> noteLines, int requestId, int total) {
         this.planId = planId;
-        this.anySubmittable = anySubmittable;
-        this.useLines = useLines;
-        this.noteLines = noteLines;
+        this.outputLines = List.copyOf(outputLines);
+        this.useLines = List.copyOf(useLines);
+        this.noteLines = List.copyOf(noteLines);
         this.requestId = requestId;
-        this.planned = planned;
+        this.planned = outputLines.size();
         this.total = total;
         this.openConfirmation = true;
     }
@@ -48,7 +46,7 @@ public class ShopAutoCraftPlanPacket {
     /** 山海：預檢失敗或已無缺口時只回饋按鍵，不開空白確認窗。 */
     public ShopAutoCraftPlanPacket(int requestId, boolean success) {
         this.planId = new UUID(0L, 0L);
-        this.anySubmittable = success;
+        this.outputLines = List.of();
         this.useLines = List.of();
         this.noteLines = List.of();
         this.requestId = requestId;
@@ -59,7 +57,7 @@ public class ShopAutoCraftPlanPacket {
 
     public ShopAutoCraftPlanPacket(FriendlyByteBuf buf) {
         this.planId = buf.readUUID();
-        this.anySubmittable = buf.readBoolean();
+        this.outputLines = readLines(buf);
         this.useLines = readLines(buf);
         this.noteLines = readLines(buf);
         this.requestId = buf.readVarInt();
@@ -68,17 +66,21 @@ public class ShopAutoCraftPlanPacket {
         this.openConfirmation = buf.readBoolean();
     }
 
-    private static List<String> readLines(FriendlyByteBuf buf) {
+    private static List<Component> readLines(FriendlyByteBuf buf) {
         int n = buf.readVarInt();
         if (n < 0 || n > MAX_LINES) throw new DecoderException("Invalid auto-craft plan line count: " + n);
-        List<String> list = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) list.add(buf.readUtf(256));
+        List<Component> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            Component line = Component.Serializer.fromJson(buf.readUtf(MAX_LINE_JSON));
+            if (line == null) throw new DecoderException("Missing auto-craft plan line");
+            list.add(line);
+        }
         return list;
     }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeUUID(planId);
-        buf.writeBoolean(anySubmittable);
+        writeLines(buf, outputLines);
         writeLines(buf, useLines);
         writeLines(buf, noteLines);
         buf.writeVarInt(requestId);
@@ -87,17 +89,21 @@ public class ShopAutoCraftPlanPacket {
         buf.writeBoolean(openConfirmation);
     }
 
-    private static void writeLines(FriendlyByteBuf buf, List<String> lines) {
+    private static void writeLines(FriendlyByteBuf buf, List<Component> lines) {
         int n = Math.min(lines.size(), MAX_LINES);
         buf.writeVarInt(n);
-        // writeUtf(String, 256) 对超过 256 字符的输入直接抛 EncoderException；调用方拼接的行
-        // （如缺料明细）一旦失控变长且未捕获，会把整个 ServerTick 事件链路带崩、直接停服。
-        // 这里兜底按字符截断到 256 以内，宁可显示不全也不能崩服务器。
         for (int i = 0; i < n; i++) {
-            String line = lines.get(i);
-            if (line.length() > 256) line = line.substring(0, 253) + "...";
-            buf.writeUtf(line, 256);
+            Component line = i == n - 1 && lines.size() > n
+                    ? omission("more_lines", Integer.toString(lines.size() - i)) : lines.get(i);
+            String json = Component.Serializer.toJson(line);
+            if (json.length() > MAX_LINE_JSON) json = Component.Serializer.toJson(omission("long_line"));
+            buf.writeUtf(json, MAX_LINE_JSON);
         }
+    }
+
+    private static Component omission(String key, Object... args) {
+        return Component.translatable("gt_shanhai.shop.confirmation.auto_craft." + key, args)
+                .withStyle(ChatFormatting.GRAY);
     }
 
     public static void handle(ShopAutoCraftPlanPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -110,16 +116,21 @@ public class ShopAutoCraftPlanPacket {
 
     @OnlyIn(Dist.CLIENT)
     private static void handleClient(ShopAutoCraftPlanPacket pkt) {
+        var client = net.minecraft.client.Minecraft.getInstance();
+        var shop = client.screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen screen ? screen : null;
+        boolean abandoned = pkt.openConfirmation && (shop == null || !shop.acceptsAutoCraftPlan(pkt.requestId));
         com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults.offerAutoCraft(
                 new com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults.AutoCraftResult(
-                        pkt.requestId, pkt.planned, pkt.total, System.currentTimeMillis()));
-        // 有預覽時保留回執到返回商店再閃色，避免結果在確認窗背後播完；即時錯誤立即顯示。
-        if (!pkt.openConfirmation && net.minecraft.client.Minecraft.getInstance().screen
-                instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen shop) {
-            shop.drainAutoCraftResults();
+                        pkt.requestId, abandoned ? 0 : pkt.planned, pkt.total, System.currentTimeMillis()));
+        if (abandoned && pkt.planned > 0 && client.getConnection() != null) {
+            ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(pkt.planId, false));
         }
-        if (!pkt.openConfirmation) return;
-        com.dishanhai.gt_shanhai.client.gui.shop.ShopAutoCraftConfirmScreen.openOrUpdate(
-                pkt.planId, pkt.anySubmittable, pkt.useLines, pkt.noteLines);
+        if (shop == null) return;
+        if (!pkt.openConfirmation || abandoned) {
+            shop.drainAutoCraftResults();
+            return;
+        }
+        com.dishanhai.gt_shanhai.client.gui.shop.ShopAutoCraftConfirmScreen.open(
+                shop, pkt.planId, pkt.planned, pkt.total, pkt.outputLines, pkt.useLines, pkt.noteLines);
     }
 }

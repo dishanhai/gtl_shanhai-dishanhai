@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.network;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -39,7 +40,7 @@ class ShopAutoCraftPacketCodecTest {
         FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
         try {
             new ShopAutoCraftRequestPacket(ShopAutoCraftRequestPacket.Target.STAGE,
-                    0L, -1L, 1L, "无限盘区/前期", true).encode(encoded);
+                    0L, -1L, 1L, "无限盘区/前期", true, 25).encode(encoded);
             new ShopAutoCraftRequestPacket(encoded).encode(decoded);
             assertEquals(ShopAutoCraftRequestPacket.Target.STAGE, decoded.readEnum(ShopAutoCraftRequestPacket.Target.class));
             assertEquals(0L, decoded.readLong());
@@ -47,7 +48,7 @@ class ShopAutoCraftPacketCodecTest {
             assertEquals(1L, decoded.readVarLong());
             assertEquals("无限盘区/前期", decoded.readUtf(256));
             assertTrue(decoded.readBoolean());
-            assertEquals(0, decoded.readVarInt(), "原有階段請求不要求按鍵回饋");
+            assertEquals(25, decoded.readVarInt());
             assertFalse(decoded.isReadable());
         } finally {
             encoded.release();
@@ -56,20 +57,25 @@ class ShopAutoCraftPacketCodecTest {
     }
 
     @Test
-    void planRoundTripPreservesItsIdentityAndTargetQuantities() {
+    void planRoundTripPreservesSectionsIncludingTranslatableNamesAndLongQuantities() {
         UUID id = UUID.randomUUID();
+        Component output = Component.translatable("gt_shanhai.shop.confirmation.auto_craft.item_quantity",
+                Component.translatable("item.minecraft.iron_ingot"), "7000000000");
+        Component used = Component.translatable("item.minecraft.raw_iron");
+        Component note = Component.translatable("gt_shanhai.shop.confirmation.auto_craft.no_pattern");
         FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
         FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
         try {
-            new ShopAutoCraftPlanPacket(id, true, List.of("wafer x7000000000"), List.of("missing pattern"), 37, 1, 2)
+            new ShopAutoCraftPlanPacket(id, List.of(output), List.of(used), List.of(note), 37, 2)
                     .encode(encoded);
             new ShopAutoCraftPlanPacket(encoded).encode(decoded);
             assertEquals(id, decoded.readUUID());
-            assertTrue(decoded.readBoolean());
             assertEquals(1, decoded.readVarInt());
-            assertEquals("wafer x7000000000", decoded.readUtf(256));
+            assertEquals(output, decoded.readComponent());
             assertEquals(1, decoded.readVarInt());
-            assertEquals("missing pattern", decoded.readUtf(256));
+            assertEquals(used, decoded.readComponent());
+            assertEquals(1, decoded.readVarInt());
+            assertEquals(note, decoded.readComponent());
             assertEquals(37, decoded.readVarInt());
             assertEquals(1, decoded.readVarInt());
             assertEquals(2, decoded.readVarInt());
@@ -86,16 +92,21 @@ class ShopAutoCraftPacketCodecTest {
         UUID id = UUID.randomUUID();
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         try {
-            new ShopAutoCraftPlanPacket(id, false, Collections.nCopies(600, "x".repeat(300)), List.of())
+            new ShopAutoCraftPlanPacket(id, List.of(), List.of(), Collections.nCopies(600, Component.literal("x".repeat(500))), 78, 600)
                     .encode(buffer);
             assertEquals(id, buffer.readUUID());
-            assertFalse(buffer.readBoolean());
-            assertEquals(512, buffer.readVarInt());
-            for (int i = 0; i < 512; i++) assertEquals(256, buffer.readUtf(256).length());
             assertEquals(0, buffer.readVarInt());
             assertEquals(0, buffer.readVarInt());
+            assertEquals(256, buffer.readVarInt());
+            for (int i = 0; i < 255; i++) {
+                assertEquals(Component.translatable("gt_shanhai.shop.confirmation.auto_craft.long_line")
+                        .withStyle(net.minecraft.ChatFormatting.GRAY), buffer.readComponent());
+            }
+            assertEquals(Component.translatable("gt_shanhai.shop.confirmation.auto_craft.more_lines", "345")
+                    .withStyle(net.minecraft.ChatFormatting.GRAY), buffer.readComponent());
+            assertEquals(78, buffer.readVarInt());
             assertEquals(0, buffer.readVarInt());
-            assertEquals(1, buffer.readVarInt());
+            assertEquals(600, buffer.readVarInt());
             assertTrue(buffer.readBoolean());
             assertFalse(buffer.isReadable());
         } finally {
@@ -108,8 +119,7 @@ class ShopAutoCraftPacketCodecTest {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         try {
             buffer.writeUUID(UUID.randomUUID());
-            buffer.writeBoolean(false);
-            buffer.writeVarInt(513);
+            buffer.writeVarInt(257);
             assertThrows(DecoderException.class, () -> new ShopAutoCraftPlanPacket(buffer));
         } finally {
             buffer.release();
@@ -121,7 +131,7 @@ class ShopAutoCraftPacketCodecTest {
         FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
         FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
         try {
-            new ShopAutoCraftRequestPacket(9L, 42L, 7L, true, 123).encode(encoded);
+            new ShopAutoCraftRequestPacket(ShopAutoCraftRequestPacket.Target.COST, 9L, 42L, 7L, "", true, 123).encode(encoded);
             new ShopAutoCraftRequestPacket(encoded).encode(decoded);
             assertEquals(ShopAutoCraftRequestPacket.Target.COST, decoded.readEnum(ShopAutoCraftRequestPacket.Target.class));
             assertEquals(9L, decoded.readLong());
@@ -147,7 +157,7 @@ class ShopAutoCraftPacketCodecTest {
                 new ShopAutoCraftPlanPacket(78, success).encode(encoded);
                 new ShopAutoCraftPlanPacket(encoded).encode(decoded);
                 assertEquals(new UUID(0L, 0L), decoded.readUUID());
-                assertEquals(success, decoded.readBoolean());
+                assertEquals(0, decoded.readVarInt());
                 assertEquals(0, decoded.readVarInt());
                 assertEquals(0, decoded.readVarInt());
                 assertEquals(78, decoded.readVarInt());
