@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 山海：编码终端和 JEI 入口使用同一套共享图标。 */
+/** 山海：验证编码终端和 JEI 入口的图标接入。 */
 class PatternEncodingButtonIconsSourceTest {
     private static final Path SOURCE = Path.of("src/main/java/com/dishanhai/gt_shanhai");
 
@@ -30,21 +30,22 @@ class PatternEncodingButtonIconsSourceTest {
     }
 
     @Test
-    void jeiButtonsUseDistinctSharedIcons() throws IOException {
+    void jeiButtonsUseDistinctSvgIcons() throws IOException {
         String jei = Files.readString(SOURCE.resolve("integration/jei/JeiPatternQuickEncodeButtons.java"));
 
-        assertTrue(jei.contains("patternIcon = new RecipeButtonIcon(GraphicIcon.QUICK_PATTERN_ENCODE)"), "快速编码");
-        assertTrue(jei.contains("recipeTypeIcon = new RecipeButtonIcon(GraphicIcon.RECIPE_TYPE)"), "按配方类型编码");
-        assertTrue(jei.contains("cloudIcon = new RecipeButtonIcon(GraphicIcon.CLOUD_PATTERN_LIBRARY)"), "云端上传");
-        assertTrue(jei.contains("bookmarkIcon = new RecipeButtonIcon(GraphicIcon.BOOKMARK_FAVORITE)"), "书签收藏");
-        assertTrue(jei.contains("byproductIcon = new RecipeButtonIcon(GraphicIcon.EXPORT)"), "副产物上传");
+        assertTrue(jei.contains("patternIcon = new RecipeButtonSvgIcon(\"quick_encode\")"), "快速编码");
+        assertTrue(jei.contains("recipeTypeIcon = new RecipeButtonSvgIcon(\"recipe_batch\")"), "按配方类型编码");
+        assertTrue(jei.contains("cloudIcon = new RecipeButtonSvgIcon(\"cloud_upload\")"), "云端上传");
+        assertTrue(jei.contains("bookmarkIcon = new RecipeButtonSvgIcon(\"bookmark\")"), "书签收藏");
+        assertTrue(jei.contains("byproductIcon = new RecipeButtonSvgIcon(\"byproduct_upload\")"), "副产物上传");
     }
 
     @Test
     void jeiIconsUseAe2ToolbarBackgroundWithAnInset() throws IOException {
-        String jei = Files.readString(SOURCE.resolve("integration/jei/JeiPatternQuickEncodeButtons.java"));
+        String icon = Files.readString(SOURCE.resolve("integration/jei/RecipeButtonSvgIcon.java"));
 
-        assertTrue(jei.contains("Icon.TOOLBAR_BUTTON_BACKGROUND.getBlitter()"));
-        assertTrue(jei.contains("pose.translate(x + 1, y + 1, 0)"), "图标内缩，留出底板边框");
+        assertTrue(icon.contains("Icon.TOOLBAR_BUTTON_BACKGROUND.getBlitter()"));
+        assertTrue(icon.contains("(SIZE - 2) / RecipeButtonSvgMesh.VIEW_SIZE"));
+        assertTrue(icon.contains("emit(vertices, matrix, quad.a(), x + 1, y + 1)"), "图标内缩，留出底板边框");
     }
 }
