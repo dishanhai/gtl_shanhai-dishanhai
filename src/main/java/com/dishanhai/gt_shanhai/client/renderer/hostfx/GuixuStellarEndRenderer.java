@@ -18,7 +18,6 @@ import org.joml.Vector3d;
 import org.joml.Vector3f;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import static com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuStarRenderer.ambientGlint;
@@ -32,19 +31,23 @@ public final class GuixuStellarEndRenderer {
     private GuixuStellarEndRenderer() {}
 
     static void capture(PoseStack pose, Level level, BlockPos controller, Direction facing, float[] camera,
-                        double seconds, float horizon, float spinSeconds, boolean simple,
-                        List<GuixuStellarEnd.GravityWave> waves) {
-        if (horizon <= 0 || seconds >= GuixuStellarEnd.LAST_CAPTURE_SECONDS) {
-            render(pose, level, controller, facing, camera, seconds, horizon, spinSeconds, simple, waves);
+                        float spinSeconds, GuixuStellarEnd.Frame animation) {
+        if (animation.stars().isEmpty()) {
+            if (animation.stage() == GuixuStellarEnd.Stage.STRUCTURE) {
+                render(pose, level, controller, facing, camera, spinSeconds, animation);
+            }
             return;
         }
-        if (seconds <= 0) return;
         int frame = BlackHoleLensRenderer.upcomingFrameSerial();
         if (frame != pendingFrame) PENDING.clear();
         pendingFrame = frame;
-        PENDING.put(controller.immutable(), new DeferredFrame(level, facing, camera, seconds, horizon, spinSeconds, simple, waves,
+        PENDING.put(controller.immutable(), new DeferredFrame(level, facing, camera, spinSeconds, animation,
                 new Matrix4f(pose.last().pose()), new Matrix4f(RenderSystem.getModelViewMatrix()),
                 new Matrix4f(RenderSystem.getProjectionMatrix()), RenderSystem.getVertexSorting()));
+    }
+
+    public static boolean hasDeferredBodies(int frame) {
+        return pendingFrame == frame && !PENDING.isEmpty();
     }
 
     /** 保留本帧世界深度，天体颜色在黑洞透镜完成取样后才写入。 */
@@ -67,8 +70,8 @@ public final class GuixuStellarEndRenderer {
                 modelView.last().pose().set(captured.modelView());
                 RenderSystem.applyModelViewMatrix();
                 RenderSystem.setProjectionMatrix(captured.projection(), captured.sorting());
-                render(pose, level, entry.getKey(), captured.facing(), captured.camera(), captured.seconds(),
-                        captured.horizon(), captured.spinSeconds(), captured.simple(), captured.waves());
+                render(pose, level, entry.getKey(), captured.facing(), captured.camera(),
+                        captured.spinSeconds(), captured.animation());
             }
         } catch (RuntimeException e) {
             HostFxFallback.degrade(HostFxFallback.LEVEL_OFF, "群星终焉合成异常 " + e.getClass().getSimpleName());
@@ -81,50 +84,37 @@ public final class GuixuStellarEndRenderer {
         }
     }
 
-    private record DeferredFrame(Level level, Direction facing, float[] camera, double seconds, float horizon,
-                                 float spinSeconds, boolean simple, List<GuixuStellarEnd.GravityWave> waves,
+    private record DeferredFrame(Level level, Direction facing, float[] camera, float spinSeconds,
+                                 GuixuStellarEnd.Frame animation,
                                  Matrix4f pose, Matrix4f modelView,
                                  Matrix4f projection, VertexSorting sorting) {}
 
     private static void render(PoseStack pose, Level level, BlockPos controller, Direction facing, float[] camera,
-                               double seconds, float horizon, float spinSeconds, boolean simple,
-                               List<GuixuStellarEnd.GravityWave> waves) {
-        if (seconds <= 0 || (horizon <= 0 && seconds <= GuixuStellarEnd.STRUCTURE_START_SECONDS)) return;
+                               float spinSeconds, GuixuStellarEnd.Frame animation) {
+        double seconds = animation.seconds();
+        float horizon = animation.horizon();
+        boolean simple = animation.simple();
+        var stars = animation.stars();
         var layer = HostFxDraw.beamLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         Matrix4f matrix = pose.last().pose();
-        GuixuStellarEnd.Star[] stars = null;
         GuixuCelestialRenderer celestial = null;
-        float flash = 0, outflow = 0;
-        if (horizon > 0 && seconds < GuixuStellarEnd.LAST_CAPTURE_SECONDS) {
-            stars = new GuixuStellarEnd.Star[GuixuStellarEnd.STAR_COUNT];
-            for (int i = 0; i < GuixuStellarEnd.STAR_COUNT; i++) {
-                if (!GuixuStellarEnd.drawsSource(i, simple)) continue;
-                stars[i] = GuixuStellarEnd.star(i, seconds, 45);
-                flash = Math.max(flash, GuixuStellarEnd.captureFlash(stars[i]));
-                outflow = Math.max(outflow, GuixuStellarEnd.stellarOutflow(stars[i]));
-            }
+        if (!stars.isEmpty()) {
             celestial = new GuixuCelestialRenderer(matrix, camera, seconds, horizon, simple);
-            celestial.drawHorizonDepth(buffers);
             celestial.drawBodies(buffers, stars);
         }
         VertexConsumer vertices = buffers.getBuffer(layer);
         var frame = new Draw(vertices, matrix, camera, facing);
-        if (horizon > 0) frame.horizon(seconds, horizon, flash, simple ? 48 : 80);
-        if (outflow > .001F) {
-            GuixuStarRenderer.drawJets(vertices, matrix, camera, facing, seconds, horizon, outflow);
-        }
         if (celestial != null) {
             celestial.drawAuras(vertices, stars, simple ? 32 : 56);
             for (var star : stars) {
-                if (star == null) continue;
                 frame.star(star, seconds, horizon, simple ? 8 : 16, !simple);
                 frame.capture(star, horizon, simple ? 8 : 16);
             }
         }
-        for (var wave : waves) frame.gravityWave(wave, simple ? 32 : 64);
-        if (seconds > GuixuStellarEnd.STRUCTURE_START_SECONDS) {
-            var charge = new GuixuStellarChargeRenderer(vertices, matrix, camera, seconds);
+        for (var wave : animation.waves()) frame.gravityWave(wave, simple ? 32 : 64);
+        if (animation.stage() == GuixuStellarEnd.Stage.STRUCTURE) {
+            var charge = new GuixuStellarChargeRenderer(vertices, matrix, camera, animation.structureAge());
             charge.feeds(horizon, spinSeconds);
             charge.surface(GuixuStructureLightning.surface(level, controller, facing, spinSeconds));
         }
@@ -158,42 +148,6 @@ public final class GuixuStellarEndRenderer {
             up.set(view).cross(right);
         }
 
-        void horizon(double seconds, float radius, float flash, int segments) {
-            if (camera.lengthSquared() <= radius * radius) return;
-            center.zero();
-            faceCamera();
-            double finaleAge = Math.clamp((seconds - GuixuStellarEnd.STRUCTURE_START_SECONDS) / 1.25, 0, 1);
-            float powerRelease = .53F * (float) Math.sin(finaleAge * Math.PI);
-            float rebound = GuixuStellarEnd.mergerRebound(seconds);
-            float light = Math.min(1, GuixuStellarEnd.horizonLight(seconds) + flash * .25F + powerRelease + rebound * .42F);
-            for (int i = 0; i < segments; i++) {
-                double from = Math.TAU * i / segments, to = Math.TAU * (i + 1) / segments;
-                float fromLight = horizonWave(seconds, from) * light, toLight = horizonWave(seconds, to) * light;
-                haloStrip(from, to, radius, 1.002F, 1.057F, 0, 0, fromLight, toLight);
-                haloStrip(from, to, radius, 1.057F, 1.23F + .28F * flash + .36F * rebound, fromLight, toLight, 0, 0);
-            }
-        }
-
-        private static float horizonWave(double seconds, double angle) {
-            return (float) (.63 + .22 * Math.sin(angle * 3 - seconds * 1.7)
-                    + .15 * Math.sin(angle * 7 + seconds * 2.2));
-        }
-
-        private void haloStrip(double from, double to, float radius, float inner, float outer,
-                               float innerFrom, float innerTo, float outerFrom, float outerTo) {
-            haloVertex(from, radius * inner, innerFrom);
-            haloVertex(to, radius * inner, innerTo);
-            haloVertex(to, radius * outer, outerTo);
-            haloVertex(from, radius * outer, outerFrom);
-        }
-
-        private void haloVertex(double angle, float radius, float alpha) {
-            float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
-            float gold = (float) (.5 + .5 * Math.sin(angle * 2));
-            ambientVertex(vertices, matrix, right.x * x + up.x * y, right.y * x + up.y * y,
-                    right.z * x + up.z * y, .47F + .53F * gold, .75F + .16F * gold, 1F - .37F * gold, alpha);
-        }
-
         void capture(GuixuStellarEnd.Star star, float horizon, int segments) {
             if (star.captureAge() <= 0 || star.captureAge() >= GuixuStellarEnd.CAPTURE_PULSE_SECONDS) return;
             float light = GuixuStellarEnd.captureLight(star);
@@ -201,8 +155,7 @@ public final class GuixuStellarEndRenderer {
             if (light <= .001F && flash <= .001F) return;
             if (star.kind() == GuixuStellarEnd.BodyKind.WHITE_HOLE) {
                 var wake = GuixuStellarEnd.captureWake(star, light);
-                drawCaptureWake(wake.tail(), wake.head() - wake.tail(), light, horizon,
-                        Math.max(6, segments * 3 / 4), CaptureLook.OUTFLOW);
+                drawCaptureWake(wake, horizon, Math.max(6, segments * 3 / 4), CaptureLook.OUTFLOW, false);
                 return;
             }
             double azimuth = GuixuStellarEnd.captureAzimuth(star);
@@ -231,8 +184,7 @@ public final class GuixuStellarEndRenderer {
                 captureVertex(star, from, crest, height, fromLight * .62F);
             }
             var wake = GuixuStellarEnd.captureWake(star, light);
-            drawCaptureWake(wake.tail(), wake.head() - wake.tail(), light, horizon, segments,
-                    star.warm() ? CaptureLook.WARM : CaptureLook.COOL);
+            drawCaptureWake(wake, horizon, segments, star.warm() ? CaptureLook.WARM : CaptureLook.COOL, false);
             ejecta(star, azimuth, horizon, age, light, segments + segments / 2);
         }
 
@@ -278,22 +230,27 @@ public final class GuixuStellarEndRenderer {
                     .48F + .47F * scale, .63F + .35F * scale, 1F, light);
         }
 
-        private void drawCaptureWake(double tail, double span, float brightness, float horizon,
-                                     int segments, CaptureLook look) {
+        private void drawCaptureWake(GuixuStellarEnd.CaptureWake wake, float horizon, int segments,
+                                     CaptureLook look, boolean diskAligned) {
+            float brightness = wake.light();
             if (brightness <= .001F) return;
+            double tail = wake.tail(), span = wake.head() - tail;
             float spread = (float) Math.min(1, span);
             var edge = look.edge();
             var core = look.core();
-            float width = horizon * look.width();
-            wakePoint(tail, span, horizon, spread, look.height(), 0, a);
-            wakePoint(tail, span, horizon, spread, look.height(), 1.0 / segments, b);
+            float width = horizon * look.width() * (diskAligned ? 1.95F : 1F);
+            wakePoint(tail, span, horizon, spread, look.height(), 0, a, diskAligned);
+            wakePoint(tail, span, horizon, spread, look.height(), 1.0 / segments, b, diskAligned);
             ribbonWidth(a, b, a, widthA, width * .12F);
             float light = 0;
             for (int i = 1; i <= segments; i++) {
                 double fraction = i / (double) segments;
                 float nextLight = GuixuStellarEnd.CaptureWake.lightAt(brightness, fraction) * .86F;
-                if (i < segments) wakePoint(tail, span, horizon, spread, look.height(), (i + 1.0) / segments, next);
-                else next.set(b);
+                if (i < segments) {
+                    wakePoint(tail, span, horizon, spread, look.height(), (i + 1.0) / segments, next, diskAligned);
+                } else {
+                    next.set(b);
+                }
                 ribbonWidth(a, next, b, widthB, width * (.12F - .065F * (float) fraction));
                 if (widthA.dot(widthB) < 0) widthB.negate();
                 for (int side = -1; side <= 1; side += 2) {
@@ -309,18 +266,25 @@ public final class GuixuStellarEndRenderer {
             }
         }
 
-        private static void wakePoint(double tail, double span, float horizon, float spread, float height,
-                                      double fraction, Vector3f point) {
+        private void wakePoint(double tail, double span, float horizon, float spread, float height,
+                               double fraction, Vector3f point, boolean diskAligned) {
             double angle = tail + span * fraction;
             float taper = spread * (1 - (float) fraction);
-            float radius = horizon * (1.13F + .18F * taper);
-            point.set(radius * (float) Math.cos(angle), horizon * (.14F + .10F * taper) * height,
-                    radius * (float) Math.sin(angle));
+            float radius = diskAligned
+                    ? (float) (horizon * (GuixuStellarEnd.STELLAR_STREAM_INNER_RADIUS + .62F * taper))
+                    : horizon * (1.13F + .18F * taper);
+            float y = diskAligned ? 0 : horizon * (.14F + .10F * taper) * height;
+            point.set(radius * (float) Math.cos(angle), y, radius * (float) Math.sin(angle));
+            if (diskAligned) point.rotate(diskRotation);
         }
 
         private void impactFlash(double azimuth, float horizon, float flash) {
             float radius = horizon * 1.13F;
             center.set(radius * (float) Math.cos(azimuth), horizon * .14F, radius * (float) Math.sin(azimuth));
+            flashAtCenter(horizon, flash);
+        }
+
+        private void flashAtCenter(float horizon, float flash) {
             faceCamera();
             float size = Math.max(1.3F, horizon * .48F) * (.8F + .2F * flash);
             for (int i = 0; i < 16; i++) {
@@ -371,13 +335,15 @@ public final class GuixuStellarEndRenderer {
             float green = star.warm() ? .68F : .73F;
             float blue = star.warm() ? .34F : 1F;
             boolean solid = star.kind() != GuixuStellarEnd.BodyKind.GLINT;
+            var surge = GuixuStellarEnd.debrisSurge(star);
             if (star.matterBrightness() > .001F) {
                 StreamStyle style = StreamStyle.forStar(star);
-                ribbon(star, seconds, horizon, segments, detailed, style);
+                ribbon(star, seconds, horizon, solid ? segments : segments / 2, detailed, style, surge);
                 if (style.debris > 0) fragments(star, seconds, horizon,
                         Math.max(1, Math.round(segments * style.debris)), style);
             }
-            float light = star.brightness();
+            if (surge != null) debrisReturn(star, surge, horizon, segments);
+            float light = star.brightness() * .55F;
             if (solid || light <= GuixuStellarEnd.MIN_GLINT_LIGHT) return;
             setPoint(center, GuixuStellarEnd.position(star, star.body(), horizon));
             faceCamera();
@@ -387,8 +353,20 @@ public final class GuixuStellarEndRenderer {
             glint(size * .68F, size * .68F, 1F, .96F, .89F, light);
         }
 
+        private void debrisReturn(GuixuStellarEnd.Star star, GuixuStellarEnd.DebrisSurge surge,
+                                  float horizon, int segments) {
+            if (surge.flash() > .001F) {
+                float radius = (float) (horizon * GuixuStellarEnd.STELLAR_STREAM_INNER_RADIUS);
+                double angle = surge.impact();
+                center.set(radius * (float) Math.cos(angle), 0, radius * (float) Math.sin(angle)).rotate(diskRotation);
+                flashAtCenter(horizon, surge.flash());
+            }
+            drawCaptureWake(surge.wake(), horizon, segments * 2,
+                    star.warm() ? CaptureLook.WARM : CaptureLook.COOL, true);
+        }
+
         private void ribbon(GuixuStellarEnd.Star star, double seconds, float horizon, int segments,
-                            boolean detailed, StreamStyle style) {
+                            boolean detailed, StreamStyle style, GuixuStellarEnd.DebrisSurge surge) {
             double from = star.body(), length = star.leadingMatter() - from;
             if (length <= .001) return;
             if (star.kind().stellarPass != null) {
@@ -426,10 +404,11 @@ public final class GuixuStellarEndRenderer {
                 if (i < segments) placeStreamPoint(next, star, end + step, horizon);
                 else next.set(b);
                 float spreadFromMouth = (float) GuixuStellarEnd.ease(0, opening, end - from);
-                float width = mouth + (streamWidth - mouth) * spreadFromMouth;
+                float crest = surge == null ? 0 : surge.streamLightAt(i / (double) segments);
+                float width = mouth + (streamWidth * (1 + 1.45F * crest) - mouth) * spreadFromMouth;
                 ribbonWidth(a, next, b, widthB, width * (1 - (float) end * .52F));
                 if (widthA.dot(widthB) < 0) widthB.negate();
-                float nextAlpha = matterLight(star, seconds, end, style);
+                float nextAlpha = Math.min(1, matterLight(star, seconds, end, style) + .88F * crest);
                 if (fromBody) nextAlpha *= .18F + .82F * spreadFromMouth;
                 ribbonVertex(a, widthA, -1, red, green, blue, 0);
                 ribbonVertex(a, widthA, 0, coreRed, coreGreen, coreBlue, alpha);
@@ -501,7 +480,8 @@ public final class GuixuStellarEndRenderer {
                 pulse = (.22 + .78 * progress * progress) * (.41 + .59 * wave * wave);
             }
             double strength = (.19 + .43 * wave * wave) * star.kind().siphonStrength();
-            return star.matterBrightness() * (float) (pulse * Math.min(.96, strength) * tipFade);
+            float brightness = star.kind() == GuixuStellarEnd.BodyKind.GLINT ? .34F : 1F;
+            return brightness * star.matterBrightness() * (float) (pulse * Math.min(.96, strength) * tipFade);
         }
 
         private void fragments(GuixuStellarEnd.Star star, double seconds, float horizon, int count,
@@ -567,8 +547,8 @@ public final class GuixuStellarEndRenderer {
 
     private record StreamStyle(float red, float green, float blue, float width, int strands, float frequency,
                                float speed, float debris, float fragmentSize) {
-        private static final StreamStyle WARM_GLINT = new StreamStyle(1, .68F, .34F, 1, 0, 35, 5, 0, 0);
-        private static final StreamStyle COOL_GLINT = new StreamStyle(.40F, .73F, 1, 1, 0, 35, 5, 0, 0);
+        private static final StreamStyle WARM_GLINT = new StreamStyle(1, .68F, .34F, .58F, 0, 35, 5, 0, 0);
+        private static final StreamStyle COOL_GLINT = new StreamStyle(.40F, .73F, 1, .58F, 0, 35, 5, 0, 0);
         private static final StreamStyle WARM_FLAME = new StreamStyle(1, .50F, .18F, 1.48F, 1, 27, 8, .85F, 1.54F);
         private static final StreamStyle COOL_FLAME = new StreamStyle(.40F, .62F, 1, 1.48F, 1, 27, 8, .85F, 1.54F);
         private static final StreamStyle ROCK = new StreamStyle(.99F, .60F, .32F, .68F, 0, 38, 3, .26F, 1.3F);

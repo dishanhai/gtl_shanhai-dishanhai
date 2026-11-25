@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.Direction;
+import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -19,6 +20,8 @@ public final class GuixuStarRenderer {
     private static final double SPIN = BlackHoleLensSpec.KERR_SPIN;
     private static final double HORIZON_OMEGA = SPIN / (2.0 * (1.0 + Math.sqrt(1.0 - SPIN * SPIN)));
     private static final float JET_POWER = (float) (24.0 * HORIZON_OMEGA * HORIZON_OMEGA);
+    private static final float DIAGONAL = (float) Math.sqrt(.5);
+    private static final float[] JET_X = {1, DIAGONAL, 0, -DIAGONAL, -1, -DIAGONAL, 0, DIAGONAL};
 
     private GuixuStarRenderer() {}
 
@@ -44,7 +47,7 @@ public final class GuixuStarRenderer {
         Vector3f right = new Vector3f(), up = new Vector3f(), width = new Vector3f();
         for (int i = 0; backgroundInfall && i < GuixuStarField.PARTICLE_COUNT; i++) {
             float visibility = Math.max(0.0F, Math.min(1.0F, (density * GuixuStarField.PARTICLE_COUNT - i) / 8.0F));
-            if (visibility <= 0) continue;
+            if (visibility <= 0) break;
             var star = GuixuStarField.sample(i, seconds, surfaceRadius);
             float alpha = star.alpha() * visibility * brightness;
             if (alpha <= 0.001F || !visible(clip, star)) continue;
@@ -80,7 +83,7 @@ public final class GuixuStarRenderer {
             drawAccretionTrails(vertices, matrix, clip, camera, facing, seconds, surfaceRadius, accretionTrails, diskHeat);
         }
         if (blackHoleEnabled && jets > 0.001F) {
-            drawJets(vertices, matrix, camera, facing, seconds, surfaceRadius, jets);
+            drawJets(vertices, matrix, clip, camera, facing, seconds, surfaceRadius, jets);
         }
         if (ambientEnabled) {
             drawAmbient(vertices, matrix, clip, camera, HostFxSwitch.spinSeconds(), blackHoleEnabled ? surfaceRadius : 0,
@@ -98,6 +101,10 @@ public final class GuixuStarRenderer {
 
     static void drawAccretionTrails(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera,
                                     Direction facing, double seconds, double horizon, int count, float heat) {
+        // The widest orbit spans 4.14 horizons radially and .85 vertically.
+        // Include the billboard width before rotating into the machine frame.
+        if (count == 0 || !HostFxVisibility.isVisible(clip, 0, 0, 0, (float) (4.3 * horizon + .1))) return;
+        var frustum = new FrustumIntersection(clip, false);
         Quaternionf rotation = diskRotation(facing);
         Vector3f head = new Vector3f(), start = new Vector3f(), end = new Vector3f();
         Vector3f eye = new Vector3f(camera), sight = new Vector3f(), width = new Vector3f(), up = new Vector3f();
@@ -106,7 +113,6 @@ public final class GuixuStarRenderer {
             float opacity = (float) Math.min(1, Math.min(phase / .07, (1 - phase) / .085));
             if (opacity < .01F) continue;
             accretionPoint(head, rotation, i, phase, horizon);
-            if (!HostFxVisibility.isVisible(clip, head.x, head.y, head.z, (float) horizon * 2F)) continue;
             float hot = Math.clamp(.72F * (float) phase + .52F * heat, 0, 1);
             float red = 1F - hot * .10F, green = .46F + hot * .43F, blue = .19F + hot * .77F;
             float size = (float) (horizon * .011 + .035) * (1F + .42F * hot);
@@ -115,7 +121,14 @@ public final class GuixuStarRenderer {
             accretionPoint(start, rotation, i, tail, horizon);
             for (int segment = 0; segment < 5; segment++) {
                 double fraction = (segment + 1) / 5.0;
-                accretionPoint(end, rotation, i, tail + (phase - tail) * fraction, horizon);
+                if (segment == 4) end.set(head);
+                else accretionPoint(end, rotation, i, tail + (phase - tail) * fraction, horizon);
+                if (!frustum.testAab(Math.min(start.x, end.x) - size, Math.min(start.y, end.y) - size,
+                        Math.min(start.z, end.z) - size, Math.max(start.x, end.x) + size,
+                        Math.max(start.y, end.y) + size, Math.max(start.z, end.z) + size)) {
+                    start.set(end);
+                    continue;
+                }
                 width.set(end).sub(start).cross(sight.set(eye).sub(end));
                 if (width.lengthSquared() > 1e-9F) {
                     width.normalize().mul(size * (.28F + .72F * (float) fraction));
@@ -127,6 +140,7 @@ public final class GuixuStarRenderer {
                 }
                 start.set(end);
             }
+            if (!HostFxVisibility.isVisible(clip, head.x, head.y, head.z, size * 1.55F)) continue;
             sight.set(eye).sub(head);
             width.set(sight).cross(0, 1, 0);
             if (width.lengthSquared() < 1e-9F) width.set(1, 0, 0);
@@ -171,10 +185,16 @@ public final class GuixuStarRenderer {
                             ? strongestBend(stellarWaves, camera, star.tailX(), star.tailY(), star.tailZ()) : bend;
                     if (bend != null || tail != null) star = refract(star, bend, tail);
                 }
-                if (!visible(clip, star) || GuixuStarField.hiddenByShadow(camera, star, horizon)) continue;
+                // These stars enter SceneColor before the Kerr pass. Rays that escape
+                // still see the sky when the camera is inside the apparent shadow radius.
+                if (!visible(clip, star)) continue;
                 center.set((float) star.headX(), (float) star.headY(), (float) star.headZ());
                 view.set(camera[0], camera[1], camera[2]).sub(center);
-                if (kind >= 3) alpha *= Math.max(0, Math.min(1, (view.length() - 1.5F) / 4F));
+                if (kind >= 3) {
+                    float distanceSquared = view.lengthSquared();
+                    if (distanceSquared <= 1.5F * 1.5F) continue;
+                    if (distanceSquared < 5.5F * 5.5F) alpha *= ((float) Math.sqrt(distanceSquared) - 1.5F) / 4F;
+                }
                 if (view.lengthSquared() < 1.0e-8F) view.set(0, 0, 1);
                 view.normalize();
                 right.set(-view.z, 0, view.x);
@@ -283,50 +303,72 @@ public final class GuixuStarRenderer {
     }
 
     /** 沿主黑洞的盘法线画有螺旋亮纹的双极外流，沿用星场加性层。 */
-    static void drawJets(VertexConsumer vertices, Matrix4f matrix, float[] camera, Direction facing,
+    static void drawJets(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera, Direction facing,
                          double seconds, double horizon, float strength) {
         Quaternionf rotation = diskRotation(facing);
         Vector3f axis = rotation.transform(new Vector3f(0, 1, 0));
         Matrix4f jetMatrix = new Matrix4f(matrix).rotate(rotation);
+        var frustum = new FrustumIntersection(new Matrix4f(clip).rotate(rotation), false);
         Vector3f view = new Vector3f(camera);
         float alignment = axis.dot(view) / Math.max(view.length(), 1e-4F);
         double phase = seconds * (9.0 * HORIZON_OMEGA);
+        var start = new JetSection();
+        var end = new JetSection();
         for (int sign = -1; sign <= 1; sign += 2) {
+            float base = sign * (float) (horizon + .5);
+            if (!jetVisible(frustum, base, base + sign * 28F)) continue;
             // 内段仍在加速，适度减弱失束侧的衰减，让两极都可以看见。
             double shift = GuixuQuasarOptics.jetShift(alignment * sign * 0.72);
             float blueShift = Math.clamp((float) (shift * 0.76), 0.0F, 1.0F);
+            boolean contiguous = false;
             for (int segment = 0; segment < 20; segment++) {
-                JetSection start = jetSection(segment / 20.0F, sign, horizon, seconds, strength);
-                JetSection end = jetSection((segment + 1) / 20.0F, sign, horizon, seconds, strength);
-                for (int facet = 0; facet < 8; facet++) {
-                    double p0 = facet * Math.PI / 4.0;
-                    double p1 = (facet + 1) * Math.PI / 4.0;
-                    jetVertex(vertices, jetMatrix, start, p0, phase, shift, blueShift);
-                    jetVertex(vertices, jetMatrix, start, p1, phase, shift, blueShift);
-                    jetVertex(vertices, jetMatrix, end, p1, phase, shift, blueShift);
-                    jetVertex(vertices, jetMatrix, end, p0, phase, shift, blueShift);
+                float t0 = segment / 20F, t1 = (segment + 1) / 20F;
+                float y0 = sign * (float) (horizon + .5 + t0 * 28), y1 = sign * (float) (horizon + .5 + t1 * 28);
+                if (!jetVisible(frustum, y0, y1)) {
+                    contiguous = false;
+                    continue;
                 }
+                if (!contiguous) start.sample(t0, y0, seconds, strength, phase, shift);
+                end.sample(t1, y1, seconds, strength, phase, shift);
+                for (int facet = 0; facet < 8; facet++) {
+                    int next = (facet + 1) & 7;
+                    start.vertex(vertices, jetMatrix, facet, blueShift);
+                    start.vertex(vertices, jetMatrix, next, blueShift);
+                    end.vertex(vertices, jetMatrix, next, blueShift);
+                    end.vertex(vertices, jetMatrix, facet, blueShift);
+                }
+                JetSection previous = start;
+                start = end;
+                end = previous;
+                contiguous = true;
             }
         }
     }
 
-    private record JetSection(float distance, float radius, double twist, double emission) {}
-
-    private static JetSection jetSection(float t, int sign, double horizon, double seconds, float strength) {
-        float distance = sign * (float) (horizon + 0.5 + t * 28.0);
-        float radius = 0.15F + 0.62F * (float) Math.sqrt(t);
-        double knots = 0.72 + 0.28 * Math.cos(seconds * 4.5 - t * 21.0);
-        return new JetSection(distance, radius, t * 16.0, JET_POWER * strength * Math.sin(t * Math.PI) * knots);
+    private static boolean jetVisible(FrustumIntersection frustum, float y0, float y1) {
+        // Every octagonal section has radius <= .77 in jet-local coordinates.
+        return frustum.testAab(-.78F, Math.min(y0, y1), -.78F, .78F, Math.max(y0, y1), .78F);
     }
 
-    private static void jetVertex(VertexConsumer vertices, Matrix4f matrix, JetSection section,
-                                  double angle, double phase, double shift, float blueShift) {
-        double crest = 0.5 + 0.5 * Math.cos(2.0 * (angle + section.twist() - phase));
-        float alpha = GuixuQuasarOptics.beamedLight(section.emission() * (0.22 + 1.08 * crest * crest), shift);
-        float x = section.radius() * (float) Math.cos(angle);
-        float z = -section.radius() * (float) Math.sin(angle);
-        vertices.vertex(matrix, x, section.distance(), z)
-                .color(0.68F - 0.34F * blueShift, 0.48F + 0.43F * blueShift, 1.0F, alpha).endVertex();
+    private static final class JetSection {
+        float distance, radius;
+        final float[] alpha = new float[4]; // opposite vertices share a crest
+
+        void sample(float t, float distance, double seconds, float strength, double phase, double shift) {
+            this.distance = distance;
+            radius = .15F + .62F * (float) Math.sqrt(t);
+            double knots = .72 + .28 * Math.cos(seconds * 4.5 - t * 21.0);
+            double emission = JET_POWER * strength * Math.sin(t * Math.PI) * knots;
+            for (int i = 0; i < alpha.length; i++) {
+                double crest = .5 + .5 * Math.cos(i * Math.PI * .5 + 2 * (t * 16.0 - phase));
+                alpha[i] = GuixuQuasarOptics.beamedLight(emission * (.22 + 1.08 * crest * crest), shift);
+            }
+        }
+
+        void vertex(VertexConsumer vertices, Matrix4f matrix, int facet, float blueShift) {
+            vertices.vertex(matrix, radius * JET_X[facet], distance, radius * JET_X[(facet + 2) & 7])
+                    .color(.68F - .34F * blueShift, .48F + .43F * blueShift, 1F, alpha[facet & 3]).endVertex();
+        }
     }
 
 }

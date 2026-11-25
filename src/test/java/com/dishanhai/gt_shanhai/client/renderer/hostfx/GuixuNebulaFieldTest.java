@@ -34,6 +34,45 @@ class GuixuNebulaFieldTest {
                 (double) density.invoke(null, 0.4D, 20.000001), 1e-5);
     }
 
+    @Test void batchedInfallRetainsTheOriginalDensityPhaseAndFade() {
+        var knot = new GuixuNebulaField.Sample();
+        // Halfway along the arm both endpoint envelopes are at full strength.
+        int middle = GuixuNebulaField.SEGMENTS_PER_ARM / 2;
+        for (double time : new double[]{-4, 0, 4.5, 19.999, 20.001, 1_000_000_000.25}) {
+            var frame = new GuixuNebulaField.Frame(time, 5);
+            frame.sampleInfall(middle, knot);
+            assertEquals(0.72 * GuixuNebulaField.infallDensity(0.5, time), knot.alpha, 1e-7);
+            frame.sample(middle, 1, knot);
+            assertEquals(0.64F, knot.alpha);
+            frame.sampleInfall(0, knot);
+            assertEquals(0F, knot.alpha);
+        }
+    }
+
+    @Test void wholeFieldCullIncludesBothEdgesOfEveryCloudLayerAndStream() {
+        var knot = new GuixuNebulaField.Sample();
+        for (double time : new double[]{0, 15, 39, 85, 200, 1_000_000_000.25}) {
+            for (double horizon : new double[]{0.8, 12}) {
+                var frame = new GuixuNebulaField.Frame(time, horizon);
+                for (int index = 0; index < 2 * (GuixuNebulaField.SEGMENTS_PER_ARM + 1); index++) {
+                    for (int layer = 0; layer < GuixuNebulaField.LAYER_COUNT; layer++) {
+                        assertInsideWholeField(frame.sample(index, layer, knot));
+                    }
+                    assertInsideWholeField(frame.sampleInfall(index, knot));
+                }
+            }
+        }
+    }
+
+    private static void assertInsideWholeField(GuixuNebulaField.Sample knot) {
+        for (int side : new int[]{-1, 1}) {
+            double x = knot.x + side * knot.sideX * knot.width;
+            double y = knot.y + side * knot.sideY * knot.width;
+            double z = knot.z + side * knot.sideZ * knot.width;
+            assertTrue(x * x + y * y + z * z <= GuixuNebulaField.BOUNDS_RADIUS * GuixuNebulaField.BOUNDS_RADIUS);
+        }
+    }
+
     private Class<?> type() throws Exception {
         return Class.forName("com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuNebulaField");
     }

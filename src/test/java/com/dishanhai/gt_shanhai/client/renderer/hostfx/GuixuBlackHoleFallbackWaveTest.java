@@ -45,9 +45,9 @@ class GuixuBlackHoleFallbackWaveTest {
     }
 
     @Test void stellarFeedStartsAfterTheFirstDebrisReturnsAndEndsAfterInfall() {
-        assertEquals(0, GuixuStellarEnd.accretionFeed(8));
-        assertTrue(GuixuStellarEnd.accretionFeed(30) > 0);
-        assertEquals(0, GuixuStellarEnd.accretionFeed(GuixuStellarEnd.LAST_CAPTURE_SECONDS + 6));
+        assertEquals(0, GuixuStellarEnd.sample(8, 15, false).accretionFeed());
+        assertTrue(GuixuStellarEnd.sample(30, 15, false).accretionFeed() > 0);
+        assertEquals(0, GuixuStellarEnd.sample(GuixuStellarEnd.AFTERGLOW_END_SECONDS + 6, 15, false).accretionFeed());
     }
 
     @Test void photonRingMovesEvenWhenTheShadowIsTooSmallForFineWaves() {

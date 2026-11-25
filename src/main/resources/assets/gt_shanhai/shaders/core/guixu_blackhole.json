@@ -1,7 +1,7 @@
 {
     "blend": {
         "func": "add",
-        "srcrgb": "1",
+        "srcrgb": "srcalpha",
         "dstrgb": "1-srcalpha"
     },
     "vertex": "gt_shanhai:guixu_blackhole",
@@ -10,30 +10,62 @@
         "Position"
     ],
     "samplers": [
-        { "name": "Sampler0" },
-        { "name": "Sampler1" }
+        {
+            "name": "SceneColor"
+        },
+        {
+            "name": "SceneDepth"
+        },
+        {
+            "name": "RayLight"
+        },
+        {
+            "name": "RayExit"
+        },
+        {
+            "name": "PreviousLight"
+        },
+        {
+            "name": "PreviousExit"
+        },
+        {
+            "name": "PixelTransfer"
+        }
     ],
     "uniforms": [
-        { "name": "uProjMat",      "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
-        { "name": "uBhView",       "type": "float", "count": 3, "values": [ 0.0, 0.0, -10.0 ] },
-        { "name": "uDiskNormal",   "type": "float", "count": 3, "values": [ 0.0, 0.31, -0.95 ] },
-        { "name": "uScreenSize",   "type": "float", "count": 2, "values": [ 1920.0, 1080.0 ] },
-        { "name": "uBgRect",       "type": "float", "count": 4, "values": [ 0.0, 0.0, 1.0, 1.0 ] },
-        { "name": "uBgTexel",      "type": "float", "count": 2, "values": [ 0.001953125, 0.001953125 ] },
-        { "name": "uHolePx",       "type": "float", "count": 2, "values": [ 960.0, 540.0 ] },
-        { "name": "uLensRadiusPx", "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uRs",           "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uTanHalfFov",   "type": "float", "count": 1, "values": [ 0.7 ] },
-        { "name": "uAspect",       "type": "float", "count": 1, "values": [ 1.7777778 ] },
-        { "name": "uTime",         "type": "float", "count": 1, "values": [ 0.0 ] },
-        { "name": "uDiskGain",     "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uDiskHeat",     "type": "float", "count": 1, "values": [ 0.0 ] },
-        { "name": "uKerrParameters", "type": "float", "count": 3, "values": [ 0.65, 1.7599342, 3.6159372 ] },
-        { "name": "uRingGain",     "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uStrength",     "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uSampleBackground", "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uDepthGate",    "type": "float", "count": 1, "values": [ 0.0 ] },
-        { "name": "uHoleDepth",    "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uGateEps",      "type": "float", "count": 1, "values": [ 0.00001 ] }
+        {"name": "uBhView", "type": "float", "count": 3, "values": [0, 0, -10]},
+        {"name": "uRs", "type": "float", "count": 1, "values": [1]},
+        {"name": "uTime", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uDiskGain", "type": "float", "count": 1, "values": [1]},
+        {"name": "uDiskHeat", "type": "float", "count": 1, "values": [0]},
+        {"name": "uKerrParameters", "type": "float", "count": 4, "values": [0.65, 1.7599342, 3.6159372, 1]},
+        {"name": "uDiskPhysics", "type": "float", "count": 4, "values": [1, 0.055, 9400, 0.38]},
+        {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00016, 384]},
+        {"name": "uRefine", "type": "float", "count": 1, "values": [0]},
+        {"name": "uCaptureDepthOnly", "type": "float", "count": 1, "values": [0]},
+        {"name": "uTransferPass", "type": "float", "count": 1, "values": [0]},
+        {"name": "uResolveSize", "type": "float", "count": 2, "values": [1, 1]},
+        {"name": "uProjMat", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
+        {"name": "uDiskNormal", "type": "float", "count": 3, "values": [0, 0.31, -0.95]},
+        {"name": "uScreenSize", "type": "float", "count": 2, "values": [1920, 1080]},
+        {"name": "uBgRect", "type": "float", "count": 4, "values": [0, 0, 1, 1]},
+        {"name": "uBgTexel", "type": "float", "count": 2, "values": [0.001953125, 0.001953125]},
+        {"name": "uStrength", "type": "float", "count": 1, "values": [1]},
+        {"name": "uShadowPixels", "type": "float", "count": 1, "values": [1]},
+        {"name": "uSampleBackground", "type": "float", "count": 1, "values": [1]},
+        {"name": "uDepthGate", "type": "float", "count": 1, "values": [0]},
+        {"name": "uHoleDepth", "type": "float", "count": 1, "values": [1]},
+        {"name": "uGateEps", "type": "float", "count": 1, "values": [1e-05]},
+        {"name": "uInvProj", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
+        {"name": "uEquatorialX", "type": "float", "count": 3, "values": [1, 0, 0]},
+        {"name": "uRayJitter", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uTraceRect", "type": "float", "count": 4, "values": [0, 0, 1920, 1080]},
+        {"name": "uPreviousRect", "type": "float", "count": 4, "values": [0, 0, 1920, 1080]},
+        {"name": "uPreviousJitter", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uPreviousProjection", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
+        {"name": "uHistoryWeight", "type": "float", "count": 1, "values": [0]},
+        {"name": "uDisplay", "type": "float", "count": 2, "values": [1.15, 0.18]},
+        {"name": "uSkyMix", "type": "float", "count": 3, "values": [1, 0, 0]},
+        {"name": "uPreviousToView", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}
     ]
 }

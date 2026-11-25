@@ -271,11 +271,12 @@ public final class HostFxDraw {
     public static void drawBeams(PoseStack poseStack, float cx, float cy, float cz, Direction facing,
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
-                                 float holeSurfaceR, float spinDeg, float seconds, float brightness, float spinSeconds) {
+                                 float holeSurfaceR, float spinDeg, float seconds, float brightness, float spinSeconds,
+                                 boolean structureLightning) {
         beamBrightness = clamp(brightness);
         try {
             drawBeamsInternal(poseStack, cx, cy, cz, facing, controllerPos,
-                    camWorldX, camWorldY, camWorldZ, holeSurfaceR, spinDeg, seconds, spinSeconds);
+                    camWorldX, camWorldY, camWorldZ, holeSurfaceR, spinDeg, seconds, spinSeconds, structureLightning);
         } finally {
             beamBrightness = 1.0F;
         }
@@ -284,7 +285,8 @@ public final class HostFxDraw {
     private static void drawBeamsInternal(PoseStack poseStack, float cx, float cy, float cz, Direction facing,
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
-                                 float holeSurfaceR, float spinDeg, float seconds, float spinSeconds) {
+                                 float holeSurfaceR, float spinDeg, float seconds, float spinSeconds,
+                                 boolean structureLightning) {
         lastQuads = 0;
         lastBatches = 0;
         lastParticles = 0;
@@ -403,32 +405,33 @@ public final class HostFxDraw {
             HostFxPillarBeam.markMdBeamsSkipped();
         }
 
-        // 山海：原藍色光柱管環已重製為單遍暖白吸積流；共用既有 pivot、自轉與凍結時鐘。
-        // shader 失敗時使用同輪廓與材質公式回落，保留降級態不提交外環的既有契約。
+        // 激光环的网格使用同一环心和自转角，着色器与回退路径共用光带轮廓。
         if (HostFxSwitch.beamRingOn()) {
             poseStack.pushPose();
             try {
                 HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
                 HostFxRingTransforms.spin(poseStack, spinDeg);
                 final float[] ringGlow = HostFxSwitch.beamRingGlowRgb(HostFxBeamRingGeom.GLOW_RGB);
-                lastRingPasses = HostFxBeamRing.draw(poseStack, seconds, spinDeg,
+                lastRingPasses = HostFxBeamRing.draw(poseStack, seconds,
                         camSpin[0], camSpin[1], camSpin[2],
                         ringGlow);
                 if (lastRingPasses == 0) {
-                    lastFallbackRingQuads = HostFxBeamRing.drawFallback(poseStack, seconds, spinDeg,
+                    lastFallbackRingQuads = HostFxBeamRing.drawFallback(poseStack, seconds,
                             camSpin[0], camSpin[1], camSpin[2],
                             ringGlow);
                     lastQuads += lastFallbackRingQuads;
                     lastBatches++;
                 }
                 // 山海：結構錨點已各自套用環／飛船的旋轉，靜態外殼不能跟著整圈轉。
-                HostFxRingTransforms.spin(poseStack, -spinDeg);
-                final var lightning = GuixuStructureLightning.frame(net.minecraft.client.Minecraft.getInstance().level,
-                        controllerPos, facing, seconds, spinSeconds);
-                final int lightningQuads = HostFxBeamRing.drawLightning(poseStack, lightning, ringGlow);
-                if (lightningQuads > 0) {
-                    lastQuads += lightningQuads;
-                    lastBatches++;
+                if (structureLightning) {
+                    HostFxRingTransforms.spin(poseStack, -spinDeg);
+                    final var lightning = GuixuStructureLightning.frame(net.minecraft.client.Minecraft.getInstance().level,
+                            controllerPos, facing, seconds, spinSeconds);
+                    final int lightningQuads = HostFxBeamRing.drawLightning(poseStack, lightning, ringGlow);
+                    if (lightningQuads > 0) {
+                        lastQuads += lightningQuads;
+                        lastBatches++;
+                    }
                 }
             } finally {
                 poseStack.popPose();

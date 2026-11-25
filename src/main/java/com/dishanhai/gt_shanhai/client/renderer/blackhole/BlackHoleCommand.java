@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.client.renderer.blackhole;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.config.KerrRenderConfig.Parameter;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -80,6 +81,7 @@ public final class BlackHoleCommand {
 
     private static LiteralArgumentBuilder<CommandSourceStack> bhBranch() {
         return Commands.literal(ARG)
+                .then(kerrBranch())
                 // 裸 /shanhai bh = status（最常敲的那条，省一次输入）
                 .executes(ctx -> {
                     status(ctx.getSource());
@@ -282,14 +284,11 @@ public final class BlackHoleCommand {
                     status(ctx.getSource());
                     return 1;
                 }))
-                // ---- 验兜底（故意让 shader 加载失败）----
+                // Simulate a shader failure to verify suppression and recovery.
                 .then(Commands.literal("test").executes(ctx -> {
                     BlackHoleLensRenderer.requestSimulatedFailure();
                     log("test(simulated_failure)", ctx.getSource());
-                    reply(ctx.getSource(), "§e已请求「模拟一次 shader 加载失败」§7 ⇒ 下一帧会走二级兜底，"
-                            + "并打一行 §f[SHANHAI-BH] fallback=2 reason=shader_load:simulated_by_command");
-                    reply(ctx.getSource(), "§7看画面应从「背景被扭曲」变成「静态黑盘+光环」；"
-                            + "改回来用 §f/shanhai bh reload");
+                    reply(ctx.getSource(), KerrDebugScreen.label("test_failure").getString());
                     return 1;
                 }))
                 // ---- 重试一级（资源重载 / 验完 test 之后）----
@@ -303,6 +302,37 @@ public final class BlackHoleCommand {
     }
 
     // ------------------------------------------------------------------ 子命令实现
+
+    private static LiteralArgumentBuilder<CommandSourceStack> kerrBranch() {
+        var branch = Commands.literal("kerr").executes(ctx -> {
+            reply(ctx.getSource(), KerrControls.describe());
+            reply(ctx.getSource(), BlackHoleLensRenderer.kerrStatus());
+            return 1;
+        }).then(Commands.literal("panel").executes(ctx -> {
+            Minecraft client = Minecraft.getInstance();
+            client.tell(() -> client.setScreen(new KerrDebugScreen()));
+            return 1;
+        }));
+        for (Parameter parameter : Parameter.values()) {
+            String key = KerrDebugScreen.key(parameter);
+            branch.then(Commands.literal(key)
+                    .then(Commands.literal("auto").executes(ctx -> {
+                        KerrControls.follow(parameter);
+                        reply(ctx.getSource(), Component.translatable("gt_shanhai.kerr.following",
+                                KerrDebugScreen.label(key)).getString());
+                        return 1;
+                    }))
+                    .then(Commands.argument("value", DoubleArgumentType.doubleArg(parameter.min, parameter.max))
+                            .executes(ctx -> {
+                                double value = DoubleArgumentType.getDouble(ctx, "value");
+                                KerrControls.set(parameter, value);
+                                reply(ctx.getSource(), Component.translatable("gt_shanhai.kerr.updated",
+                                        KerrDebugScreen.label(key), value).getString());
+                                return 1;
+                            })));
+        }
+        return branch;
+    }
 
     /**
      * {@code /shanhai bh center <x> <y> <z>}。

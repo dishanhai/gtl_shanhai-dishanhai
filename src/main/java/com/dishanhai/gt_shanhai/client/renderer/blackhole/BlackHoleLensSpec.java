@@ -199,11 +199,8 @@ public final class BlackHoleLensSpec {
     public record KerrParameters(float spin, float horizon, float diskInner) {}
 
     public static KerrParameters kerrParameters(double spin) {
-        double spinSquared = spin * spin;
-        double z1 = 1 + Math.cbrt(1 - spinSquared) * (Math.cbrt(1 + spin) + Math.cbrt(1 - spin));
-        double z2 = Math.sqrt(3 * spinSquared + z1 * z1);
-        double isco = 3 + z2 - Math.sqrt((3 - z1) * (3 + z1 + 2 * z2));
-        return new KerrParameters((float) spin, (float) (1 + Math.sqrt(1 - spinSquared)), (float) isco);
+        var geometry = new KerrGeometry(spin);
+        return new KerrParameters((float) spin, (float) geometry.outerHorizon(), (float) geometry.isco(1));
     }
 
     /** 盘法线的方位角（度）—— 只影响"盘朝哪边斜"，环是轴对称的，取 20° 让盘不与 4 条辐条共面。 */

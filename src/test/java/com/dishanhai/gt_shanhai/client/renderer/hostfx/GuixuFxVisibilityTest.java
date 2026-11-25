@@ -2,6 +2,10 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 
 // Author: dishanhai
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.core.Direction;
+import java.lang.reflect.Proxy;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,5 +42,26 @@ class GuixuFxVisibilityTest {
         assertTrue(GuixuStarField.skyCount(1, true) <= 96);
         assertTrue(GuixuNebulaField.PATCH_COUNT <= 48);
         assertTrue(GuixuNebulaField.patchCount(true, true) <= 16);
+    }
+
+    @Test void accretionTailCrossesTheViewWithItsHeadOffscreen() {
+        double seconds = 3.05;
+        double phase = GuixuStarField.accretionPhase(0, seconds);
+        var tail = GuixuStarField.accretionPosition(0, phase - .19, 6);
+        var head = GuixuStarField.accretionPosition(0, phase, 6);
+        var rotation = GuixuStarRenderer.diskRotation(Direction.EAST);
+        var center = rotation.transform(new Vector3f((float) tail.x(), (float) tail.y(), (float) tail.z()));
+        var tip = rotation.transform(new Vector3f((float) head.x(), (float) head.y(), (float) head.z()));
+        var clip = new Matrix4f().scaling(2).translate(-center.x, -center.y, -center.z);
+        assertFalse(HostFxVisibility.isVisible(clip, tip.x, tip.y, tip.z, .3F));
+        int[] count = {0};
+        var vertices = (VertexConsumer) Proxy.newProxyInstance(VertexConsumer.class.getClassLoader(),
+                new Class<?>[]{VertexConsumer.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("endVertex")) count[0]++;
+                    return proxy;
+                });
+        GuixuStarRenderer.drawAccretionTrails(vertices, new Matrix4f(), clip, new float[]{0, 0, 20},
+                Direction.EAST, seconds, 6, 1, .5F);
+        assertTrue(count[0] >= 4 && count[0] < 20);
     }
 }

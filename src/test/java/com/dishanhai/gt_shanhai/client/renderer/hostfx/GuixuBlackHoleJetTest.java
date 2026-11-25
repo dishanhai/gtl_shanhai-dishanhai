@@ -23,7 +23,8 @@ class GuixuBlackHoleJetTest {
             for (int cameraPole : new int[]{-1, 1}) {
                 var camera = new Vector3f(axis).mul(cameraPole * 50).rotateY(-yaw);
                 var capture = new JetCapture(axis);
-                GuixuStarRenderer.drawJets(capture.vertices(), new Matrix4f().rotateY(yaw),
+                Matrix4f model = new Matrix4f().rotateY(yaw);
+                GuixuStarRenderer.drawJets(capture.vertices(), model, new Matrix4f().scaling(.02F).mul(model),
                         new float[]{camera.x, camera.y, camera.z}, facing, 3.0, 5.0, 1.0F);
                 assertTrue(capture.count[0] > 0, "Each jet must emit vertices");
                 assertEquals(capture.count[0], capture.count[1]);
@@ -38,6 +39,25 @@ class GuixuBlackHoleJetTest {
                         "Approaching jet must be brighter");
             }
         }
+    }
+
+    @Test
+    void closeViewSubmitsOnlyIntersectingJetSectionsIncludingGrazingFacets() {
+        var axis = new Vector3f(BlackHoleLensSpec.diskNormal());
+        var worldToJet = GuixuStarRenderer.diskRotation(Direction.EAST).conjugate();
+        var camera = new float[]{0, 0, 0};
+        var onePole = new JetCapture(axis);
+        var clip = new Matrix4f().perspective(1.2F, 1, .05F, 64)
+                .lookAt(0, 0, 0, 0, 1, 0, 0, 0, -1).rotate(worldToJet);
+        GuixuStarRenderer.drawJets(onePole.vertices(), new Matrix4f(), clip, camera, Direction.EAST, 3, 5, 1);
+        assertEquals(0, onePole.count[0]);
+        assertEquals(640, onePole.count[1]);
+
+        var grazing = new JetCapture(axis);
+        clip.setOrtho(.2F, .5F, 9, 10, -2, 2).rotate(worldToJet);
+        GuixuStarRenderer.drawJets(grazing.vertices(), new Matrix4f(), clip, camera, Direction.EAST, 3, 5, 1);
+        assertEquals(0, grazing.count[0]);
+        assertEquals(64, grazing.count[1]);
     }
 
     private static final class JetCapture {

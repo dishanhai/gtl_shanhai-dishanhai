@@ -4,6 +4,10 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 import org.junit.jupiter.api.Test;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensSpec;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import org.joml.FrustumIntersection;
+import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GuixuDeepSpaceBackdropTest {
@@ -41,6 +45,27 @@ class GuixuDeepSpaceBackdropTest {
                 if (d > threshold) d = Math.nextDown(d);
                 for (float[] camera : new float[][]{{d, 0, 0}, {0, -d, 0}, {0, 0, d}})
                     assertEquals(0, emission(camera, horizon)[0], "Inside source must contain no black curtain");
+            }
+        }
+    }
+
+    @Test void clippedBackdropKeepsEveryIntersectingQuadAndItsOriginalOpacity() {
+        var complete = new ArrayList<Vector3f>();
+        var clipped = new ArrayList<Vector3f>();
+        var view = new FrustumIntersection(new Matrix4f().setOrtho(.61F, .82F, -.2F, .2F, -1, 1), false);
+        GuixuDeepSpaceBackdrop.drawPatches(null, 1, (x,y,z,a) -> complete.add(new Vector3f(x,y,a)));
+        GuixuDeepSpaceBackdrop.drawPatches(view, 1, (x,y,z,a) -> clipped.add(new Vector3f(x,y,a)));
+        assertEquals(1536, complete.size());
+        assertTrue(clipped.size() > 0 && clipped.size() < complete.size() / 2);
+        for (int i = 0; i < complete.size(); i += 4) {
+            var quad = complete.subList(i, i + 4);
+            float x0 = 1, y0 = 1, x1 = -1, y1 = -1;
+            for (var p : quad) {
+                x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+                y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+            }
+            if (view.testAab(x0, y0, 0, x1, y1, 0)) {
+                assertTrue(java.util.Collections.indexOfSubList(clipped, quad) >= 0);
             }
         }
     }

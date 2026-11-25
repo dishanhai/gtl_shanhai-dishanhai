@@ -8,8 +8,7 @@
   "fragment": "gt_shanhai:shanhai_host_beam_ring",
   "attributes": [
     "Position",
-    "UV0",
-    "UV1"
+    "UV0"
   ],
   "samplers": [],
   "uniforms": [
@@ -86,6 +85,18 @@
       "values": [
         0.0
       ]
+    },
+    {
+      "name": "WarpPhase",
+      "type": "float",
+      "count": 1,
+      "values": [0.0]
+    },
+    {
+      "name": "BeamBrightness",
+      "type": "float",
+      "count": 1,
+      "values": [1.0]
     }
   ]
 }

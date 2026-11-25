@@ -4,6 +4,7 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 public final class GuixuStarField {
     public static final int PARTICLE_COUNT = 192;
     public static final int SKY_COUNT = 512;
+    public static final double SKY_OUTER_RADIUS = 168.0;
     public static final int ORBIT_COUNT = 64;
     public static final int METEOR_COUNT = 8;
     public static final int VOLUME_COUNT = 384;
@@ -38,8 +39,9 @@ public final class GuixuStarField {
 
     /** 山海：外圍星帶與球殼，位置緩慢漂移，亮度各自閃爍。 */
     public static Sample sampleSky(int index, double seconds) {
-        double radius = 76.0 + seed(index, 11) * 28.0;
-        double vertical = (seed(index, 12) * 2.0 - 1.0) * (index % 3 == 0 ? 1.0 : 0.12);
+        double radius = 76.0 + (SKY_OUTER_RADIUS - 76.0) * seed(index, 11);
+        double latitude = seed(index, 12) * 2.0 - 1.0;
+        double vertical = index % 2 == 0 ? latitude : .24 * latitude;
         double angle = seed(index, 13) * TAU + seconds * 0.0012;
         double radial = radius * Math.sqrt(1.0 - vertical * vertical);
         double planeZ = Math.sin(angle) * radial;
@@ -50,7 +52,9 @@ public final class GuixuStarField {
                 planeZ * Math.cos(tilt) - height * Math.sin(tilt));
         double twinkle = 0.5 + 0.5 * Math.sin(seconds * (0.5 + seed(index, 14)) + seed(index, 15) * TAU);
         float size = (float) (index % 17 == 0 ? 0.30 + seed(index, 16) * 0.18 : 0.12 + seed(index, 16) * 0.12);
-        return ambient(point, point, size, (float) (0.42 + twinkle * 0.48), index % 13 == 0);
+        // Maintain angular size in the distant layer; fading stays continuous during approach.
+        return ambient(point, point, size * (float) Math.sqrt(radius / 90.0),
+                (float) (.55 + twinkle * .36), index % 9 == 0);
     }
 
     /** 外環之外的星塵，沿上下起伏的軌道掠過結構。 */

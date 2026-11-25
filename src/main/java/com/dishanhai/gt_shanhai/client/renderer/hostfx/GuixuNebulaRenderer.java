@@ -1,12 +1,12 @@
 package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.renderer.MultiBufferSource;
-import org.joml.Matrix4f;
 import org.joml.Matrix3f;
+import org.joml.Matrix4f;
 
 /** 山海：連續寬旋臂；彩色絲狀雲氣單批提交，不以重疊粒子堆亮度。 */
 public final class GuixuNebulaRenderer {
@@ -20,60 +20,98 @@ public final class GuixuNebulaRenderer {
 
     public static void render(PoseStack pose, float[] camera, double seconds, float brightness,
                               boolean enabled, boolean degraded, boolean infall, double horizon) {
-        int count = GuixuNebulaField.patchCount(enabled, degraded);
-        if (count == 0) return;
+        if (!enabled) return;
+        Matrix4f matrix = pose.last().pose();
+        Matrix4f clip = new Matrix4f(RenderSystem.getProjectionMatrix()).mul(matrix);
+        if (!HostFxVisibility.isVisible(clip, 0, 0, 0, GuixuNebulaField.BOUNDS_RADIUS)) return;
         boolean dynamicShader = GuixuNebulaShader.prepare(seconds, degraded);
         var layer = HostFxDraw.nebulaLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
-        VertexConsumer vertices = buffers.getBuffer(layer);
-        Matrix4f matrix = pose.last().pose();
-        Matrix3f normalMatrix = pose.last().normal();
-        Matrix4f clip = new Matrix4f(RenderSystem.getProjectionMatrix()).mul(matrix);
         float light = (0.82F + 0.18F * brightness) * (degraded ? 0.72F : 1F);
-        int segments = count / (2 * GuixuNebulaField.LAYER_COUNT);
-        int stride = GuixuNebulaField.SEGMENTS_PER_ARM / segments;
-        for (int cloudLayer = 0; cloudLayer < GuixuNebulaField.LAYER_COUNT + (infall ? 1 : 0); cloudLayer++) for (int arm = 0; arm < 2; arm++) {
-            int start = arm * (GuixuNebulaField.SEGMENTS_PER_ARM + 1);
-            boolean stream = cloudLayer == GuixuNebulaField.LAYER_COUNT;
-            var a = stream ? GuixuNebulaField.sampleInfall(start, seconds, horizon)
-                    : GuixuNebulaField.sample(start, seconds, cloudLayer);
-            for (int step = 1; step <= segments; step++) {
-                var b = stream ? GuixuNebulaField.sampleInfall(start + step * stride, seconds, horizon)
-                        : GuixuNebulaField.sample(start + step * stride, seconds, cloudLayer);
-                float x = (float) ((a.x() + b.x()) * 0.5), y = (float) ((a.y() + b.y()) * 0.5);
-                float z = (float) ((a.z() + b.z()) * 0.5);
-                double dx = a.x() - b.x(), dy = a.y() - b.y(), dz = a.z() - b.z();
-                float radius = Math.max(a.width(), b.width()) + (float) (0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz));
-                // 包含兩端截面全寬，中心在畫面外時仍保留可見雲邊。
-                if (HostFxVisibility.isVisible(clip, x, y, z, radius)) {
-                    float alphaA = a.alpha() * light * proximityFade(a, camera);
-                    float alphaB = b.alpha() * light * proximityFade(b, camera);
-                    vertex(vertices, matrix, normalMatrix, a, -1, 0, alphaA, dynamicShader, seconds);
-                    vertex(vertices, matrix, normalMatrix, b, -1, 0, alphaB, dynamicShader, seconds);
-                    vertex(vertices, matrix, normalMatrix, b, 1, 1, alphaB, dynamicShader, seconds);
-                    vertex(vertices, matrix, normalMatrix, a, 1, 1, alphaA, dynamicShader, seconds);
-                }
-                a = b;
-            }
-        }
+        drawVisibleSections(buffers.getBuffer(layer), matrix, pose.last().normal(), clip, camera,
+                seconds, light, degraded, infall, horizon, dynamicShader);
         buffers.endBatch(layer);
     }
 
-    /** 飛入雲帶時柔和淡出，避免近處大面積覆蓋控制室或相機。 */
-    private static float proximityFade(GuixuNebulaField.Knot knot, float[] camera) {
-        double dx = camera[0] - knot.x(), dy = camera[1] - knot.y(), dz = camera[2] - knot.z();
-        return (float) Math.max(0, Math.min(1, (Math.sqrt(dx * dx + dy * dy + dz * dz) - 12) / 20));
+    static void drawVisibleSections(VertexConsumer vertices, Matrix4f matrix, Matrix3f normalMatrix,
+                                    Matrix4f clip, float[] camera, double seconds, float light,
+                                    boolean degraded, boolean infall, double horizon, boolean dynamicShader) {
+        int segments = GuixuNebulaField.patchCount(true, degraded) / (2 * GuixuNebulaField.LAYER_COUNT);
+        int stride = GuixuNebulaField.SEGMENTS_PER_ARM / segments;
+        float fallbackPhase = dynamicShader ? 0 : GuixuNebulaField.materialPhase(seconds);
+        var frame = new GuixuNebulaField.Frame(seconds, horizon);
+        var a = new Section();
+        var b = new Section();
+        int layers = GuixuNebulaField.LAYER_COUNT + (infall ? 1 : 0);
+        for (int cloudLayer = 0; cloudLayer < layers; cloudLayer++) {
+            for (int arm = 0; arm < 2; arm++) {
+                int start = arm * (GuixuNebulaField.SEGMENTS_PER_ARM + 1);
+                a.sample(frame, start, cloudLayer, camera, light);
+                for (int step = 1; step <= segments; step++) {
+                    b.sample(frame, start + step * stride, cloudLayer, camera, light);
+                    if ((a.alpha > 0 || b.alpha > 0) && visible(clip, a, b)) {
+                        a.prepare(dynamicShader, fallbackPhase, normalMatrix);
+                        b.prepare(dynamicShader, fallbackPhase, normalMatrix);
+                        a.vertex(vertices, matrix, -1, 0);
+                        b.vertex(vertices, matrix, -1, 0);
+                        b.vertex(vertices, matrix, 1, 1);
+                        a.vertex(vertices, matrix, 1, 1);
+                    }
+                    Section previous = a;
+                    a = b;
+                    b = previous;
+                }
+            }
+        }
     }
 
-    private static void vertex(VertexConsumer vertices, Matrix4f matrix, Matrix3f normalMatrix, GuixuNebulaField.Knot knot,
-                               float sign, float v, float alpha, boolean dynamicShader, double seconds) {
-        float width = knot.width() * sign;
-        vertices.vertex(matrix, (float) (knot.x() + knot.sideX() * width), (float) (knot.y() + knot.sideY() * width),
-                        (float) (knot.z() + knot.sideZ() * width))
-                .uv(dynamicShader ? knot.u() : GuixuNebulaField.fallbackU(knot.u(), seconds), v)
-                .color(knot.red(), knot.green(), knot.blue(), alpha)
-                .normal(normalMatrix, (float) (knot.tangentY() * knot.sideZ() - knot.tangentZ() * knot.sideY()),
-                        (float) (knot.tangentZ() * knot.sideX() - knot.tangentX() * knot.sideZ()),
-                        (float) (knot.tangentX() * knot.sideY() - knot.tangentY() * knot.sideX())).endVertex();
+    private static boolean visible(Matrix4f clip, Section a, Section b) {
+        float x = (float) ((a.x + b.x) * 0.5), y = (float) ((a.y + b.y) * 0.5);
+        float z = (float) ((a.z + b.z) * 0.5);
+        double dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y), dz = Math.abs(a.z - b.z);
+        // 可见性函数使用轴对齐包围盒。每轴都覆盖两端完整截面，云边仍能从屏外进入。
+        float halfExtent = Math.max(a.width, b.width) + (float) (0.5 * Math.max(dx, Math.max(dy, dz)));
+        return HostFxVisibility.isVisible(clip, x, y, z, halfExtent);
+    }
+
+    /** 相邻两片共用截面，沿脊线只更新一次可见截面的 UV、法线和两侧位置。 */
+    private static final class Section extends GuixuNebulaField.Sample {
+        private boolean prepared;
+        private double edgeX, edgeY, edgeZ;
+        private float nx, ny, nz;
+
+        void sample(GuixuNebulaField.Frame frame, int index, int layer, float[] camera, float light) {
+            if (layer == GuixuNebulaField.LAYER_COUNT) frame.sampleInfall(index, this);
+            else frame.sample(index, layer, this);
+            double dx = camera[0] - x, dy = camera[1] - y, dz = camera[2] - z;
+            double distanceSquared = dx * dx + dy * dy + dz * dz;
+            // 飞入云带时淡出。仅在 12 至 32 格的过渡区计算距离。
+            float fade = distanceSquared >= 32 * 32 ? 1 : distanceSquared <= 12 * 12 ? 0
+                    : (float) ((Math.sqrt(distanceSquared) - 12) / 20);
+            alpha = alpha * light * fade;
+            prepared = false;
+        }
+
+        void prepare(boolean dynamicShader, float fallbackPhase, Matrix3f normal) {
+            if (prepared) return;
+            if (!dynamicShader) u = GuixuNebulaField.fallbackMaterialU(u, fallbackPhase);
+            edgeX = sideX * width;
+            edgeY = sideY * width;
+            edgeZ = sideZ * width;
+            float x = (float) (tangentY * sideZ - tangentZ * sideY);
+            float y = (float) (tangentZ * sideX - tangentX * sideZ);
+            float z = (float) (tangentX * sideY - tangentY * sideX);
+            nx = normal.m00() * x + normal.m10() * y + normal.m20() * z;
+            ny = normal.m01() * x + normal.m11() * y + normal.m21() * z;
+            nz = normal.m02() * x + normal.m12() * y + normal.m22() * z;
+            prepared = true;
+        }
+
+        void vertex(VertexConsumer vertices, Matrix4f matrix, int sign, float v) {
+            vertices.vertex(matrix, (float) (x + sign * edgeX), (float) (y + sign * edgeY), (float) (z + sign * edgeZ))
+                    .uv(u, v)
+                    .color(red, green, blue, alpha)
+                    .normal(nx, ny, nz).endVertex();
+        }
     }
 }

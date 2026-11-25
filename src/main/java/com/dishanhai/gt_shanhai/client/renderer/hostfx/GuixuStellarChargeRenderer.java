@@ -15,14 +15,13 @@ final class GuixuStellarChargeRenderer {
     private final Vector3f camera, view = new Vector3f(), side = new Vector3f(), up = new Vector3f();
     private final Vector3f start = new Vector3f(), end = new Vector3f();
     private final Vector3f a = new Vector3f(), b = new Vector3f(), point = new Vector3f();
-    private final double seconds, elapsed;
+    private final double elapsed;
 
-    GuixuStellarChargeRenderer(VertexConsumer vertices, Matrix4f matrix, float[] camera, double seconds) {
+    GuixuStellarChargeRenderer(VertexConsumer vertices, Matrix4f matrix, float[] camera, double elapsed) {
         this.vertices = vertices;
         this.matrix = matrix;
         this.camera = new Vector3f(camera[0], camera[1], camera[2]);
-        this.seconds = seconds;
-        this.elapsed = seconds - GuixuStellarEnd.STRUCTURE_START_SECONDS;
+        this.elapsed = elapsed;
     }
 
     void feeds(float horizon, float spinSeconds) {
@@ -77,9 +76,9 @@ final class GuixuStellarChargeRenderer {
             Point p = centers[i];
             if (p == null || elapsed <= arrivals[i]) continue;
             double since = elapsed - arrivals[i];
-            float charge = (float) GuixuStellarEnd.structureCharge(seconds, arrivals[i]);
+            float charge = (float) GuixuStellarEnd.structureCharge(elapsed, arrivals[i]);
             float wave = (float) Math.sin(Math.PI * Math.clamp(since / 1.42, 0, 1));
-            float steady = charge * (.29F + .10F * (float) Math.sin(seconds * 1.4 - arrivals[i] + i * .21));
+            float steady = charge * (.29F + .10F * (float) Math.sin(elapsed * 1.4 - arrivals[i] + i * .21));
             node((float) p.x(), (float) p.y(), (float) p.z(), steady + wave * .59F, .69F + wave * .75F);
         }
     }

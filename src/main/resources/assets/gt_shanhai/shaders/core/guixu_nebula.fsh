@@ -15,7 +15,12 @@ vec2 mirrorFlow(vec2 uv) {
 }
 
 void main() {
-    float edge = smoothstep(0.0, 0.12, texCoord.y) * smoothstep(0.0, 0.12, 1.0 - texCoord.y);
+    float edge = smoothstep(0.0, 0.12, min(texCoord.y, 1.0 - texCoord.y));
+    // 掠视截面柔和淡出；用一次逆平方根同时归一化两个向量。
+    float facing = abs(dot(viewNormal, viewPosition))
+        * inversesqrt(max(1e-12, dot(viewNormal, viewNormal) * dot(viewPosition, viewPosition)));
+    float softFacing = smoothstep(0.05, 0.60, facing);
+
     float drift = NebulaPhase / 3.141592653589793;
     vec2 warp = vec2(sin(texCoord.y * 8.0 + NebulaPhase * 2.0) + sin(texCoord.x * 11.0 - NebulaPhase),
                      cos(texCoord.x * 9.0 + NebulaPhase)) * 0.021;
@@ -26,8 +31,5 @@ void main() {
         gas = mix(gas, counterFlow, 0.38 + 0.08 * sin(NebulaPhase + texCoord.x * 6.0));
     }
     float pulse = 0.92 + 0.08 * sin(NebulaPhase * 2.0 + texCoord.x * 11.0 + texCoord.y * 3.0);
-    // 掠視截面柔和淡出，避免豎向雲體在輪廓形成硬直立邊；不額外取樣貼圖。
-    float facing = abs(dot(viewNormal, viewPosition)) / max(0.000001, length(viewNormal) * length(viewPosition));
-    float softFacing = smoothstep(0.05, 0.60, facing);
     fragColor = vec4(gas.rgb, gas.a * edge * pulse * softFacing) * vertexColor * ColorModulator;
 }

@@ -3,58 +3,58 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 // Author: dishanhai
 import java.util.Locale;
 
-/** 山海歸墟外緣吸積帶：保留 51–57 格結構間隙，以微翹曲的雙面薄帶替代發光管。 */
+/** 归墟激光环的局部薄带网格，保留 51–57 格的结构间隙。 */
 public final class HostFxBeamRingGeom {
     private HostFxBeamRingGeom() {}
-    public static final float RING_R = 54F;
-    public static final float TUBE_R = 3F;
-    /** 舊欄位名保留：現在表示徑向寬度，不是管徑。 */
-    public static final float DIAMETER = 6F;
-    public static final float CENTER_Y = 0F;
+    static final float WIDTH = GuixuAccretionFlow.OUTER_RADIUS - GuixuAccretionFlow.INNER_RADIUS;
     public static final float OUTER_BAND_INNER_FACE = 58.5F;
-    public static final int SEGMENTS = 192;
-    public static final int FACETS = 16;
+    static final int SEGMENTS = 192;
+    static final int RADIAL_CELLS = 4;
+    static final int FALLBACK_SEGMENTS = 96;
+    static final int FALLBACK_RADIAL_CELLS = 12;
     public static final float[] GLOW_RGB = {1F, 1F, 1F};
 
-    public interface Sink {
-        void vertex(float x, float y, float z, float nx, float ny, float nz,
-                    float u, float v, float alpha, float azimuthDeg);
+    record Knot(float x, float z, float radial, float angle) {}
+
+    interface QuadSink {
+        void quad(int a, int b, int c, int d);
     }
-    public static int triangleCount() { return SEGMENTS * FACETS * 2; }
-    public static int vertexCount() { return triangleCount() * 3; }
+
+    record Mesh(Knot[] knots, int columnSize) {
+        void forEachQuad(QuadSink sink) {
+            for (int column = 0; column < knots.length - columnSize; column += columnSize) {
+                for (int row = 0; row < columnSize - 1; row++) {
+                    int a = column + row;
+                    int d = a + columnSize;
+                    sink.quad(a, a + 1, d + 1, d);
+                }
+            }
+        }
+    }
+
     public static float innerEdge() { return GuixuAccretionFlow.INNER_RADIUS; }
     public static float outerEdge() { return GuixuAccretionFlow.OUTER_RADIUS; }
 
-    /**
-     * 沿用舊入口名，每格輸出兩個三角形；spinDeg 由上層矩陣處理，網格不重複自轉。
-     * UV0 = (歸一化半徑, 角度)，無須貼圖。
-     */
-    public static int emitTube(Sink sink, float radiusScale, float alpha, float tick, float spinDeg) {
-        float seconds = tick / 20F;
-        for (int i = 0; i < SEGMENTS; i++) {
-            float a = (float) (2 * Math.PI * i / SEGMENTS);
-            float b = (float) (2 * Math.PI * (i + 1) / SEGMENTS);
-            for (int j = 0; j < FACETS; j++) {
-                float s = j / (float) FACETS, t = (j + 1) / (float) FACETS;
-                vertex(sink, s, a, seconds, radiusScale, alpha);
-                vertex(sink, t, a, seconds, radiusScale, alpha);
-                vertex(sink, t, b, seconds, radiusScale, alpha);
-                vertex(sink, s, a, seconds, radiusScale, alpha);
-                vertex(sink, t, b, seconds, radiusScale, alpha);
-                vertex(sink, s, b, seconds, radiusScale, alpha);
+    static Mesh mesh(int segments, int radialCells) {
+        int columnSize = radialCells + 1;
+        Knot[] knots = new Knot[(segments + 1) * columnSize];
+        for (int i = 0; i <= segments; i++) {
+            double angle = 2 * Math.PI * i / segments;
+            // 两列共享精确的位置，保留相差 2π 的 UV 供各自的片元插值。
+            float cos = i == segments ? 1 : (float) Math.cos(angle);
+            float sin = i == segments ? 0 : (float) Math.sin(angle);
+            for (int j = 0; j <= radialCells; j++) {
+                float s = j / (float) radialCells;
+                float radius = innerEdge() + WIDTH * s;
+                knots[i * columnSize + j] = new Knot(radius * cos, radius * sin, s, (float) angle);
             }
         }
-        return vertexCount();
+        return new Mesh(knots, columnSize);
     }
-    private static void vertex(Sink sink, float s, float angle, float seconds, float scale, float alpha) {
-        float radius = RING_R + (s - .5F) * DIAMETER * scale;
-        float x = radius * (float) Math.cos(angle), z = radius * (float) Math.sin(angle);
-        sink.vertex(x, CENTER_Y + GuixuAccretionFlow.height(s, angle, seconds), z,
-                0, 1, 0, s, angle, alpha, (float) Math.toDegrees(angle));
-    }
+
     public static String stats() {
-        return String.format(Locale.ROOT, "吸積流 r=%.2f..%.2f 厚度≤%.2f / %d×%d / 單遍暖白流紋",
-                innerEdge(), outerEdge(), GuixuAccretionFlow.HALF_HEIGHT * 2, SEGMENTS, FACETS);
+        return String.format(Locale.ROOT, "激光环 r=%.2f..%.2f 厚度≤%.2f / %d×%d / 单遍静态网格",
+                innerEdge(), outerEdge(), GuixuAccretionFlow.HALF_HEIGHT * 2, SEGMENTS, RADIAL_CELLS);
     }
     /** 比對既有台帳包圍盒；機器與輻條交叉位置交由深度測試遮擋。 */
     public static String selfCheck() {

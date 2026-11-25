@@ -22,6 +22,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.List;
+
 /**
  * 归墟视界枢核 · <b>动态特效渲染器</b>（TESR）。
  *
@@ -405,10 +407,13 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             //    4 条解压机主喷口光柱 + 中央上下 2 根主光柱 → 伪神之锻炉那套（同一份 shader + space_layer 贴图）。
             //    几何在 HostFxGeometry.buildBeamQuads，状态与提交在 HostFxDraw / HostFxPillarBeam。
             final Vec3 cam = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+            final long gameTick = clientLevel.getGameTime();
+            final double effectTick = gameTick + (double) partialTick;
+            final double effectSeconds = effectTick / 20.0;
             final long stellarEndStart = host.getStellarEndStartTick();
             final boolean stellarEndActive = stellarEndStart >= 0 && host.isHostFxEnabled();
             final double stellarEndSeconds = stellarEndActive
-                    ? Math.max(0, (clientLevel.getGameTime() - stellarEndStart + (double) partialTick) / 20.0) : 0;
+                    ? Math.max(0, (gameTick - stellarEndStart + (double) partialTick) / 20.0) : 0;
             final boolean blackHoleVisible = clientLevel.hasChunkAt(controllerPos) && clientLevel.hasChunkAt(center)
                     && !GuixuAnnihilationFx.isPreviewing(clientLevel, controllerPos)
                     && BlackHoleTuning.withinChunkRenderDistance(cam.x, cam.z,
@@ -425,33 +430,19 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             }
             // 黑洞表面半径：优先用 blackhole 包这一帧真正用的视界半径（× B_CRIT）
             final float holeR = blackHoleVisible ? HostFxBlackHole.surfaceRadius() : HostFxState.holeRadiusBlocks();
-            final double effectTick = clientLevel.getGameTime() + (double) partialTick;
-            final double effectSeconds = effectTick / 20.0;
             final boolean drawBlackHole = BlackHoleTuning.enabled() && blackHoleVisible;
             final var preview = drawBlackHole
                     ? GuixuBlackHolePreview.sample(host.getBlackHolePreviewStartTick(), effectTick) : null;
             final boolean linkedMatterActive = host.isNyarlathotepLinkReady() && drawBlackHole;
             final boolean simpleAccretion = HostFxSwitch.degraded() || HostFxFallback.level() >= HostFxFallback.LEVEL_SIMPLE;
+            final var stellar = stellarEndActive
+                    ? GuixuStellarEnd.sample(stellarEndSeconds, drawBlackHole ? holeR : 0, simpleAccretion) : null;
             final int accretionTrails = simpleAccretion ? GuixuStarField.SIMPLE_ACCRETION_TRAILS : GuixuStarField.ACCRETION_TRAILS;
             final boolean backgroundInfall = drawBlackHole && !stellarEndActive;
             float feed = backgroundInfall ? GuixuStarField.accretionFeed(effectSeconds, accretionTrails) : 0;
             if (linkedMatterActive) feed += .46F;
-            if (stellarEndActive && drawBlackHole) feed += GuixuStellarEnd.accretionFeed(stellarEndSeconds);
+            if (stellar != null) feed += stellar.accretionFeed() + .72F * stellar.horizonGlow();
             final float diskHeat = host.updateAccretionHeat(effectSeconds, feed);
-
-            // ⑥.5 黑洞<b>安全兜底</b>：纯顶点 billboard（黑盘 + 光子环 + 光晕 + 吸积盘）。
-            //     只在"真路径这一帧没画"时顶上（HostFxBlackHole.active() 逐条判据见类注释）。
-            if (blackHoleVisible && HostFxBlackHole.active()) {
-                final float[] camLocal =
-                        HostFxBlackHole.cameraLocal(facing, cam.x, cam.y, cam.z, controllerPos);
-                poseStack.pushPose();
-                try {
-                    HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
-                    HostFxBlackHole.render(poseStack, camLocal[0], camLocal[1], camLocal[2], seconds, holeR, diskHeat, facing);
-                } finally {
-                    poseStack.popPose();
-                }
-            }
 
             // 🔴 seconds 必须传进去：粒子沿轴流动的相位来自它（停世界 ⇒ 自然冻结）
             //    第八改起：这个调用里还包含【内外环之间那圈粗光柱环】（HostFxBeamRing）。
@@ -460,8 +451,9 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             //    UV 流动仍用 seconds（世界时间）：降级态中央两束是"红的、还在流"，那是刻意保留的
             //    "仍通电"信号（用户只要求"不转"，没要求"光也冻住"）。
             final var profile = host.getVisualProfile(effectSeconds);
+            final boolean structureFinale = stellar != null && stellar.stage() == GuixuStellarEnd.Stage.STRUCTURE;
             HostFxDraw.drawBeams(poseStack, cx, cy, cz, facing, controllerPos, cam.x, cam.y, cam.z,
-                    holeR, HostFxGeometry.ringDeg(spinSeconds), seconds, profile.brightness(), spinSeconds);
+                    holeR, HostFxGeometry.ringDeg(spinSeconds), seconds, profile.brightness(), spinSeconds, !structureFinale);
 
             // 山海：保留 master 的狀態密度、亮度、噴流及向黑洞收束的星辰效果。
             final double starHorizon = BlackHoleLensRenderer.rsBlocks() * BlackHoleLensMath.B_CRIT;
@@ -469,23 +461,21 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             poseStack.pushPose();
             try {
                 HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
-                final var stellarWaves = GuixuStellarEnd.activeGravityWaves(stellarEndSeconds,
-                        stellarEndActive && drawBlackHole ? holeR : 0);
-                if (stellarEndActive) {
-                    GuixuStellarEndRenderer.capture(poseStack, clientLevel, controllerPos, facing, starCamera,
-                            stellarEndSeconds, drawBlackHole ? holeR : 0, spinSeconds,
-                            HostFxFallback.level() >= HostFxFallback.LEVEL_SIMPLE, stellarWaves);
+                if (stellar != null) {
+                    GuixuStellarEndRenderer.capture(poseStack, clientLevel, controllerPos, facing, starCamera, spinSeconds, stellar);
                 }
-                // 群星终焉期间只由演出天体提供入流，外围星空与机器喷流按各自状态绘制。
+                // 常态与碎屑供料共用一对喷流，波环与外围星光共用演出的波前。
+                final float jets = stellar == null ? profile.jets() : Math.max(profile.jets(), stellar.outflow());
                 GuixuStarRenderer.render(poseStack, starCamera, effectSeconds, starHorizon,
-                        profile.density(), profile.brightness(), profile.jets(), drawBlackHole, backgroundInfall,
-                        host.isHostOuterStarsEnabled(), facing, stellarWaves, accretionTrails, diskHeat);
+                        profile.density(), profile.brightness(), jets, drawBlackHole, backgroundInfall,
+                        host.isHostOuterStarsEnabled(), facing, stellar == null ? List.of() : stellar.waves(),
+                        accretionTrails, diskHeat);
                 if (drawBlackHole) {
                     GuixuBlackHoleMechanicsRenderer.render(poseStack, host, facing, holeR,
                             effectTick, simpleAccretion, preview);
                 }
                 GuixuNebulaRenderer.render(poseStack, starCamera, spinSeconds, profile.brightness(),
-                        host.isHostNebulaEnabled(), HostFxSwitch.degraded(), drawBlackHole, starHorizon);
+                        host.isHostNebulaEnabled(), simpleAccretion, drawBlackHole, starHorizon);
                 // 山海：另一端從黑日掠奪的物質由局部通道吐出，收束至本機黑洞。
                 // 環心與四向轉換沿用上方 pivot，不查跨維度客戶端世界。
                 var linkedMatter = com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiNyarlathotepLinkGeometry.frame(

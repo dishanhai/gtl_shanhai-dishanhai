@@ -74,18 +74,16 @@ class IntegrateBlackHoleTest {
     }
 
     @Test
-    void horizonCannotExposeDiskLightAndSubpixelNoiseIsFiltered() throws Exception {
+    void captureAndDiskRadianceAreProducedByGeodesicsBeforeCompositing() throws Exception {
         String shader = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/shaders/core/guixu_blackhole.fsh"));
-        assertTrue(shader.contains("length(cross(bh, dir))"), "Avoid cancellation when looking toward the core");
-        assertTrue(shader.contains("outsideShadow = (1.0 - shadowMask) * maskFade")
-                && shader.contains("emission += diskCol * diskExposure * outsideShadow")
-                && shader.contains("coverage += diskOpacity * (1.0 - shadowMask)"),
-                "Both exterior modes must mask the disk on captured rays");
-        assertTrue(shader.contains("background *= 1.0 - diskOpacity")
-                && shader.contains("coverage += diskOpacity * (1.0 - shadowMask) * (1.0 - backgroundCoverage)"),
-                "Disk absorption must apply exactly once where sampled and live backgrounds meet");
-        assertTrue(shader.contains("dFdx(p)") && shader.contains("dFdy(p)"), "Filter noise at the actual pixel footprint");
-        assertTrue(shader.contains("max(RING_WIDTH, aa)"), "Keep the photon ring resolved at distance");
+        String trace = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/shaders/include/guixu_kerr.glsl"));
+        assertTrue(trace.contains("m.r <= captureRadius"));
+        assertTrue(trace.contains("transferDisk(y, next, k1, k4, pt, stepSize, light)"));
+        assertTrue(shader.contains("float transmitted = light.a * (1.0 - captured)"));
+        assertTrue(shader.contains("mix(1.0, transmitted, edge)"));
+        assertTrue(shader.contains("texture(RayLight"));
+        assertFalse(shader.contains("ringCore"));
+        assertFalse(shader.contains("surfaceRipple"));
     }
 
     @Test
@@ -95,7 +93,7 @@ class IntegrateBlackHoleTest {
         String backgroundCopy = source.substring(source.indexOf("private static boolean copyBackground("),
                 source.indexOf("private static void drainGlErrors("));
         assertFalse(backgroundCopy.contains("copyDepthRect("), "The interior shares the color copy");
-        int gatedCopy = source.indexOf("if (sampleBackground && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {");
+        int gatedCopy = source.indexOf("if (copyWorld && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {");
         assertTrue(gatedCopy >= 0, "Only valid world depth may be copied for lens sampling");
         assertTrue(source.substring(gatedCopy, source.indexOf('}', gatedCopy))
                 .contains("copyDepthRect(f.copyX0, f.copyY0, f.copyW, f.copyH);"));
@@ -107,7 +105,7 @@ class IntegrateBlackHoleTest {
                 + "blackhole/BlackHoleLensRenderer.java"));
         int apply = source.indexOf("public void apply()", source.indexOf("class ExteriorShader"));
         assertTrue(apply >= 0);
-        String body = source.substring(apply, source.indexOf('}', apply));
+        String body = source.substring(apply, source.indexOf("\n        }", apply));
         int applySharedState = body.indexOf("super.apply();");
         int blend = body.indexOf("RenderSystem.enableBlend();");
         assertTrue(applySharedState >= 0 && blend > applySharedState);
@@ -122,13 +120,14 @@ class IntegrateBlackHoleTest {
         String fragment = Files.readString(shaders.resolve("guixu_blackhole.fsh"));
         String program = Files.readString(shaders.resolve("guixu_blackhole.json"));
         assertTrue(source.contains("drawExterior(g, f, depthOk, sampleBackground)"));
-        assertTrue(source.contains("sampleBackground && !ensureBgTexture("));
-        assertTrue(source.contains("sampleBackground && !copyBackground(g, main, f)"));
+        assertTrue(source.contains("copyWorld = sampleBackground && f.kerr.worldSky() > 0.0F"));
+        assertTrue(source.contains("copyWorld && !ensureBgTexture("));
+        assertTrue(source.contains("copyWorld && !copyBackground(g, main, f)"));
         assertTrue(source.contains("\"uSampleBackground\").set(sampleBackground ? 1.0F : 0.0F)"));
-        assertTrue(fragment.contains("if (uSampleBackground > 0.5)"));
-        assertTrue(fragment.contains("float coverage = shadowMask;"));
-        assertTrue(fragment.contains("vec4(background + emission, coverage)"));
-        assertTrue(program.contains("\"srcrgb\": \"1\""));
+        assertTrue(fragment.contains("if (uSampleBackground < 0.5)"));
+        assertTrue(fragment.contains("float coverage = 1.0 - transmitted * (1.0 - skyCoverage);"));
+        assertTrue(fragment.contains("vec4(mix(displayEncode(emission) * edge, scene, skyCoverage), coverage)"));
+        assertTrue(program.contains("\"srcrgb\": \"srcalpha\""));
         assertTrue(program.contains("\"dstrgb\": \"1-srcalpha\""));
         assertTrue(program.contains("\"name\": \"uSampleBackground\""));
     }

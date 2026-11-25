@@ -15,14 +15,19 @@ final class GuixuStellarEnd {
     static final float MIN_GLINT_LIGHT = .001F;
     private static final double LAST_SIPHON_START = 22;
     private static final double INFALL_SECONDS = 24;
+    private static final double SOURCE_FIELD_RADIUS = 45;
     private static final double STELLAR_DEBRIS_RETURN_SECONDS = 9.25;
+    private static final double STELLAR_STREAM_TURN = 2.05;
+    static final double STELLAR_STREAM_INNER_RADIUS = 1.27;
     static final double CAPTURE_PULSE_SECONDS = 2.4;
+    private static final double CAPTURE_FEED_SECONDS = 2.9;
     static final double PULSAR_ROTATION_SECONDS = 1.6;
     static final double QUASAR_ENTRY_SECONDS;
     private static final double QUASAR_SIPHON_START;
     private static final double QUASAR_INFALL_SECONDS = 18;
     private static final double QUASAR_JETS_EXTENDED_AGE = 2.78;
-    static final double LAST_CAPTURE_SECONDS;
+    static final double QUASAR_CAPTURE_SECONDS;
+    static final double AFTERGLOW_END_SECONDS;
     private static final double MERGER_WAVE_SECONDS = 3.4;
     private static final double COMPANION_SINK_SECONDS = .72;
     static final double STRUCTURE_START_SECONDS;
@@ -83,11 +88,73 @@ final class GuixuStellarEnd {
         LAST_BODY_INDEX = lastBodyIndex;
         QUASAR_ENTRY_SECONDS = lastSink;
         QUASAR_SIPHON_START = lastSink + 4.5;
-        LAST_CAPTURE_SECONDS = QUASAR_SIPHON_START + QUASAR_INFALL_SECONDS + CAPTURE_PULSE_SECONDS;
-        STRUCTURE_START_SECONDS = LAST_CAPTURE_SECONDS + .45;
+        QUASAR_CAPTURE_SECONDS = QUASAR_SIPHON_START + QUASAR_INFALL_SECONDS;
+        AFTERGLOW_END_SECONDS = QUASAR_CAPTURE_SECONDS + CAPTURE_PULSE_SECONDS;
+        STRUCTURE_START_SECONDS = QUASAR_CAPTURE_SECONDS + CAPTURE_FEED_SECONDS;
     }
 
     private GuixuStellarEnd() {}
+
+    enum Stage {
+        INFALL, QUASAR, AFTERGLOW, STRUCTURE
+    }
+
+    record Frame(Stage stage, double seconds, double structureAge, float horizon, boolean simple,
+                 List<Star> stars, List<GravityWave> waves, float accretionFeed, float outflow,
+                 float horizonGlow) {}
+
+    /** 主机、背景星空和透镜后的绘制共用本帧采样。 */
+    static Frame sample(double seconds, float horizon, boolean simple) {
+        Stage stage = stageAt(seconds);
+        double structureAge = seconds - STRUCTURE_START_SECONDS;
+        if (horizon <= 0 || seconds <= 0) {
+            return new Frame(stage, seconds, structureAge, horizon, simple, List.of(), List.of(), 0, 0, 0);
+        }
+
+        float feed = 0, flash = 0, outflow = 0;
+        List<Star> stars = List.of();
+        List<GravityWave> waves = List.of();
+        if (stage != Stage.STRUCTURE) {
+            var visibleStars = new ArrayList<Star>();
+            var activeWaves = new ArrayList<GravityWave>();
+            boolean drawCelestials = seconds < AFTERGLOW_END_SECONDS;
+            for (int i = 0; i < SOURCES.length; i++) {
+                Source source = SOURCES[i];
+                BodyKind kind = source.kind();
+                if (kind == BodyKind.QUASAR && stage == Stage.INFALL) continue;
+                double age = source.siphonAge(seconds);
+                double captureAge = age - source.infallDuration();
+                boolean draw = drawCelestials && drawsSource(i, simple);
+                if (kind == BodyKind.GLINT && (!draw || captureAge >= 0)) continue;
+                if (captureAge >= Math.max(CAPTURE_FEED_SECONDS, gravityWaveSeconds(kind))) continue;
+
+                Star star = star(i, seconds, SOURCE_FIELD_RADIUS, age);
+                feed += accretionFeed(star, age);
+                if (!draw) continue;
+                visibleStars.add(star);
+                flash = Math.max(flash, captureFlash(star));
+                outflow = Math.max(outflow, stellarOutflow(star));
+                if (kind.gravityWaveStrength() > 0 && captureAge > 0 && captureAge < gravityWaveSeconds(kind)) {
+                    GravityWave wave = gravityWave(star, horizon);
+                    if (wave.light() > .001F) activeWaves.add(wave);
+                }
+            }
+            stars = List.copyOf(visibleStars);
+            waves = List.copyOf(activeWaves);
+        }
+        float rebound = mergerRebound(seconds);
+        float release = .53F * (float) Math.sin(Math.PI * Math.clamp(structureAge / 1.25, 0, 1));
+        float glow = Math.min(1, horizonLight(seconds) + flash * .25F + release + rebound * .42F);
+        return new Frame(stage, seconds, structureAge, horizon, simple, stars, waves, feed, outflow,
+                glow);
+    }
+
+    private static Stage stageAt(double seconds) {
+        if (seconds < QUASAR_ENTRY_SECONDS) return Stage.INFALL;
+        if (seconds < QUASAR_CAPTURE_SECONDS) return Stage.QUASAR;
+        if (seconds < STRUCTURE_START_SECONDS) return Stage.AFTERGLOW;
+        return Stage.STRUCTURE;
+    }
 
     static float horizonRadius(float base, double seconds) {
         double progress = .58 * ease(0, 13, seconds) + .42 * ease(13, 45, seconds);
@@ -123,21 +190,24 @@ final class GuixuStellarEnd {
         return new JetPulse(position, light);
     }
 
-    static float horizonLight(double seconds) {
+    private static float horizonLight(double seconds) {
         double ignition = ease(0, 3, seconds);
         double feeding = ease(5, 14, seconds) * (1 - ease(39, QUASAR_ENTRY_SECONDS, seconds));
         feeding += ease(QUASAR_SIPHON_START, QUASAR_SIPHON_START + 6, seconds)
-                * (1 - ease(LAST_CAPTURE_SECONDS - 6, LAST_CAPTURE_SECONDS, seconds));
+                * (1 - ease(AFTERGLOW_END_SECONDS - 6, AFTERGLOW_END_SECONDS, seconds));
         return (float) (ignition * (.28 + .49 * feeding) * (.89 + .11 * Math.sin(seconds * 2.6)));
     }
 
     static Star star(int index, double seconds, double outerRadius) {
+        return star(index, seconds, outerRadius, SOURCES[index].siphonAge(seconds));
+    }
+
+    private static Star star(int index, double seconds, double outerRadius, double age) {
         Source source = SOURCES[index];
         BodyKind kind = source.kind();
         boolean quasar = kind == BodyKind.QUASAR;
         StellarPass passage = kind.stellarPass;
-        double age = seconds - (quasar ? QUASAR_SIPHON_START : source.siphonAt());
-        double infall = quasar ? QUASAR_INFALL_SECONDS : INFALL_SECONDS;
+        double infall = source.infallDuration();
         double captureAge = age - infall;
         float strength = kind.siphonStrength();
         double streamTravel = streamTravel(kind);
@@ -267,11 +337,11 @@ final class GuixuStellarEnd {
             double travel = streamFraction(star, progress);
             double remaining = 1 - travel;
             double origin = stellarRadius(star, passage, horizon, approach) - star.solidRadius() * (1 + star.tidalStress());
-            double disk = 1.27 * horizon;
+            double disk = STELLAR_STREAM_INNER_RADIUS * horizon;
             double radius = disk + (origin - disk) * remaining * remaining;
             double vertical = stellarLatitude(star, approach) * remaining * remaining;
             double horizontal = radius * Math.sqrt(1 - vertical * vertical);
-            double angle = star.angle() + infallTurn(star.body()) + 2.05 * travel;
+            double angle = star.angle() + infallTurn(star.body()) + STELLAR_STREAM_TURN * travel;
             point.set(Math.cos(angle) * horizontal, radius * vertical, Math.sin(angle) * horizontal);
             return;
         }
@@ -291,6 +361,25 @@ final class GuixuStellarEnd {
 
     static double streamFraction(Star star, double progress) {
         return progress >= 1 ? 1 : (progress - star.body()) / (1 - star.body());
+    }
+
+    /** 同一批碎屑先沿流束卷入，再在撞击点点亮主吸积盘。 */
+    static DebrisSurge debrisSurge(Star star) {
+        var passage = star.kind().stellarPass;
+        if (passage == null) return null;
+        double returnTime = streamTravel(star.kind());
+        double age = star.captureAge() - (returnTime - INFALL_SECONDS);
+        if (age <= -1.4 || age >= 2.4) return null;
+
+        double progress = ease(-1.4, 0, age);
+        float streamLight = star.matterBrightness() * capturePulse(age + 1.4, 1.03, 1.62);
+        float flash = passage.matterYield * capturePulse(age, .13, .72);
+        float heat = passage.matterYield * capturePulse(age, .35, 2.4);
+        double impact = star.angle() - age * ORBIT_SPEED + infallTurn(ease(4.8, INFALL_SECONDS, returnTime))
+                + STELLAR_STREAM_TURN;
+        double advance = 4.2 * ease(0, 2.4, age);
+        return new DebrisSurge(progress, streamLight, impact, flash,
+                new CaptureWake(impact + advance * .30, impact + advance, heat));
     }
 
     static float stellarOutflow(Star star) {
@@ -340,24 +429,18 @@ final class GuixuStellarEnd {
     }
 
     /** 只累计已经回落到内盘的物质，天体还在外侧瓦解时不预热。 */
-    static float accretionFeed(double seconds) {
+    private static float accretionFeed(Star star, double age) {
+        BodyKind kind = star.kind();
+        if (kind == BodyKind.GLINT) return 0;
+        double arrival = streamTravel(kind);
+        double captureAge = star.captureAge();
+        float strength = kind.siphonStrength();
         float feed = 0;
-        for (int index = 0; index < SOURCES.length; index++) {
-            var source = SOURCES[index];
-            var kind = source.kind();
-            if (kind == BodyKind.GLINT) continue;
-            boolean quasar = kind == BodyKind.QUASAR;
-            double age = seconds - (quasar ? QUASAR_SIPHON_START : source.siphonAt());
-            double arrival = streamTravel(kind);
-            double impact = quasar ? QUASAR_INFALL_SECONDS : INFALL_SECONDS;
-            float strength = kind.siphonStrength();
-            if (age > arrival && age < impact) {
-                float matter = star(index, seconds, 45).matterBrightness();
-                feed += (float) (.046 * strength * matter * ease(arrival, arrival + .85, age));
-            }
-            if (kind.stellarPass == null && kind != BodyKind.BLACK_HOLE) {
-                feed += (float) (.16 * strength * capturePulse(age - impact, .42, 2.9));
-            }
+        if (age > arrival && captureAge < 0) {
+            feed = (float) (.046 * strength * star.matterBrightness() * ease(arrival, arrival + .85, age));
+        }
+        if (kind.stellarPass == null && kind != BodyKind.BLACK_HOLE) {
+            feed += (float) (.16 * strength * capturePulse(captureAge, .42, CAPTURE_FEED_SECONDS));
         }
         return feed;
     }
@@ -404,25 +487,6 @@ final class GuixuStellarEnd {
 
     private static double gravityWaveSeconds(BodyKind kind) {
         return kind == BodyKind.BLACK_HOLE ? MERGER_WAVE_SECONDS : CAPTURE_PULSE_SECONDS;
-    }
-
-    static List<GravityWave> activeGravityWaves(double seconds, float horizon) {
-        if (horizon <= 0 || seconds < INFALL_SECONDS || seconds >= LAST_CAPTURE_SECONDS) return List.of();
-        List<GravityWave> waves = null;
-        for (int i = 0; i < SOURCES.length; i++) {
-            var source = SOURCES[i];
-            var kind = source.kind();
-            if (kind.gravityWaveStrength() == 0) continue;
-            double age = kind == BodyKind.QUASAR
-                    ? seconds - QUASAR_SIPHON_START - QUASAR_INFALL_SECONDS
-                    : seconds - source.siphonAt() - INFALL_SECONDS;
-            if (age <= 0 || age >= gravityWaveSeconds(kind)) continue;
-            var wave = gravityWave(star(i, seconds, 45), horizon);
-            if (wave.light() <= .001F) continue;
-            if (waves == null) waves = new ArrayList<>();
-            waves.add(wave);
-        }
-        return waves == null ? List.of() : waves;
     }
 
     /** 波纹固定在该天体的入射方位，余辉不随尚未落尽的天体继续绕行。 */
@@ -474,8 +538,8 @@ final class GuixuStellarEnd {
         return .55 + radius * .075 + alongSide * .043 + Math.min(12, height) * .042;
     }
 
-    static double structureCharge(double seconds, double arrival) {
-        return ease(0, .84, seconds - STRUCTURE_START_SECONDS - arrival);
+    static double structureCharge(double elapsed, double arrival) {
+        return ease(0, .84, elapsed - arrival);
     }
 
     static double ease(double start, double end, double value) {
@@ -632,7 +696,15 @@ final class GuixuStellarEnd {
     }
 
     private record Source(double angle, double vertical, double radiusScale, double siphonAt, double phase,
-                          float size, boolean warm, BodyKind kind) {}
+                          float size, boolean warm, BodyKind kind) {
+        double siphonAge(double seconds) {
+            return seconds - (kind == BodyKind.QUASAR ? QUASAR_SIPHON_START : siphonAt);
+        }
+
+        double infallDuration() {
+            return kind == BodyKind.QUASAR ? QUASAR_INFALL_SECONDS : INFALL_SECONDS;
+        }
+    }
 
     record Star(double angle, double vertical, double radius, double phase, float size, boolean warm,
                 double body, double leadingMatter, float brightness, float matterBrightness,
@@ -645,6 +717,12 @@ final class GuixuStellarEnd {
                 case THORNE_ZYTKOW -> .24F * (1 - disruption);
                 default -> 0F;
             };
+        }
+    }
+
+    record DebrisSurge(double progress, float streamLight, double impact, float flash, CaptureWake wake) {
+        float streamLightAt(double fraction) {
+            return streamLight * (float) (1 - ease(0, .24, Math.abs(fraction - progress)));
         }
     }
 

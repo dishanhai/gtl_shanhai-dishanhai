@@ -1,9 +1,9 @@
 package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 
 // Author: dishanhai
-import com.google.common.collect.ImmutableMap;
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry;
 import com.mojang.blaze3d.platform.GlStateManager;
-import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -12,25 +12,22 @@ import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
-import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 
-/** 山海：外緣吸積流單遍繪製，沿用原光柱環的開關、重載及回落入口。 */
+/** 归墟激光环及结构电弧。激光环的静态网格在 GPU 上随时间翘曲。 */
 public final class HostFxBeamRing {
     private HostFxBeamRing() {}
     public static final ResourceLocation SHADER_ID =
             new ResourceLocation(GTDishanhaiMod.MOD_ID, "shanhai_host_beam_ring");
-    public static final VertexFormat BEAM_RING_VERTEX_FORMAT = new VertexFormat(ImmutableMap.of(
-            "Position", DefaultVertexFormat.ELEMENT_POSITION,
-            "UV0", DefaultVertexFormat.ELEMENT_UV0,
-            "UV1", DefaultVertexFormat.ELEMENT_UV1));
-    public static final float ALPHA_PACK_SCALE = HostFxPillarBeam.ALPHA_PACK_SCALE;
+    public static final VertexFormat BEAM_RING_VERTEX_FORMAT = DefaultVertexFormat.POSITION_TEX;
     private static final HostFxLazyHandle<ShaderInstance> HANDLE = new HostFxLazyHandle<>(HostFxBeamRing::createShader);
     private static ShaderInstance pendingClose;
     private static VertexBuffer buffer;
+    private static FallbackMesh fallbackMesh;
     private static int lastPasses, lastFallbackQuads;
     private static int loggedBuilds = -1, warnedBuilds = -1;
 
@@ -80,15 +77,34 @@ public final class HostFxBeamRing {
         }
         if (shader == null && HANDLE.failed() && warnedBuilds != HANDLE.builds()) {
             warnedBuilds = HANDLE.builds();
-            GTDishanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] ring_shader_failed（回落至暖白吸積流）", HANDLE.lastError());
+            GTDishanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] ring_shader_failed，使用顶点色激光环", HANDLE.lastError());
         }
         return shader;
     }
-    private static VertexBuffer buffer() {
-        if (buffer == null) buffer = new VertexBuffer(VertexBuffer.Usage.DYNAMIC);
+    private static VertexBuffer ringBuffer() {
+        if (buffer == null) {
+            var mesh = HostFxBeamRingGeom.mesh(HostFxBeamRingGeom.SEGMENTS, HostFxBeamRingGeom.RADIAL_CELLS);
+            var knots = mesh.knots();
+            BufferBuilder builder = Tesselator.getInstance().getBuilder();
+            builder.begin(VertexFormat.Mode.QUADS, BEAM_RING_VERTEX_FORMAT);
+            mesh.forEachQuad((a, b, c, d) -> {
+                meshVertex(builder, knots[a]);
+                meshVertex(builder, knots[b]);
+                meshVertex(builder, knots[c]);
+                meshVertex(builder, knots[d]);
+            });
+            buffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
+            buffer.bind();
+            buffer.upload(builder.end());
+        }
         return buffer;
     }
-    public static int draw(PoseStack poseStack, float seconds, float spinDeg,
+
+    private static void meshVertex(VertexConsumer consumer, HostFxBeamRingGeom.Knot knot) {
+        consumer.vertex(knot.x(), 0, knot.z()).uv(knot.radial(), knot.angle()).endVertex();
+    }
+
+    public static int draw(PoseStack poseStack, float seconds,
                            float camX, float camY, float camZ, float[] glowRgb) {
         markSkipped();
         ShaderInstance shader = shader();
@@ -99,18 +115,14 @@ public final class HostFxBeamRing {
         RenderSystem.depthMask(false);
         RenderSystem.disableCull();
         try {
-            setUniform(shader, "CameraPosition", camX, camY, camZ);
-            setUniform(shader, "BeamColor", glowRgb[0], glowRgb[1], glowRgb[2]);
-            setUniform(shader, "FlowTime", seconds);
-            BufferBuilder builder = Tesselator.getInstance().getBuilder();
-            builder.begin(VertexFormat.Mode.TRIANGLES, BEAM_RING_VERTEX_FORMAT);
-            HostFxBeamRingGeom.emitTube((x, y, z, nx, ny, nz, u, v, alpha, angle) -> builder
-                    .vertex(x, y, z).uv(u, v)
-                    .overlayCoords(packAlpha(alpha * HostFxDraw.beamBrightness()), 0).endVertex(),
-                    1, 1, seconds * 20, spinDeg);
-            buffer().bind();
-            buffer().upload(builder.end());
-            buffer().drawWithShader(poseStack.last().pose(), RenderSystem.getProjectionMatrix(), shader);
+            shader.safeGetUniform("CameraPosition").set(camX, camY, camZ);
+            shader.safeGetUniform("BeamColor").set(glowRgb[0], glowRgb[1], glowRgb[2]);
+            shader.safeGetUniform("BeamBrightness").set(HostFxDraw.beamBrightness());
+            shader.safeGetUniform("FlowTime").set(GuixuAccretionFlow.flowClock(seconds));
+            shader.safeGetUniform("WarpPhase").set(GuixuAccretionFlow.warpPhase(seconds));
+            VertexBuffer mesh = ringBuffer();
+            mesh.bind();
+            mesh.drawWithShader(poseStack.last().pose(), RenderSystem.getProjectionMatrix(), shader);
             lastPasses = 1;
         } finally {
             VertexBuffer.unbind();
@@ -121,30 +133,33 @@ public final class HostFxBeamRing {
         }
         return lastPasses;
     }
-    /** 單一雙面加性批次；與 GPU 使用相同輪廓、色溫與流向，不再回到藍色實心管。 */
-    public static int drawFallback(PoseStack poseStack, float seconds, float spinDeg,
+    /** 使用相同轮廓和色调的单个加性批次。 */
+    public static int drawFallback(PoseStack poseStack, float seconds,
                                    float camX, float camY, float camZ, float[] glowRgb) {
         markSkipped();
         var layer = HostFxDraw.beamLayer();
-        var buffers = net.minecraft.client.renderer.MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
+        var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer consumer = buffers.getBuffer(layer);
         double distance = Math.sqrt(camX * camX + camY * camY + camZ * camZ);
         float radialPixels = Math.abs(RenderSystem.getProjectionMatrix().m11())
-                * Minecraft.getInstance().getWindow().getHeight() * .5F * HostFxBeamRingGeom.DIAMETER;
-        FlowSink sink = new FlowSink(consumer, poseStack.last().pose(), seconds,
-                (float) (distance / Math.max(1, radialPixels)), camX, camY, camZ, glowRgb);
-        HostFxBeamRingGeom.emitTube(sink, 1, 1, seconds * 20, spinDeg);
+                * Minecraft.getInstance().getWindow().getHeight() * .5F * HostFxBeamRingGeom.WIDTH;
+        // 顶点色同时受屏幕像素和径向网格间距限制。
+        float footprint = Math.max(.5F / HostFxBeamRingGeom.FALLBACK_RADIAL_CELLS,
+                (float) (distance / Math.max(1, radialPixels)));
+        if (fallbackMesh == null) fallbackMesh = new FallbackMesh();
+        fallbackMesh.shade(seconds, footprint, camX, camY, camZ);
+        fallbackMesh.draw(consumer, poseStack.last().pose(), glowRgb);
         buffers.endBatch(layer);
-        lastFallbackQuads = sink.vertices / 3;
+        lastFallbackQuads = HostFxBeamRingGeom.FALLBACK_SEGMENTS * HostFxBeamRingGeom.FALLBACK_RADIAL_CELLS;
         return lastFallbackQuads;
     }
 
     /** 同一加性層一次提交全部電弧；不依賴吸積盤自訂 shader，回落時仍可顯示。 */
     public static int drawLightning(PoseStack poseStack,
-            com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Frame frame, float[] glowRgb) {
+            ShanhaiInstabilityGeometry.Frame frame, float[] glowRgb) {
         if (frame.quads().isEmpty()) return 0;
         var layer = HostFxDraw.beamLayer();
-        var buffers = net.minecraft.client.renderer.MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
+        var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer consumer = buffers.getBuffer(layer);
         Matrix4f matrix = poseStack.last().pose();
         for (var q : frame.quads()) {
@@ -158,41 +173,45 @@ public final class HostFxBeamRing {
     }
 
     private static void lightningVertex(VertexConsumer consumer, Matrix4f matrix,
-            com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Point p,
-            com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Quad q, float[] glow) {
+            ShanhaiInstabilityGeometry.Point p, ShanhaiInstabilityGeometry.Quad q, float[] glow) {
         consumer.vertex(matrix, (float) p.x(), (float) p.y(), (float) p.z())
                 .color(q.red() * glow[0], q.green() * glow[1], q.blue() * glow[2],
                         q.alpha() * HostFxDraw.beamBrightness()).endVertex();
     }
-    /** 位置色層採 QUADS；每個三角形重複最後一點，第二個退化三角形不產生像素。 */
-    private static final class FlowSink implements HostFxBeamRingGeom.Sink {
-        private final VertexConsumer consumer;
-        private final Matrix4f matrix;
-        private final float seconds, footprint, camX, camY, camZ;
-        private final float[] glow, rgba = new float[4];
-        private int vertices;
-        private FlowSink(VertexConsumer consumer, Matrix4f matrix, float seconds, float footprint,
-                         float camX, float camY, float camZ, float[] glow) {
-            this.consumer = consumer; this.matrix = matrix; this.seconds = seconds; this.footprint = footprint;
-            this.camX = camX; this.camY = camY; this.camZ = camZ; this.glow = glow;
+    private static final class FallbackMesh {
+        private final HostFxBeamRingGeom.Mesh mesh = HostFxBeamRingGeom.mesh(
+                HostFxBeamRingGeom.FALLBACK_SEGMENTS, HostFxBeamRingGeom.FALLBACK_RADIAL_CELLS);
+        private final HostFxBeamRingGeom.Knot[] knots = mesh.knots();
+        private final float[] height = new float[knots.length - mesh.columnSize()];
+        private final float[][] color = new float[height.length][4];
+
+        private void shade(float seconds, float footprint, float camX, float camY, float camZ) {
+            float warp = GuixuAccretionFlow.warpPhase(seconds);
+            float clock = GuixuAccretionFlow.flowClock(seconds);
+            for (int i = 0; i < height.length; i++) {
+                var knot = knots[i];
+                height[i] = GuixuAccretionFlow.heightAtPhase(knot.radial(), knot.angle(), warp);
+                GuixuAccretionFlow.shadeAt(knot.radial(), knot.angle(), clock, footprint,
+                        camX - knot.x(), camY - height[i], camZ - knot.z(), color[i]);
+            }
         }
-        @Override public void vertex(float x, float y, float z, float nx, float ny, float nz,
-                                     float u, float v, float alpha, float angle) {
-            GuixuAccretionFlow.shade((float) Math.hypot(x, z), v, seconds, footprint, camX, camY, camZ, rgba);
-            put(x, y, z, alpha);
-            if (++vertices % 3 == 0) put(x, y, z, alpha);
+
+        private void draw(VertexConsumer consumer, Matrix4f matrix, float[] glow) {
+            float brightness = HostFxDraw.beamBrightness();
+            mesh.forEachQuad((a, b, c, d) -> {
+                vertex(consumer, matrix, a, glow, brightness);
+                vertex(consumer, matrix, b, glow, brightness);
+                vertex(consumer, matrix, c, glow, brightness);
+                vertex(consumer, matrix, d, glow, brightness);
+            });
         }
-        private void put(float x, float y, float z, float alpha) {
-            consumer.vertex(matrix, x, y, z).color(rgba[0] * glow[0], rgba[1] * glow[1], rgba[2] * glow[2],
-                    rgba[3] * alpha * HostFxDraw.beamBrightness()).endVertex();
+
+        private void vertex(VertexConsumer consumer, Matrix4f matrix, int index, float[] glow, float brightness) {
+            var knot = knots[index];
+            int sample = index < height.length ? index : index - height.length;
+            float[] rgba = color[sample];
+            consumer.vertex(matrix, knot.x(), height[sample], knot.z())
+                    .color(rgba[0] * glow[0], rgba[1] * glow[1], rgba[2] * glow[2], rgba[3] * brightness).endVertex();
         }
-    }
-    private static int packAlpha(float alpha) {
-        return Math.max(0, Math.min(32767, Math.round(alpha * ALPHA_PACK_SCALE))) & 0xffff;
-    }
-    private static void setUniform(ShaderInstance shader, String name, float... values) {
-        Uniform uniform = shader.getUniform(name);
-        if (uniform == null) return;
-        if (values.length == 1) uniform.set(values[0]); else uniform.set(values[0], values[1], values[2]);
     }
 }

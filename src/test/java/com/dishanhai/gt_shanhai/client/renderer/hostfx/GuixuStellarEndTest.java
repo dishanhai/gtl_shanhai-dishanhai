@@ -14,7 +14,7 @@ import java.util.HashSet;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GuixuStellarEndTest {
-    private static final double CAPTURE_END = GuixuStellarEnd.LAST_CAPTURE_SECONDS;
+    private static final double CAPTURE_END = GuixuStellarEnd.AFTERGLOW_END_SECONDS;
     private static final double QUASAR_FULLY_VISIBLE = GuixuStellarEnd.QUASAR_ENTRY_SECONDS + 4.0;
 
     @Test
@@ -57,22 +57,69 @@ class GuixuStellarEndTest {
 
     @Test
     void finaleReachesPillarsRingsAndStationInOrderAndLeavesThemLit() {
-        double start = GuixuStellarEnd.STRUCTURE_START_SECONDS;
         double pillarBase = GuixuStellarEnd.structureArrival(5, 26, 0);
         double pillarCap = GuixuStellarEnd.structureArrival(5, 67, 0);
         double innerFeed = GuixuStellarEnd.structureArrival(50, 0, 0);
         double outerFeed = GuixuStellarEnd.structureArrival(60, 0, 0);
         double outerCorner = GuixuStellarEnd.structureArrival(60, 0, 60);
         double station = GuixuStellarEnd.structureArrival(72, 11, 0);
-        assertTrue(start >= CAPTURE_END);
         assertTrue(0 < pillarBase && pillarBase < pillarCap);
         assertTrue(pillarBase < innerFeed && innerFeed < outerFeed);
         assertTrue(outerFeed < outerCorner && outerCorner < station);
         assertEquals(pillarBase, GuixuStellarEnd.structureArrival(5, -26, 0), 1e-6);
-        assertEquals(0, GuixuStellarEnd.structureCharge(CAPTURE_END, pillarBase));
-        assertTrue(GuixuStellarEnd.structureCharge(start + innerFeed + .5, innerFeed) > 0);
-        assertEquals(0, GuixuStellarEnd.structureCharge(start + innerFeed + .5, station));
-        assertEquals(1, GuixuStellarEnd.structureCharge(start + station + 3, station));
+        assertEquals(0, GuixuStellarEnd.structureCharge(0, pillarBase));
+        assertTrue(GuixuStellarEnd.structureCharge(innerFeed + .5, innerFeed) > 0);
+        assertEquals(0, GuixuStellarEnd.structureCharge(innerFeed + .5, station));
+        assertEquals(1, GuixuStellarEnd.structureCharge(station + 3, station));
+    }
+
+    @Test
+    void sampledFrameHandsOffFromInfallToQuasarAfterglowAndStructure() {
+        double entry = GuixuStellarEnd.QUASAR_ENTRY_SECONDS;
+        double impact = GuixuStellarEnd.QUASAR_CAPTURE_SECONDS;
+        double finale = GuixuStellarEnd.STRUCTURE_START_SECONDS;
+        for (boolean simple : new boolean[]{false, true}) {
+            var infall = GuixuStellarEnd.sample(3, 15, simple);
+            assertEquals(GuixuStellarEnd.Stage.INFALL, infall.stage());
+            assertFalse(infall.stars().isEmpty());
+            assertTrue(infall.stars().stream().noneMatch(star -> star.kind() == GuixuStellarEnd.BodyKind.QUASAR));
+
+            var quasar = GuixuStellarEnd.sample(entry, 15, simple);
+            assertEquals(GuixuStellarEnd.Stage.QUASAR, quasar.stage());
+            assertTrue(quasar.stars().stream().anyMatch(star ->
+                    star.kind() == GuixuStellarEnd.BodyKind.QUASAR && star.solidRadius() > 0));
+
+            var afterglow = GuixuStellarEnd.sample(impact + .25, 15, simple);
+            assertEquals(GuixuStellarEnd.Stage.AFTERGLOW, afterglow.stage());
+            assertEquals(1, afterglow.waves().size());
+            assertTrue(afterglow.accretionFeed() > 0);
+            assertTrue(GuixuStellarEnd.sample(CAPTURE_END, 15, simple).waves().isEmpty());
+
+            var structure = GuixuStellarEnd.sample(finale, 15, simple);
+            assertEquals(GuixuStellarEnd.Stage.STRUCTURE, structure.stage());
+            assertEquals(0, structure.structureAge());
+            assertEquals(0F, structure.accretionFeed());
+            assertTrue(structure.stars().isEmpty());
+            assertTrue(structure.waves().isEmpty());
+        }
+    }
+
+    @Test
+    void simplifiedFramesKeepPhysicalFeedAndHiddenHorizonStillAllowsTheFinale() {
+        for (double seconds = 3; seconds < CAPTURE_END; seconds += .25) {
+            var full = GuixuStellarEnd.sample(seconds, 15, false);
+            var simple = GuixuStellarEnd.sample(seconds, 15, true);
+            assertEquals(full.accretionFeed(), simple.accretionFeed());
+            assertEquals(full.waves(), simple.waves());
+            assertEquals(full.outflow(), simple.outflow());
+            assertTrue(full.stars().containsAll(simple.stars()));
+        }
+        double finale = GuixuStellarEnd.STRUCTURE_START_SECONDS;
+        var hidden = GuixuStellarEnd.sample(finale + 6, 0, false);
+        assertEquals(6, hidden.structureAge(), 1e-9);
+        assertEquals(GuixuStellarEnd.Stage.STRUCTURE, hidden.stage());
+        assertEquals(0F, hidden.horizonGlow());
+        assertTrue(hidden.stars().isEmpty());
     }
 
     @Test
@@ -299,9 +346,10 @@ class GuixuStellarEndTest {
         String celestial = Files.readString(renderer.resolve("hostfx/GuixuCelestialRenderer.java"));
         assertTrue(host.contains("GuixuStellarEndRenderer.capture("));
         assertEquals(2, lens.split("GuixuStellarEndRenderer.flushAfterLens\\(", -1).length - 1);
-        int depthMask = stellar.indexOf("celestial.drawHorizonDepth(");
-        assertTrue(depthMask >= 0 && depthMask < stellar.indexOf("celestial.drawBodies("));
-        assertTrue(celestial.contains("new RenderStateShard.WriteMaskStateShard(false, true)"));
+        assertTrue(lens.contains("GuixuStellarEndRenderer.hasDeferredBodies(renderFrameSerial)"));
+        assertTrue(lens.contains("writeCapturedDepth(f, shader)"));
+        assertFalse(celestial.contains("drawHorizonDepth"));
+        assertTrue(stellar.contains("celestial.drawBodies("));
     }
 
     @Test
@@ -311,7 +359,7 @@ class GuixuStellarEndTest {
         String stars = Files.readString(hostfx.resolve("GuixuStarRenderer.java"));
         assertTrue(host.contains("backgroundInfall = drawBlackHole && !stellarEndActive"));
         assertTrue(host.contains("backgroundInfall ? GuixuStarField.accretionFeed("));
-        assertTrue(host.contains("profile.jets(), drawBlackHole, backgroundInfall,"));
+        assertTrue(host.contains("jets, drawBlackHole, backgroundInfall,"));
         assertTrue(stars.contains("backgroundInfall && i < GuixuStarField.PARTICLE_COUNT"));
         assertTrue(stars.contains("if (backgroundInfall) {\n            drawAccretionTrails("));
         assertTrue(stars.contains("if (blackHoleEnabled && jets >"));
@@ -351,8 +399,8 @@ class GuixuStellarEndTest {
         assertEquals(0, GuixuStellarEnd.mergerRebound(impact + 3));
         var first = GuixuStellarEnd.gravityWave(GuixuStellarEnd.star(companion, impact + .25, 45), horizon);
         var late = GuixuStellarEnd.gravityWave(GuixuStellarEnd.star(companion, impact + 2.5, 45), horizon);
-        assertTrue(GuixuStellarEnd.activeGravityWaves(impact + .25, horizon).contains(first));
-        assertTrue(GuixuStellarEnd.activeGravityWaves(impact + 3.5, horizon).stream()
+        assertTrue(GuixuStellarEnd.sample(impact + .25, horizon, false).waves().contains(first));
+        assertTrue(GuixuStellarEnd.sample(impact + 3.5, horizon, false).waves().stream()
                 .noneMatch(wave -> Math.abs(wave.azimuth() - first.azimuth()) < 1e-6));
         assertTrue(first.light() > late.light() && late.light() > 0);
         assertTrue(late.radius() > first.radius() + 25);
@@ -377,20 +425,20 @@ class GuixuStellarEndTest {
             assertTrue(late.radius() > first.radius() + 9);
             assertTrue(late.light() > 0 && late.light() < first.light());
             assertEquals(first.azimuth(), late.azimuth(), 1e-6);
-            assertTrue(GuixuStellarEnd.activeGravityWaves(impact + .25, 15).contains(first), source.kind().name());
-            assertTrue(GuixuStellarEnd.activeGravityWaves(impact - .05, 15).stream()
+            assertTrue(GuixuStellarEnd.sample(impact + .25, 15, false).waves().contains(first), source.kind().name());
+            assertTrue(GuixuStellarEnd.sample(impact - .05, 15, false).waves().stream()
                     .noneMatch(wave -> Math.abs(wave.azimuth() - first.azimuth()) < 1e-6));
             assertEquals(0, GuixuStellarEnd.gravityWave(GuixuStellarEnd.star(i, impact + 2.4, 45), 15).light(), 1e-6);
         }
-        assertTrue(GuixuStellarEnd.activeGravityWaves(CAPTURE_END, 15).isEmpty());
-        assertTrue(GuixuStellarEnd.activeGravityWaves(CAPTURE_END - 1, 0).isEmpty());
+        assertTrue(GuixuStellarEnd.sample(CAPTURE_END, 15, false).waves().isEmpty());
+        assertTrue(GuixuStellarEnd.sample(CAPTURE_END - 1, 0, false).waves().isEmpty());
     }
 
     @Test
     void flybysDoNotAddImpactWavefrontsToTheCompanionMerger() {
         boolean mergerWaveAppears = false;
         for (double seconds = 24; seconds < GuixuStellarEnd.QUASAR_ENTRY_SECONDS; seconds += .125) {
-            int waves = GuixuStellarEnd.activeGravityWaves(seconds, 15).size();
+            int waves = GuixuStellarEnd.sample(seconds, 15, false).waves().size();
             assertTrue(waves <= 1);
             mergerWaveAppears |= waves == 1;
         }
@@ -544,6 +592,35 @@ class GuixuStellarEndTest {
         assertTrue(GuixuStellarEnd.stellarOutflow(atCapture(4, -4.8))
                 < GuixuStellarEnd.stellarOutflow(atCapture(36, -8.3)));
         assertEquals(0F, GuixuStellarEnd.stellarOutflow(atCapture(4, 1.3)));
+    }
+
+    @Test
+    void stellarDebrisCrestReachesItsDiskEntryBeforeTheAfterglowSweepsAround() {
+        double arrival = -14.75;
+        assertNull(GuixuStellarEnd.debrisSurge(atCapture(0, arrival - 1.5)));
+        var upstream = GuixuStellarEnd.debrisSurge(atCapture(0, arrival - .9));
+        var incoming = GuixuStellarEnd.debrisSurge(atCapture(0, arrival - .3));
+        assertTrue(upstream.progress() < incoming.progress());
+        assertTrue(incoming.streamLightAt(incoming.progress()) > .6F);
+        assertEquals(0F, incoming.streamLightAt(0));
+        assertEquals(0F, incoming.flash());
+        assertEquals(0F, incoming.wake().light());
+
+        var star = atCapture(0, arrival);
+        var entry = GuixuStellarEnd.streamPosition(star, 1, 15);
+        var flash = GuixuStellarEnd.debrisSurge(atCapture(0, arrival + .13));
+        var afterglow = GuixuStellarEnd.debrisSurge(atCapture(0, arrival + 1.2));
+        assertEquals(Math.atan2(entry.z(), entry.x()), Math.atan2(Math.sin(flash.impact()), Math.cos(flash.impact())), 1e-9);
+        assertEquals(flash.impact(), afterglow.impact(), 1e-9);
+        assertTrue(flash.flash() > .95F);
+        assertEquals(0F, afterglow.flash());
+        assertTrue(afterglow.wake().head() > flash.wake().head());
+        assertTrue(afterglow.wake().light() > .4F);
+        assertNull(GuixuStellarEnd.debrisSurge(atCapture(0, arrival + 2.5)));
+
+        var strippedCore = GuixuStellarEnd.debrisSurge(atCapture(4, -7 + .13));
+        assertTrue(strippedCore.flash() > 0 && strippedCore.flash() < flash.flash() * .2F);
+        assertNull(GuixuStellarEnd.debrisSurge(atCapture(8, .13)));
     }
 
     @Test

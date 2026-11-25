@@ -33,6 +33,7 @@ import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
 
 import org.joml.Matrix4f;
+import org.joml.Vector3d;
 import org.lwjgl.opengl.GL11;
 
 import com.mojang.blaze3d.platform.NativeImage;
@@ -45,6 +46,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
+
+import static com.dishanhai.gt_shanhai.config.KerrRenderConfig.Parameter.*;
 
 /**
  * 山海重构 · <b>主机中心黑洞的「真引力透镜」渲染件</b>（一级 = 屏幕空间透镜；二级 = 程序化贴图 quad；三级 = 不画）。
@@ -93,8 +96,7 @@ import java.util.function.Consumer;
  * <ol>
  *   <li>距离 &gt; {@link #MAX_DISTANCE_BLOCKS} 格 ⇒ 直接不进函数体；</li>
  *   <li>屏幕半径 &lt; {@link #MIN_LENS_RADIUS_PX} 像素 ⇒ 不画（看不清，省一次拷贝）；</li>
- *   <li>矩形面积超过 {@link #MAX_PIXEL_FRACTION} × 全屏像素（且有 {@link #MAX_TEX_SIDE} 的硬上限）⇒
- *       按面积等比缩小矩形，并把"透镜强度掩码"一起收进去（画面只是变小，不会出现硬边）；</li>
+ *   <li>Kerr 积分按质量档分配采样，输出区域由视口和透镜范围决定；</li>
  *   <li>背景只拷<b>矩形那一块</b>（{@code glCopyTexSubImage2D} 的 src 矩形参数），不是全屏；</li>
  *   <li>开关 = 客户端配置 {@code [debug] blackhole_enabled}。</li>
  * </ol>
@@ -288,6 +290,7 @@ public final class BlackHoleLensRenderer {
     private static final int GL_CURRENT_PROGRAM = 35725;
 
     private static final ResourceLocation SHADER_ID = new ResourceLocation("gt_shanhai", "guixu_blackhole");
+    private static final KerrRenderPass KERR_PASS = new KerrRenderPass();
 
     /**
      * 必需 uniform：任何一个在链接后的程序里找不到 ⇒ 当场降二级（宁可画贴图，也别画出一坨错的）。
@@ -304,13 +307,9 @@ public final class BlackHoleLensRenderer {
      * 的 uniforms 全表（离线断言 {@code temp/bh-gate2/check-uniforms.ps1} 的 G1/G2 两条守着这个等式）。
      */
     private static final String[] REQUIRED_UNIFORMS = {
-            "uProjMat", "uBhView", "uDiskNormal", "uScreenSize", "uBgRect", "uBgTexel",
-            "uHolePx", "uLensRadiusPx", "uRs", "uTanHalfFov", "uAspect", "uTime",
-            "uDiskGain", "uRingGain", "uStrength", "uSampleBackground", "uKerrParameters",
-            // 🔴 2026-10-25：采样侧深度门（"只有黑洞后面的东西才参与弯折"）。缺了就等于门不存在，
-            //   而"门不存在"正是用户报的那个 bug ⇒ 必须当成硬失败（降二级画贴图，日志有 reason）。
-            //   uGateEps 是门的新容差（本工程有先例：JSON 里缺一个 uniform 不抛异常、也不生效）。
-            "uDepthGate", "uGateEps"
+            "uProjMat", "uInvProj", "uDiskNormal", "uEquatorialX", "uScreenSize", "uBgRect", "uBgTexel",
+            "uTraceRect", "uRayJitter", "uPreviousProjection", "uPreviousToView", "uPreviousRect", "uPreviousJitter",
+            "uHistoryWeight", "uDisplay", "uSkyMix", "uStrength", "uShadowPixels", "uSampleBackground", "uDepthGate", "uGateEps"
     };
 
     /**
@@ -364,7 +363,7 @@ public final class BlackHoleLensRenderer {
     private static boolean specLogged;
 
     private static int bgTexId = -1;
-    private static int bgTexSide;
+    private static int bgTexWidth, bgTexHeight;
     private static boolean copyVerified;
 
     // ------------------------------------------------------------------------------------------
@@ -379,8 +378,8 @@ public final class BlackHoleLensRenderer {
      * 深度用<b>同一个 API</b>（{@code glCopyTexSubImage2D}；目标纹理是深度格式时源就是深度缓冲）。
      */
     private static int depthTexId = -1;
-    /** 深度贴图边长；与 {@link #bgTexSide} 不一致时要重建（背景贴图会长大）。 */
-    private static int depthTexSide;
+    /** 深度贴图边长；与 {@link #bgTexWidth} 不一致时要重建（背景贴图会长大）。 */
+    private static int depthTexWidth, depthTexHeight;
     /** 第一次拷贝后做一次"排干历史错误 → 再拷 → 只认这次 glGetError"的实测（一次性）。 */
     private static boolean depthCopyVerified;
     /** 实测失败 ⇒ 永久关闭采样门（绝不拿脏深度把整块画面涂掉）。 */
@@ -580,7 +579,6 @@ public final class BlackHoleLensRenderer {
         double rsBlocks;
         double screenR;             // 黑盘在屏幕上的像素半径（用户要看的读数）
         double lensHalfPx;          // 实际使用的透镜半边长（已被 MIN_LENS_RADIUS_PX 抬过）
-        double maxPixels;
         double rectX0;
         double rectY0;
         double rectW;
@@ -605,9 +603,10 @@ public final class BlackHoleLensRenderer {
         int screenH;
         float renderSeconds;
         float diskHeat;
+        KerrControls.Frame kerr;
+        float[] spinAxis, equatorialX;
+        boolean nearField;
         long stampNanos;
-        /** 这一帧的 parts 位掩码（见 {@link BlackHoleShaderProbe#parts}；1 秒重算一次）。 */
-        int partsSerial;
         /** 相机跨入可见黑盘后切到洞内视角。 */
         boolean inside;
         /** 这一帧真正用的洞内阈值（格）—— 进日志的 {@code insideThr=}，与 {@link #inside} 同源。 */
@@ -637,10 +636,6 @@ public final class BlackHoleLensRenderer {
          */
         double insideDepth;
 
-        /** parts 位掩码（最近一次算出来的）。 */
-        int parts() {
-            return partsSerial;
-        }
     }
 
     // ==========================================================================================
@@ -686,6 +681,23 @@ public final class BlackHoleLensRenderer {
     /** 方块实体提交发生在 AFTER_WEATHER 给当前帧编号之前。 */
     public static int upcomingFrameSerial() {
         return renderFrameSerial + 1;
+    }
+
+    private static final KerrBlockOutline FOREGROUND_OUTLINE = new KerrBlockOutline();
+
+    public static VertexConsumer foregroundOutline(VertexConsumer vanilla) {
+        if (!mixinSeen || !enabled() || shaderpackNow()) return vanilla;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || !(mc.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit)) return vanilla;
+        double[] center = resolveCenter();
+        if (center == null) return vanilla;
+        var camera = mc.gameRenderer.getMainCamera();
+        var forward = camera.getLookVector();
+        var eye = camera.getPosition();
+        double selectionDepth = hit.getLocation().subtract(eye).dot(new Vec3(forward));
+        double holeDepth = (center[0] - eye.x) * forward.x + (center[1] - eye.y) * forward.y
+                + (center[2] - eye.z) * forward.z;
+        return selectionDepth < holeDepth ? FOREGROUND_OUTLINE.capture(upcomingFrameSerial(), mc.level) : vanilla;
     }
 
     /** {@link #onRenderLevelStage} 的本体（抽出来只为了能套上面那个 {@code finally}）。 */
@@ -761,6 +773,7 @@ public final class BlackHoleLensRenderer {
             return renderFrame(guard(), f, PATH_LENS_AFTER_COMPOSITE, stage);
         } finally {
             GuixuStellarEndRenderer.flushAfterLens(renderFrameSerial);
+            FOREGROUND_OUTLINE.flush(renderFrameSerial);
             HostFxGlassArDeferred.flushAfterLens();
         }
     }
@@ -871,13 +884,41 @@ public final class BlackHoleLensRenderer {
         f.center = center;
         f.dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-        // 用场景中的黑盘半径切换洞内视角，让接近中的玩家继续看到外侧视界。
-        final double rs0 = rsBlocks();
+        double worldSeconds = (event.getRenderTick() + (double) event.getPartialTick()) / 20;
+        f.renderSeconds = (float) worldSeconds;
+        double referenceRs = rsBlocks();
+        f.kerr = KerrControls.sample(System.nanoTime(), worldSeconds, f.dist, referenceRs);
+        final double rs0 = f.dist > 1e-8 ? 2 * f.dist / Math.max(1e-8, f.kerr.value(DISTANCE))
+                : referenceRs * f.kerr.value(MASS);
+        double tilt = Math.toRadians(f.kerr.value(TILT));
+        double azimuth = Math.toRadians(f.kerr.value(AZIMUTH));
+        var axis = new Vector3d(Math.sin(tilt) * Math.sin(azimuth), Math.cos(tilt),
+                Math.sin(tilt) * Math.cos(azimuth));
+        var equatorialX = new Vector3d(Math.cos(azimuth), 0, -Math.sin(azimuth));
+        if (f.kerr.inclinationWeight() > 0 && f.dist > 1e-8) {
+            var towardObserver = new Vector3d(-dx / f.dist, -dy / f.dist, -dz / f.dist);
+            var tangent = new Vector3d(axis).fma(-axis.dot(towardObserver), towardObserver);
+            if (tangent.lengthSquared() < 1e-8) {
+                tangent.set(equatorialX).fma(-equatorialX.dot(towardObserver), towardObserver);
+            }
+            double naturalAngle = Math.acos(Math.clamp(axis.dot(towardObserver), -1, 1));
+            double inclination = Math.fma(Math.toRadians(f.kerr.value(INCLINATION)) - naturalAngle,
+                    f.kerr.inclinationWeight(), naturalAngle);
+            axis.set(towardObserver).mul(Math.cos(inclination)).fma(Math.sin(inclination), tangent.normalize());
+            if (Math.abs(equatorialX.dot(axis)) > .999) equatorialX.set(towardObserver).cross(tangent).normalize();
+        }
+        f.spinAxis = new float[]{(float) axis.x, (float) axis.y, (float) axis.z};
+        f.equatorialX = new float[]{(float) equatorialX.x, (float) equatorialX.y, (float) equatorialX.z};
         final double shadowR = BlackHoleLensMath.B_CRIT * rs0;
-        final double insideThr = BlackHoleLensSpec.insideThresholdBlocks(rs0);
+        var geometry = f.kerr.geometry();
+        double radialHeight = -(axis.x * dx + axis.y * dy + axis.z * dz) * 2 / rs0;
+        double radialPlane = Math.sqrt(Math.max(0, 4 * f.dist * f.dist / (rs0 * rs0) - radialHeight * radialHeight));
+        double radialCoordinate = geometry.radialCoordinate(radialPlane, 0, radialHeight);
+        final double insideThr = radialCoordinate > 1e-8 ? f.dist * geometry.outerHorizon() / radialCoordinate
+                : rs0 * geometry.outerHorizon() / 2;
         f.rsBlocks = rs0;
         f.insideThr = insideThr;
-        if (f.dist <= insideThr) {
+        if (radialCoordinate <= geometry.outerHorizon()) {
             f.inside = true;
             f.insideShadowR = shadowR;
             f.insideRatio = shadowR > 1.0e-6D ? f.dist / shadowR : 0.0D;
@@ -941,6 +982,31 @@ public final class BlackHoleLensRenderer {
         final float[] bhView = new float[3];
         BlackHoleLensMath.toView(f.view, center, f.camPos, bhView);
         f.bhView = bhView;                              // ← 着色器的 uBhView 直接取它（相机空间）
+        // Inside the emitting volume a visible arc may extend behind the camera
+        // even when its centre is off screen. Trace the complete field of view.
+        if (f.dist <= rs0 * LENS_RANGE_RS) {
+            f.nearField = true;
+            f.proj = new float[16];
+            event.getProjectionMatrix().get(f.proj);
+            f.tanHalfFov = BlackHoleLensMath.tanHalfFovY(f.proj);
+            f.holeScreen = new double[]{f.screenW * .5, f.screenH * .5, 0};
+            f.forwardDist = -bhView[2];
+            float[] observerProjection = f.forwardDist > .05 ? bhView : new float[]{0, 0, -(float) f.dist};
+            BlackHoleLensMath.projectToScreen(f.proj, observerProjection, f.screenW, f.screenH, f.holeScreen);
+            f.holeScreen[2] = Math.clamp(f.holeScreen[2], -0.9999, 0.9999);
+            f.holeDepthWin = f.holeScreen[2] * .5 + .5;
+            f.depthEpsPerBlock = Math.abs(windowDepth(f.proj, observerProjection[2] - 1)
+                    - windowDepth(f.proj, observerProjection[2]));
+            f.gateEps = Math.max(GATE_EPS_MIN, GATE_EPS_BLOCKS * f.depthEpsPerBlock);
+            f.rectW = f.screenW;
+            f.rectH = f.screenH;
+            f.rectHalf = Math.max(f.screenW, f.screenH) * .5;
+            f.screenR = BlackHoleFallbackQuad.clampScreenR(shadowR * f.screenH /
+                    (2 * f.tanHalfFov * Math.max(rs0, f.dist)), f.screenH);
+            f.stampNanos = System.nanoTime();
+            f.renderTick = event.getRenderTick();
+            return f;
+        }
         if (!(bhView[2] < -0.05F)) {                    // 闸门 G7（洞内跳过）：洞在相机【前方】
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_BEHIND);
             return null;                                // 在相机背后 / 贴在镜头上（不是距离闸门）
@@ -1016,12 +1082,10 @@ public final class BlackHoleLensRenderer {
         //   现在：抬到 MIN_LENS_RADIUS_PX 继续走；只有"没有中心 / 开关关闭 / shader 失败"三种情况才不画。
         f.lensHalfPx = Math.max(lensHalfPx, MIN_LENS_RADIUS_PX);
 
-        // ---- 像素预算：把矩形收进预算内（掩码跟着收，画面不会出现硬边）
-        f.maxPixels = Math.min((double) MAX_TEX_SIDE * MAX_TEX_SIDE,
-                f.screenW * (double) f.screenH * MAX_PIXEL_FRACTION);
-        final double shadowHalf = Math.min(f.lensHalfPx, screenRRaw * 1.45D);
-        final BlackHoleLensMath.Rect rect = BlackHoleLensMath.rectWithShadow(
-                f.holeScreen[0], f.holeScreen[1], f.lensHalfPx, shadowHalf, f.screenW, f.screenH, f.maxPixels);
+        // Cropping the emitter to a sampling budget cuts a square into the disk on approach.
+        // KerrRenderPass budgets the ray field independently of the visible image extent.
+        final BlackHoleLensMath.Rect rect = BlackHoleLensMath.rectAround(
+                f.holeScreen[0], f.holeScreen[1], f.lensHalfPx, f.screenW, f.screenH, 0);
         if (rect.w < 4.0D || rect.h < 4.0D) {        // 闸门 G11（洞内跳过）：整块在画面外
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_RECT);
             return null;                                // 整个黑洞都在画面外（不是"太小"）
@@ -1030,7 +1094,7 @@ public final class BlackHoleLensRenderer {
         f.rectY0 = rect.y0;
         f.rectW = rect.w;
         f.rectH = rect.h;
-        f.rectHalf = Math.max(rect.half, shadowHalf);
+        f.rectHalf = rect.half;
 
         final org.joml.Vector3f up = camera.getUpVector();
         final org.joml.Vector3f left = camera.getLeftVector();
@@ -1103,7 +1167,7 @@ public final class BlackHoleLensRenderer {
             //   `inside=true` 24 行、`inside_shader_ok` 0 行、`fallback=2 reason=inside_uniform_missing:uScreenSize` 1 行，
             //   三者拼起来才是真相：<b>洞内一帧都没画</b>，而判据行说"画了"。
             //   现在传真的 drewInside；断在哪一段由 inside_break= 明确写出。
-            logFrameReadout(f, PATH_INSIDE, stage, shaderpack, depthOk, false, false, drewInside, 0);
+            logFrameReadout(f, PATH_INSIDE, stage, shaderpack, depthOk, false, drewInside);
             if (drewInside) {
                 BlackHoleFrameStats.noteDraw(false, f.center == null ? f.camPos : f.center,
                         f.rsBlocks <= 0.0D ? BlackHoleLensSpec.RS_BLOCKS_DEFAULT : f.rsBlocks,
@@ -1115,35 +1179,22 @@ public final class BlackHoleLensRenderer {
             return drewInside;
         }
 
-        // 参考模型估算取景范围，只在日志节流窗口采样。
-        final long nowMs = System.currentTimeMillis();
-        if (nowMs - lastFrameLogMs >= FRAME_LOG_MS) {
-            f.partsSerial = BlackHoleShaderProbe.parts(paramsOf(f, sampleBackground), PARTS_SAMPLES);
-            if (!sampleBackground) f.partsSerial &= ~BlackHoleShaderProbe.PART_WARP;
-        }
-
         boolean drewExterior = false;
         if (g.level() == BlackHoleFallbackGuard.LEVEL_FULL) {
             drewExterior = drawExterior(g, f, depthOk, sampleBackground);
             if (drewExterior && sampleBackground && !lensOnLogged) {
                 lensOnLogged = true;
                 GTDishanhaiMod.LOGGER.info(
-                        "{} lens_on path={} rect=[{},{} {}x{}] rsPx={} dist={} budget_max_px={}",
+                        "{} lens_on path={} rect=[{},{} {}x{}] rsPx={} dist={} {}",
                         PREFIX, path, f1(f.rectX0), f1(f.rectY0), f1(f.rectW), f1(f.rectH),
-                        f1(f.screenR), f1(f.dist), f0(f.maxPixels));
+                        f1(f.screenR), f1(f.dist), KERR_PASS.status());
             }
         }
 
-        // 洞外着色器本帧不可用时，继续沿用静态贴图回退。
-        boolean drewQuad = false;
-        if (!drewExterior && !g.isDead()) {
-            drewQuad = drawFallbackQuad(g, f);
-        }
-        lastPath = drewExterior ? exteriorPath : (drewQuad ? PATH_FALLBACK_QUAD : PATH_NONE);
-        logFrameReadout(f, exteriorPath, stage, shaderpack, depthOk, drewExterior, drewQuad, false, f.parts());
-        if (drewExterior || drewQuad) {
-            String result = drewQuad ? BlackHoleFrameStats.DREW_QUAD
-                    : sampleBackground ? BlackHoleFrameStats.DREW_FULL : BlackHoleFrameStats.DREW_BODY_ONLY;
+        lastPath = drewExterior ? exteriorPath : PATH_NONE;
+        logFrameReadout(f, exteriorPath, stage, shaderpack, depthOk, drewExterior, false);
+        if (drewExterior) {
+            String result = sampleBackground ? BlackHoleFrameStats.DREW_FULL : BlackHoleFrameStats.DREW_BODY_ONLY;
             BlackHoleFrameStats.noteDraw(result, f.center, f.rsBlocks, f.dist,
                     f.rectW, f.rectH, f.screenW, f.screenH, f.tanHalfFov, shaderpack);
         } else {
@@ -1189,20 +1240,15 @@ public final class BlackHoleLensRenderer {
      * 日志分不出来</b>。现在洞内帧照常打这一行（只是 {@code parts=inside}），三件套永远同时出现。
      */
     private static void logFrameReadout(Frame f, String path, String stage, boolean shaderpack,
-                                        boolean depthOk, boolean drewFull, boolean drewQuad,
-                                        boolean drewInside, int parts) {
+                                        boolean depthOk, boolean drewFull, boolean drewInside) {
         final long now = System.currentTimeMillis();
         if (now - lastFrameLogMs < FRAME_LOG_MS) {
             return;
         }
         lastFrameLogMs = now;
         // 洞内必须落到 PATH_INSIDE：改前这里没带 drewInside，于是洞内帧会被算成 path=none
-        final String drawnPath = f.inside
-                ? (drewInside ? PATH_INSIDE : PATH_NONE)
-                : (drewFull ? path : (drewQuad ? PATH_FALLBACK_QUAD : PATH_NONE));
-        final boolean drew = drewFull || drewQuad || drewInside;
-        final boolean missing = drewFull && (parts & BlackHoleShaderProbe.PART_REQUIRED)
-                != BlackHoleShaderProbe.PART_REQUIRED;
+        final boolean drew = drewFull || drewInside;
+        final String drawnPath = drew ? path : PATH_NONE;
         // ---- 🔴 2026-10-25 传送 bug 之后新增的三列（原有 dist/inside/insideThr/screenR 一字不动）
         //   level=  guard 的降级级别（改前只在 hostfx 那行出现，`owner=lens` 会被误读成"一级画了"）；
         //   reason= 最近一次降级的原因（改前只有降级那一瞬间的一行 WARN，几万行日志里翻不到）；
@@ -1227,7 +1273,7 @@ public final class BlackHoleLensRenderer {
                 PREFIX, drawnPath, stage, shaderpack, depthOk ? "ok" : "none",
                 f.depthPreserved, f.inside, drew ? "lens" : "none",
                 f1(f.dist), f1(f.insideThr), f1(f.screenR),
-                f.inside ? PARTS_INSIDE : BlackHoleShaderProbe.describe(parts),
+                f.inside ? PARTS_INSIDE : drewFull ? "kerr " + KERR_PASS.status() : "none",
                 drew ? "yes" : "no",
                 g.level(), g.reason(),
                 "[" + f1(f.rectX0) + "," + f1(f.rectY0) + " " + f1(f.rectW) + "x" + f1(f.rectH) + "]",
@@ -1240,17 +1286,6 @@ public final class BlackHoleLensRenderer {
                     f1(BlackHoleFallbackQuad.screenRCut(screenRRaw, f.screenH)),
                     f0(f.screenH * BlackHoleFallbackQuad.SCREEN_R_CAP_H),
                     f0(BlackHoleFallbackQuad.SCREEN_R_CAP_H), f.screenH, f1(f.forwardDist));
-        }
-        if (!drewFull && !drewInside && !f.inside && !"none".equals(lastQuadSkip)) {
-            GTDishanhaiMod.LOGGER.info("{} fallback_quad_skip why={} （二级这一帧没画，不是沉默失败）",
-                    PREFIX, lastQuadSkip);
-        }
-        if (missing) {
-            GTDishanhaiMod.LOGGER.warn("{} parts_missing 参考模型未检出全部特征 parts={} "
-                            + "（bhView={},{},{} rs={} lensR={} rect=[{},{} {}x{}]）",
-                    PREFIX, BlackHoleShaderProbe.describe(parts),
-                    f2(f.bhView[0]), f2(f.bhView[1]), f2(f.bhView[2]), f2(f.rsBlocks),
-                    f1(f.rectHalf), f1(f.rectX0), f1(f.rectY0), f1(f.rectW), f1(f.rectH));
         }
     }
 
@@ -1477,7 +1512,7 @@ public final class BlackHoleLensRenderer {
                     f.screenW, f.screenH, (int) Math.round(f.rectW), f.insideDepth, f.dist,
                     f.insideShadowR, f.insideDiskN, f.tanHalfFov, f.renderSeconds,
                     BlackHoleTuning.insideWindowMul(), BlackHoleTuning.insideStreakOverride(),
-                    1.0D / (double) bgTexSide);
+                    1.0D / (double) bgTexWidth);
             setInsideUniforms(shader, p);
             if (hasInsideUniform(shader, "uSolid")) {
                 shader.safeGetUniform("uSolid").set(solid ? 1.0F : 0.0F);
@@ -1515,7 +1550,7 @@ public final class BlackHoleLensRenderer {
                                 + "没有任何几何图元）",
                         PREFIX, f1(f.dist), f1(f.insideThr), f1(f.insideShadowR), f2(f.insideRatio),
                         BlackHoleInsideSpec.describe(p), f1(f.rectX0), f1(f.rectY0), f1(f.rectW),
-                        f1(f.rectH), bgTexSide, f2(BlackHoleTuning.insideWindowMul()),
+                        f1(f.rectH), bgTexWidth, f2(BlackHoleTuning.insideWindowMul()),
                         BlackHoleTuning.insideStreakOverride() < 0.0D ? "auto"
                                 : f2(BlackHoleTuning.insideStreakOverride()));
             }
@@ -1665,7 +1700,7 @@ public final class BlackHoleLensRenderer {
                     (float) p.bgW, (float) p.bgH);
         }
         if (hasInsideUniform(shader, "uBgTexel")) {
-            shader.safeGetUniform("uBgTexel").set((float) p.bgTexel, (float) p.bgTexel);
+            shader.safeGetUniform("uBgTexel").set((float) p.bgTexel, 1f / bgTexHeight);
         }
         if (hasInsideUniform(shader, "uBandNrm")) {
             shader.safeGetUniform("uBandNrm").set((float) p.bandNrmX, (float) p.bandNrmY);
@@ -1852,7 +1887,8 @@ public final class BlackHoleLensRenderer {
         if (shader == null) {
             return false;
         }
-        if (sampleBackground && !ensureBgTexture(g, (int) Math.ceil(f.rectW), (int) Math.ceil(f.rectH))) {
+        final boolean copyWorld = sampleBackground && f.kerr.worldSky() > 0.0F;
+        if (copyWorld && !ensureBgTexture(g, (int) Math.ceil(f.rectW), (int) Math.ceil(f.rectH))) {
             return false;
         }
         final Minecraft mc = Minecraft.getInstance();
@@ -1861,9 +1897,8 @@ public final class BlackHoleLensRenderer {
             return false;                                // 分辨率换过 ⇒ 这一帧的像素读数作废
         }
         try {
-            final float[] diskN = new float[3];
-            BlackHoleLensMath.toView(f.view, new double[]{WORLD_DISK_NORMAL[0], WORLD_DISK_NORMAL[1],
-                    WORLD_DISK_NORMAL[2]}, new double[]{0.0D, 0.0D, 0.0D}, diskN);
+            final float[] diskN = directionToView(f.view, f.spinAxis);
+            final float[] equatorialX = directionToView(f.view, f.equatorialX);
             final float nx = diskN[0];
             final float ny = diskN[1];
             final float nz = diskN[2];
@@ -1874,7 +1909,8 @@ public final class BlackHoleLensRenderer {
 
             // 🔴 2026-10-24 深夜：uBhView 必须是【相机空间】（着色器里 dir 就是相机空间射线）。
             //    之前这里错给了"世界空间差值" ⇒ b/bn 全错 ⇒ 黑盘/环/盘一件都不出（只剩 warp）。
-            final double bnAtCenter = centerBn(f);
+            Matrix4f inverseProjection = new Matrix4f().set(f.proj).invert();
+            final double bnAtCenter = f.nearField ? 0 : centerBn(f, inverseProjection);
             if (!(bnAtCenter < BlackHoleShaderProbe.B_CRIT)) {
                 // 🔴 2026-10-25 传送 bug 的真凶之一。
                 //   改前：这一帧不达标 ⇒ 立刻 degradeTo(LEVEL_QUAD)，而那个降级【只降不升】⇒ 整局变贴图。
@@ -1902,67 +1938,91 @@ public final class BlackHoleLensRenderer {
                 bhViewBadFrames = 0;                    // 连续超标断了 ⇒ 清零（下一次重新计数）
                 bhViewBadWarned = false;
             }
-            if (sampleBackground && !copyBackground(g, main, f)) {
+            if (copyWorld && !copyBackground(g, main, f)) {
                 return false;
             }
             // 洞外透镜的采样深度门与颜色共用像素坐标。开关打开且本帧有世界深度时才复制。
             boolean gate = false;
-            if (sampleBackground && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {
+            if (copyWorld && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {
                 copyDepthRect(f.copyX0, f.copyY0, f.copyW, f.copyH);
                 gate = !depthGateDisabled;
             }
-            shader.safeGetUniform("uBhView").set(f.bhView[0], f.bhView[1], f.bhView[2]);
+            KERR_PASS.draw(main, shader, f, inverseProjection, diskN, equatorialX, (float) (DISK_GAIN * BlackHoleTuning.disk()));
             shader.safeGetUniform("uDiskNormal").set(nx / nlen, ny / nlen, nz / nlen);
+            shader.safeGetUniform("uEquatorialX").set(equatorialX);
             shader.safeGetUniform("uScreenSize").set((float) f.screenW, (float) f.screenH);
-            shader.safeGetUniform("uHolePx").set((float) f.holeScreen[0], (float) f.holeScreen[1]);
-            shader.safeGetUniform("uLensRadiusPx").set((float) f.rectHalf);
-            shader.safeGetUniform("uRs").set((float) f.rsBlocks);
-            shader.safeGetUniform("uTanHalfFov").set((float) f.tanHalfFov);
-            shader.safeGetUniform("uAspect").set((float) f.screenW / (float) f.screenH);
-            shader.safeGetUniform("uTime").set(f.renderSeconds);
-            // 运行期可调的两个视觉量：偏折强度（几何）与盘亮度（颜色）
-            // 🔴 2026-10-25：乘总增益 0.42（用户「引力透镜有点劲大」）；见 BlackHoleLensSpec.DEFLECT_GAIN
-            shader.safeGetUniform("uStrength").set((float) diskDeflection(sampleBackground));
+            shader.safeGetUniform("uStrength").set((float) deflectStrength());
+            shader.safeGetUniform("uShadowPixels").set((float) f.screenR);
             shader.setSampleBackground(sampleBackground);
-            shader.safeGetUniform("uDiskGain").set((float) (DISK_GAIN * BlackHoleTuning.disk()));
-            shader.safeGetUniform("uDiskHeat").set(f.diskHeat);
-            var kerr = BlackHoleTuning.kerrParameters();
-            shader.safeGetUniform("uKerrParameters").set(kerr.spin(), kerr.horizon(), kerr.diskInner());
-            shader.safeGetUniform("uRingGain").set(RING_GAIN);
             shader.safeGetUniform("uDepthGate").set(gate ? 1.0F : 0.0F);
-            // 🔴 2026-10-25 第四改：uHoleDepth **重新参与判定**（fsh 里是 `refDepth = max(dSelf, uHoleDepth)`），
-            //   它现在是"参照深度的下界"，不再只是写入门/日志/契约的占位。
-            //   ⚠️ 为什么这一步必须"写得进 + shader 里读得到"：只声明不读的 uniform 会被 GLSL 编译器整条删掉 ⇒
-            //     这里 getUniform 拿到 null ⇒ safeGetUniform 给的是 DUMMY（写入无害、静默不生效），同时
-            //     上层的"必需 uniform 缺失"检查会把整条一级透镜打成二级（实机 reason=uniform_missing:uHoleDepth）。
-            //   ⇒ 这一行与 fsh 的 max 必须成对存在；离线断言见 temp/bh-gate2/check-uniforms.ps1（B1/C1）。
-            //   注：safeGetUniform 在取不到时返回 DUMMY（memory: safeGetUniform → getUniform()==null → DUMMY_UNIFORM），
-            //   所以哪怕真取不到，这里也**不会抛异常**、不会把这一帧打断 —— 失败形态只剩"门的参照少一个下界"。
+            // 采样深度和合成深度使用同一洞心平面，远处天空不抬高采样门。
             shader.safeGetUniform("uHoleDepth").set((float) f.holeDepthWin);
             // 容差单独走 uGateEps（与 uHoleDepth 解耦：一个是参照，一个是容差）
             shader.safeGetUniform("uGateEps").set((float) f.gateEps);
-            shader.setSampler("Sampler1", gate ? depthTexId : null);
+            shader.setSampler("SceneDepth", gate ? depthTexId : null);
 
             // 背景贴图绑到 0 号纹理单元（见 bindTextureForShader 的注释：setShaderTexture 只"记账"不绑）
-            if (sampleBackground) {
+            if (copyWorld) {
                 shader.safeGetUniform("uProjMat").set(new Matrix4f().set(f.proj));
                 // 用实际拷贝的整数矩形，未偏折像素才会对准各自的 texel。
                 shader.safeGetUniform("uBgRect").set((float) f.copyX0, (float) f.copyY0,
                         (float) f.copyW, (float) f.copyH);
-                final float texel = 1.0F / (float) bgTexSide;
-                shader.safeGetUniform("uBgTexel").set(texel, texel);
-                bindTextureForShader(shader, bgTexId);
+                final float texel = 1.0F / (float) bgTexWidth;
+                shader.safeGetUniform("uBgTexel").set(texel, 1f / bgTexHeight);
+                shader.setSampler("SceneColor", bgTexId);
             } else {
-                shader.setSampler("Sampler0", null);
+                shader.setSampler("SceneColor", null);
                 main.bindWrite(false);
             }
+            KERR_PASS.resolveFootprints(main, shader, f);
             drawLensQuad(f, depthOk, gate);
+            if (depthOk && GuixuStellarEndRenderer.hasDeferredBodies(renderFrameSerial)) {
+                writeCapturedDepth(f, shader);
+            }
             return true;
         } catch (Throwable t) {
             g.degradeTo(BlackHoleFallbackGuard.LEVEL_QUAD, "lens_draw:" + t.getClass().getSimpleName());
+            GTDishanhaiMod.LOGGER.warn("{} Kerr render pass failed", PREFIX, t);
+            KERR_PASS.invalidateHistory();
             return false;
+        } finally {
+            KERR_PASS.finishTiming();
         }
     }
+
+    private static void writeCapturedDepth(Frame f, ShaderInstance shader) {
+        float left = (float) (2 * f.rectX0 / f.screenW - 1);
+        float right = (float) (2 * (f.rectX0 + f.rectW) / f.screenW - 1);
+        float bottom = (float) (2 * f.rectY0 / f.screenH - 1);
+        float top = (float) (2 * (f.rectY0 + f.rectH) / f.screenH - 1);
+        float z = (float) f.holeScreen[2];
+        shader.safeGetUniform("uCaptureDepthOnly").set(1f);
+        RenderSystem.setShader(() -> shader);
+        RenderSystem.colorMask(false, false, false, false);
+        try {
+            var buffer = Tesselator.getInstance().getBuilder();
+            buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION);
+            buffer.vertex(left, bottom, z).endVertex();
+            buffer.vertex(right, bottom, z).endVertex();
+            buffer.vertex(right, top, z).endVertex();
+            buffer.vertex(left, top, z).endVertex();
+            com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(buffer.end());
+        } finally {
+            shader.safeGetUniform("uCaptureDepthOnly").set(0f);
+            RenderSystem.colorMask(true, true, true, true);
+            RenderSystem.disableBlend();
+            RenderSystem.defaultBlendFunc();
+        }
+    }
+
+    private static float[] directionToView(float[] view, float[] direction) {
+        return new float[]{
+                view[0] * direction[0] + view[4] * direction[1] + view[8] * direction[2],
+                view[1] * direction[0] + view[5] * direction[1] + view[9] * direction[2],
+                view[2] * direction[0] + view[6] * direction[1] + view[10] * direction[2]};
+    }
+
+    static String kerrStatus() { return KERR_PASS.status(); }
 
     /**
      * 画一个 NDC 矩形（顶点已经是裁剪空间坐标；z 用黑洞中心平面的 NDC 深度 ⇒ 深度测试天然正确）。
@@ -2028,22 +2088,20 @@ public final class BlackHoleLensRenderer {
                     ? f2(f.gateEps / f.depthEpsPerBlock) : "nan";
             GTDishanhaiMod.LOGGER.info(
                     "{} lens_gate depthOk={} gate={} depthTest={} depthFunc=0x{}({}) depthMask={} "
-                            + "quadNdcZ={} holeCenterNdcZ={} holeWinZ={} depthTex={} depthTexSide={} "
+                            + "quadNdcZ={} holeCenterNdcZ={} holeWinZ={} depthTex={} depthTexWidth={} "
                             + "gateEps={} gateEpsBlocks={} depthEpsPerBlock={} gateEpsMin={} gateEpsCfgBlocks={} "
                             + "gateEpsSrc={} depthProbe={}/{} depthProbeVerdict={} "
                             + "rect=[{},{} {}x{}] note=gateEps=max(gateEpsMin, gateEpsCfgBlocks×depthEpsPerBlock)，"
                             + "三项都是窗口深度单位；gateEpsBlocks 是按【本帧洞距】现算的格数"
                             + "（=gateEps/depthEpsPerBlock，随距离变，不是常量）；"
                             + "写入门用 GL depth test（quad 的 z = 洞心平面）；"
-                            + "采样门用 Sampler1 的深度拷贝，判据是「采样点比 refDepth=max(本像素深度,洞心平面深度) "
-                            + "更近就退回自采样」（正常情形 refDepth=本像素深度，与逐像素自比等价；"
-                            + "洞面只当 dSelf 的下界 ⇒ 门不押在常数上，同时 uHoleDepth 因此被真的读到、不会被优化掉）",
+                            + "采样门用 SceneDepth 拷贝，采样点跨过洞心平面时按容差过渡到原场景",
                     PREFIX, depthOk, gate ? "on" : "off",
                     depthTestOn ? "on" : "off", Integer.toHexString(depthFunc),
                     depthFunc == GL_LEQUAL ? "lequal" : (depthFunc == GL_ALWAYS ? "always" : "?"),
                     depthWriteOn ? "true" : "false",
                     fd(z), fd(f.holeScreen[2]), fd(f.holeDepthWin),
-                    depthTexState, depthTexSide,
+                    depthTexState, depthTexWidth,
                     fe(f.gateEps), gateEpsBlocksStr, fe(f.depthEpsPerBlock), fe(GATE_EPS_MIN),
                     f2(GATE_EPS_BLOCKS), epsFromBlocks ? "blocks" : "min",
                     fd(depthProbeMin), fd(depthProbeMax), depthProbeVerdict,
@@ -2244,7 +2302,13 @@ public final class BlackHoleLensRenderer {
     // 资源：shader / 背景贴图 / 拷贝
     // ==========================================================================================
 
-    private static final class ExteriorShader extends ShaderInstance {
+    static final class ExteriorShader extends ShaderInstance {
+        private int transferPass;
+
+        void setTransferPass(int pass) {
+            transferPass = pass;
+            safeGetUniform("uTransferPass").set((float) pass);
+        }
         private ExteriorShader() throws IOException {
             super(Minecraft.getInstance().getResourceManager(), SHADER_ID, DefaultVertexFormat.POSITION);
         }
@@ -2256,7 +2320,13 @@ public final class BlackHoleLensRenderer {
         @Override
         public void apply() {
             super.apply();
-            // 只有采样区域内部输出完整背景；周边按预乘覆盖率叠加黑影和发光。
+            if (transferPass == 1) {
+                RenderSystem.disableBlend();
+                return;
+            }
+            // The JSON must match vanilla position_tex. BlendMode caches the first
+            // translucent mode after an opaque pass; caching premultiplied here
+            // makes position_tex overwrite the sun's additive factors next frame.
             RenderSystem.enableBlend();
             RenderSystem.blendFunc(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
         }
@@ -2350,18 +2420,14 @@ public final class BlackHoleLensRenderer {
     }
 
     private static boolean ensureBgTexture(BlackHoleFallbackGuard g, int needW, int needH) {
-        final int need = Math.min(MAX_TEX_SIDE, Math.max(BASE_TEX_SIDE, Math.max(needW, needH)));
-        if (bgTexId != -1 && bgTexSide >= need) {
-            return true;
-        }
+        if (bgTexId != -1 && bgTexWidth >= needW && bgTexHeight >= needH) return true;
         try {
-            int side = 1;
-            while (side < need) {
-                side <<= 1;
-            }
-            if (side > MAX_TEX_SIDE) {
-                side = MAX_TEX_SIDE;
-            }
+            // Rectangular storage covers the actual viewport, including ultrawide
+            // close-ups. Quantize growth without reallocating as the camera walks.
+            int maxSize = GL11.glGetInteger(GL11.GL_MAX_TEXTURE_SIZE);
+            int width = Math.min(maxSize, Math.max(bgTexWidth, (needW + 255) & ~255));
+            int height = Math.min(maxSize, Math.max(bgTexHeight, (needH + 255) & ~255));
+            if (bgTexId != -1 && width == bgTexWidth && height == bgTexHeight) return true;
             final int id = GlStateManager._genTexture();
             GlStateManager._bindTexture(id);
             GlStateManager._texParameter(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -2369,14 +2435,15 @@ public final class BlackHoleLensRenderer {
             GlStateManager._texParameter(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             GlStateManager._texParameter(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             // 只分配存储（data = null）：内容由每帧的 glCopyTexSubImage2D 灌进去
-            GlStateManager._texImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, side, side, 0,
+            GlStateManager._texImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
                     GL_RGBA, GL_UNSIGNED_BYTE, (IntBuffer) null);
             GlStateManager._bindTexture(0);
             if (bgTexId != -1) {
                 GlStateManager._deleteTexture(bgTexId);
             }
             bgTexId = id;
-            bgTexSide = side;
+            bgTexWidth = width;
+            bgTexHeight = height;
             return true;
         } catch (Throwable t) {
             g.degradeTo(BlackHoleFallbackGuard.LEVEL_QUAD, "bgtex:" + t.getClass().getSimpleName());
@@ -2385,7 +2452,7 @@ public final class BlackHoleLensRenderer {
     }
 
     /**
-     * 建立 / 复用<b>深度拷贝贴图</b>（边长 = {@link #bgTexSide}，与颜色拷贝共用同一套 uv）。
+     * 建立 / 复用<b>深度拷贝贴图</b>（边长 = {@link #bgTexWidth}，与颜色拷贝共用同一套 uv）。
      *
      * <p>为什么用 NEAREST：深度纹理不能线性过滤（比较模式关闭时按普通纹理采，但驱动普遍只保证
      * NEAREST；而且这里要的就是"这个像素本来多深"，插值反而错）。
@@ -2398,7 +2465,7 @@ public final class BlackHoleLensRenderer {
         if (depthGateDisabled) {
             return false;
         }
-        if (depthTexId != -1 && depthTexSide == bgTexSide) {
+        if (depthTexId != -1 && depthTexWidth == bgTexWidth && depthTexHeight == bgTexHeight) {
             return true;
         }
         try {
@@ -2413,7 +2480,7 @@ public final class BlackHoleLensRenderer {
             //   GL 4.6 表 8.2：DEPTH_COMPONENT24 × DEPTH_COMPONENT 只允许 UNSIGNED_INT。
             //   这条错误【不会抛异常】，只有 glGetError 能看到 ⇒ 下面这一段自检就是为它写的。
             drainGlErrors();                             // 先把历史错误排干，之后读到的才归因于这一次分配
-            GlStateManager._texImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, bgTexSide, bgTexSide, 0,
+            GlStateManager._texImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, bgTexWidth, bgTexHeight, 0,
                     GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, (IntBuffer) null);
             final int allocErr = GlStateManager._getError();   // ← 必须【紧跟着】读，别被后面的调用污染
             if (!depthAllocLogged) {
@@ -2421,12 +2488,12 @@ public final class BlackHoleLensRenderer {
                 if (allocErr == 0) {
                     GTDishanhaiMod.LOGGER.info("{} depth_tex_alloc gl=0 ok internalformat=GL_DEPTH_COMPONENT24"
                                     + " format=GL_DEPTH_COMPONENT type=GL_UNSIGNED_INT side={}",
-                            PREFIX, bgTexSide);
+                            PREFIX, bgTexWidth);
                 } else {
                     GTDishanhaiMod.LOGGER.warn("{} depth_tex_alloc gl={} fail internalformat=GL_DEPTH_COMPONENT24"
                                     + " format=GL_DEPTH_COMPONENT type=GL_UNSIGNED_INT side={} ⇒ 采样门关闭"
                                     + "（这张贴图没有存储，采样只会读到 0 —— 那样的门会把整屏都判成前景）",
-                            PREFIX, allocErr, bgTexSide);
+                            PREFIX, allocErr, bgTexWidth);
                 }
             }
             GlStateManager._bindTexture(0);
@@ -2440,7 +2507,8 @@ public final class BlackHoleLensRenderer {
                 GlStateManager._deleteTexture(depthTexId);
             }
             depthTexId = id;
-            depthTexSide = bgTexSide;
+            depthTexWidth = bgTexWidth;
+            depthTexHeight = bgTexHeight;
             depthCopyVerified = false;
             depthGateDisabled = false;
             return true;
@@ -2488,7 +2556,7 @@ public final class BlackHoleLensRenderer {
                 } else if (!depthTexLogged) {
                     depthTexLogged = true;
                     GTDishanhaiMod.LOGGER.info("{} depth_copy_ok kind=glCopyTexSubImage2D(depth→tex{}) side={} "
-                                    + "note=这是「只有黑洞后面的东西才参与弯折」的数据来源", PREFIX, depthTexId, depthTexSide);
+                                    + "note=这是「只有黑洞后面的东西才参与弯折」的数据来源", PREFIX, depthTexId, depthTexWidth);
                 }
             }
             // 🔴 2026-10-25：拷完之后【把贴图里的数读出来看一眼】—— 一面会话只做一次。
@@ -2654,15 +2722,15 @@ public final class BlackHoleLensRenderer {
         final int bottom = (int) Math.floor(f.rectY0);
         final int right = (int) Math.ceil(f.rectX0 + f.rectW);
         final int top = (int) Math.ceil(f.rectY0 + f.rectH);
-        final int w = Math.min(right - left, bgTexSide);
-        final int h = Math.min(top - bottom, bgTexSide);
+        final int w = Math.min(right - left, bgTexWidth);
+        final int h = Math.min(top - bottom, bgTexHeight);
         final int x = BlackHoleLensMath.copyStart(left, right, w, f.holeScreen[0]);
         final int y = BlackHoleLensMath.copyStart(bottom, top, h, f.holeScreen[1]);
         if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > main.width || y + h > main.height) {
             if (f.inside) {
                 BlackHoleInsideProbe.logOnce(BlackHoleInsideProbe.STAGE_COPY,
                         "src=[" + x + "," + y + " " + w + "x" + h + "] tex=" + bgTexId
-                                + " side=" + bgTexSide + " main=[" + main.width + "x" + main.height + "]"
+                                + " side=" + bgTexWidth + " main=[" + main.width + "x" + main.height + "]"
                                 + " result=fail why=src_rect_out_of_main note=源矩形越出主目标"
                                 + "（screenR=0 的洞内帧不该走到这里，rect 是屏幕中心正方形）");
                 BlackHoleInsideProbe.markBreak(BlackHoleInsideProbe.BREAK_COPY, "src_rect_out_of_main");
@@ -2692,7 +2760,7 @@ public final class BlackHoleLensRenderer {
                 final int copyErr = GlStateManager._getError();
                 BlackHoleInsideProbe.logOnce(BlackHoleInsideProbe.STAGE_COPY,
                         "src=[" + x + "," + y + " " + w + "x" + h + "] tex=" + bgTexId
-                                + " side=" + bgTexSide + " main=[" + main.width + "x" + main.height + "]"
+                                + " side=" + bgTexWidth + " main=[" + main.width + "x" + main.height + "]"
                                 + " fb_read=" + GlStateManager._getInteger(GL_READ_FRAMEBUFFER_BINDING)
                                 + " fb_draw=" + GlStateManager._getInteger(GL_DRAW_FRAMEBUFFER_BINDING)
                                 + " result=" + (copyErr == 0 ? "ok" : "fail") + " gl=" + copyErr
@@ -2713,7 +2781,7 @@ public final class BlackHoleLensRenderer {
                     g.degradeTo(BlackHoleFallbackGuard.LEVEL_QUAD, "copy_gl_error:" + err);
                     return false;
                 }
-                GTDishanhaiMod.LOGGER.info("{} bgcopy_ok kind=glCopyTexSubImage2D max_side={}", PREFIX, bgTexSide);
+                GTDishanhaiMod.LOGGER.info("{} bgcopy_ok kind=glCopyTexSubImage2D max_side={}", PREFIX, bgTexWidth);
             }
             return true;
         } catch (Throwable t) {
@@ -2919,7 +2987,7 @@ public final class BlackHoleLensRenderer {
      *   <li>{@link #copyVerified} —— 一次性自检旗标（验过就不再验），它假设"屏幕/目标没换过"。</li>
      *   <li>{@link #lastDrawnRenderTick} —— 防重复绘制，跟渲染刻绑定。</li>
      *   <li>{@link #fallbackPosLogged} —— 只打一次的诊断行（换环境后要能再打一次）。</li>
-     *   <li>{@link #bgTexId} / {@link #bgTexSide} —— 显存里的拷贝贴图尺寸（按 {@code need} 增长，
+     *   <li>{@link #bgTexId} / {@link #bgTexWidth} —— 显存里的拷贝贴图尺寸（按 {@code need} 增长，
      *       <b>不依赖相机</b>，所以不作废；它由 {@code ensureBgTexture} 自己按需重建）。</li>
      *   <li>{@link #centerCache} / {@link #centerRawCache} —— 黑洞<b>世界</b>坐标（配置来的），
      *       <b>不是相机量</b>，传送不影响它；它由配置字符串变化驱动。</li>
@@ -3106,6 +3174,7 @@ public final class BlackHoleLensRenderer {
 
     /** 资源重载后调用：作废 shader / 拷贝自检缓存（{@link BlackHoleReloadHook} 转调）。 */
     public static void onResourceReload() {
+        FOREGROUND_OUTLINE.discard();
         closeShaderQuietly();
         closeInsideShaderQuietly();
         shaderTried = false;
@@ -3192,7 +3261,7 @@ public final class BlackHoleLensRenderer {
         final String tex = depthTexId == -1 ? "none" : (depthGateDisabled ? "fail" : "ok");
         final boolean on = depthTexId != -1 && !depthGateDisabled && BlackHoleTuning.depthGate();
         return "lens_gate gate=" + (on ? "on" : "off") + " depthTex=" + tex
-                + " side=" + depthTexSide
+                + " side=" + depthTexWidth
                 + " depthProbe=" + fd(depthProbeMin) + "/" + fd(depthProbeMax)
                 + " depthProbeVerdict=" + depthProbeVerdict
                 + " abSwitch=" + (BlackHoleTuning.depthGate() ? "on" : "off")
@@ -3271,6 +3340,7 @@ public final class BlackHoleLensRenderer {
     }
 
     private static void closeShaderQuietly() {
+        KERR_PASS.close();
         try {
             if (lensShader != null) {
                 lensShader.close();
@@ -3339,52 +3409,13 @@ public final class BlackHoleLensRenderer {
         return v < 0.0D ? 0.0D : (v > 1.0D ? 1.0D : v);
     }
 
-    /**
-     * 把一帧读数翻成 {@link BlackHoleShaderProbe} 的输入（<b>与给着色器的 uniform 逐项同值</b>）。
-     *
-     * <p>为什么不让 parts 直接猜：{@code uBhView} 那次事故（世界空间 vs 相机空间）正是"猜"出来的。
-     * 这里每一项都取"真的喂进去的那个值"，所以 parts 与画面同源。
-     */
-    private static double diskDeflection(boolean sampleBackground) {
-        return sampleBackground ? deflectStrength() : BlackHoleLensSpec.DEFLECT_GAIN;
-    }
-
-    private static BlackHoleShaderProbe.Params paramsOf(Frame f, boolean sampleBackground) {
-        final float[] n = diskNormalView(f);
-        return new BlackHoleShaderProbe.Params(
-                f.proj, f.bhView, n, f.screenW, f.screenH,
-                f.rectX0, f.rectY0, f.rectW, f.rectH, f.rectHalf,
-                f.holeScreen[0], f.holeScreen[1], f.rsBlocks, f.tanHalfFov,
-                diskDeflection(sampleBackground),
-                DISK_GAIN * BlackHoleTuning.disk(), RING_GAIN, f.renderSeconds);
-    }
-
-    /** 盘法线在相机空间里的方向。 */
-    private static float[] diskNormalView(Frame f) {
-        final float[] out = new float[3];
-        BlackHoleLensMath.toView(f.view, new double[]{WORLD_DISK_NORMAL[0], WORLD_DISK_NORMAL[1],
-                WORLD_DISK_NORMAL[2]}, new double[]{0.0D, 0.0D, 0.0D}, out);
-        final double l = Math.sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
-        if (!(l > 1.0e-9D)) {
-            return new float[]{0.0F, 1.0F, 0.0F};
-        }
-        return new float[]{(float) (out[0] / l), (float) (out[1] / l), (float) (out[2] / l)};
-    }
-
-    /**
-     * 黑洞中心那个像素上的碰撞参数 {@code bn = b / Rs}（相机空间口径）。
-     *
-     * <p>自检用：中心处必须 {@code bn < B_CRIT}（否则连黑盘都画不出来）。
-     * 2026-10-24 深夜那次事故里它是几十（因为 uBhView 给了世界空间差值），一眼就该报错。
-     */
-    static double centerBn(Frame f) {
-        // 🔴 这是一条**真检查**（不是恒等式）：算的是"黑洞中心那个像素的射线"的碰撞参数。
-        //    · 正确（bhView = 相机空间、holeScreen 由同一个 bhView 投影）⇒ bn ≈ 0 < B_CRIT（通过）；
-        //    · 错误（bhView 被喂成世界空间差值 —— 2026-10-24 深夜那个 bug）⇒ 射线与 bh 差着一整个
-        //      相机旋转角 ⇒ bn 大到几十 ⇒ 当场报红并降二级。
-        //    ⚠️ 千万别写成 `tca = len`（那样 b 恒 0、永远绿）—— 那正是"检查器自己的假设错了"。
-        //    数学本体在 BlackHoleShaderProbe.bnAtPixel（离线探针 PartsCheck 用的也是它）。
-        return BlackHoleShaderProbe.bnAtHoleCenter(paramsOf(f, true));
+    /** Distance of the projected center ray from the hole, including view bob and roll. */
+    private static double centerBn(Frame f, Matrix4f inverse) {
+        var eye = new org.joml.Vector3f(inverse.m20(), inverse.m21(), inverse.m22()).div(inverse.m23());
+        var near = new org.joml.Vector4f((float) (2 * f.holeScreen[0] / f.screenW - 1),
+                (float) (2 * f.holeScreen[1] / f.screenH - 1), -1, 1).mul(inverse);
+        var ray = new org.joml.Vector3f(near.x, near.y, near.z).fma(-near.w, eye).normalize();
+        return new org.joml.Vector3f(f.bhView).sub(eye).cross(ray).length() / f.rsBlocks;
     }
 
     private static String f0(double v) {

@@ -58,12 +58,11 @@ class GuixuAccretionLightningTest {
 
     @Test void finaleChargesTheActualStructureInSuccessiveSections() throws Exception {
         var nodes = nodes(model());
-        double finale = GuixuStellarEnd.STRUCTURE_START_SECONDS;
         boolean upper = false, lower = false, rim = false, station = false;
         for (var node : nodes) {
             double arrival = GuixuStellarEnd.structureArrival(node.x(), node.y(), node.z());
-            assertEquals(0, GuixuStellarEnd.structureCharge(finale, arrival));
-            assertEquals(1, GuixuStellarEnd.structureCharge(finale + 16, arrival));
+            assertEquals(0, GuixuStellarEnd.structureCharge(0, arrival));
+            assertEquals(1, GuixuStellarEnd.structureCharge(16, arrival));
             upper |= node.y() > 60 && arrival < 7;
             lower |= node.y() < -60 && arrival < 7;
             rim |= (node.x() < -60 || Math.abs(node.z()) > 60) && arrival > 5 && arrival < 11;

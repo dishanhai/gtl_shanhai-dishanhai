@@ -130,7 +130,7 @@ public final class BlackHoleTuning {
      * <p>默认 {@link InsideDebug#SAMPLE} = <b>改前的行为</b>；这是唯一一个"改了也不影响画面"的开关，
      * 只在排查"洞内不渲染"时用。见 {@link InsideDebug} 的三档说明。
      */
-    private static volatile InsideDebug insideDebug = InsideDebug.SAMPLE;
+    private static volatile InsideDebug insideDebug = InsideDebug.OFF;
 
     /**
      * <b>采样侧深度门</b>的 A/B 开关（{@code /shanhai bh depthgate on|off|status}）。

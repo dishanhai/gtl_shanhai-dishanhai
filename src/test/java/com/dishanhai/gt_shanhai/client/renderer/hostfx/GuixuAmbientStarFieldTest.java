@@ -26,15 +26,18 @@ class GuixuAmbientStarFieldTest {
     @Test void skySurroundsTheOuterStructureAndStaysInsideABoundedShell() throws Exception {
         int count = type().getField("SKY_COUNT").getInt(null);
         assertTrue(count >= 512 && count <= 1024);
-        double lowest = 0, highest = 0;
+        double lowest = 0, highest = 0, farthest = 0;
         for (int i = 0; i < count; i++) {
             Object star = sample("sampleSky", i, 12.5);
-            assertTrue(radius(star) >= 76.0 && radius(star) <= 110.0);
+            double distance = radius(star);
+            assertTrue(distance >= 76.0 && distance <= GuixuStarField.SKY_OUTER_RADIUS);
+            farthest = Math.max(farthest, distance);
             assertTrue(value(star, "alpha") > 0 && value(star, "alpha") <= 1);
             lowest = Math.min(lowest, value(star, "headY"));
             highest = Math.max(highest, value(star, "headY"));
         }
-        assertTrue(lowest < -50 && highest > 50, "星空應包圍結構上下方");
+        assertTrue(lowest < -110 && highest > 110, "扩展星空应覆盖主机上下方");
+        assertTrue(farthest >= 166, "最外层星点应覆盖到扩展后的星空边缘");
     }
 
     @Test void skyAndOrbitSamplingAreDeterministicAndFiniteAtLongTimes() throws Exception {

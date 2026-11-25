@@ -16,6 +16,8 @@ import org.joml.Vector3d;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 
+import java.util.List;
+
 import static com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuStarRenderer.ambientVertex;
 
 /** 实体球面写入深度，日冕、大气和星环在后续加性批次绘制。 */
@@ -62,7 +64,6 @@ final class GuixuCelestialRenderer {
     };
     private static RenderType bodyLayer;
     private static RenderType animatedBodyLayer;
-    private static RenderType horizonDepthLayer;
 
     private final Matrix4f matrix, clip;
     private final Vector3f camera, center = new Vector3f(), view = new Vector3f(), pull = new Vector3f();
@@ -89,27 +90,13 @@ final class GuixuCelestialRenderer {
         this.horizon = horizon;
     }
 
-    void drawHorizonDepth(MultiBufferSource.BufferSource buffers) {
-        if (camera.lengthSquared() <= horizon * horizon
-                || !HostFxVisibility.isVisible(clip, 0, 0, 0, horizon)) return;
-        RenderType layer = horizonDepthLayer();
-        VertexConsumer vertices = buffers.getBuffer(layer);
-        // 屏幕空间透镜只写颜色，这个视界球为随后绘制的天体补上遮挡深度。
-        for (int index : DETAIL.indices) {
-            var vertex = DETAIL.points[index];
-            ambientVertex(vertices, matrix, horizon * vertex.x(), horizon * vertex.y(), horizon * vertex.z(),
-                    0, 0, 0, 1);
-        }
-        buffers.endBatch(layer);
-    }
-
-    void drawBodies(MultiBufferSource.BufferSource buffers, GuixuStellarEnd.Star[] stars) {
+    void drawBodies(MultiBufferSource.BufferSource buffers, List<GuixuStellarEnd.Star> stars) {
         boolean animate = GuixuCelestialShader.prepare(seconds, PULSAR_MAGNETIC_TILT);
         RenderType layer = bodyLayer(animate);
         VertexConsumer vertices = buffers.getBuffer(layer);
         // 渲染线程按天体顺序复用变换后的顶点，避免给相邻四边形重复做光照和潮汐计算。
         for (var star : stars) {
-            if (star == null || star.solidRadius() <= GuixuStellarEnd.MIN_SOLID_RADIUS) continue;
+            if (star.solidRadius() <= GuixuStellarEnd.MIN_SOLID_RADIUS) continue;
             if (place(star)) drawSphere(vertices, star, animate);
             drawMoons(vertices, star, animate);
             drawTidalFragments(vertices, star, animate);
@@ -118,9 +105,9 @@ final class GuixuCelestialRenderer {
         buffers.endBatch(layer);
     }
 
-    void drawAuras(VertexConsumer vertices, GuixuStellarEnd.Star[] stars, int segments) {
+    void drawAuras(VertexConsumer vertices, List<GuixuStellarEnd.Star> stars, int segments) {
         for (var star : stars) {
-            if (star == null || star.kind() == GuixuStellarEnd.BodyKind.BLACK_DWARF || !place(star)) continue;
+            if (star.kind() == GuixuStellarEnd.BodyKind.BLACK_DWARF || !place(star)) continue;
             if (star.kind() == GuixuStellarEnd.BodyKind.QUASAR) {
                 var ignition = GuixuStellarEnd.quasarIgnition(seconds);
                 new GuixuQuasarRenderer(matrix, center, view, axis, seconds, star, ignition).draw(vertices, segments + 16);
@@ -164,7 +151,7 @@ final class GuixuCelestialRenderer {
     }
 
     private boolean place(GuixuStellarEnd.Star star) {
-        if (star == null || star.solidRadius() <= GuixuStellarEnd.MIN_SOLID_RADIUS) return false;
+        if (star.solidRadius() <= GuixuStellarEnd.MIN_SOLID_RADIUS) return false;
         var location = GuixuStellarEnd.bodyPosition(star, horizon);
         center.set((float) location.x(), (float) location.y(), (float) location.z());
         float extent = star.solidRadius() * star.kind().effectExtent();
@@ -851,18 +838,6 @@ final class GuixuCelestialRenderer {
                         .setDepthTestState(new RenderStateShard.DepthTestStateShard("lequal", GL11.GL_LEQUAL))
                         .setWriteMaskState(new RenderStateShard.WriteMaskStateShard(true, true))
                         .createCompositeState(false));
-    }
-
-    private static RenderType horizonDepthLayer() {
-        if (horizonDepthLayer == null) {
-            horizonDepthLayer = RenderType.create("shanhai_guixu_stellar_horizon_depth", DefaultVertexFormat.POSITION_COLOR,
-                    VertexFormat.Mode.QUADS, 32768, false, false, RenderType.CompositeState.builder()
-                            .setShaderState(new RenderStateShard.ShaderStateShard(GameRenderer::getPositionColorShader))
-                            .setDepthTestState(new RenderStateShard.DepthTestStateShard("lequal", GL11.GL_LEQUAL))
-                            .setWriteMaskState(new RenderStateShard.WriteMaskStateShard(false, true))
-                            .createCompositeState(false));
-        }
-        return horizonDepthLayer;
     }
 
     private static final class Sphere {
