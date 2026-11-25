@@ -289,6 +289,17 @@ tasks.register('releaseJar', Copy) {
 
 tasks.named('build') { dependsOn 'devJar', 'releaseJar' }
 
+tasks.register('kerrGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Runs the Guixu Kerr shaders in a hidden OpenGL context.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.GuixuKerrGpuProbe'
+    systemProperty 'kerr.stabilityFrames', providers.gradleProperty('kerrStabilityFrames').getOrElse('0')
+    systemProperty 'kerr.width', providers.gradleProperty('kerrWidth').getOrElse('800')
+    systemProperty 'kerr.height', providers.gradleProperty('kerrHeight').getOrElse('560')
+}
+
 // .rtui 配方 UI 克隆
 task cloneRtui(type: JavaExec) {
     group = 'gt_shanhai'
