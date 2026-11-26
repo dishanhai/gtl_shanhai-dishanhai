@@ -87,6 +87,7 @@ public final class BlackHoleCommand {
     private static LiteralArgumentBuilder<CommandSourceStack> bhBranch() {
         return Commands.literal(ARG)
                 .then(kerrBranch())
+                .then(whiteHoleBranch())
                 // 裸 /shanhai bh = status（最常敲的那条，省一次输入）
                 .executes(ctx -> {
                     status(ctx.getSource());
@@ -337,6 +338,79 @@ public final class BlackHoleCommand {
                             })));
         }
         return branch;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> whiteHoleBranch() {
+        return Commands.literal("white")
+                .then(Commands.literal("on").executes(ctx -> setWhiteHolePreview(ctx.getSource(), true)))
+                .then(Commands.literal("off").executes(ctx -> setWhiteHolePreview(ctx.getSource(), false)))
+                .then(Commands.literal("host")
+                        .then(Commands.literal("on").executes(ctx -> setHostWhiteHole(ctx.getSource())))
+                        .then(Commands.literal("off").executes(ctx -> {
+                            BlackHoleTuning.clearHostWhiteHoleOverride();
+                            log("white_host=off", ctx.getSource());
+                            reply(ctx.getSource(), Component.translatable("gt_shanhai.white_hole.host_restored").getString());
+                            return 1;
+                        })))
+                .then(Commands.literal("demo").executes(ctx -> {
+                    WhiteHoleRenderState.setLevel(Minecraft.getInstance().level);
+                    WhiteHoleRenderState.startDemonstration();
+                    reply(ctx.getSource(), Component.translatable("gt_shanhai.white_hole.demo_on").getString());
+                    return 1;
+                }))
+                .then(Commands.literal("panel").executes(ctx -> {
+                    Minecraft client = Minecraft.getInstance();
+                    client.tell(() -> {
+                        WhiteHoleRenderState.setLevel(client.level);
+                        client.setScreen(new WhiteHoleDebugScreen());
+                    });
+                    return 1;
+                }))
+                .then(Commands.literal("seed").then(Commands.argument("value", LongArgumentType.longArg())
+                        .executes(ctx -> {
+                            WhiteHoleRenderState.setLevel(Minecraft.getInstance().level);
+                            long seed = LongArgumentType.getLong(ctx, "value");
+                            WhiteHoleRenderState.preview().reseed(seed);
+                            reply(ctx.getSource(), Component.translatable("gt_shanhai.white_hole.seed_saved", seed).getString());
+                            return 1;
+                        })));
+    }
+
+    private static int setHostWhiteHole(CommandSourceStack source) {
+        Minecraft client = Minecraft.getInstance();
+        var level = client.level;
+        WhiteHoleRenderState.setLevel(level);
+        var camera = client.gameRenderer.getMainCamera().getPosition();
+        var controller = BlockPos.of(BlackHoleTuning.hostCenterControllerPos());
+        if (level == null || !BlackHoleTuning.hasHostCenter()
+                || !BlackHoleTuning.hostCenterInRange(level, camera.x, camera.z, client.options.getEffectiveRenderDistance())
+                || !level.hasChunkAt(controller)
+                || !(MetaMachine.getMachine(level, controller) instanceof GuixuVisionCoreMachine host)
+                || !(host.isFormed() || host.isHostFormedSync())) {
+            reply(source, Component.translatable("gt_shanhai.white_hole.host_missing").getString());
+            return 0;
+        }
+        if (!BlackHoleTuning.enabled() || !GuixuClientConfig.hostFxEnabled()) {
+            reply(source, Component.translatable("gt_shanhai.white_hole.host_render_disabled").getString());
+            return 0;
+        }
+        WhiteHoleRenderState.setPreviewEnabled(false);
+        BlackHoleTuning.forceHostWhiteHole(level, controller.asLong());
+        String controllerPosition = controller.toShortString();
+        log("white_host=on controller=" + controllerPosition, source);
+        reply(source, Component.translatable("gt_shanhai.white_hole.host_forced", controllerPosition).getString());
+        return 1;
+    }
+
+    private static int setWhiteHolePreview(CommandSourceStack source, boolean enabled) {
+        WhiteHoleRenderState.setLevel(Minecraft.getInstance().level);
+        WhiteHoleRenderState.setPreviewEnabled(enabled);
+        reply(source, Component.translatable(enabled ? "gt_shanhai.white_hole.preview_on"
+                : "gt_shanhai.white_hole.preview_off").getString());
+        if (enabled && BlackHoleTuning.hasHostCenter()) {
+            reply(source, Component.translatable("gt_shanhai.white_hole.host_active").getString());
+        }
+        return 1;
     }
 
     /**

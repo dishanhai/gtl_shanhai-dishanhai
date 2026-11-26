@@ -29,7 +29,7 @@ final class KerrDebugScreen extends Screen {
     KerrDebugScreen() { this(null, KerrControls.KERR); }
 
     KerrDebugScreen(Screen previous, KerrControls.Optics optics) {
-        super(label("title"));
+        super(optics == KerrControls.WHITE ? Component.translatable("gt_shanhai.white_hole.optics") : label("title"));
         this.previous = previous;
         this.optics = optics;
     }
@@ -54,6 +54,7 @@ final class KerrDebugScreen extends Screen {
                 .bounds(left + column + 6, top + 14, column, 20).build()).active = page != 1;
         Parameter[] parameters = PAGES[page];
         for (int i = 0; i < parameters.length; i++) {
+            if (parameters[i] == OUTER_RADIUS && optics == KerrControls.WHITE) continue;
             addRenderableWidget(new ParameterSlider(left + i % 2 * (column + 6), top + 38 + 21 * (i / 2),
                     column, parameters[i], optics));
         }
@@ -68,7 +69,8 @@ final class KerrDebugScreen extends Screen {
                     .withValues(Quality.values()).withInitialValue(optics.requestedQuality())
                     .create(left, top + 101, column, 20, label("quality"), (b, q) -> optics.setQuality(q)));
             addRenderableWidget(CycleButton.<Background>builder(b -> label(key(b)))
-                    .withValues(Background.values()).withInitialValue(optics.requestedBackground())
+                    .withValues(Background.values()).withInitialValue(optics.requestedBackground(
+                            WhiteHoleRenderState.isDemonstrating() || BlackHoleTuning.hasHostCenter()))
                     .create(left + column + 6, top + 101, column, 20, label("background"),
                             (b, background) -> optics.setBackground(background)));
         }

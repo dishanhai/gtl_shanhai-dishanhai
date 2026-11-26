@@ -1,0 +1,27 @@
+{
+    "vertex": "gt_shanhai:guixu_blackhole",
+    "fragment": "gt_shanhai:guixu_white_cache",
+    "attributes": ["Position"],
+    "samplers": [{"name": "SceneDepth"}, {"name": "WhiteParticleGrid"}],
+    "uniforms": [
+        {"name": "uInvProj", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
+        {"name": "uBhView", "type": "float", "count": 3, "values": [0, 0, -10]},
+        {"name": "uDiskNormal", "type": "float", "count": 3, "values": [0, 1, 0]},
+        {"name": "uEquatorialX", "type": "float", "count": 3, "values": [1, 0, 0]},
+        {"name": "uScreenSize", "type": "float", "count": 2, "values": [1, 1]},
+        {"name": "uRs", "type": "float", "count": 1, "values": [2]},
+        {"name": "uKerrParameters", "type": "float", "count": 4, "values": [0, 2, 6, 1]},
+        {"name": "uDiskPhysics", "type": "float", "count": 4, "values": [1, 0.055, 9400, 0.38]},
+        {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00022, 384]},
+        {"name": "uWhiteHole", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteTime", "type": "float", "count": 4, "values": [0, -1, 0, 0]},
+        {"name": "uWhiteStyle", "type": "float", "count": 4, "values": [1, 1, 0, 1]},
+        {"name": "uWhiteExtraBursts0", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteExtraBursts1", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteParticleGain", "type": "float", "count": 1, "values": [0]},
+        {"name": "uBgRect", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteSceneDepth", "type": "float", "count": 1, "values": [0]},
+        {"name": "uCacheOrigin", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uCacheStride", "type": "float", "count": 2, "values": [1, 1]}
+    ]
+}

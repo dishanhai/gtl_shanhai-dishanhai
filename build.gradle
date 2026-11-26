@@ -298,6 +298,34 @@ tasks.register('kerrGpuProbe', JavaExec) {
     systemProperty 'kerr.stabilityFrames', providers.gradleProperty('kerrStabilityFrames').getOrElse('0')
     systemProperty 'kerr.width', providers.gradleProperty('kerrWidth').getOrElse('800')
     systemProperty 'kerr.height', providers.gradleProperty('kerrHeight').getOrElse('560')
+    def shaderRoot = providers.gradleProperty('kerrShaderRoot').orNull
+    if (shaderRoot != null) systemProperty 'kerr.shaderRoot', shaderRoot
+}
+
+tasks.register('whiteHoleGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Runs the white hole visual regression and GPU timing checks.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.GuixuWhiteHoleGpuProbe'
+    systemProperty 'kerr.width', providers.gradleProperty('whiteHoleWidth').getOrElse('800')
+    systemProperty 'kerr.height', providers.gradleProperty('whiteHoleHeight').getOrElse('560')
+}
+
+tasks.register('whiteHoleParticleGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Verifies the OpenGL 4.3 white hole particle and density atlas path.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.WhiteHoleParticleGpuProbe'
+}
+
+tasks.register('whiteHoleBloomGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Verifies the HDR soft-knee filter, mip bloom, and GL state restoration.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.WhiteHoleBloomGpuProbe'
 }
 
 // .rtui 配方 UI 克隆

@@ -16,7 +16,7 @@ import static org.lwjgl.opengl.GL32C.*;
 import static org.lwjgl.opengl.GL41C.glGetFloati_v;
 import static org.lwjgl.opengl.GL41C.glViewportIndexedf;
 
-/** Exposed floating-point highlights sampled at several scales by the lens compositor. */
+/** Exposed floating-point highlights sampled at several scales by the white-hole compositor. */
 final class CompactHdrPostProcessing implements AutoCloseable {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_LOD = 6;

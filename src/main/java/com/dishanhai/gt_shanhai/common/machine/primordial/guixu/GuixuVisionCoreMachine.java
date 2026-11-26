@@ -208,6 +208,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     @Persisted
     @DescSynced
+    private boolean hostWhiteHole;
+
+    @Persisted
+    @DescSynced
+    private boolean hostWhiteHoleUnlocked;
+
+    @Persisted
+    @DescSynced
     private boolean hostArMaskEnabled = true;
 
     @Persisted
@@ -538,8 +546,40 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     }
 
     public void setHostLegacyBlackHole(boolean value) {
-        if (hostLegacyBlackHole == value) return;
-        hostLegacyBlackHole = value;
+        setHostHoleStyle(value, false);
+    }
+
+    public boolean isHostWhiteHole() {
+        return hostWhiteHole;
+    }
+
+    public boolean isHostWhiteHoleUnlocked() {
+        return hostWhiteHoleUnlocked || hostWhiteHole;
+    }
+
+    public boolean unlockHostWhiteHole() {
+        if (isRemote() || !isFormed() || isHostWhiteHoleUnlocked()) return false;
+        hostWhiteHoleUnlocked = true;
+        setHostHoleStyle(false, true);
+        return true;
+    }
+
+    public void cycleHostHoleStyle() {
+        if (hostWhiteHole) {
+            setHostHoleStyle(false, false);
+        } else if (hostLegacyBlackHole) {
+            setHostHoleStyle(false, isHostWhiteHoleUnlocked());
+        } else {
+            setHostHoleStyle(true, false);
+        }
+    }
+
+    private void setHostHoleStyle(boolean legacy, boolean whiteHole) {
+        if (hostLegacyBlackHole == legacy && hostWhiteHole == whiteHole) return;
+        // 旧存档已经启用白洞时，首次切换模式时补记解锁状态。
+        hostWhiteHoleUnlocked = isHostWhiteHoleUnlocked();
+        hostLegacyBlackHole = legacy;
+        hostWhiteHole = whiteHole;
         markDirty();
         pushHostFxSync();
     }
@@ -1758,7 +1798,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 "containmentCollapseTick",
                 "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
-                "hostLegacyBlackHole", "hostOuterStarsEnabled", "hostNebulaEnabled",
+                "hostLegacyBlackHole", "hostWhiteHole", "hostWhiteHoleUnlocked", "hostOuterStarsEnabled", "hostNebulaEnabled",
                 "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostArStatus", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
                 "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",

@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "gt_shanhai:guixu_event_horizon_matrix" },
+    { "item": "gtceu:uiv_emitter" }
+  ],
+  "result": { "item": "gt_shanhai:guixu_horizon_inversion_matrix" }
+}

@@ -1,0 +1,16 @@
+#version 430 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(r32ui, binding = 0) uniform uimage2D Accumulation;
+layout(r16f, binding = 1) writeonly uniform image2D Density;
+uniform int uNormalize;
+
+void main() {
+    ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+    if (uNormalize == 0) {
+        imageStore(Accumulation, at, uvec4(0));
+    } else {
+        float deposits = float(imageLoad(Accumulation, at).r);
+        imageStore(Density, at, vec4(1.0 - exp2(-deposits / 1850.0)));
+    }
+}
