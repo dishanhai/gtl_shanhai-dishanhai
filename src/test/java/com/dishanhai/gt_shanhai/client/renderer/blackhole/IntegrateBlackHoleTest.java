@@ -7,8 +7,38 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleTuning.RenderMode.*;
 
 class IntegrateBlackHoleTest {
+    @Test
+    void hostWhiteHoleOverrideMatchesOnlyTheRequestedWorldAndController() {
+        Object world = new Object();
+        Object anotherWorld = new Object();
+        long controller = 48L;
+        try {
+            BlackHoleTuning.setHostCenter(world, controller, new double[]{0.5, 64.5, 0.5});
+            assertEquals(KERR, BlackHoleTuning.hostRenderMode(world, controller, false, false));
+            assertEquals(LEGACY, BlackHoleTuning.hostRenderMode(world, controller, true, false));
+            assertEquals(WHITE_HOLE, BlackHoleTuning.hostRenderMode(world, controller, false, true));
+            BlackHoleTuning.forceHostWhiteHole(world, controller);
+            assertEquals(WHITE_HOLE, BlackHoleTuning.hostRenderMode(world, controller, true, false));
+            assertEquals(LEGACY, BlackHoleTuning.hostRenderMode(anotherWorld, controller, true, false));
+            assertTrue(BlackHoleTuning.isHostWhiteHoleForced(world, controller));
+            assertFalse(BlackHoleTuning.isHostWhiteHoleForced(world, controller + 1));
+            assertFalse(BlackHoleTuning.isHostWhiteHoleForced(anotherWorld, controller));
+
+            BlackHoleTuning.clearHostCenter(world, controller);
+            BlackHoleTuning.setHostCenter(world, controller, new double[]{0.5, 64.5, 0.5});
+            assertTrue(BlackHoleTuning.isHostWhiteHoleForced(world, controller));
+            BlackHoleTuning.clearHostWhiteHoleOverride();
+            assertEquals(LEGACY, BlackHoleTuning.hostRenderMode(world, controller, true, false));
+            assertTrue(BlackHoleTuning.hasHostCenter());
+            assertFalse(BlackHoleTuning.isHostWhiteHoleForced(world, controller));
+        } finally {
+            BlackHoleTuning.clearHostWhiteHoleOverride();
+            BlackHoleTuning.clearHostCenter(world, controller);
+        }
+    }
 
     @Test
     void approachingTheVisibleShadowKeepsTheExteriorAndPreservesItsDrawArea() {
@@ -81,7 +111,7 @@ class IntegrateBlackHoleTest {
         assertTrue(trace.contains("m.r <= captureRadius"));
         assertTrue(trace.contains("transferDisk(y, next, k1, k4, pt, stepSize, light)"));
         assertTrue(shader.contains("float transmitted = light.a * (1.0 - captured)"));
-        assertTrue(shader.contains("mix(1.0, transmitted, edge)"));
+        assertTrue(shader.contains("mix(1.0, transmitted, edge * (1.0 - .80 * whiteWorld))"));
         assertTrue(shader.contains("texture(RayLight"));
         assertFalse(shader.contains("ringCore"));
         assertFalse(shader.contains("surfaceRipple"));
@@ -94,7 +124,8 @@ class IntegrateBlackHoleTest {
         String backgroundCopy = source.substring(source.indexOf("private static boolean copyBackground("),
                 source.indexOf("private static void drainGlErrors("));
         assertFalse(backgroundCopy.contains("copyDepthRect("), "The interior shares the color copy");
-        int gatedCopy = source.indexOf("if (copyScene && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {");
+        assertTrue(source.contains("copyScene = copyWorld || (whiteWorld && depthOk)"));
+        int gatedCopy = source.indexOf("if (copyScene && depthOk && (whiteWorld || BlackHoleTuning.depthGate()) && ensureDepthTexture()) {");
         assertTrue(gatedCopy >= 0, "Only valid world depth may be copied for lens sampling");
         assertTrue(source.substring(gatedCopy, source.indexOf('}', gatedCopy))
                 .contains("copyDepthRect(f.copyX0, f.copyY0, f.copyW, f.copyH);"));
@@ -121,7 +152,7 @@ class IntegrateBlackHoleTest {
         String fragment = Files.readString(shaders.resolve("guixu_blackhole.fsh"));
         String program = Files.readString(shaders.resolve("guixu_blackhole.json"));
         assertTrue(source.contains("drawExterior(g, f, depthOk, sampleBackground)"));
-        assertTrue(source.contains("copyWorld = sampleBackground && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F)"));
+        assertTrue(source.contains("copyWorld = sampleBackground && !f.whiteDemo && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F)"));
         assertTrue(source.contains("copyScene && !ensureBgTexture("));
         assertTrue(source.contains("copyScene && !copyBackground(g, main, f, copyWorld)"));
         assertTrue(source.contains("shader.setSampler(\"SceneColor\", copyWorld ? bgTexId : null)"));

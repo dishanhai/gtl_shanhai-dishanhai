@@ -9,6 +9,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KerrControlsTest {
     @Test
+    void whiteOpticsAndKerrOverridesAreIndependent() {
+        try {
+            KerrControls.set(EXPOSURE, .5);
+            KerrControls.setQuality(Quality.LOW);
+            KerrControls.setBackground(Background.DARK);
+            assertEquals(Quality.ADAPTIVE, KerrControls.WHITE.requestedQuality());
+            assertEquals(Background.WORLD, KerrControls.WHITE.requestedBackground());
+            assertEquals(EXPOSURE.initial, KerrControls.WHITE.requested(EXPOSURE));
+            KerrControls.WHITE.set(EXPOSURE, 2.2);
+            KerrControls.WHITE.setQuality(Quality.HIGH);
+            assertEquals(.5, KerrControls.requested(EXPOSURE));
+            assertEquals(Quality.LOW, KerrControls.KERR.requestedQuality());
+            KerrControls.reset();
+            assertEquals(2.2, KerrControls.WHITE.requested(EXPOSURE));
+            assertEquals(Quality.HIGH, KerrControls.WHITE.requestedQuality());
+        } finally {
+            KerrControls.reset();
+            KerrControls.WHITE.reset();
+        }
+    }
+    @Test
     void runtimeChangesInterpolateAndFollowResumesAtThePhysicalCamera() {
         long start = System.nanoTime();
         try {

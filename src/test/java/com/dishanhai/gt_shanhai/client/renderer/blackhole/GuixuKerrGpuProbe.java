@@ -904,6 +904,8 @@ class GuixuKerrGpuProbe {
         set(composite, "uSampleBackground", 1);
         set(composite, "uDepthGate", 0);
         set(composite, "uCaptureDepthOnly", 0);
+        set(composite, "uWhiteHole", 0, 0, 0, 0);
+        set(composite, "uWhiteObserverBeta", 0);
         set(composite, "uExterior", 1, W * .5f, H * .5f);
         set(composite, "uShadowPixels", radius);
         set(composite, "uKerrParameters", .65f, 1 + (float) Math.sqrt(1 - .65 * .65), isco(.65f), 1);
@@ -1370,12 +1372,17 @@ class GuixuKerrGpuProbe {
     }
 
     private static void drawCriticalStrip(double transferScale) {
+        drawCriticalStrip(transferScale, false);
+    }
+
+    static void drawCriticalStrip(double transferScale, boolean whiteWorld) {
         float radius = (float) (Math.sqrt(27) * H * PROJ.m11() / (2 * cameraDistance));
-        boolean cached = transferScale > 0;
+        boolean cached = !whiteWorld && transferScale > 0;
         double observerDistance = Math.hypot(cameraDistance, cameraOffset);
-        int width = KerrSampling.blackHoleCriticalStripWidth(radius, H, observerDistance, cached);
-        float span = KerrSampling.blackHoleCriticalStripSpan(transferScale, observerDistance);
-        if (width == 0 || span <= 0 || diskGain <= 0) return;
+        int width = whiteWorld ? KerrSampling.criticalStripWidth(radius, H, observerDistance)
+                : KerrSampling.blackHoleCriticalStripWidth(radius, H, observerDistance, cached);
+        float span = whiteWorld ? 12f : KerrSampling.blackHoleCriticalStripSpan(transferScale, observerDistance);
+        if (width == 0 || span <= 0 || (!whiteWorld && diskGain <= 0)) return;
         float x = .5f * W * (1 + PROJ.m00() * cameraOffset / cameraDistance), y = .5f * H;
         int rows = cached ? KerrSampling.CACHED_CRITICAL_STRIP_ROWS : KerrSampling.CRITICAL_STRIP_ROWS;
         if (stripWidth != width || stripRows != rows) {
@@ -1594,7 +1601,8 @@ class GuixuKerrGpuProbe {
     private static int shader(int type, String file, boolean diagnostic) throws Exception {
         int id = glCreateShader(type);
         String source = Files.readString(SHADERS.resolve(file));
-        for (String include : new String[]{"guixu_kerr.glsl", "guixu_kerr_exterior.glsl"}) {
+        for (String include : new String[]{"guixu_kerr.glsl", "guixu_kerr_exterior.glsl",
+                "guixu_white_primary.glsl", "guixu_white_world.glsl"}) {
             source = source.replace("#moj_import <gt_shanhai:" + include + ">",
                     Files.readString(SHADERS.resolve("../include").resolve(include)));
         }

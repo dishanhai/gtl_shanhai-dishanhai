@@ -13,7 +13,7 @@ class GuixuOuterFxControlsTest {
 
     @Test void screenEffectsAreRegisteredForSaveAndClientSync() throws Exception {
         var fields = host().getFieldHolder().getFields();
-        for (String name : new String[]{"hostOuterStarsEnabled", "hostNebulaEnabled", "hostLegacyBlackHole"}) {
+        for (String name : new String[]{"hostOuterStarsEnabled", "hostNebulaEnabled", "hostLegacyBlackHole", "hostWhiteHole"}) {
             var key = java.util.Arrays.stream(fields).filter(candidate -> candidate.getName().equals(name))
                     .findFirst().orElseThrow(() -> new AssertionError("Missing managed field: " + name));
             assertTrue(key.isPersist(), name);
@@ -21,6 +21,20 @@ class GuixuOuterFxControlsTest {
         }
     }
 
+    @Test void cyclesFromOldSaveFlagsThroughWhiteHoleAndBackToKerr() throws Exception {
+        Host host = host();
+        host.cycleHostHoleStyle();
+        assertTrue(host.isHostLegacyBlackHole());
+        assertFalse(host.isHostWhiteHole());
+        host.cycleHostHoleStyle();
+        assertFalse(host.isHostLegacyBlackHole());
+        assertTrue(host.isHostWhiteHole());
+        host.cycleHostHoleStyle();
+        assertFalse(host.isHostLegacyBlackHole());
+        assertFalse(host.isHostWhiteHole());
+        assertEquals(3, host.dirty);
+        assertEquals(3, host.sync);
+    }
 
     @Test void blackHoleStyleDefaultsToKerrAndSavesBothTransitions() throws Exception {
         Host host = host();

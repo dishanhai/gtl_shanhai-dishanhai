@@ -8,6 +8,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KerrSamplingTest {
     @Test
+    void whiteHostReuseIsBoundedInFramesAndWallTime() {
+        assertTrue(KerrSampling.whiteHostCanReuse(0, 0));
+        assertTrue(KerrSampling.whiteHostCanReuse(55_000_000, 2));
+        assertFalse(KerrSampling.whiteHostCanReuse(57_000_000, 0));
+        assertFalse(KerrSampling.whiteHostCanReuse(17_000_000, 3));
+        assertFalse(KerrSampling.whiteHostCanReuse(-1, 0));
+    }
+
+    @Test
+    void whiteHostNearPilotLeavesFullResolutionToTheDirectImage() {
+        double area = 2560.0 * 1600;
+        var plan = KerrSampling.plan(ADAPTIVE, ADAPTIVE.scale, ADAPTIVE.scale, area, 1, 17, 200, 1);
+        var close = plan.forWhiteHost(ADAPTIVE, area, 17);
+        assertTrue(close.traceScale() < plan.traceScale());
+        assertEquals(96_000, area * close.traceScale() * close.traceScale(), 1);
+        assertEquals(plan.traceScale(), plan.forWhiteHost(ADAPTIVE, area, 40).traceScale());
+        assertSame(plan, plan.forWhiteHost(HIGH, area, 17));
+    }
+
+    @Test
     void detailGridAlignsWithScreenPixelsAndOnlyRunsWhenItAddsResolution() {
         var low = new KerrSampling(.13, .22, 2);
         var core = low.diskDetail(512.4, 320.7, 58.1, 1024, 640);
@@ -24,8 +44,33 @@ class KerrSamplingTest {
     @Test
     void onlyBlackHoleCompatibilityBypassesTheGeodesicIntegrator() {
         for (Quality quality : Quality.values()) {
-            assertEquals(quality == COMPATIBILITY ? 1f : 0f, KerrSampling.exteriorWeight(quality));
+            assertEquals(quality == COMPATIBILITY ? 1f : 0f, KerrSampling.exteriorWeight(quality, 0));
+            assertEquals(0f, KerrSampling.exteriorWeight(quality, 1));
         }
+    }
+
+    @Test
+    void whiteVolumeUsesItsOwnAdaptiveBudgetWithoutOverridingManualQuality() {
+        double area = 2560.0 * 1600;
+        double shadow = KerrSampling.shadowFraction(46, .60);
+        var black = KerrSampling.plan(ADAPTIVE, ADAPTIVE.scale, .27, area, shadow, 46, 150);
+        var white = KerrSampling.plan(ADAPTIVE, ADAPTIVE.scale, .27, area, shadow, 46, 150, 1);
+        assertTrue(white.traceScale() > black.traceScale());
+        assertTrue(white.transferScale() > black.transferScale());
+        assertTrue(KerrSampling.plan(ADAPTIVE, ADAPTIVE.scale, .13, area, shadow, 46, 150, 1).traceScale()
+                < white.traceScale());
+        assertEquals(HIGH.scale, KerrSampling.plan(HIGH, HIGH.scale, .27, area, shadow, 46, 150, 1).traceScale());
+    }
+    @Test
+    void coarseCachedRaysStayOnOnePhaseAndKeepAGrazingContour() {
+        assertEquals(0, KerrSampling.blackHoleJitter(.20, 30));
+        assertEquals(0, KerrSampling.blackHoleJitter(0, 14));
+        assertEquals(.5, KerrSampling.blackHoleJitter(0, 22));
+        assertEquals(1, KerrSampling.blackHoleJitter(0, 28));
+        assertEquals(0, KerrSampling.criticalStripWidth(630, 800, 5));
+        assertEquals(640, KerrSampling.blackHoleCriticalStripWidth(630, 800, 5, true));
+        assertEquals(0, KerrSampling.blackHoleCriticalStripWidth(630, 800, 3, true));
+        assertEquals(11f, KerrSampling.blackHoleCriticalStripSpan(.20, 5));
     }
 
     @Test
