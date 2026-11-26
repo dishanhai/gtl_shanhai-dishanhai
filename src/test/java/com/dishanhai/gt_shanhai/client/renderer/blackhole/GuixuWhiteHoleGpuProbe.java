@@ -36,6 +36,7 @@ public final class GuixuWhiteHoleGpuProbe {
     private static final int PARTICLE_UNIT = 9;
     private static final int BLOOM_UNIT = 10;
     private static final KerrRenderPass.Target HOST_BLOOM_SOURCE = new KerrRenderPass.Target();
+    private static final KerrRenderPass.Target HOST_OPTICAL = new KerrRenderPass.Target();
     private static final KerrRenderPass.Target HOST_DIRECT = new KerrRenderPass.Target(false, GL_R32F);
     private static int hostDirectProgram;
     private static int particleAtlas;
@@ -50,13 +51,14 @@ public final class GuixuWhiteHoleGpuProbe {
     public static void main(String[] args) throws Exception {
         var flags = Arrays.asList(args);
         boolean interactive = flags.contains("--interactive");
+        boolean hostParticles = flags.contains("--host-particles");
         boolean expectParticles = flags.contains("--smoke-particles-viewer");
         boolean smokeViewer = flags.contains("--smoke-viewer") || expectParticles;
         Files.createDirectories(REPORT);
         if (!glfwInit()) throw new IllegalStateException("GLFW initialization failed");
         try {
             glfwWindowHint(GLFW_VISIBLE, interactive ? GLFW_TRUE : GLFW_FALSE);
-            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, interactive || expectParticles ? 4 : 3);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, interactive || expectParticles || hostParticles ? 4 : 3);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
             var lang = Path.of("src/main/resources/assets/gt_shanhai/lang")
@@ -93,8 +95,9 @@ public final class GuixuWhiteHoleGpuProbe {
                         if (flags.contains("--host-views")) {
                             hostDirectProgram = program("guixu_white_cache");
                             try {
-                                verifyHostViews();
+                                verifyHostViews(hostParticles);
                             } finally {
+                                HOST_OPTICAL.close();
                                 glDeleteProgram(hostDirectProgram);
                             }
                         }
@@ -273,7 +276,7 @@ public final class GuixuWhiteHoleGpuProbe {
         }
     }
 
-    private static void verifyHostViews() throws IOException {
+    private static void verifyHostViews(boolean withParticles) throws IOException {
         int scene = glGenTextures(), depth = glGenTextures();
         try {
             glBindTexture(GL_TEXTURE_2D, scene);
@@ -327,11 +330,160 @@ public final class GuixuWhiteHoleGpuProbe {
             }
             verifyHostFrameReuse(camera, effect, scene, depth);
             verifyHostScale(effect, scene, depth);
+            verifyBrightHostCoreAndMotion(effect, scene, depth);
+            if (withParticles) verifyHostMotionWithParticles(effect, scene, depth);
+            verifyCinematicHostSky(effect, scene, depth);
         } finally {
             HOST_BLOOM_SOURCE.close();
             HOST_DIRECT.close();
             glDeleteTextures(depth);
             glDeleteTextures(scene);
+        }
+    }
+
+    private static void verifyCinematicHostSky(Emission effect, int scene, int depth) throws IOException {
+        var camera = new Camera(68, 0, 30);
+        var skyOnly = new Emission(effect.mode(), effect.spin(), effect.beta(), 0, effect.seed(), effect.time(),
+                -1, 0, 0, effect.spectrum(), effect.exposure());
+        setHostDepth(depth, 1);
+        prepareHostView(camera, skyOnly, 0, .15, HostMaterial.ALL);
+        set(composite, "uSkyMix", 0, 1, 0);
+        presentHostView(scene, depth, effect.exposure(), 0, false);
+        var pilot = readImage();
+        drawCriticalStrip(0, true, true);
+        presentHostView(scene, depth, effect.exposure(), 0, false);
+        var movie = readImage();
+        set(composite, "uWhiteHostSky", 1);
+        var host = renderSkyOverWorld(scene, depth, effect.exposure());
+        require(movie.getRGB(W / 2, H / 2) == host.getRGB(W / 2, H / 2),
+                "The centre of the host aperture must use the cinematic sky");
+        require((host.getRGB(0, 0) & 0xffffff) == 0xbcc6d5 && movie.getRGB(0, 0) != host.getRGB(0, 0),
+                "The host aperture must preserve the distant sky before entering the surrounding star field");
+        double criticalDifference = meanPixelError(pilot, movie);
+        int least = 255, most = 0, refinedPixels = 0;
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            int blue = movie.getRGB(x, y) & 255;
+            least = Math.min(least, blue);
+            most = Math.max(most, blue);
+            if (Math.abs(blue - (pilot.getRGB(x, y) & 255)) > 4) refinedPixels++;
+        }
+        System.out.printf(Locale.ROOT, "Critical sky strip changed %,d pixels by more than 4 levels, full-frame RGB delta %.4f%n",
+                refinedPixels, criticalDifference);
+        require(refinedPixels > .0001 * W * H, "Resolved critical rays must change the image near the lensed arc");
+        require(most - least >= 45, "The shared sky must contain visible stars");
+
+        var terrain = BufferUtils.createFloatBuffer(H);
+        for (int y = 0; y < H; y++) terrain.put(y < H / 2 ? .96f : 1f);
+        terrain.flip();
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, depth);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, 1, H, 0, GL_RED, GL_FLOAT, terrain);
+        var partlyBlocked = renderSkyOverWorld(scene, depth, effect.exposure());
+        set(composite, "uWhiteSceneDepth", 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glEnable(GL_BLEND);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDisable(GL_BLEND);
+        var missingDepth = readImage();
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            int worldColor = 0xbcc6d5;
+            int expected = y < H - H / 2 ? host.getRGB(x, y) & 0xffffff : worldColor;
+            if (Math.abs(y - H / 2) > 1)
+                require((partlyBlocked.getRGB(x, y) & 0xffffff) == expected, "Stars must stop at world geometry");
+            require((missingDepth.getRGB(x, y) & 0xffffff) == worldColor, "Keep scene colour when depth is unavailable");
+        }
+
+        setHostDepth(depth, 1);
+        int straight = constantTexture(0, 0, 0, 0);
+        try {
+            bindHostTexture(composite, "RayExit", 3, straight);
+            set(composite, "uCriticalBounds", 0, 0, 0, 0);
+            var unwarped = renderSkyOverWorld(scene, depth, effect.exposure());
+            double focal = H / (2 * Math.tan(Math.toRadians(31)));
+            double outerShadow = 6.2 * focal / camera.distance();
+            int bent = 0;
+            for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+                double radius = Math.hypot(x - W * .5, y - H * .5);
+                if (radius > outerShadow && Math.abs((host.getRGB(x, y) & 255) - (unwarped.getRGB(x, y) & 255)) > 9)
+                    bent++;
+            }
+            require(bent > .005 * W * H, "Escaping rays must bend the local star field beyond the past horizon's image");
+            ImageIO.write(unwarped, "PNG", REPORT.resolve("host-cinematic-sky-unwarped.png").toFile());
+            System.out.printf(Locale.ROOT, "Cinematic sky: %,d visibly bent pixels outside capture, critical RGB delta %.3f%n",
+                    bent, criticalDifference);
+        } finally {
+            glDeleteTextures(straight);
+        }
+        verifyDistantHostAperture(skyOnly, scene, depth);
+        verifyCloseHostSky(skyOnly, scene, depth);
+        prepareHostView(camera, effect, 0, .15, HostMaterial.ALL);
+        drawCriticalStrip(0, true, true);
+        set(composite, "uSkyMix", 0, 1, 0);
+        presentHostView(scene, depth, effect.exposure(), (float) BLOOM.initial, false);
+        ImageIO.write(readImage(), "PNG", REPORT.resolve("host-cinematic-sky.png").toFile());
+        set(composite, "uWhiteHostSky", 0);
+        int divisor = KerrSampling.whiteDirectDivisor(Quality.ADAPTIVE, (double) W * H);
+        if (divisor > 1) {
+            double ratio = compareMovingHostTimes(effect, scene, depth, (float) BLOOM.initial,
+                    divisor, "cinematic sky", true);
+            require(ratio < .95, "The reduced cache must still help with a curved cinematic sky");
+        }
+        System.out.printf(Locale.ROOT, "Cinematic sky blue levels %d–%d, local aperture and exact terrain/missing-depth colour verified%n",
+                least, most);
+    }
+
+    private static void verifyDistantHostAperture(Emission effect, int scene, int depth) throws IOException {
+        int distance = 110, offset = 24;
+        prepareHostView(new Camera(68, 0, distance), effect, offset, .15, HostMaterial.ALL);
+        set(composite, "uSkyMix", 0, 1, 0);
+        double pixelsPerRg = H / (2 * distance * Math.tan(Math.toRadians(31)));
+        int x = (int) Math.round(W * .5 + offset * pixelsPerRg), y = H / 2;
+        float half = (float) (52 * pixelsPerRg);
+        set(composite, "uTraceRect", x - half, y - half, 2 * half, 2 * half);
+        var image = renderSkyOverWorld(scene, depth, effect.exposure());
+        int axis = (int) Math.round(26 * pixelsPerRg), diagonal = (int) Math.round(38 * pixelsPerRg / Math.sqrt(2));
+        int world = 0xbcc6d5;
+        require((image.getRGB(x + axis, y) & 0xffffff) != world, "The host aperture must feather before its outer edge");
+        require((image.getRGB(x + diagonal, y - diagonal) & 0xffffff) == world,
+                "The trace tile corner must show the original world sky");
+        ImageIO.write(image, "PNG", REPORT.resolve("host-cinematic-sky-distant.png").toFile());
+    }
+
+    private static void verifyCloseHostSky(Emission effect, int scene, int depth) throws IOException {
+        int[] skyBlue = new int[3];
+        float[] distances = {32, 20, 10};
+        for (int i = 0; i < distances.length; i++) {
+            prepareHostView(new Camera(82, 0, distances[i]), effect, 0, .15, HostMaterial.ALL, true);
+            set(composite, "uSkyMix", 0, 1, 0);
+            set(composite, "uWhiteHostSky", 1);
+            var image = renderSkyOverWorld(scene, depth, effect.exposure());
+            skyBlue[i] = image.getRGB(0, 0) & 255;
+            if (i == distances.length - 1) {
+                ImageIO.write(image, "PNG", REPORT.resolve("host-cinematic-sky-close.png").toFile());
+                set(composite, "uWhiteHostSky", 0);
+                presentHostView(scene, depth, effect.exposure(), 0, false);
+                require(meanPixelError(image, readImage()) == 0,
+                        "The closest open host sky must match the cinematic star field across the view");
+                set(composite, "uWhiteHostSky", 1);
+            }
+        }
+        require(skyBlue[0] == 213 && skyBlue[0] > skyBlue[1] && skyBlue[1] > skyBlue[2],
+                "The surrounding stars must grow continuously across the sky as the camera approaches the host");
+        System.out.printf(Locale.ROOT, "Approaching white host at 32, 20 and 10 rg: sky corner blue %d → %d → %d%n",
+                skyBlue[0], skyBlue[1], skyBlue[2]);
+    }
+
+    private static BufferedImage renderSkyOverWorld(int scene, int depth, float exposure) {
+        glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
+        glClearColor(188 / 255f, 198 / 255f, 213 / 255f, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_BLEND);
+        try {
+            presentHostView(scene, depth, exposure, 0, false);
+            return readImage();
+        } finally {
+            glDisable(GL_BLEND);
         }
     }
 
@@ -368,7 +520,7 @@ public final class GuixuWhiteHoleGpuProbe {
             require(jetWidth > .23 && jetWidth < jetWidthLimit && litWidth > .23 && litWidth < jetWidthLimit
                             && Math.abs(litWidth - jetWidth) < .035,
                     "Both jet spines must retain their narrow FWHM with bloom enabled");
-            require(coreWidth > .65 && coreWidth < 1.22 && litCoreWidth > .65 && litCoreWidth < 1.22
+            require(coreWidth > .08 && coreWidth < .65 && litCoreWidth > .08 && litCoreWidth < .65
                             && Math.abs(litCoreWidth - coreWidth) < .08,
                     "Both core edges must retain their measured 10–90% transition with bloom enabled");
         }
@@ -592,6 +744,189 @@ public final class GuixuWhiteHoleGpuProbe {
                 "The host effect must grow about 35% around its original projected centre");
     }
 
+    private static void verifyBrightHostCoreAndMotion(Emission effect, int scene, int depth) throws IOException {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, scene);
+        var sky = BufferUtils.createByteBuffer(4).put((byte) 188).put((byte) 198).put((byte) 213).put((byte) 255).flip();
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, sky);
+        var camera = new Camera(86, 0, 25);
+        float bloom = (float) BLOOM.initial;
+        var appearance = renderHostView(camera, effect, scene, depth, 0, .15, HostMaterial.ALL, bloom);
+        ImageIO.write(appearance, "PNG", REPORT.resolve("host-bright-sky.png").toFile());
+        // Compare the core with the adjacent disk on the same axis and sky.
+        double centre = greenAverage(appearance, W / 2, H / 2);
+        int shoulder = (int) (4.5 * H / (2 * camera.distance() * Math.tan(Math.toRadians(31))));
+        double disk = (greenAverage(appearance, W / 2 - shoulder, H / 2)
+                     + greenAverage(appearance, W / 2 + shoulder, H / 2)) * .5;
+        System.out.printf(Locale.ROOT, "Host bright sky %.1f core / %.1f disk green levels%n", centre, disk);
+        require(centre >= 238 && centre - disk >= 10, "Host core must stand out from its disk against a bright sky");
+        int divisor = KerrSampling.whiteDirectDivisor(Quality.ADAPTIVE, (double) W * H);
+        if (divisor == 1) return;
+        double ratio = compareMovingHostTimes(effect, scene, depth, bloom, divisor, "clear", false);
+
+        prepareHostView(camera, effect, 0, .15, HostMaterial.ALL);
+        bakeHostDirect(camera, effect, depth, 0, divisor);
+        presentHostView(scene, depth, effect.exposure(), bloom, true, divisor);
+        double error = meanPixelError(appearance, readImage());
+        require(error < .28, "Reduced host cache must preserve the direct image");
+        setHostDepth(depth, .99815f);
+        presentHostView(scene, depth, effect.exposure(), 0, false);
+        var clipped = readImage();
+        presentHostView(scene, depth, effect.exposure(), 0, true, divisor);
+        double clippedError = meanPixelError(clipped, readImage());
+        require(clippedError < .16, "Reduced host cache must clip at the live foreground depth");
+        bakeHostDirect(camera, effect, depth, 0, divisor);
+        presentHostView(scene, depth, effect.exposure(), 0, true, divisor);
+        double rebakedError = meanPixelError(clipped, readImage());
+        require(rebakedError < .16, "The reduced cache must preserve emission along a clipped surface");
+        // A one-pixel foreground strip can be missed by the reduced grid.
+        // The live depth check must still leave its original scene colour.
+        var silhouette = BufferUtils.createFloatBuffer(W);
+        for (int x = 0; x < W; x++) silhouette.put(x == W / 2 ? .96f : 1f);
+        silhouette.flip();
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, depth);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, W, 1, 0, GL_RED, GL_FLOAT, silhouette);
+        bakeHostDirect(camera, effect, depth, 0, divisor);
+        presentHostView(scene, depth, effect.exposure(), 0, true, divisor);
+        var silhouetteImage = readImage();
+        for (int y = H * 2 / 5; y < H * 3 / 5; y++) {
+            require((silhouetteImage.getRGB(W / 2, y) & 255) == 213,
+                    "A one-pixel foreground silhouette must not leak cached emission");
+        }
+        require(ratio < .85, "Moving the camera must stay cheaper with the host render budget");
+        System.out.printf(Locale.ROOT, "Host reduced-cache mean RGB errors %.3f open / %.3f clipped / %.3f rebaked%n",
+                error, clippedError, rebakedError);
+        setHostDepth(depth, 1);
+    }
+
+    private static void verifyHostMotionWithParticles(Emission effect, int scene, int depth) throws IOException {
+        int divisor = KerrSampling.whiteDirectDivisor(Quality.ADAPTIVE, (double) W * H);
+        require(divisor > 1, "Particle host timing requires a large enough viewport for the reduced direct cache");
+        try (var grid = new WhiteHoleParticleGrid(name -> Files.readString(PARTICLE_SHADERS.resolve(name)))) {
+            particleAtlas = grid.update(effect.time(), effect.seed(), effect.beta(), effect.jets(),
+                    (float) new KerrGeometry(effect.spin()).outerHorizon(), 8192);
+            require(particleAtlas != 0, "Host timing must include the particle density atlas");
+            // Sloped roofs, depth discontinuities and open sky under the same close viewport.
+            var terrain = BufferUtils.createFloatBuffer(W * H);
+            for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+                float roof = .9945f + .003f * y / H + .002f * (x % (W / 8)) / (W / 8);
+                terrain.put(y < H / 2 + (x / (W / 8) % 3) * H / 32 ? roof : 1f);
+            }
+            terrain.flip();
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, depth);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, W, H, 0, GL_RED, GL_FLOAT, terrain);
+            float bloom = (float) BLOOM.initial;
+            drawMovingHostFrame(effect, scene, depth, bloom, 0, 1, true);
+            var reference = readImage();
+            drawMovingHostFrame(effect, scene, depth, bloom, 0, divisor, true);
+            var cached = readImage();
+            double error = meanPixelError(reference, cached);
+            System.out.printf(Locale.ROOT, "Host reduced-cache RGB error with sloped terrain %.3f%n", error);
+            require(error < .45, "Reduced cache must retain the sky and the depth-clipped image over sloped roofs");
+            double ratio = compareMovingHostTimes(effect, scene, depth, bloom, divisor, "with stars, particles and sloped terrain", true);
+            require(ratio < .90, "Near-field moving budget must help even with particles and terrain");
+            verifyZoomedHost(effect, scene, depth, bloom, divisor);
+        } finally {
+            particleAtlas = 0;
+            setHostDepth(depth, 1);
+        }
+    }
+
+    private static void verifyZoomedHost(Emission effect, int scene, int depth, float bloom, int divisor) {
+        var camera = new Camera(80, 0, 54);
+        int[] queries = new int[12];
+        glGenQueries(queries);
+        try {
+            double[][] times = new double[2][queries.length];
+            for (int pass = 0; pass < times.length; pass++) {
+                int samplingDivisor = pass == 0 ? 1 : divisor;
+                for (int frame = -4; frame < queries.length; frame++) {
+                    perspective(22 + Math.floorMod(frame, 4));
+                    if (frame >= 0) glBeginQuery(GL_TIME_ELAPSED, queries[frame]);
+                    drawMovingHostFrame(camera, effect, scene, depth, bloom, frame, samplingDivisor, true);
+                    if (frame >= 0) glEndQuery(GL_TIME_ELAPSED);
+                }
+                for (int frame = 0; frame < queries.length; frame++) {
+                    times[pass][frame] = glGetQueryObjectui64(queries[frame], GL_QUERY_RESULT) * 1e-6;
+                }
+                Arrays.sort(times[pass]);
+            }
+            double maxNative = times[0][queries.length - 1], maxLayered = times[1][queries.length - 1];
+            System.out.printf(Locale.ROOT, "Zoom-while-turning host GPU median %.2f → %.2f ms, worst %.2f → %.2f ms%n",
+                    times[0][queries.length / 2], times[1][queries.length / 2], maxNative, maxLayered);
+            require(maxLayered < maxNative, "Layered optics must reduce the worst zoom-and-turn frame");
+            perspective(24);
+            drawMovingHostFrame(camera, effect, scene, depth, bloom, 3, 1, true);
+            var reference = readImage();
+            drawMovingHostFrame(camera, effect, scene, depth, bloom, 3, divisor, true);
+            double error = meanPixelError(reference, readImage());
+            System.out.printf(Locale.ROOT, "Zoomed host layered cache RGB error %.3f%n", error);
+            require(error < .45, "The zoomed layered image must preserve the depth-clipped host");
+        } finally {
+            glDeleteQueries(queries);
+            perspective(62);
+        }
+    }
+
+    private static double compareMovingHostTimes(Emission effect, int scene, int depth, float bloom, int divisor,
+                                                 String view, boolean cinematicSky) {
+        double[] nativeTimes = new double[3], reducedTimes = new double[3];
+        for (int i = 0; i < nativeTimes.length; i++) {
+            if (i % 2 == 0) nativeTimes[i] = timeMovingHost(effect, scene, depth, bloom, 1, cinematicSky);
+            reducedTimes[i] = timeMovingHost(effect, scene, depth, bloom, divisor, cinematicSky);
+            if (i % 2 != 0) nativeTimes[i] = timeMovingHost(effect, scene, depth, bloom, 1, cinematicSky);
+        }
+        Arrays.sort(nativeTimes);
+        Arrays.sort(reducedTimes);
+        System.out.printf(Locale.ROOT, "Host moving GPU %s %.2f → %.2f ms%n", view, nativeTimes[1], reducedTimes[1]);
+        return reducedTimes[1] / nativeTimes[1];
+    }
+
+    private static double timeMovingHost(Emission effect, int scene, int depth, float bloom, int divisor, boolean cinematicSky) {
+        int query = glGenQueries();
+        try {
+            for (int i = 0; i < 4; i++) drawMovingHostFrame(effect, scene, depth, bloom, i, divisor, cinematicSky);
+            glFinish();
+            glBeginQuery(GL_TIME_ELAPSED, query);
+            for (int i = 0; i < 12; i++) drawMovingHostFrame(effect, scene, depth, bloom, i, divisor, cinematicSky);
+            glEndQuery(GL_TIME_ELAPSED);
+            return glGetQueryObjectui64(query, GL_QUERY_RESULT) / 12e6;
+        } finally {
+            glDeleteQueries(query);
+        }
+    }
+
+    private static double greenAverage(BufferedImage image, int x, int y) {
+        int count = 0, sum = 0;
+        int radius = Math.max(2, H / 160);
+        for (int dy = -radius; dy <= radius; dy++) for (int dx = -radius; dx <= radius; dx++) {
+            sum += (image.getRGB(x + dx, y + dy) >> 8) & 255;
+            count++;
+        }
+        return sum / (double) count;
+    }
+
+    private static void drawMovingHostFrame(Emission effect, int scene, int depth, float bloom, int frame, int divisor,
+                                            boolean cinematicSky) {
+        var camera = new Camera(80 + frame, 0, (cinematicSky ? 11 : 24) + .25f * frame);
+        drawMovingHostFrame(camera, effect, scene, depth, bloom, frame, divisor, cinematicSky);
+    }
+
+    private static void drawMovingHostFrame(Camera camera, Emission effect, int scene, int depth, float bloom,
+                                            int frame, int divisor, boolean cinematicSky) {
+        float offset = frame * .16f;
+        double area = (double) W * H;
+        double scale = divisor == 1 ? .15 : new KerrSampling(.15, 0, 2)
+                .forWhiteHost(Quality.ADAPTIVE, area, camera.distance()).traceScale();
+        prepareHostView(camera, effect, offset, scale, HostMaterial.ALL, cinematicSky);
+        set(composite, "uWhiteHostSky", cinematicSky ? 1 : 0);
+        if (cinematicSky) set(composite, "uSkyMix", 0, 1, 0);
+        if (divisor > 1) bakeHostDirect(camera, effect, depth, offset, divisor);
+        presentHostView(scene, depth, effect.exposure(), bloom, divisor > 1, divisor);
+    }
+
     private static double timeHostView(Camera camera, Emission effect, int scene, int depth, float bloom, boolean reuse) {
         int query = glGenQueries();
         try {
@@ -621,6 +956,11 @@ public final class GuixuWhiteHoleGpuProbe {
     }
 
     private static void prepareHostView(Camera camera, Emission effect, float offset, double scale, HostMaterial material) {
+        prepareHostView(camera, effect, offset, scale, material, false);
+    }
+
+    private static void prepareHostView(Camera camera, Emission effect, float offset, double scale, HostMaterial material,
+                                        boolean skyRays) {
         if (rayWidth() != (int) Math.ceil(W * scale) || rayHeight() != (int) Math.ceil(H * scale)) rayTarget(scale);
         bindEmission(camera, effect, List.of());
         var style = WhiteHolePreset.CINEMATIC_WHITE_HOLE.settings(effect.seed());
@@ -636,16 +976,23 @@ public final class GuixuWhiteHoleGpuProbe {
         }
         trace(effect.spin(), camera.inclination(), offset, camera.distance(), .00022f, 384, 0, effect.time());
         prepareComposite(camera.inclination(), 0, 0);
-        if ((material == HostMaterial.ALL || material == HostMaterial.OPTICAL) && effect.gain() > 0) drawCriticalStrip(0, true);
+        if (skyRays || (material == HostMaterial.ALL || material == HostMaterial.OPTICAL) && effect.gain() > 0) {
+            drawCriticalStrip(0, true, skyRays);
+        }
     }
 
     private static void bakeHostDirect(Camera camera, Emission effect, int depth) {
+        bakeHostDirect(camera, effect, depth, 4, 1);
+    }
+
+    private static void bakeHostDirect(Camera camera, Emission effect, int depth, float offset, int divisor) {
         int program = hostDirectProgram;
         glActiveTexture(GL_TEXTURE13);
-        HOST_DIRECT.bind(W, H, glGetFragDataLocation(program, "directLight"), glGetFragDataLocation(program, "directDepth"));
-        glViewport(0, 0, W, H);
+        int width = KerrSampling.whiteDirectExtent(W, divisor), height = KerrSampling.whiteDirectExtent(H, divisor);
+        HOST_DIRECT.bind(width, height, glGetFragDataLocation(program, "directLight"), glGetFragDataLocation(program, "directDepth"));
+        glViewport(0, 0, width, height);
         glUseProgram(program);
-        bindRayCamera(program, camera.inclination(), 4, camera.distance());
+        bindRayCamera(program, camera.inclination(), offset, camera.distance());
         bindHostTexture(program, "SceneDepth", 1, depth);
         var style = WhiteHolePreset.CINEMATIC_WHITE_HOLE.settings(effect.seed());
         var geometry = new KerrGeometry(effect.spin());
@@ -655,9 +1002,12 @@ public final class GuixuWhiteHoleGpuProbe {
         set(program, "uWhiteHole", effect.mode(), effect.beta(), effect.gain(), effect.seed());
         set(program, "uWhiteTime", effect.time(), effect.burstAge(), effect.jets(), effect.burstStrength());
         set(program, "uWhiteStyle", style.diskDensity(), style.diskThickness(), style.spectrum(), style.coreGain());
+        bindHostTexture(program, "WhiteParticleGrid", PARTICLE_UNIT, particleAtlas);
+        set(program, "uWhiteParticleGain", particleAtlas != 0 ? .55f : 0);
         set(program, "uBgRect", 0, 0, W, H);
         set(program, "uWhiteSceneDepth", 1);
         set(program, "uCacheOrigin", 0, 0);
+        set(program, "uCacheStride", (float) W / width, (float) H / height);
         glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
@@ -668,10 +1018,16 @@ public final class GuixuWhiteHoleGpuProbe {
     }
 
     private static void presentHostView(int scene, int depth, float exposure, float bloom, boolean cached) {
+        presentHostView(scene, depth, exposure, bloom, cached, 1);
+    }
+
+    private static void presentHostView(int scene, int depth, float exposure, float bloom, boolean cached, int divisor) {
         glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
         glViewport(0, 0, W, H);
         glUseProgram(composite);
         set(composite, "uWhiteCacheRect", 0, 0, cached ? W : 0, cached ? H : 0);
+        set(composite, "uWhiteCacheReduced", divisor > 1 ? 1 : 0);
+        set(composite, "uWhiteOpticalLayer", divisor > 1 ? 1 : 0);
         if (cached) {
             bindHostTexture(composite, "WhiteDirectLight", 14, HOST_DIRECT.light);
             bindHostTexture(composite, "WhiteDirectDepth", 15, HOST_DIRECT.exit);
@@ -685,6 +1041,18 @@ public final class GuixuWhiteHoleGpuProbe {
         set(composite, "uBgRect", 0, 0, W, H);
         set(composite, "uBgTexel", 1f / W, 1f / H);
         set(composite, "uWhiteSceneDepth", 1);
+        if (divisor > 1) {
+            glActiveTexture(GL_TEXTURE13);
+            HOST_OPTICAL.bind(rayWidth(), rayHeight(), 0, -1);
+            glViewport(0, 0, rayWidth(), rayHeight());
+            set(composite, "uResolveSize", rayWidth(), rayHeight());
+            set(composite, "uTransferPass", KerrRenderPass.WHITE_OPTICAL_PASS);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            set(composite, "uTransferPass", 0);
+            bindHostTexture(composite, "DiskDetail", 7, HOST_OPTICAL.light);
+            glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
+            glViewport(0, 0, W, H);
+        }
         int highlights = 0;
         if (bloom > 0) {
             glActiveTexture(GL_TEXTURE13);

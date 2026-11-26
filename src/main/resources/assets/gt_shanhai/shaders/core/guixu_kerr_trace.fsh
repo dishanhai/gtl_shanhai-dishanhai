@@ -7,6 +7,7 @@ uniform vec2 uRayJitter;
 uniform sampler2D CachedRayExit;
 uniform sampler2D CriticalRadii;
 uniform float uReuseRayExit;
+uniform float uTransferOnly;
 uniform vec4 uCriticalBounds; // projected centre, radius search or strip width, pass
 out vec4 rayLight;
 out vec4 rayExit;
@@ -14,10 +15,19 @@ out vec4 rayExit;
 void main() {
     if (uCriticalBounds.w == 3.0) {
         vec2 uv = gl_FragCoord.xy / uTraceSize;
+        vec2 px = uTraceRect.xy + uv * uTraceRect.zw;
         rayLight = vec4(0.0, 0.0, 0.0, 1.0);
         rayExit = vec4(0.0);
-        if (length(uv * 2.0 - 1.0) < 1.02)
-            rayExit = tracePixel(uTraceRect.xy + uv * uTraceRect.zw, false, true, rayLight);
+        // Keep the full reconstruction and mip-bloom footprint around the visible tile.
+        float pad = max(192.0, 4.0 * uTraceRect.z / uTraceSize.x);
+        float tileRadius = length(uv * 2.0 - 1.0);
+        if (all(greaterThanEqual(px, vec2(-pad))) && all(lessThanEqual(px, uScreenSize + pad))
+            && tileRadius < 1.02) {
+            // The shadow, first lensed arcs and independent foreground edge
+            // use the original tolerance. Farther out the disk varies more slowly.
+            float toleranceCap = mix(.000006, .000035, smoothstep(.72, 1.0, tileRadius));
+            rayExit = tracePixel(px, uTransferOnly > .5, toleranceCap, rayLight);
+        }
         return;
     }
     if (uCriticalBounds.w > .5) {
@@ -29,9 +39,9 @@ void main() {
             vec3 head = texelFetch(CriticalRadii, ivec2(int(gl_FragCoord.x), 0), 0).rgb;
             rayLight = vec4(0.0, 0.0, 0.0, 1.0);
             if (head.z > .5) {
-                float t = 2.0 * gl_FragCoord.y / uTraceSize.y - 1.0;
-                float offset = .5 * uCriticalBounds.z * t * abs(t);
-                tracePixel(center + axis * (head.x + head.y + offset), true, true, rayLight);
+                float offset = criticalOffset(gl_FragCoord.y / uTraceSize.y, uCriticalBounds.z);
+                rayExit = tracePixel(center + axis * (head.x + head.y + offset),
+                                     uCriticalBounds.w < 3.5, true, rayLight);
             }
             return;
         }
@@ -50,9 +60,17 @@ void main() {
         return;
     }
     vec2 px = uTraceRect.xy + (gl_FragCoord.xy + uRayJitter) / uTraceSize * uTraceRect.zw;
+    bool transferOnly = uTransferOnly > .5;
+#if !defined(KERR_CHECK_INVARIANTS) && !defined(KERR_FULL_CAPTURE)
+    if (transferOnly && (uDiskGain <= 0.0 || uDiskPhysics.x <= 0.0 || uDiskPhysics.w <= 0.0)) {
+        rayLight = vec4(0.0, 0.0, 0.0, 1.0);
+        rayExit = vec4(0.0, 0.0, 0.0, 1.0 + capturedAt(px));
+        return;
+    }
+#endif
     vec4 cached = uReuseRayExit > 0.5 ? texelFetch(CachedRayExit, ivec2(gl_FragCoord.xy), 0) : vec4(0.0);
     bool reuseExit = cached.w == 1.0;
-    rayExit = tracePixel(px, reuseExit, rayLight);
+    rayExit = tracePixel(px, transferOnly || reuseExit, rayLight);
     if (reuseExit) rayExit = cached;
 #ifdef KERR_FULL_CAPTURE
     rayLight.a = capturedAt(px);

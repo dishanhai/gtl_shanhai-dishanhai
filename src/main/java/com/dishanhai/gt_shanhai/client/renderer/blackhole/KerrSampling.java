@@ -14,7 +14,20 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
     private static final int CLOSE_TRANSFER_PIXELS = 120_000;
     private static final int NATIVE_COMPOSITE_PIXELS = 480_000;
     static final int WHITE_DIRECT_CACHE_PIXELS = 4_200_000;
-    private static final int WHITE_HOST_CLOSE_TRACE_PIXELS = 96_000;
+    private static final int WHITE_DIRECT_BUDGET = 320_000;
+    private static final int WHITE_HOST_CLOSE_TRACE_PIXELS = 48_000;
+
+    static int whiteDirectDivisor(Quality quality, double area) {
+        if ((quality != Quality.ADAPTIVE && quality != Quality.LOW) || area < 480_000) {
+            return 1;
+        }
+        // Zoom can enlarge the footprint without bringing the observer any closer.
+        return (int) Math.ceil(Math.sqrt(area / WHITE_DIRECT_BUDGET));
+    }
+
+    static int whiteDirectExtent(int pixels, int divisor) {
+        return divisor == 1 ? pixels : Math.min(pixels, ((pixels + divisor * 32 - 1) / (divisor * 32)) * 32);
+    }
 
     static boolean whiteHostCanReuse(long ageNanos, int reusedFrames) {
         return ageNanos >= 0 && ageNanos <= 56_000_000 && reusedFrames < 3;
@@ -22,9 +35,9 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
 
     KerrSampling forWhiteHost(Quality quality, double area, double observerDistance) {
         if (quality != Quality.ADAPTIVE && quality != Quality.LOW) return this;
-        // The host integrates its bright material at display resolution. Only the
-        // broad, indirect image needs the near-field pilot grid.
-        double near = smoothUnit((40 - observerDistance) / 20);
+        // Only the broad indirect image uses this near-field pilot grid.
+        double near = Math.max(smoothUnit((46 - observerDistance) / 18),
+                smoothUnit((area - 1_000_000) / 2_000_000));
         double capped = Math.min(traceScale, Math.sqrt(WHITE_HOST_CLOSE_TRACE_PIXELS / area));
         return new KerrSampling(lerp(traceScale, capped, near), 0, subpixels);
     }
@@ -125,18 +138,39 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
                 : (float) Math.clamp(2.2 / transferScale, 5, 16);
     }
 
+    record CriticalArc(float inner, float outer, int rows, int columns) {}
+
+    static CriticalArc criticalArc(float radius, int coreRows, int coreColumns, boolean extend) {
+        if (!extend || radius < 24) return new CriticalArc(0, 0, coreRows, coreColumns);
+        float inner = .20f * radius;
+        float outer = .54f * radius;
+        // The GLSL map retains subpixel spacing at the rim and uses roughly one
+        // display pixel per row across the wider bands until the budget cap.
+        int rows = ((int) Math.ceil(inner + outer + 8) + 7) & ~7;
+        int columns = ((int) Math.ceil(2 * Math.PI * radius / 1.25) + 31) & ~31;
+        return new CriticalArc(inner, outer, Math.clamp(rows, coreRows, 104), Math.clamp(columns, coreColumns, 768));
+    }
+
     // The foreground disk crosses the interior of the shadow. Its edge cannot
     // be reconstructed from the capture boundary or from a coarse transfer cell.
     record DiskDetail(int x, int y, int side, int samples, float weight) {}
 
-    DiskDetail diskDetail(double x, double y, double radius, int screenWidth, int screenHeight) {
+    DiskDetail diskDetail(double x, double y, double radius, int screenWidth, int screenHeight, double observerDistance) {
         if (!(radius > 6 && radius <= Math.max(screenWidth, screenHeight) && Double.isFinite(x) && Double.isFinite(y))) return null;
-        int half = ((int) Math.ceil(1.9 * radius) + 7) & ~7;
+        // Keep the near-horizon budget small, where each ray takes more steps.
+        // Concentrate the extra samples on the disk and its first lensed arcs.
+        double extraDetail = smoothUnit((screenHeight - 640.0) / 960.0) * smoothUnit((observerDistance - 6) / 6);
+        int half = ((int) Math.ceil(lerp(1.9, 1.55, extraDetail) * radius) + 7) & ~7;
         int side = 2 * half;
         if (x + half <= 0 || x - half >= screenWidth || y + half <= 0 || y - half >= screenHeight) return null;
-        int samples = Math.min(224, side);
+        // Use a denser interior grid for wide close-ups where the foreground
+        // disk edge spans many pixels. Near the horizon the original cap applies.
+        double foregroundDetail = extraDetail * smoothUnit((18 - observerDistance) / 7);
+        int sampleLimit = 224 + 8 * (int) Math.round(20 * extraDetail + 8 * foregroundDetail);
+        int samples = Math.min(sampleLimit, side);
         double base = Math.max(traceScale, transferScale);
-        float weight = (float) (smoothUnit((samples / (double) side - base - .12) / .35) * smoothUnit((radius - 6) / 6));
+        double densityGain = samples / (side * base);
+        float weight = (float) (smoothUnit((densityGain - 1.25) / .45) * smoothUnit((radius - 6) / 6));
         if (weight == 0) return null;
         return new DiskDetail((int) Math.floor(x) - half, (int) Math.floor(y) - half, side, samples, weight);
     }

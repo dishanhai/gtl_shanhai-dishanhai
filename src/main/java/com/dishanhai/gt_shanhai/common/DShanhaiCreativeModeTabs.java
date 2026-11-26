@@ -46,6 +46,7 @@ public class DShanhaiCreativeModeTabs {
                             output.accept(new ItemStack(GTDishanhaiMod.GUIXU_HYPERDIMENSIONAL_LINK_MODULE.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.GUIXU_NYARLATHOTEP_LINK_MODULE.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.GUIXU_EVENT_HORIZON_MATRIX.get()));
+                            output.accept(new ItemStack(GTDishanhaiMod.GUIXU_HORIZON_INVERSION_MATRIX.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.NYARLATHOTEP_ECHO_LINK_MODULE.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.GRAVITON_SHARD.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.VIRTUAL_ITEM_PROVIDER.get()));

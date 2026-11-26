@@ -184,6 +184,7 @@ final class WhiteHoleRenderState {
                     && diskDensity == previous.diskDensity && diskThickness == previous.diskThickness
                     && spectrum == previous.spectrum && coreGain == previous.coreGain
                     && observerBeta == previous.observerBeta
+                    && (gain > 0) == (previous.gain > 0)
                     && Math.abs(gain - previous.gain) <= .015f && Math.abs(temperature - previous.temperature) <= 1f;
         }
 

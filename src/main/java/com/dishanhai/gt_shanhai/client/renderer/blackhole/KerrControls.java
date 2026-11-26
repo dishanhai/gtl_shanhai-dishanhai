@@ -28,7 +28,7 @@ public final class KerrControls {
     }
 
     static Frame sample(long nanos, double worldSeconds, double worldDistance, double referenceRs) {
-        return KERR.sample(nanos, worldSeconds, worldDistance, referenceRs);
+        return KERR.sample(nanos, worldSeconds, worldDistance, referenceRs, false, 0);
     }
 
     static String describe() { return KERR.describe(); }
@@ -76,14 +76,18 @@ public final class KerrControls {
         private double target(Parameter parameter) {
             Double override = overrides.get(parameter);
             if (override != null) return override;
-            if (parameter == Parameter.SPIN && BlackHoleTuning.hasHostCenter()) {
+            if (!white && parameter == Parameter.SPIN && BlackHoleTuning.hasHostCenter()) {
                 return BlackHoleTuning.kerrParameters().spin();
             }
             if (!white) return GuixuClientConfig.kerr(parameter);
             return parameter == Parameter.BLOOM ? .09 : parameter.initial;
         }
 
-        synchronized double requested(Parameter parameter) { return target(parameter); }
+        synchronized double requested(Parameter parameter) {
+            if (white && parameter == Parameter.SPIN && previousTime != 0 && !overrides.containsKey(parameter))
+                return current[parameter.ordinal()];
+            return target(parameter);
+        }
 
         /** World-space radius guaranteed to enclose the black-hole horizon during control changes. */
         synchronized double horizonRadiusBound(double worldDistance, double referenceRs) {
@@ -95,13 +99,15 @@ public final class KerrControls {
             return distance == 0 ? smoothedBound : Math.max(smoothedBound, 2 * worldDistance / distance);
         }
 
-        synchronized Frame sample(long nanos, double worldSeconds, double worldDistance, double referenceRs) {
+        synchronized Frame sample(long nanos, double worldSeconds, double worldDistance, double referenceRs,
+                                  boolean cinematicSky, double whiteSpin) {
             double delta = (nanos - previousTime) * 1e-9;
             boolean fresh = previousTime == 0 || !(delta > 0 && delta < 1);
             double blend = fresh ? 1 : -Math.expm1(-delta / 0.15);
             for (Parameter parameter : Parameter.values()) {
                 if (parameter == Parameter.DISTANCE || parameter == Parameter.INCLINATION) continue;
-                double value = target(parameter);
+                double value = white && parameter == Parameter.SPIN && !overrides.containsKey(parameter)
+                        ? whiteSpin : target(parameter);
                 int index = parameter.ordinal();
                 double difference = value - current[index];
                 if (parameter == Parameter.AZIMUTH) difference = Math.IEEEremainder(difference, 360);
@@ -126,7 +132,7 @@ public final class KerrControls {
             renderScale = smooth(renderScale, quality.scale, blend);
             tolerance = smooth(tolerance, quality.tolerance, blend);
             stepBudget = smooth(stepBudget, quality.steps, blend);
-            int backgroundIndex = requestedBackground().ordinal();
+            int backgroundIndex = requestedBackground(cinematicSky).ordinal();
             for (int i = 0; i < skyWeights.length; i++) {
                 skyWeights[i] = smooth(skyWeights[i], i == backgroundIndex ? 1 : 0, blend);
             }
@@ -169,8 +175,10 @@ public final class KerrControls {
             return qualityOverride != null ? qualityOverride : white ? Quality.ADAPTIVE : GuixuClientConfig.kerrQuality();
         }
 
-        synchronized Background requestedBackground() {
-            return backgroundOverride != null ? backgroundOverride : white ? Background.WORLD : GuixuClientConfig.kerrBackground();
+        synchronized Background requestedBackground(boolean cinematicSky) {
+            if (backgroundOverride != null) return backgroundOverride;
+            if (!white) return GuixuClientConfig.kerrBackground();
+            return cinematicSky ? Background.STARS : Background.WORLD;
         }
 
         synchronized boolean requestedReverse() {

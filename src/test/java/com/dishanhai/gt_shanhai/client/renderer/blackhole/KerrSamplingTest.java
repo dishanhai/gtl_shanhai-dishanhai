@@ -17,29 +17,44 @@ class KerrSamplingTest {
     }
 
     @Test
-    void whiteHostNearPilotLeavesFullResolutionToTheDirectImage() {
+    void whiteHostNearPilotAndDirectImageHaveSeparateBudgets() {
         double area = 2560.0 * 1600;
         var plan = KerrSampling.plan(ADAPTIVE, ADAPTIVE.scale, ADAPTIVE.scale, area, 1, 17, 200, 1);
         var close = plan.forWhiteHost(ADAPTIVE, area, 17);
         assertTrue(close.traceScale() < plan.traceScale());
-        assertEquals(96_000, area * close.traceScale() * close.traceScale(), 1);
-        assertEquals(plan.traceScale(), plan.forWhiteHost(ADAPTIVE, area, 40).traceScale());
+        assertEquals(48_000, area * close.traceScale() * close.traceScale(), 1);
+        var zoomed = plan.forWhiteHost(ADAPTIVE, area, 60);
+        assertEquals(48_000, area * zoomed.traceScale() * zoomed.traceScale(), 1);
+        assertEquals(plan.traceScale(), plan.forWhiteHost(ADAPTIVE, 160 * 160, 60).traceScale());
         assertSame(plan, plan.forWhiteHost(HIGH, area, 17));
+        assertEquals(4, KerrSampling.whiteDirectDivisor(ADAPTIVE, area));
+        assertEquals(2, KerrSampling.whiteDirectDivisor(LOW, 1280 * 720));
+        assertEquals(1, KerrSampling.whiteDirectDivisor(HIGH, area));
+        assertEquals(1, KerrSampling.whiteDirectDivisor(ADAPTIVE, 160 * 160));
+        assertEquals(864, KerrSampling.whiteDirectExtent(2560, 3));
+        assertEquals(864, KerrSampling.whiteDirectExtent(2552, 3));
     }
 
     @Test
     void detailGridAlignsWithScreenPixelsAndOnlyRunsWhenItAddsResolution() {
         var low = new KerrSampling(.13, .22, 2);
-        var core = low.diskDetail(512.4, 320.7, 58.1, 1024, 640);
+        var core = low.diskDetail(512.4, 320.7, 58.1, 1024, 640, 36);
         assertEquals(224, core.side());
         assertEquals(core.side(), core.samples());
         assertEquals(400, core.x());
         assertEquals(208, core.y());
         assertEquals(1f, core.weight());
-        assertNull(low.diskDetail(-200, 320, 58.1, 1024, 640));
-        assertNotNull(low.diskDetail(-20, 320, 58.1, 1024, 640));
-        assertNull(low.diskDetail(512, 320, 450, 1024, 640));
-        assertNull(new KerrSampling(1, 0, 4).diskDetail(512, 320, 58.1, 1024, 640));
+        assertNull(low.diskDetail(-200, 320, 58.1, 1024, 640, 36));
+        assertNotNull(low.diskDetail(-20, 320, 58.1, 1024, 640, 36));
+        assertNull(low.diskDetail(512, 320, 450, 1024, 640, 5));
+        assertNull(new KerrSampling(1, 0, 4).diskDetail(512, 320, 58.1, 1024, 640, 36));
+
+        var large = low.diskDetail(1430, 670, 270, 2560, 1600, 22);
+        assertEquals(384, large.samples());
+        assertTrue(large.weight() > .9);
+        var close = low.diskDetail(1430, 670, 270, 2560, 1600, 11);
+        assertTrue(close.samples() > large.samples() && close.samples() <= 448);
+        assertNull(low.diskDetail(1430, 670, 270, 2560, 1600, 5));
     }
     @Test
     void onlyBlackHoleCompatibilityBypassesTheGeodesicIntegrator() {

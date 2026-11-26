@@ -627,8 +627,11 @@ public final class BlackHoleLensRenderer {
         RenderMode mode;
         float[] spinAxis, equatorialX;
         boolean nearField;
+        boolean usesCinematicWhite() {
+            return mode == RenderMode.WHITE_HOLE && (whiteDemo || !whitePreview);
+        }
         boolean usesWhiteWorldPrimary() {
-            return mode == RenderMode.WHITE_HOLE && !whitePreview && white.debugMode() == 0;
+            return usesCinematicWhite() && white.debugMode() == 0;
         }
         long stampNanos;
         /** 相机跨入可见黑盘后切到洞内视角。 */
@@ -1006,6 +1009,7 @@ public final class BlackHoleLensRenderer {
         final float[] bhView = new float[3];
         BlackHoleLensMath.toView(f.view, center, f.camPos, bhView);
         f.bhView = bhView;                              // ← 着色器的 uBhView 直接取它（相机空间）
+        if (f.mode == RenderMode.KERR) return captureKerrVolume(f, event, lensRange * rs0, shadowR);
         // Inside the emitting volume a visible arc may extend behind the camera
         // even when its centre is off screen. Trace the complete field of view.
         if (!f.legacyBlackHole && (whiteDemo || f.dist <= rs0 * lensRange)) {
@@ -1139,10 +1143,54 @@ public final class BlackHoleLensRenderer {
         return f;
     }
 
+    private static Frame captureKerrVolume(Frame f, RenderLevelStageEvent event, double extent, double shadowRadius) {
+        f.proj = event.getProjectionMatrix().get(new float[16]);
+        f.tanHalfFov = BlackHoleLensMath.tanHalfFovY(f.proj);
+        if (!(f.tanHalfFov >= .02) || f.tanHalfFov > 20) {
+            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_BAD_PROJECTION);
+            return null;
+        }
+        var rect = BlackHoleLensMath.projectVolume(f.proj, f.bhView, extent, f.screenW, f.screenH);
+        if (rect == null) {
+            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_OUT_OF_FRUSTUM);
+            return null;
+        }
+        f.forwardDist = -f.bhView[2];
+        f.holeScreen = new double[3];
+        f.nearField = f.forwardDist <= .05 || !BlackHoleLensMath.projectToScreen(f.proj, f.bhView,
+                f.screenW, f.screenH, f.holeScreen);
+        float depthZ = f.bhView[2];
+        if (f.nearField) {
+            // A volume may intersect the viewport even when its centre cannot be projected.
+            depthZ = -(float) f.dist;
+            f.holeScreen[0] = f.screenW * .5;
+            f.holeScreen[1] = f.screenH * .5;
+            f.holeScreen[2] = 2 * windowDepth(f.proj, depthZ) - 1;
+        }
+        f.holeScreen[2] = Math.clamp(f.holeScreen[2], -.9999, .9999);
+        f.holeDepthWin = f.holeScreen[2] * .5 + .5;
+        f.depthEpsPerBlock = Math.abs(windowDepth(f.proj, depthZ - 1) - windowDepth(f.proj, depthZ));
+        f.gateEps = Math.max(GATE_EPS_MIN, GATE_EPS_BLOCKS * f.depthEpsPerBlock);
+        double scaleDistance = Math.max(f.dist * .5, f.forwardDist);
+        screenRRaw = BlackHoleLensMath.screenRadiusPx(shadowRadius, scaleDistance, f.tanHalfFov, f.screenH);
+        f.screenR = BlackHoleFallbackQuad.clampScreenR(screenRRaw, f.screenH);
+        f.lensHalfPx = Math.max(MIN_LENS_RADIUS_PX,
+                BlackHoleLensMath.screenRadiusPx(extent, scaleDistance, f.tanHalfFov, f.screenH));
+        f.rectX0 = rect.x0;
+        f.rectY0 = rect.y0;
+        f.rectW = rect.w;
+        f.rectH = rect.h;
+        f.rectHalf = rect.half;
+        f.renderTick = event.getRenderTick();
+        f.stampNanos = System.nanoTime();
+        return f;
+    }
+
     private static void captureKerrGeometry(Frame f, double worldSeconds, double referenceRs,
                                             double dx, double dy, double dz, Camera camera) {
         var optics = f.mode == RenderMode.WHITE_HOLE ? KerrControls.WHITE : KerrControls.KERR;
-        f.kerr = optics.sample(System.nanoTime(), worldSeconds, f.dist, referenceRs);
+        f.kerr = optics.sample(System.nanoTime(), worldSeconds, f.dist, referenceRs,
+                f.usesCinematicWhite(), f.white.spin());
         final double initialRs = f.dist > 1e-8 ? 2 * f.dist / Math.max(1e-8, f.kerr.value(DISTANCE))
                 : referenceRs * f.kerr.value(MASS);
         // The formed Guixu's upper and lower emitters share the vertical axis of its ring centre.
@@ -1178,9 +1226,7 @@ public final class BlackHoleLensRenderer {
         }
         f.spinAxis = new float[]{(float) axis.x, (float) axis.y, (float) axis.z};
         f.equatorialX = new float[]{(float) equatorialX.x, (float) equatorialX.y, (float) equatorialX.z};
-        f.geometry = f.whitePreview && f.white.mix() > 0
-                ? new KerrGeometry(Math.fma(f.white.mix(), f.white.spin() - f.kerr.value(SPIN), f.kerr.value(SPIN)))
-                : f.kerr.geometry();
+        f.geometry = f.kerr.geometry();
         var geometry = f.geometry;
         double radialHeight = -(axis.x * dx + axis.y * dy + axis.z * dz) * 2 / rs;
         double radialPlane = Math.sqrt(Math.max(0, 4 * f.dist * f.dist / (rs * rs) - radialHeight * radialHeight));
@@ -1996,7 +2042,7 @@ public final class BlackHoleLensRenderer {
             return false;
         }
         final boolean whiteWorld = f.usesWhiteWorldPrimary();
-        final boolean copyWorld = sampleBackground && !f.whiteDemo && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F);
+        final boolean copyWorld = sampleBackground && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F);
         final boolean copyScene = copyWorld || (whiteWorld && depthOk);
         if (copyScene && !ensureBgTexture(g, (int) Math.ceil(f.rectW), (int) Math.ceil(f.rectH))) {
             return false;
@@ -2019,7 +2065,7 @@ public final class BlackHoleLensRenderer {
             // 🔴 2026-10-24 深夜：uBhView 必须是【相机空间】（着色器里 dir 就是相机空间射线）。
             //    之前这里错给了"世界空间差值" ⇒ b/bn 全错 ⇒ 黑盘/环/盘一件都不出（只剩 warp）。
             Matrix4f inverseProjection = new Matrix4f().set(f.proj).invert();
-            final double bnAtCenter = f.nearField ? 0 : centerBn(f, inverseProjection);
+            final double bnAtCenter = f.nearField || f.mode == RenderMode.KERR ? 0 : centerBn(f, inverseProjection);
             if (!(bnAtCenter < BlackHoleShaderProbe.B_CRIT)) {
                 // 🔴 2026-10-25 传送 bug 的真凶之一。
                 //   改前：这一帧不达标 ⇒ 立刻 degradeTo(LEVEL_QUAD)，而那个降级【只降不升】⇒ 整局变贴图。
@@ -2073,7 +2119,7 @@ public final class BlackHoleLensRenderer {
             } else {
                 final float[] equatorialX = directionToView(f.view, f.equatorialX);
                 KERR_PASS.draw(main, shader, f, inverseProjection, diskN, equatorialX, diskGain,
-                        whiteWorld && gate ? depthTexId : 0);
+                        whiteWorld && gate ? depthTexId : 0, sampleBackground);
                 shader.safeGetUniform("uEquatorialX").set(equatorialX);
                 shader.safeGetUniform("uStrength").set((float) deflectStrength());
                 shader.safeGetUniform("uShadowPixels").set((float) f.screenR);
@@ -2088,8 +2134,10 @@ public final class BlackHoleLensRenderer {
             shader.safeGetUniform("uGateEps").set((float) f.gateEps);
 
             // 背景贴图绑到 0 号纹理单元（见 bindTextureForShader 的注释：setShaderTexture 只"记账"不绑）
+            final boolean kerrDepth = f.mode == RenderMode.KERR && depthOk;
+            if (!f.legacyBlackHole) shader.safeGetUniform("uKerrDepth").set(kerrDepth ? 1f : 0f);
+            if (copyScene || kerrDepth) shader.safeGetUniform("uProjMat").set(new Matrix4f().set(f.proj));
             if (copyScene) {
-                shader.safeGetUniform("uProjMat").set(new Matrix4f().set(f.proj));
                 final float texel = 1.0F / (float) bgTexWidth;
                 shader.safeGetUniform("uBgTexel").set(texel, 1f / bgTexHeight);
                 shader.setSampler("SceneColor", copyWorld ? bgTexId : null);

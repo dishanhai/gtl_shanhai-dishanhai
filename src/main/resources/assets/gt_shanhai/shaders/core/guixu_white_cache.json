@@ -21,6 +21,7 @@
         {"name": "uWhiteParticleGain", "type": "float", "count": 1, "values": [0]},
         {"name": "uBgRect", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
         {"name": "uWhiteSceneDepth", "type": "float", "count": 1, "values": [0]},
-        {"name": "uCacheOrigin", "type": "float", "count": 2, "values": [0, 0]}
+        {"name": "uCacheOrigin", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uCacheStride", "type": "float", "count": 2, "values": [1, 1]}
     ]
 }

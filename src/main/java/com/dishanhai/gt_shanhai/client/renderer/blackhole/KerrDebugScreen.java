@@ -69,7 +69,8 @@ final class KerrDebugScreen extends Screen {
                     .withValues(Quality.values()).withInitialValue(optics.requestedQuality())
                     .create(left, top + 101, column, 20, label("quality"), (b, q) -> optics.setQuality(q)));
             addRenderableWidget(CycleButton.<Background>builder(b -> label(key(b)))
-                    .withValues(Background.values()).withInitialValue(optics.requestedBackground())
+                    .withValues(Background.values()).withInitialValue(optics.requestedBackground(
+                            WhiteHoleRenderState.isDemonstrating() || BlackHoleTuning.hasHostCenter()))
                     .create(left + column + 6, top + 101, column, 20, label("background"),
                             (b, background) -> optics.setBackground(background)));
         }

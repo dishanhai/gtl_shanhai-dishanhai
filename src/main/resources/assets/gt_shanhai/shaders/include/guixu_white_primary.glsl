@@ -72,23 +72,61 @@ float whiteWorldDistance(vec2 px, vec3 viewRay, float sceneDepth) {
     return max(0.0, dot(hit.xyz / hit.w - eye, viewRay) * (2.0 / uRs));
 }
 
-vec4 whitePrimaryLight(vec3 origin, vec3 direction, float cutoff) {
+// Resolve the compact photosphere by its clipped ray chord. The rim stays
+// distinct from the much wider disk even before adding the bloom image.
+vec4 whitePhotosphere(vec3 origin, vec3 direction, float cutoff, vec4 style, out vec2 moments) {
+    moments = vec2(0.0);
+    float gain = style.w;
+    if (gain <= 0.0) return vec4(0.0, 0.0, 0.0, 1.0);
+    float equator = sqrt(HORIZON * HORIZON + SPIN * SPIN) + 1.10;
+    vec3 stretch = vec3(1.0, 1.0, equator / (HORIZON + 1.04));
+    vec3 ray = direction * stretch;
+    float speed = length(ray);
+    vec2 chord = whiteSphereInterval(origin * stretch, ray / speed, equator) / speed;
+    vec2 visible = whiteIntersect(chord, vec2(0.0, cutoff));
+    if (visible.x >= visible.y) return vec4(0.0, 0.0, 0.0, 1.0);
+    float path = visible.y - visible.x;
+    float face = smoothstep(.12, .61, (chord.y - chord.x) / (2.0 * equator));
+    float surfaceDepth = min(.28, path);
+    moments = vec2(visible.x + .5 * surfaceDepth, .24 * surfaceDepth);
+    vec3 p = origin + moments.x * direction;
+    float convection = .94 + .06 * sin(5.2 * p.x + 3.9 * p.z - 2.6 * uWhiteTime.x
+                       + 2.1 * sin(4.4 * p.y + uWhiteTime.x + uWhiteHole.w / 4096.0));
+    float coverage = smoothstep(0.0, .28, path);
+    float opacity = coverage * (1.0 - exp(-gain * mix(.45, 1.9, face)));
+    vec3 spectral = mix(vec3(.50, .76, 1.0), vec3(1.0, .984, .958), face);
+    float temperature = clamp(uDiskPhysics.z / 9400.0, .20, 7.0);
+    spectral = mix(spectral, vec3(1.0), max(0.0, 1.0 - abs(style.z - 4.0)));
+    if (style.z > 4.0) {
+        float r = max(HORIZON, radius(p));
+        float beta = clamp(uWhiteHole.y, 0.0, .995);
+        float frequency = (sqrt(1.0 + 2.0 / r) + beta * dot(normalize(p), direction))
+                          * inversesqrt(1.0 - beta * beta);
+        spectral = mix(spectral, whiteThermalBands(frequency, 27000.0 * temperature), min(1.0, style.z - 4.0));
+    }
+    vec3 radiance = spectral * (mix(1.55, 4.4, face) * opacity * uWhiteHole.z * sqrt(temperature) * convection);
+    return vec4(radiance, 1.0 - opacity);
+}
+
+vec4 whitePrimaryLight(vec3 origin, vec3 direction, float cutoff, bool highlightsOnly) {
     vec4 light = vec4(0.0, 0.0, 0.0, 1.0);
     if (uWhiteHole.z <= 0.0) return light;
-    WhiteEmission emission = whiteEmission();
     vec2 limit = whiteIntersect(vec2(0.0, cutoff), whiteSphereInterval(origin, direction, WHITE_SHELL_MAX));
     if (limit.x >= limit.y) return light;
+    WhiteEmission emission = whiteEmission();
     vec2 field[5];
-    field[0] = emission.style.w > 0.0
-             ? whiteIntersect(limit, whiteSphereInterval(origin, direction, HORIZON + 4.0)) : vec2(1.0, 0.0);
     field[1] = emission.style.x > 0.0 ? whiteDiskInterval(origin, direction, limit, emission.style.y) : vec2(1.0, 0.0);
     field[2] = whiteJetInterval(origin, direction, 1.0, limit);
     field[3] = whiteJetInterval(origin, direction, -1.0, limit);
     field[4] = emission.shells || uWhiteParticleGain > 0.0
              ? whiteIntersect(limit, whiteSphereInterval(origin, direction, emission.shells ? WHITE_SHELL_MAX : 30.0))
              : vec2(1.0, 0.0);
-    if (field[0].x >= field[0].y && field[1].x >= field[1].y && field[2].x >= field[2].y
-            && field[3].x >= field[3].y && field[4].x >= field[4].y) return light;
+    vec4 layer[5];
+    vec2 depthMoments[5];
+    layer[0] = whitePhotosphere(origin, direction, cutoff, emission.style, depthMoments[0]);
+    if (field[1].x >= field[1].y && field[2].x >= field[2].y
+            && field[3].x >= field[3].y && field[4].x >= field[4].y) return layer[0];
+    light.a = layer[0].a;
     // The primary image is an exterior emission approximation. Smoothly damp the far
     // side through the projected horizon without stamping an opaque ellipsoid.
     vec3 normalization = vec3(inversesqrt(HORIZON * HORIZON + SPIN * SPIN));
@@ -99,14 +137,15 @@ vec4 whitePrimaryLight(vec3 origin, vec3 direction, float cutoff) {
     float farThrough = mix(.32, 1.0, smoothstep(.45, 1.65, impact));
     // Integrate each medium before resolving overlap. Depth moments keep the
     // transition continuous when neighboring rays cross two overlapping media.
-    vec4 layer[5];
-    vec2 depthMoments[5];
-    for (int material = 0; material < 5; ++material) {
+    for (int material = 1; material < 5; ++material) {
         vec2 span = field[material];
         vec4 medium = vec4(0.0, 0.0, 0.0, 1.0);
         vec2 moments = vec2(0.0);
-        int count = material == 0 ? 24 : material == 1 ? (uIntegration.y >= 480.0 ? 18 : 12)
+        int count = material == 1 ? (uIntegration.y >= 480.0 ? 18 : 12)
                   : material == 4 ? (emission.shells ? 22 : 10) : 11;
+        // Bloom spreads over a much wider footprint than the direct image.
+        // Its cache misses only need a coarse estimate of each emitter.
+        if (highlightsOnly) count = (count + 1) / 2;
         float ds = (span.y - span.x) / float(count);
         if (ds > .00001) for (int i = 0; i < count && medium.a > .002; ++i) {
             float t = (float(i) + .5) * ds;
@@ -123,6 +162,7 @@ vec4 whitePrimaryLight(vec3 origin, vec3 direction, float cutoff) {
         depthMoments[material] = vec2(span.x + mean.x, sqrt(max(0.0, mean.y - mean.x * mean.x)));
         light.a *= medium.a;
     }
+    layer[1].rgb *= .68; // Keep the broad disk below the photosphere's display white point.
     for (int i = 0; i < 5; ++i) {
         if (layer[i].a >= .99999) continue;
         float transmission = 1.0;
@@ -135,4 +175,8 @@ vec4 whitePrimaryLight(vec3 origin, vec3 direction, float cutoff) {
         light.rgb += transmission * layer[i].rgb;
     }
     return light;
+}
+
+vec4 whitePrimaryLight(vec3 origin, vec3 direction, float cutoff) {
+    return whitePrimaryLight(origin, direction, cutoff, false);
 }

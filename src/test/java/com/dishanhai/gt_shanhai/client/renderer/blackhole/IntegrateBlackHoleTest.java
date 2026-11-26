@@ -58,6 +58,35 @@ class IntegrateBlackHoleTest {
     }
 
     @Test
+    void kerrVolumeStaysVisibleAcrossTheScreenAndEyePlanes() {
+        int width = 800, height = 560;
+        float[] projection = new org.joml.Matrix4f().perspective((float) Math.toRadians(70),
+                (float) width / height, .05f, 256).get(new float[16]);
+        var offscreenCenter = BlackHoleLensMath.projectVolume(projection, new float[]{13, 0, -10}, 3, width, height);
+        assertNotNull(offscreenCenter);
+        assertTrue(offscreenCenter.w > 30 && offscreenCenter.x0 + offscreenCenter.w == width);
+        for (float z : new float[]{-.1f, 0, .1f}) {
+            var acrossEye = BlackHoleLensMath.projectVolume(projection, new float[]{2.8f, 0, z}, 3, width, height);
+            assertNotNull(acrossEye);
+            assertEquals(width, acrossEye.w);
+        }
+        assertNull(BlackHoleLensMath.projectVolume(projection, new float[]{40, 0, -10}, 3, width, height));
+        assertNull(BlackHoleLensMath.projectVolume(projection, new float[]{0, 0, 8}, 3, width, height));
+    }
+
+    @Test
+    void kerrVolumeCullsInvisibleScreenRegionsEvenWhenItCrossesTheEyePlane() {
+        int width = 800, height = 560;
+        float[] projection = new org.joml.Matrix4f().perspective((float) Math.toRadians(70),
+                (float) width / height, .05f, 256).get(new float[16]);
+        var grazing = BlackHoleLensMath.projectVolume(projection, new float[]{4, 0, -2.9f}, 3, width, height);
+        assertNotNull(grazing);
+        assertTrue(grazing.x0 > width * .60 && grazing.x0 + grazing.w == width);
+        assertNull(BlackHoleLensMath.projectVolume(projection, new float[]{0, 11.6f, -10}, 3, width, height));
+        assertNull(BlackHoleLensMath.projectVolume(projection, new float[]{4.6f, 0, .5f}, 3, width, height));
+    }
+
+    @Test
     void unresolvedSurfaceWavesFadeOutInsteadOfDrawingDenseWhiteRings() {
         var p = new BlackHoleShaderProbe.Params(new float[16], new float[]{0, 0, -240},
                 new float[]{0, .82F, .57F}, 768, 768, 0, 0, 768, 768, 376,
@@ -152,7 +181,7 @@ class IntegrateBlackHoleTest {
         String fragment = Files.readString(shaders.resolve("guixu_blackhole.fsh"));
         String program = Files.readString(shaders.resolve("guixu_blackhole.json"));
         assertTrue(source.contains("drawExterior(g, f, depthOk, sampleBackground)"));
-        assertTrue(source.contains("copyWorld = sampleBackground && !f.whiteDemo && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F)"));
+        assertTrue(source.contains("copyWorld = sampleBackground &&"));
         assertTrue(source.contains("copyScene && !ensureBgTexture("));
         assertTrue(source.contains("copyScene && !copyBackground(g, main, f, copyWorld)"));
         assertTrue(source.contains("shader.setSampler(\"SceneColor\", copyWorld ? bgTexId : null)"));

@@ -20,7 +20,8 @@ import static org.lwjgl.opengl.GL33C.*;
 
 /** Exercises the production GLSL in a hidden OpenGL context. */
 class GuixuKerrGpuProbe {
-    private static final Path SHADERS = Path.of("src/main/resources/assets/gt_shanhai/shaders/core");
+    private static final Path SHADERS = Path.of(System.getProperty("kerr.shaderRoot",
+            "src/main/resources/assets/gt_shanhai/shaders/core"));
     static final int W = Integer.getInteger("kerr.width", 800), H = Integer.getInteger("kerr.height", 560);
     private static final float TAN = (float) Math.tan(Math.toRadians(31));
     private static final Matrix4f PROJ = new Matrix4f().perspective(2 * (float) Math.atan(TAN), (float) W / H, .05f, 512);
@@ -36,7 +37,7 @@ class GuixuKerrGpuProbe {
         INV_PROJ.set(PROJ).invert();
     }
     private static int transferFbo, transferTex, transferW, transferH;
-    private static int stripWidth, stripRows, radiiFbo, radiiTex, stripFbo, stripTex;
+    private static int stripWidth, stripRows, radiiFbo, radiiTex, stripFbo, stripTex, stripExit;
     private static float cameraDistance, cameraOffset, diskGain;
     private static boolean diagnostic, fullCapture;
     private static CompactHdrPostProcessing hdr;
@@ -64,11 +65,45 @@ class GuixuKerrGpuProbe {
                 verifyDiskEdge(output);
                 return;
             }
+            if (args.length == 2 && args[1].equals("close-detail")) {
+                perspective(70);
+                verifyDiskEdgeScene(output, false, 0, 22);
+                verifyDiskEdgeScene(output, false, .18f, 22);
+                // Approximate the reported body-only view with its logged 160x96 pilot grid.
+                perspective(116);
+                verifyDiskEdgeScene(output, false, 0, 11);
+                verifyDiskEdgeScene(output, false, .18f, 11);
+                return;
+            }
+            if (args.length == 2 && args[1].equals("world-moire")) {
+                verifyWorldMinification();
+                verifyWorldDonorBoundary();
+                return;
+            }
+            if (args.length == 2 && args[1].equals("grazing-depth")) {
+                verifyGrazingDepth();
+                return;
+            }
             if (args.length == 2 && args[1].equals("benchmark")) {
                 benchmark(.4, 26, 65, 0);
                 benchmark(.4, 14, 42, 0);
                 benchmark(.45, 4.7f, 80, 2f);
                 benchmark(.20, 4.7f, 80, 2f);
+                return;
+            }
+            if (args.length == 2 && args[1].equals("performance")) {
+                perspective(70);
+                rayTarget(.13);
+                verifyWorldStructure(output, true);
+                verifyTransferOnly();
+                verifyDiskEdgeScene(output, false, .18f, 22, true);
+                perspective(116);
+                verifyDiskEdgeScene(output, false, .18f, 11, true);
+                perspective(70);
+                for (float distance : new float[]{46, 22, 11, 4.7f}) {
+                    var plan = KerrSampling.plan(Quality.ADAPTIVE, .44, .44, W * (double) H, 1, distance, H * .17);
+                    benchmark(plan, distance, 80, distance < 6 ? 2 : 0);
+                }
                 return;
             }
             if (args.length == 2 && args[1].equals("close-budget")) {
@@ -129,10 +164,12 @@ class GuixuKerrGpuProbe {
             verifySpinReflection();
             verifyConvergence();
             verifySceneComposition();
+            verifyGrazingDepth();
             verifyAnalyticExterior(output);
             verifyWorldCacheEdges();
             verifyWalkingCamera();
             verifyWorldStructure(output);
+            verifyWorldMinification();
             verifyDiskMotion();
             verifyColdDiskAndHistory();
             verifyCachedDeflection();
@@ -534,12 +571,18 @@ class GuixuKerrGpuProbe {
     // Include the foreground disk crossing the shadow, well inside the critical curve.
     private static void verifyDiskEdge(Path output) throws Exception {
         perspective(70);
-        verifyDiskEdgeScene(output, false, 0);
-        verifyDiskEdgeScene(output, true, 0);
-        verifyDiskEdgeScene(output, false, .18f);
+        verifyDiskEdgeScene(output, false, 0, 36);
+        verifyDiskEdgeScene(output, true, 0, 36);
+        verifyDiskEdgeScene(output, false, .18f, 36);
     }
 
-    private static void verifyDiskEdgeScene(Path output, boolean stars, float bloom) throws Exception {
+    private static void verifyDiskEdgeScene(Path output, boolean stars, float bloom, float distance) throws Exception {
+        verifyDiskEdgeScene(output, stars, bloom, distance, false);
+    }
+
+    private static void verifyDiskEdgeScene(Path output, boolean stars, float bloom, float distance, boolean timed) throws Exception {
+        boolean nearHost = distance == 11;
+        double transferScale = nearHost ? .103 : .22;
         float gain = stars ? 0 : .62f;
         int background = stars ? 1 : 2;
         glUseProgram(trace);
@@ -547,21 +590,25 @@ class GuixuKerrGpuProbe {
         glUseProgram(composite);
         set(composite, "uDiskDetailRect", 0, 0, 1, 0);
         rayTarget(2);
-        trace(.95f, 80, 0, 36, .000009f, 768, gain, 14);
+        trace(.95f, 80, 0, distance, .000009f, 768, gain, 14);
         prepareComposite(80, background, bloom);
+        if (nearHost) set(composite, "uSampleBackground", 0);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         BufferedImage reference = readImage();
-        rayTarget((W * 136 + 512) / 1024, (H * 88 + 320) / 640);
-        trace(.95f, 80, 0, 36, .00022f, 384, gain, 14);
+        if (nearHost) rayTarget(160, 96);
+        else rayTarget((W * 136 + 512) / 1024, (H * 88 + 320) / 640);
+        trace(.95f, 80, 0, distance, .00022f, 384, gain, 14);
         prepareComposite(80, background, bloom);
+        if (nearHost) set(composite, "uSampleBackground", 0);
         set(composite, "uRefine", 2);
-        float radius = (float) (Math.sqrt(27) * H * PROJ.m11() / 72);
+        float radius = (float) (Math.sqrt(27) * H * PROJ.m11() / (2 * distance));
         set(composite, "uShadowPixels", radius);
-        drawCriticalStrip(.22);
-        bakeFootprintsAtScale(.22);
+        drawCriticalStrip(transferScale);
+        bakeFootprintsAtScale(transferScale);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         BufferedImage coarse = readImage();
-        var detail = new KerrSampling(rayW / (double) W, .22, 2).diskDetail(W * .5, H * .5, radius, W, H);
+        var detail = new KerrSampling(rayW / (double) W, transferScale, 2).diskDetail(W * .5, H * .5, radius, W, H, distance);
+        if (detail == null) throw new AssertionError("No disk detail for shadow radius " + radius);
         int detailTexture = texture(detail.samples(), detail.samples(), GL_RGBA16F, GL_LINEAR);
         int detailExit = texture(detail.samples(), detail.samples(), GL_RGBA16F, GL_NEAREST);
         int detailFbo = glGenFramebuffers();
@@ -581,7 +628,15 @@ class GuixuKerrGpuProbe {
         set(trace, "uCriticalBounds", 0, 0, 0, 3);
         set(trace, "uTraceSize", detail.samples(), detail.samples());
         set(trace, "uTraceRect", detail.x(), detail.y(), detail.side(), detail.side());
+        int timer = glGenQueries();
+        glBeginQuery(GL_TIME_ELAPSED, timer);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+        glEndQuery(GL_TIME_ELAPSED);
+        double detailMs = timed ? medianDrawTime(() -> glDrawArrays(GL_TRIANGLES, 0, 3))
+                : glGetQueryObjectui64(timer, GL_QUERY_RESULT) * 1e-6;
+        glDeleteQueries(timer);
+        BufferedImage coreOnly, actual;
+        double arcMs = 0;
         try (var detailHdr = new CompactHdrPostProcessing(extension ->
                 Files.readString(SHADERS.resolve("../post/bright_pass." + extension)))) {
             int glow = bloom > 0 ? detailHdr.draw(detailTexture, detail.samples(), detail.samples(), 1.15f) : 0;
@@ -590,20 +645,36 @@ class GuixuKerrGpuProbe {
             set(composite, "uDiskBloomLod", glow != 0 ? detailHdr.lastLevel() : 0,
                     KerrSampling.bloomLodBias(detail.samples(), detail.samples(), detail.side(), detail.side(), H));
             sampler("DiskDetail", 13, detailTexture);
-            sampler("DiskDetailExit", 14, detailExit);
+            sampler("LocalRayExit", 14, detailExit);
             set(composite, "uDiskDetailRect", detail.x(), detail.y(), detail.side(), detail.weight());
             glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
             glViewport(0, 0, W, H);
             sampler("PixelTransfer", 6, transferTex);
             glDrawArrays(GL_TRIANGLES, 0, 3);
+            coreOnly = readImage();
+            if (!stars) {
+                int arcTimer = glGenQueries();
+                glBeginQuery(GL_TIME_ELAPSED, arcTimer);
+                drawCriticalStrip(transferScale, false, false, true);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glEndQuery(GL_TIME_ELAPSED);
+                arcMs = glGetQueryObjectui64(arcTimer, GL_QUERY_RESULT) * 1e-6;
+                glDeleteQueries(arcTimer);
+            }
+            actual = stars ? coreOnly : readImage();
         }
-        BufferedImage actual = readImage();
         glDeleteFramebuffers(detailFbo);
         glDeleteTextures(detailTexture);
         glDeleteTextures(detailExit);
         String name = stars ? "lensed-stars" : bloom > 0 ? "disk-edge-bloom" : "disk-edge";
+        if (nearHost) name += "-host";
         ImageIO.write(actual, "PNG", output.resolve(name + ".png").toFile());
+        ImageIO.write(coarse, "PNG", output.resolve(name + "-coarse.png").toFile());
         ImageIO.write(reference, "PNG", output.resolve(name + "-reference.png").toFile());
+        if (!stars) {
+            ImageIO.write(coreOnly, "PNG", output.resolve(name + "-core.png").toFile());
+            verifyArcDetail(name, actual, coreOnly, reference, radius, arcMs);
+        }
         long error = 0, coarseError = 0;
         int edges = 0;
         for (int y = 1; y < H - 1; y++) for (int x = 1; x < W - 1; x++) {
@@ -621,9 +692,38 @@ class GuixuKerrGpuProbe {
         }
         double mae = error / (3.0 * edges);
         double baseline = coarseError / (3.0 * edges);
-        System.out.printf(Locale.ROOT, "High-spin %s: %d pixels, mean RGB error %.3f -> %.3f /255%n", name, edges, baseline, mae);
+        System.out.printf(Locale.ROOT, "High-spin %s: %d pixels, mean RGB error %.3f -> %.3f /255, detail %dx%d %.2f ms GPU%n",
+                name, edges, baseline, mae, detail.samples(), detail.samples(), detailMs);
         if (edges < 300 || !(mae < .8 * baseline) || (!stars && mae > 5))
             throw new AssertionError("Under-resolved " + name);
+    }
+
+    private static void verifyArcDetail(String name, BufferedImage actual, BufferedImage coreOnly,
+                                        BufferedImage reference, float radius, double arcMs) {
+        long[] errors = new long[2], baseline = new long[2];
+        int[] pixels = new int[2];
+        for (int y = 1; y < H - 1; y++) for (int x = 1; x < W - 1; x++) {
+            float dx = x - W * .5f, dy = y - H * .5f;
+            if (Math.abs(dx) > radius || Math.abs(dy) < .8f * radius || Math.hypot(dx, dy) > 1.62 * radius) continue;
+            int target = reference.getRGB(x, y) >> 16 & 255;
+            int radialContrast = (reference.getRGB(x, y + 1) >> 16 & 255) - (reference.getRGB(x, y - 1) >> 16 & 255);
+            if (Math.abs(radialContrast) < 7) continue;
+            int arc = dy < 0 ? 0 : 1;
+            errors[arc] += Math.abs((actual.getRGB(x, y) >> 16 & 255) - target);
+            baseline[arc] += Math.abs((coreOnly.getRGB(x, y) >> 16 & 255) - target);
+            pixels[arc]++;
+        }
+        System.out.printf(Locale.ROOT,
+                "%s lensed arcs: upper %.3f -> %.3f, lower %.3f -> %.3f /255 (%d + %d pixels), strip and composite %.2f ms GPU%n",
+                name, baseline[0] / (double) pixels[0], errors[0] / (double) pixels[0],
+                baseline[1] / (double) pixels[1], errors[1] / (double) pixels[1], pixels[0], pixels[1], arcMs);
+        if (radius >= 80) {
+            for (int arc = 0; arc < 2; arc++) {
+                if (pixels[arc] < 300 || errors[arc] >= .85 * baseline[arc]) {
+                    throw new AssertionError(name + (arc == 0 ? " upper" : " lower") + " lensed arc is under-resolved");
+                }
+            }
+        }
     }
 
     private static void verifyCriticalRadiance(Path output) throws Exception {
@@ -797,6 +897,51 @@ class GuixuKerrGpuProbe {
         glDeleteRenderbuffers(depth);
         glDeleteTextures(scene);
         System.out.println("world background, foreground occlusion and body-only compositing passed");
+    }
+
+    private static void verifyGrazingDepth() {
+        int depth = glGenRenderbuffers();
+        int skyColor = constantTexture(.67f, .76f, .95f, 1);
+        float distance = 15;
+        int x = W * 3 / 4, y = H / 2;
+        float offset = (2 * (x + .5f) / W - 1) * distance / PROJ.m00();
+        prepareExterior(distance, 65, H * (float) BlackHoleLensMath.B_CRIT / (TAN * distance), 0, skyColor);
+        set(composite, "uBhView", offset, 0, -distance);
+        set(composite, "uSampleBackground", 0);
+        set(composite, "uKerrDepth", 1);
+        glBindRenderbuffer(GL_RENDERBUFFER, depth);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, W, H);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth);
+        checkFbo();
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        try {
+            glClearColor(.67f, .76f, .95f, 1);
+            glClearDepth(windowDepth(distance - 1));
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glDepthMask(false);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            if (redAt(x, y) < 160) throw new AssertionError("Kerr overwrote a genuine foreground occluder");
+            glDepthMask(true);
+            glClearDepth(windowDepth(distance + 1));
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glDepthMask(false);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            if (redAt(x, y) > 3) throw new AssertionError("Off-axis Kerr shadow was lost against a background surface");
+        } finally {
+            glDepthMask(true);
+            glClearDepth(1);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+            glDeleteRenderbuffers(depth);
+            glDeleteTextures(skyColor);
+            set(composite, "uKerrDepth", 0);
+            set(composite, "uExterior", 0, 0, 0);
+        }
+        System.out.println("Off-axis Kerr keeps its shadow behind foreground and in front of background");
     }
 
     private static void verifyAnalyticExterior(Path output) throws Exception {
@@ -985,6 +1130,10 @@ class GuixuKerrGpuProbe {
     }
 
     private static void verifyWorldStructure(Path output) throws Exception {
+        verifyWorldStructure(output, false);
+    }
+
+    private static void verifyWorldStructure(Path output, boolean timed) throws Exception {
         // Near blue truss, distant gold ring and an unoccluded sky, in camera-space units.
         ByteBuffer colors = BufferUtils.createByteBuffer(W * H * 4);
         FloatBuffer depths = BufferUtils.createFloatBuffer(W * H);
@@ -1024,6 +1173,14 @@ class GuixuKerrGpuProbe {
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+        if (timed) {
+            // Keep the camera, depth rejection and donor textures the same in both modes.
+            double worldMs = medianDrawTime(() -> glDrawArrays(GL_TRIANGLES, 0, 3));
+            set(composite, "uSampleBackground", 0);
+            double bodyMs = medianDrawTime(() -> glDrawArrays(GL_TRIANGLES, 0, 3));
+            set(composite, "uSampleBackground", 1);
+            System.out.printf(Locale.ROOT, "World composite %.3f ms, body-only %.3f ms%n", worldMs, bodyMs);
+        }
         glDisable(GL_BLEND);
         ImageIO.write(readImage(), "PNG", output.resolve("world-structure.png").toFile());
 
@@ -1064,6 +1221,106 @@ class GuixuKerrGpuProbe {
 
     private static float windowDepth(float distance) {
         return .5f + .5f * (-distance * PROJ.m22() + PROJ.m32()) / distance;
+    }
+
+    private static void verifyWorldMinification() {
+        // A smooth donor map compresses two independent stripe patterns. Red and
+        // green let the test distinguish filtering in each direction.
+        ByteBuffer colors = BufferUtils.createByteBuffer(W * H * 4);
+        FloatBuffer directions = BufferUtils.createFloatBuffer(W * H * 4);
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            colors.put((byte) ((x / 2 % 2) * 255)).put((byte) ((y / 2 % 2) * 255)).put((byte) 0).put((byte) 255);
+            float dx = x + .5f - W / 2f, dy = y + .5f - H / 2f;
+            float outgoingX = dx + Math.clamp(11 * dx, -90, 90);
+            float outgoingY = dy + Math.clamp(4 * dy, -55, 55);
+            directions.put(2 * outgoingX / (W * PROJ.m00())).put(2 * outgoingY / (H * PROJ.m11())).put(-1).put(1);
+        }
+        int world = texture(W, H, GL_RGBA8, GL_LINEAR);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, colors.flip());
+        int rays = texture(W, H, GL_RGBA32F, GL_NEAREST);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_FLOAT, directions.flip());
+        int dark = constantTexture(0, 0, 0, 1);
+        prepareComposite(80, 0, 0);
+        sampler("RayLight", 2, dark);
+        sampler("RayExit", 3, rays);
+        sampler("SceneColor", 0, world);
+        set(composite, "uDiskDetailRect", 0, 0, 1, 0);
+        set(composite, "uBgRect", 0, 0, W, H);
+        set(composite, "uBgTexel", 1f / W, 1f / H);
+        set(composite, "uShadowPixels", W / 2f);
+        set(composite, "uStrength", 1);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        BufferedImage image = readImage();
+        glDeleteTextures(new int[]{world, rays, dark});
+        int[] lo = {255, 255}, hi = {0, 0};
+        for (int y = H / 2 - 6; y < H / 2 + 6; y++) for (int x = W / 2 - 6; x < W / 2 + 6; x++) {
+            int rgb = image.getRGB(x, y);
+            for (int c = 0; c < 2; c++) {
+                int value = rgb >> (16 - 8 * c) & 255;
+                lo[c] = Math.min(lo[c], value);
+                hi[c] = Math.max(hi[c], value);
+            }
+        }
+        System.out.printf("Compressed stripe residual: horizontal %d, vertical %d /255%n", hi[0] - lo[0], hi[1] - lo[1]);
+        if (lo[0] < 130 || lo[1] < 130 || hi[0] - lo[0] > 75 || hi[1] - lo[1] > 75)
+            throw new AssertionError("World minification left periodic aliasing");
+    }
+
+    private static void verifyWorldDonorBoundary() {
+        // Uniform displacement has a one-texel footprint even where a
+        // foreground texel forces the adjacent fragment back to its self donor.
+        ByteBuffer colors = BufferUtils.createByteBuffer(W * H * 4);
+        FloatBuffer directions = BufferUtils.createFloatBuffer(W * H * 4);
+        FloatBuffer depths = BufferUtils.createFloatBuffer(W * H);
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            colors.put((byte) (255 * (x & 1))).put((byte) 0)
+                    .put((byte) (x > W / 2 + 10 ? 255 : 0)).put((byte) 255);
+            directions.put((2 * (x + 48.5f) / W - 1) / PROJ.m00())
+                    .put((2 * (y + .5f) / H - 1) / PROJ.m11()).put(-1).put(1);
+            int blocker = W / 2 + 39 + ((y >> 2) & 1);
+            depths.put(x == blocker ? .1f : 1f);
+        }
+        int world = texture(W, H, GL_RGBA8, GL_LINEAR);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, colors.flip());
+        int rays = texture(W, H, GL_RGBA32F, GL_NEAREST);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_FLOAT, directions.flip());
+        int depth = texture(W, H, GL_R32F, GL_NEAREST);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RED, GL_FLOAT, depths.flip());
+        int dark = constantTexture(0, 0, 0, 1);
+        prepareComposite(80, 0, 0);
+        sampler("RayLight", 2, dark);
+        sampler("RayExit", 3, rays);
+        sampler("SceneColor", 0, world);
+        sampler("SceneDepth", 1, depth);
+        set(composite, "uBgRect", 0, 0, W, H);
+        set(composite, "uBgTexel", 1f / W, 1f / H);
+        set(composite, "uShadowPixels", W / 2f);
+        set(composite, "uStrength", 1);
+        set(composite, "uHoleDepth", .5f);
+        set(composite, "uGateEps", .0001f);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        BufferedImage unblocked = readImage();
+        set(composite, "uDepthGate", 1);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        BufferedImage blocked = readImage();
+        glDeleteTextures(new int[]{world, rays, depth, dark});
+        int rejected = 0, retained = 0, maxError = 0;
+        for (int y = H / 2 - 8; y < H / 2 + 8; y++) for (int x = W / 2 - 6; x < W / 2 + 5; x++) {
+            int expected = unblocked.getRGB(x, y);
+            int actual = blocked.getRGB(x, y);
+            if ((expected & 255) < 250) continue;
+            if ((actual & 255) < 250) {
+                rejected++;
+            } else {
+                retained++;
+                maxError = Math.max(maxError, Math.abs((actual >> 16 & 255) - (expected >> 16 & 255)));
+            }
+        }
+        System.out.printf("Donor boundary: %d rejected, %d retained, max red-channel error %d /255%n",
+                rejected, retained, maxError);
+        if (rejected == 0 || retained == 0 || maxError > 3) {
+            throw new AssertionError("Foreground rejection blurred adjacent valid world samples");
+        }
     }
 
     private static void verifyWalkingCamera() {
@@ -1162,7 +1419,7 @@ class GuixuKerrGpuProbe {
         }
     }
 
-    private static int constantTexture(float r, float g, float b, float a) {
+    static int constantTexture(float r, float g, float b, float a) {
         int id = texture(1, 1, GL_RGBA16F, GL_NEAREST);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_FLOAT, new float[]{r, g, b, a});
         return id;
@@ -1230,6 +1487,45 @@ class GuixuKerrGpuProbe {
     private static void benchmark(double scale, float distance, float inclination, float offset) {
         double transferScale = W * H >= 480_000 ? Math.clamp(1.65 * scale, .28, .74) : 0;
         benchmark(new KerrSampling(scale, transferScale, scale <= .25 ? 2 : 4), distance, inclination, offset);
+    }
+
+    private static double medianDrawTime(Runnable draw) {
+        for (int i = 0; i < 6; ++i) draw.run();
+        int timer = glGenQueries();
+        double[] batches = new double[5];
+        for (int i = 0; i < batches.length; ++i) {
+            glBeginQuery(GL_TIME_ELAPSED, timer);
+            for (int frame = 0; frame < 20; ++frame) draw.run();
+            glEndQuery(GL_TIME_ELAPSED);
+            batches[i] = glGetQueryObjectui64(timer, GL_QUERY_RESULT) / 20e6;
+        }
+        glDeleteQueries(timer);
+        java.util.Arrays.sort(batches);
+        return batches[batches.length / 2];
+    }
+
+    private static void verifyTransferOnly() {
+        if (glGetUniformLocation(trace, "uTransferOnly") < 0) return;
+        for (float gain : new float[]{.62f, 0}) {
+            Runnable draw = () -> trace(.95f, 80, 0, 46, .00022f, 384, gain, 14);
+            double fullMs = medianDrawTime(draw);
+            FloatBuffer fullLight = readRayBuffer("rayLight"), fullExit = readExit();
+            set(trace, "uTransferOnly", 1);
+            double bodyMs = medianDrawTime(draw);
+            FloatBuffer bodyLight = readRayBuffer("rayLight"), bodyExit = readExit();
+            set(trace, "uTransferOnly", 0);
+            int changedCapture = 0;
+            double largestLightDelta = 0;
+            for (int i = 0; i < fullExit.capacity(); i += 4) {
+                if ((fullExit.get(i + 3) > 1.5f) != (bodyExit.get(i + 3) > 1.5f)) changedCapture++;
+                for (int c = 0; c < 4; ++c)
+                    largestLightDelta = Math.max(largestLightDelta, Math.abs(fullLight.get(i + c) - bodyLight.get(i + c)));
+            }
+            System.out.printf(Locale.ROOT, "Trace disk gain %.2f: %.3f -> %.3f ms, capture changes %d, largest linear delta %.5f%n",
+                    gain, fullMs, bodyMs, changedCapture, largestLightDelta);
+            if (changedCapture > 4 || largestLightDelta > .001)
+                throw new AssertionError("Transfer-only trace changed visible disk light or the capture mask");
+        }
     }
 
     private static void benchmarkCloseBudget() {
@@ -1376,6 +1672,14 @@ class GuixuKerrGpuProbe {
     }
 
     static void drawCriticalStrip(double transferScale, boolean whiteWorld) {
+        drawCriticalStrip(transferScale, whiteWorld, false);
+    }
+
+    static void drawCriticalStrip(double transferScale, boolean whiteWorld, boolean skyRays) {
+        drawCriticalStrip(transferScale, whiteWorld, skyRays, false);
+    }
+
+    private static void drawCriticalStrip(double transferScale, boolean whiteWorld, boolean skyRays, boolean extend) {
         float radius = (float) (Math.sqrt(27) * H * PROJ.m11() / (2 * cameraDistance));
         boolean cached = !whiteWorld && transferScale > 0;
         double observerDistance = Math.hypot(cameraDistance, cameraOffset);
@@ -1384,19 +1688,24 @@ class GuixuKerrGpuProbe {
         float span = whiteWorld ? 12f : KerrSampling.blackHoleCriticalStripSpan(transferScale, observerDistance);
         if (width == 0 || span <= 0 || (!whiteWorld && diskGain <= 0)) return;
         float x = .5f * W * (1 + PROJ.m00() * cameraOffset / cameraDistance), y = .5f * H;
-        int rows = cached ? KerrSampling.CACHED_CRITICAL_STRIP_ROWS : KerrSampling.CRITICAL_STRIP_ROWS;
-        if (stripWidth != width || stripRows != rows) {
+        int coreRows = cached ? KerrSampling.CACHED_CRITICAL_STRIP_ROWS : KerrSampling.CRITICAL_STRIP_ROWS;
+        var arc = KerrSampling.criticalArc(radius, coreRows, width, extend);
+        int rows = arc.rows();
+        width = arc.columns();
+        if (stripWidth != width || stripRows != rows || skyRays != (stripExit != 0)) {
             if (radiiFbo != 0) {
                 glDeleteFramebuffers(radiiFbo);
                 glDeleteFramebuffers(stripFbo);
                 glDeleteTextures(radiiTex);
                 glDeleteTextures(stripTex);
+                glDeleteTextures(stripExit);
             }
             glActiveTexture(GL_TEXTURE11);
             radiiTex = texture(width, 1, GL_RGBA32F, GL_LINEAR);
-            radiiFbo = stripTarget(radiiTex);
+            radiiFbo = stripTarget(radiiTex, 0);
             stripTex = texture(width, rows, GL_RGBA16F, GL_LINEAR);
-            stripFbo = stripTarget(stripTex);
+            stripExit = skyRays ? texture(width, rows, GL_RGBA16F, GL_NEAREST) : 0;
+            stripFbo = stripTarget(stripTex, stripExit);
             stripWidth = width;
             stripRows = rows;
         }
@@ -1413,7 +1722,8 @@ class GuixuKerrGpuProbe {
         glBindTexture(GL_TEXTURE_2D, radiiTex);
         glBindFramebuffer(GL_FRAMEBUFFER, stripFbo);
         glViewport(0, 0, width, rows);
-        set(trace, "uCriticalBounds", x, y, span, 2);
+        set(trace, "uCriticalBounds", x, y, span, skyRays ? 4 : 2);
+        set(trace, "uCriticalArc", arc.inner(), arc.outer());
         set(trace, "uTraceSize", width, rows);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         set(trace, "uCriticalBounds", 0, 0, 0, 0);
@@ -1422,19 +1732,27 @@ class GuixuKerrGpuProbe {
         glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
         glViewport(0, 0, W, H);
         glUseProgram(composite);
-        set(composite, "uCriticalBounds", x, y, span, 1);
+        set(composite, "uCriticalBounds", x, y, span, skyRays ? 2 : 1);
+        set(composite, "uCriticalArc", arc.inner(), arc.outer());
         sampler("CriticalLight", 11, stripTex);
         sampler("CriticalRadii", 12, radiiTex);
+        if (skyRays) sampler("LocalRayExit", 6, stripExit);
     }
 
-    private static int stripTarget(int texture) {
+    private static int stripTarget(int texture, int rayExit) {
+        glBindTexture(GL_TEXTURE_2D, texture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         int framebuffer = glGenFramebuffers();
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         int output = glGetFragDataLocation(trace, "rayLight");
         attach(texture, GL_COLOR_ATTACHMENT0 + output);
-        int[] targets = new int[output + 1];
+        int exitOutput = rayExit != 0 ? glGetFragDataLocation(trace, "rayExit") : -1;
+        int[] targets = new int[Math.max(output, exitOutput) + 1];
         targets[output] = GL_COLOR_ATTACHMENT0 + output;
+        if (rayExit != 0) {
+            attach(rayExit, GL_COLOR_ATTACHMENT0 + exitOutput);
+            targets[exitOutput] = GL_COLOR_ATTACHMENT0 + exitOutput;
+        }
         glDrawBuffers(targets);
         glReadBuffer(GL_COLOR_ATTACHMENT0 + output);
         checkFbo();
@@ -1476,6 +1794,7 @@ class GuixuKerrGpuProbe {
         set(composite, "uRefine", 0);
         set(composite, "uTransferPass", 0);
         set(composite, "uCriticalBounds", 0, 0, 0, 0);
+        set(composite, "uCriticalArc", 0, 0);
         matrix(composite, "uInvProj", INV_PROJ);
         matrix(composite, "uProjMat", PROJ);
         axis(composite, inclination);

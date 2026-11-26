@@ -298,6 +298,8 @@ tasks.register('kerrGpuProbe', JavaExec) {
     systemProperty 'kerr.stabilityFrames', providers.gradleProperty('kerrStabilityFrames').getOrElse('0')
     systemProperty 'kerr.width', providers.gradleProperty('kerrWidth').getOrElse('800')
     systemProperty 'kerr.height', providers.gradleProperty('kerrHeight').getOrElse('560')
+    def shaderRoot = providers.gradleProperty('kerrShaderRoot').orNull
+    if (shaderRoot != null) systemProperty 'kerr.shaderRoot', shaderRoot
 }
 
 tasks.register('whiteHoleGpuProbe', JavaExec) {

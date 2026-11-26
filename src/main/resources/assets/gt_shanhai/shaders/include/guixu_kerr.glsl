@@ -25,6 +25,35 @@ uniform float uWhiteParticleGain;
 uniform float uWhiteObserverBeta;
 uniform float uWhitePrimary; // attached host resolves direct emission in the world compositor
 
+// Inner and outer extent of the contour strip in screen pixels.
+uniform vec2 uCriticalArc;
+
+vec2 criticalExtent(float span) {
+    return max(vec2(.5 * span), uCriticalArc);
+}
+
+vec2 criticalParam(vec2 offset) {
+    if (uCriticalArc.y <= 0.0) return sqrt(offset);
+    // Keep subpixel samples at the shadow. Give the first arcs uniform
+    // radial spacing, then spread samples over the broader outer emission.
+    return sqrt(min(offset, vec2(4.0))) + .25 * clamp(offset - 4.0, 0.0, 24.0)
+         + 2.0 * (sqrt(1.0 + .25 * max(vec2(0.0), offset - 28.0)) - 1.0);
+}
+
+float criticalOffset(float row, float span) {
+    vec2 extent = criticalParam(criticalExtent(span));
+    float radial = row * (extent.x + extent.y) - extent.x;
+    float magnitude = abs(radial);
+    if (uCriticalArc.y <= 0.0 || magnitude <= 2.0) return radial * magnitude;
+    float tail = max(0.0, magnitude - 8.0);
+    return sign(radial) * (4.0 * magnitude - 4.0 + tail * tail);
+}
+
+float criticalRow(float offset, vec2 extent) {
+    float radial = criticalParam(vec2(abs(offset), 0.0)).x;
+    return (sign(offset) * radial + extent.x) / (extent.x + extent.y);
+}
+
 #define SPIN uKerrParameters.x
 #define HORIZON uKerrParameters.y
 #define ISCO uKerrParameters.z
@@ -579,7 +608,7 @@ void transferWhite(State start, State end, State first, State last, float pt, fl
     }
 }
 
-vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool critical, out vec4 light) {
+vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, float toleranceCap, out vec4 light) {
     Metric m = metric(position);
     float pt;
     State y = observerRay(position, direction, velocity, m, pt);
@@ -623,8 +652,7 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool
     float stepSize = 0.20 * m.r;
     // Close observers magnify errors in the location of the first few disk
     // samples. Match step control continuously to that observing distance.
-    float tolerance = mix(min(uIntegration.x, .000002), uIntegration.x, smoothstep(6.0, 16.0, m.r));
-    if (critical) tolerance = min(tolerance, .000006);
+    float tolerance = min(toleranceCap, mix(min(uIntegration.x, .000002), uIntegration.x, smoothstep(6.0, 16.0, m.r)));
     int budget = int(uIntegration.y);
     for (int i = 0; i < 768; ++i) {
         if (m.r <= captureRadius) return vec4(0.0, 0.0, 0.0, 2.0);
@@ -661,7 +689,7 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool
                 transferDisk(y, next, k1, k4, pt, stepSize, light);
             } else if (!secondary) {
                 transferWhite(y, next, k1, k4, pt, stepSize, emission, light);
-            } else if (uWhiteHole.z > 0.0 && min(m.r, nextMetric.r) < 10.0) {
+            } else if (uWhiteHole.z > 0.0 && emission.style.x > 0.0 && min(m.r, nextMetric.r) < 10.0) {
                 // Only the inner disk image after a substantial turn belongs
                 // to the bent pass. It cannot draw a second projected spine.
                 sweep += atan(length(cross(y.x, next.x)), dot(y.x, next.x));
@@ -744,14 +772,18 @@ float capturedAt(vec2 px) {
     return float(shadowMargin(px) < 0.0);
 }
 
-vec4 tracePixel(vec2 px, bool transferOnly, bool critical, out vec4 light) {
+vec4 tracePixel(vec2 px, bool transferOnly, float toleranceCap, out vec4 light) {
     mat3 basis;
     vec3 observer, direction;
     cameraRay(px, basis, observer, direction);
     vec3 velocity = transpose(basis) * vec3(0.0, 0.0, -uWhiteObserverBeta);
-    vec4 ray = trace(observer, direction, velocity, transferOnly, critical, light);
+    vec4 ray = trace(observer, direction, velocity, transferOnly, toleranceCap, light);
     ray.xyz = basis * ray.xyz;
     return ray;
+}
+
+vec4 tracePixel(vec2 px, bool transferOnly, bool critical, out vec4 light) {
+    return tracePixel(px, transferOnly, critical ? .000006 : uIntegration.x, light);
 }
 
 vec4 tracePixel(vec2 px, bool transferOnly, out vec4 light) {

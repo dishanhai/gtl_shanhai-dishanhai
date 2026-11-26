@@ -53,10 +53,16 @@ vec4 drawKerrExterior(vec2 px) {
     float turn = angle - ROTATION * drift;
     float warp = sin(2.0 * turn + 2.5 * r) * .40
                + sin(3.0 * turn - 1.8 * r) * .19;
-    float phase = 32.0 * log(max(r, .7)) + 2.0 * warp + 3.0 * turn;
-    float detail = 1.0 - smoothstep(.85, 2.7, radialPixel * 32.0 / max(r, .7));
-    float filament = .54 + detail * (.22 * cos(phase)
-                   + .25 * smoothstep(.40, .84, cos(1.0 + 2.0 * phase)));
+    float radialPhase = 32.0 * log(max(r, .7)) + 2.0 * warp;
+    float phase = radialPhase + 3.0 * turn;
+    vec2 turnStep = vec2(dFdx(angle), dFdy(angle));
+    turnStep = mod(turnStep + 3.14159265, 6.28318530) - 3.14159265;
+    vec2 phaseStep = vec2(dFdx(radialPhase), dFdy(radialPhase)) + 3.0 * turnStep;
+    float phasePixel = dot(abs(phaseStep), vec2(1.0));
+    float detail = 1.0 - smoothstep(.75, 3.14, phasePixel);
+    float narrowDetail = 1.0 - smoothstep(.35, 1.22, phasePixel);
+    float filament = .54 + .22 * detail * cos(phase)
+                   + .25 * mix(.28, smoothstep(.40, .84, cos(1.0 + 2.0 * phase)), narrowDetail);
     float inner = clamp((ISCO + 1.35) / 5.1961524, .90, 1.37);
     float diskMask = clamp(.5 + (r - inner) / radialPixel, 0.0, 1.0)
                    * (1.0 - smoothstep(2.45, 3.43, r));
@@ -88,11 +94,11 @@ vec4 drawKerrExterior(vec2 px) {
     float width = mix(.20, mix(.47, 1.24, upper), smoothstep(.04, .98, opening))
                 + 1.02 * fold * smoothstep(.65, .99, inclination);
     float arcCoordinate = arcDistance / width;
-    float arcFootprint = max(fwidth(arcCoordinate), .0001);
     float flow = sin(5.5 * lensed.x + 1.7 * latitude - ROTATION * drift)
                * sin(3.2 * lensed.x - 4.0 * latitude + ROTATION * drift);
     float arcEnvelope = smoothstep(.025, .15, arcCoordinate) * (1.0 - smoothstep(.49, .69, arcCoordinate));
     float arcLane = arcCoordinate + flow * .019;
+    float arcFootprint = max(fwidth(arcLane), .0001);
     float arc = (.32 + .12 * flow) * arcEnvelope
               + .66 * exteriorBand(arcLane - .155, .052, arcFootprint)
               + .52 * exteriorBand(arcLane - .155, .023, arcFootprint)
@@ -101,7 +107,7 @@ vec4 drawKerrExterior(vec2 px) {
               + .38 * exteriorBand(arcLane - .427, .018, arcFootprint)
               + .21 * exteriorBand(arcLane - .504, .013, arcFootprint);
     float ring = exteriorBand(rimPx - max(.78, .016 * radialScale),
-                max(.37, .008 * radialScale), max(1.0, fwidth(rimPx)));
+                max(.37, .008 * radialScale), max(1.0, (abs(slope.x) + abs(slope.y)) / max(grad, 1e-8)));
     float orbitalSide = clamp(1.0 + .55 * ROTATION * inclination * p.x / max(b, .01), .45, 1.55);
     vec3 arcTint = mix(amber, ivory, clamp(temperature - .26 * arcCoordinate + .27 * (orbitalSide - 1.0), 0.0, 1.0));
     float power = min(9.0, 6.0 * uDiskGain * uDiskPhysics.w * sqrt(uDiskPhysics.x) * (1.0 + .27 * uDiskHeat));
@@ -122,7 +128,8 @@ vec4 drawKerrExterior(vec2 px) {
     vec3 outgoing = basis * normalize(direction - impact * warpAngle / max(b, .01));
     vec3 viewing = basis * direction;
     float skyCoverage;
-    vec3 incoming = background(px, viewing, vec4(outgoing, 1.0), traceCoverage(px), false, skyCoverage);
+    float edge = traceCoverage(px);
+    vec3 incoming = background(px, viewing, vec4(outgoing, 1.0), edge, edge, true, false, 1.0, skyCoverage);
     vec3 source = toneMap(uDisplay.x * emission);
     vec3 scene = displayEncode(clamp(incoming * through + source, 0.0, 1.0));
     float field = 1.0 - smoothstep(3.5, 4.0, b);

@@ -47,7 +47,7 @@
             "name": "DiskDetail"
         },
         {
-            "name": "DiskDetailExit"
+            "name": "LocalRayExit"
         },
         {"name": "DiskDetailBloom"},
         {"name": "WhiteDirectLight"},
@@ -72,18 +72,23 @@
         {"name": "uWhiteParticleGain", "type": "float", "count": 1, "values": [0]},
         {"name": "uRayBloomLod", "type": "float", "count": 2, "values": [0, 0]},
         {"name": "uCriticalBounds", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uCriticalArc", "type": "float", "count": 2, "values": [0, 0]},
         {"name": "uDiskDetailRect", "type": "float", "count": 4, "values": [0, 0, 1, 0]},
         {"name": "uDiskBloomLod", "type": "float", "count": 2, "values": [0, 0]},
         {"name": "uExterior", "type": "float", "count": 3, "values": [0, 0, 0]},
         {"name": "uWhiteDebug", "type": "float", "count": 1, "values": [0]},
         {"name": "uWhitePrimary", "type": "float", "count": 1, "values": [0]},
         {"name": "uWhiteSceneDepth", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhiteHostSky", "type": "float", "count": 1, "values": [0]},
         {"name": "uWhiteObserverBeta", "type": "float", "count": 1, "values": [0]},
         {"name": "uRefine", "type": "float", "count": 1, "values": [0]},
         {"name": "uCaptureDepthOnly", "type": "float", "count": 1, "values": [0]},
+        {"name": "uKerrDepth", "type": "float", "count": 1, "values": [0]},
         {"name": "uTransferPass", "type": "float", "count": 1, "values": [0]},
         {"name": "uResolveSize", "type": "float", "count": 2, "values": [1, 1]},
         {"name": "uWhiteCacheRect", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteCacheReduced", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhiteOpticalLayer", "type": "float", "count": 1, "values": [0]},
         {"name": "uProjMat", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
         {"name": "uDiskNormal", "type": "float", "count": 3, "values": [0, 0.31, -0.95]},
         {"name": "uScreenSize", "type": "float", "count": 2, "values": [1920, 1080]},

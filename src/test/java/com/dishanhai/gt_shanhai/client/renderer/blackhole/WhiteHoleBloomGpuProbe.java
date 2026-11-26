@@ -13,7 +13,7 @@ import static org.lwjgl.opengl.GL41C.*;
 
 /** Exercises the bloom pyramid and shared rendering state in an isolated OpenGL context. */
 public final class WhiteHoleBloomGpuProbe {
-    private static final Path SHADERS = Path.of("src/main/resources/assets/gt_shanhai/shaders/post");
+    private static final Path SHADERS = Path.of("src/main/resources/assets/gt_shanhai/shaders/whitehole");
     private static final int W = 57, H = 43;
 
     private WhiteHoleBloomGpuProbe() {}

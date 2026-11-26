@@ -15,7 +15,8 @@ class KerrControlsTest {
             KerrControls.setQuality(Quality.LOW);
             KerrControls.setBackground(Background.DARK);
             assertEquals(Quality.ADAPTIVE, KerrControls.WHITE.requestedQuality());
-            assertEquals(Background.WORLD, KerrControls.WHITE.requestedBackground());
+            assertEquals(Background.WORLD, KerrControls.WHITE.requestedBackground(false));
+            assertEquals(Background.STARS, KerrControls.WHITE.requestedBackground(true));
             assertEquals(EXPOSURE.initial, KerrControls.WHITE.requested(EXPOSURE));
             KerrControls.WHITE.set(EXPOSURE, 2.2);
             KerrControls.WHITE.setQuality(Quality.HIGH);
@@ -29,6 +30,42 @@ class KerrControlsTest {
             KerrControls.WHITE.reset();
         }
     }
+
+    @Test
+    void formedHostAndMovieShareTheCinematicBackgroundAndCompositor() {
+        var host = new BlackHoleLensRenderer.Frame();
+        host.mode = BlackHoleTuning.RenderMode.WHITE_HOLE;
+        host.white = WhiteHoleRenderState.Frame.NONE;
+        var movie = new BlackHoleLensRenderer.Frame();
+        movie.mode = host.mode;
+        movie.white = host.white;
+        movie.whitePreview = true;
+        movie.whiteDemo = true;
+        assertTrue(host.usesWhiteWorldPrimary());
+        assertTrue(movie.usesWhiteWorldPrimary());
+
+        try {
+            long start = System.nanoTime();
+            var optics = KerrControls.WHITE;
+            var hostSky = optics.sample(start, 0, 25, 2, host.usesCinematicWhite(), .72);
+            var movieSky = optics.sample(start + 20_000_000, 0, 25, 2, movie.usesCinematicWhite(), .72);
+            assertEquals(1f, hostSky.starsSky());
+            assertEquals(hostSky.starsSky(), movieSky.starsSky());
+            assertEquals(.72, hostSky.geometry().spin());
+            assertEquals(hostSky.geometry().spin(), movieSky.geometry().spin());
+            optics.setBackground(Background.DARK);
+            optics.set(SPIN, .25);
+            hostSky = optics.sample(start + 2_000_000_000, 0, 25, 2, host.usesCinematicWhite(), .72);
+            movieSky = optics.sample(start + 2_020_000_000, 0, 25, 2, movie.usesCinematicWhite(), .72);
+            assertEquals(1f, hostSky.darkSky());
+            assertEquals(hostSky.darkSky(), movieSky.darkSky());
+            assertEquals(.25, hostSky.geometry().spin());
+            assertEquals(hostSky.geometry().spin(), movieSky.geometry().spin());
+        } finally {
+            KerrControls.WHITE.reset();
+        }
+    }
+
     @Test
     void runtimeChangesInterpolateAndFollowResumesAtThePhysicalCamera() {
         long start = System.nanoTime();
