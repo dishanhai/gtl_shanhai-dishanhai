@@ -361,7 +361,8 @@ class GuixuStellarEndTest {
         assertTrue(host.contains("backgroundInfall ? GuixuStarField.accretionFeed("));
         assertTrue(host.contains("jets, drawBlackHole, backgroundInfall,"));
         assertTrue(stars.contains("backgroundInfall && i < GuixuStarField.PARTICLE_COUNT"));
-        assertTrue(stars.contains("if (backgroundInfall) {\n            drawAccretionTrails("));
+        assertTrue(stars.contains("if (backgroundInfall) {"));
+        assertTrue(stars.contains("drawAccretionTrails(vertices, matrix, clip, camera, facing"));
         assertTrue(stars.contains("if (blackHoleEnabled && jets >"));
     }
 
