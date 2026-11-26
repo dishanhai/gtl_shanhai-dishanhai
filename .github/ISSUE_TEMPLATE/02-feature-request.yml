@@ -1,0 +1,34 @@
+name: 功能建议 / Feature request
+description: 建议 GTSH 的新功能或体验改进。 / Suggest a feature or improvement.
+title: '[Feature] '
+labels:
+- enhancement
+body:
+- type: markdown
+  attributes:
+    value: 先[搜索已有 Issue](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)，有相同问题请补充到原帖。中文和英文都可以。 / [Search existing issues](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)
+      first; Chinese and English are both welcome.
+- type: textarea
+  id: use-case
+  attributes:
+    label: 使用场景 / Use case
+    description: 说明你在做什么、遇到什么限制。 / Describe what you are trying to do and what gets in the way.
+  validations:
+    required: true
+- type: textarea
+  id: proposal
+  attributes:
+    label: 希望的改进 / Proposed improvement
+    description: 说明改动后应如何使用、看到什么结果。 / Describe the desired behavior or workflow.
+  validations:
+    required: true
+- type: input
+  id: area
+  attributes:
+    label: 涉及模块 / Affected area
+    description: 涉及的机器、任务、配方或系统；如为存档升级问题，请写升级前后的版本。 / Name the machine, quest, recipe, or system; include both versions for an upgrade issue.
+- type: textarea
+  id: alternatives
+  attributes:
+    label: 替代方案与参考 / Alternatives and references
+    description: 可附现有绕行方案、示意图或相关 Issue。 / Include workarounds, mockups or related issues if useful.
