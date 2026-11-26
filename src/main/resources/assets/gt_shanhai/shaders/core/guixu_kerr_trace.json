@@ -4,6 +4,7 @@
     "attributes": [
         "Position"
     ],
+    "samplers": [{"name": "WhiteParticleGrid"}, {"name": "CachedRayExit"}, {"name": "CriticalRadii"}],
     "uniforms": [
         {"name": "uBhView", "type": "float", "count": 3, "values": [0, 0, -10]},
         {"name": "uDiskNormal", "type": "float", "count": 3, "values": [0, 0.31, -0.95]},
@@ -23,6 +24,14 @@
         {"name": "uOuterDisk", "type": "float", "count": 1, "values": [40]},
         {"name": "uDiskSqrtFlux", "type": "float", "count": 128, "values": [0]},
         {"name": "uDiskPhysics", "type": "float", "count": 4, "values": [1, 0.055, 9400, 0.38]},
-        {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00016, 384]}
+        {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00016, 384]},
+        {"name": "uWhiteHole", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteTime", "type": "float", "count": 4, "values": [0, -1, 0, 0]},
+        {"name": "uWhiteStyle", "type": "float", "count": 4, "values": [1, 1, 0, 1]},
+        {"name": "uWhiteExtraBursts0", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteExtraBursts1", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteParticleGain", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhiteObserverBeta", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhitePrimary", "type": "float", "count": 1, "values": [0]}
     ]
 }

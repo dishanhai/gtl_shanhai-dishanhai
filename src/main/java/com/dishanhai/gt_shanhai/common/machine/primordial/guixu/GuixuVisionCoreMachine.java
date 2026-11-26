@@ -208,6 +208,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     @Persisted
     @DescSynced
+    private boolean hostWhiteHole;
+
+    @Persisted
+    @DescSynced
     private boolean hostArMaskEnabled = true;
 
     @Persisted
@@ -538,8 +542,23 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     }
 
     public void setHostLegacyBlackHole(boolean value) {
-        if (hostLegacyBlackHole == value) return;
-        hostLegacyBlackHole = value;
+        setHostHoleStyle(value, false);
+    }
+
+    public boolean isHostWhiteHole() {
+        return hostWhiteHole;
+    }
+
+    public void cycleHostHoleStyle() {
+        if (hostWhiteHole) setHostHoleStyle(false, false);
+        else if (hostLegacyBlackHole) setHostHoleStyle(false, true);
+        else setHostHoleStyle(true, false);
+    }
+
+    private void setHostHoleStyle(boolean legacy, boolean whiteHole) {
+        if (hostLegacyBlackHole == legacy && hostWhiteHole == whiteHole) return;
+        hostLegacyBlackHole = legacy;
+        hostWhiteHole = whiteHole;
         markDirty();
         pushHostFxSync();
     }
@@ -1758,7 +1777,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 "containmentCollapseTick",
                 "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
-                "hostLegacyBlackHole", "hostOuterStarsEnabled", "hostNebulaEnabled",
+                "hostLegacyBlackHole", "hostWhiteHole", "hostOuterStarsEnabled", "hostNebulaEnabled",
                 "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostArStatus", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
                 "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",

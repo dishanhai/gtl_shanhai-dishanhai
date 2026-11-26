@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.client.renderer.blackhole;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.config.KerrRenderConfig.Quality;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -24,15 +25,21 @@ import static org.lwjgl.opengl.GL33C.*;
 final class KerrRenderPass implements AutoCloseable {
     private static final float[] JITTER_X = {-.25f, .25f, -.375f, .375f};
     private static final float[] JITTER_Y = {.166667f, -.388889f, -.055556f, .277778f};
+    static final int WHITE_BLOOM_SOURCE_PASS = 3;
     private final Target[] targets = {new Target(false, GL_RGBA32F), new Target(false, GL_RGBA32F)};
     private final Target transfer = new Target();
+    private final Target whiteBloomSource = new Target();
+    private final Target whiteDirect = new Target(false, GL_R32F);
     private final Target diskDetail = new Target(false, GL_RGBA32F);
-    private final CompactHdrPostProcessing hdr = new CompactHdrPostProcessing();
     private final CompactHdrPostProcessing diskHighlights = new CompactHdrPostProcessing();
     private final KerrThinDisk disk = new KerrThinDisk();
     private final Target criticalRadii = new Target(true, GL_RGBA16F, GL_RGBA32F);
     private final Target criticalLight = new Target(true);
+    private final WhiteHoleParticleGrid particles = new WhiteHoleParticleGrid();
+    private final CompactHdrPostProcessing hdr = new CompactHdrPostProcessing();
     private ShaderInstance shader;
+    private ShaderInstance whiteCacheShader;
+    private int directLightAttachment, directDepthAttachment;
     private int sample, jitterPhase;
     private int attachmentLight, attachmentExit;
     private int timer;
@@ -41,13 +48,19 @@ final class KerrRenderPass implements AutoCloseable {
     private double cpuMilliseconds;
     private double adaptiveScale = Quality.ADAPTIVE.scale;
     private int width, height, completedPasses;
+    private boolean particleAtlasActive;
     private float exteriorWeight;
     private int adaptiveRecoverySamples;
+    private long lastExposureTimestamp;
     private KerrSampling sampling;
     private History history;
+    private long whiteRefreshStamp;
+    private int whiteReuseFrames, whiteCacheHits;
+    private boolean whiteDirectReady;
+    private boolean whiteCacheUnavailable;
 
     void draw(RenderTarget main, BlackHoleLensRenderer.ExteriorShader composite, BlackHoleLensRenderer.Frame frame,
-              Matrix4f inverseProjection, float[] axis, float[] equatorialX, float diskGain) {
+              Matrix4f inverseProjection, float[] axis, float[] equatorialX, float diskGain, int worldDepthTexture) {
         KerrControls.Frame settings = frame.kerr;
         Quality quality = settings.quality();
         long start = System.nanoTime();
@@ -58,12 +71,16 @@ final class KerrRenderPass implements AutoCloseable {
         bindOptics(composite, frame, inverseProjection, axis, equatorialX, diskGain, steps, tolerance);
         composite.safeGetUniform("uExterior").set(exteriorWeight, (float) frame.holeScreen[0], (float) frame.holeScreen[1]);
         composite.safeGetUniform("uTraceRect").set(rectX, rectY, rectWidth, rectHeight);
-        composite.safeGetUniform("uSkyMix").set(settings.worldSky(), settings.starsSky(), settings.darkSky());
+        composite.safeGetUniform("uWhiteDebug").set((float) frame.white.debugMode());
+        if (frame.whiteDemo) composite.safeGetUniform("uSkyMix").set(0f, 1f, 0f);
+        else composite.safeGetUniform("uSkyMix").set(settings.worldSky(), settings.starsSky(), settings.darkSky());
         if (exteriorWeight >= 1f) {
             // The analytic image is drawn directly into the production framebuffer.
             main.bindWrite(false);
             composite.safeGetUniform("uDisplay").set(settings.f(EXPOSURE), settings.f(BLOOM));
             invalidateHistory();
+            lastExposureTimestamp = 0;
+            particleAtlasActive = false;
             cpuMilliseconds = (System.nanoTime() - start) * 1e-6;
             completedPasses++;
             return;
@@ -75,13 +92,27 @@ final class KerrRenderPass implements AutoCloseable {
         Target target = targets[sample % targets.length];
         Target previous = targets[(sample + 1) % targets.length];
         var geometry = frame.geometry;
+        boolean worldPrimary = frame.usesWhiteWorldPrimary();
+        int directX = (int) Math.floor(frame.rectX0), directY = (int) Math.floor(frame.rectY0);
+        int directW = (int) Math.ceil(frame.rectX0 + frame.rectW) - directX;
+        int directH = (int) Math.ceil(frame.rectY0 + frame.rectH) - directY;
+        boolean cacheDirect = worldPrimary && 2 * frame.dist / frame.rsBlocks <= 70
+                && (long) directW * directH <= KerrSampling.WHITE_DIRECT_CACHE_PIXELS;
+        if (cacheDirect && whiteCacheShader == null && !whiteCacheUnavailable) loadWhiteCacheShader();
+        cacheDirect &= whiteCacheShader != null;
+        boolean stableWhite = worldPrimary && history != null && history.matchesWhiteHost(frame, axis, equatorialX, steps, tolerance);
+        boolean reuseWhite = stableWhite && previous.width == width && previous.height == height
+                && (!cacheDirect || whiteDirectReady)
+                && KerrSampling.whiteHostCanReuse(frame.stampNanos - whiteRefreshStamp, whiteReuseFrames);
+        if (reuseWhite) target = previous;
         boolean reuseExit = (quality == Quality.ADAPTIVE || quality == Quality.LOW)
                 && history != null && previous.width == width && previous.height == height
                 && history.matchesTraceGrid(frame, axis, equatorialX, steps, tolerance);
         // A cached frame uses the same rays as its source. Advance the pilot
         // phase only after a full trace so all jitter positions remain in rotation.
         int phase = reuseExit ? history.phase : jitterPhase;
-        float jitter = (float) KerrSampling.blackHoleJitter(sampling.transferScale(), 2 * frame.dist / frame.rsBlocks);
+        float jitter = worldPrimary ? 0 : frame.white.mix() == 0
+                ? (float) KerrSampling.blackHoleJitter(sampling.transferScale(), 2 * frame.dist / frame.rsBlocks) : 1;
         float jitterX = jitter * JITTER_X[phase], jitterY = jitter * JITTER_Y[phase];
         // Cached directions must be sampled at the phase that produced them.
         if (reuseExit) {
@@ -89,34 +120,91 @@ final class KerrRenderPass implements AutoCloseable {
             jitterY = history.jitterY * height;
         }
 
-        float exposure = settings.f(EXPOSURE);
+        double exposureDelta = lastExposureTimestamp != 0 ? (frame.stampNanos - lastExposureTimestamp) * 1e-9 : 0;
+        lastExposureTimestamp = frame.stampNanos;
+        boolean autoExposure = frame.white.mix() > 0 && frame.white.automaticExposure();
+        float exposure;
         int textureUnit = glGetInteger(GL_ACTIVE_TEXTURE);
         try {
+            int budget = switch (quality) {
+                case COMPATIBILITY -> 0;
+                case LOW -> 4096;
+                case MEDIUM -> 8192;
+                case HIGH -> 16384;
+                case ULTRA, CINEMATIC, SCIENTIFIC -> WhiteHoleParticleGrid.MAX_PARTICLES;
+                case ADAPTIVE -> adaptiveScale < .24 ? 4096 : adaptiveScale < .44 ? 8192 : 16384;
+            };
+            if (autoExposure && (history == null || !Arrays.equals(history.center, frame.center) || exposureDelta > 1)) {
+                hdr.adaptExposure(settings.f(EXPOSURE), 0, false);
+            }
+            exposure = hdr.adaptExposure(settings.f(EXPOSURE), Math.clamp(exposureDelta, 0, .25), autoExposure);
             RenderSystem.activeTexture(GL_TEXTURE0);
             RenderSystem.disableDepthTest();
             RenderSystem.depthMask(false);
             RenderSystem.disableCull();
             RenderSystem.disableBlend();
             composite.safeGetUniform("uRefine").set((float) sampling.subpixels());
-            target.bind(width, height, attachmentLight, attachmentExit);
-            RenderSystem.viewport(0, 0, width, height);
-            bindOptics(shader, frame, inverseProjection, axis, equatorialX, diskGain, steps, tolerance);
-            shader.safeGetUniform("uTraceRect").set(rectX, rectY, rectWidth, rectHeight);
-            shader.safeGetUniform("uTraceSize").set((float) width, (float) height);
-            shader.safeGetUniform("uRayJitter").set(jitterX, jitterY);
-            shader.safeGetUniform("uReuseRayExit").set(reuseExit ? 1f : 0f);
-            shader.setSampler("CachedRayExit", reuseExit ? previous.exit : null);
-            shader.safeGetUniform("uCriticalBounds").set(0f, 0f, 0f, 0f);
-            shader.setSampler("CriticalRadii", null);
-            drawTriangle(shader);
-            drawCriticalStrip(composite, frame, diskGain);
+            if (!reuseWhite) {
+                int particleAtlas = frame.white.mix() > 0
+                        ? particles.update(frame.white.time(), frame.white.particleSeed(), frame.white.beta(),
+                                frame.white.jets(), (float) geometry.outerHorizon(), budget)
+                        : 0;
+                particleAtlasActive = particleAtlas != 0;
+                target.bind(width, height, attachmentLight, attachmentExit);
+                RenderSystem.viewport(0, 0, width, height);
+                bindOptics(shader, frame, inverseProjection, axis, equatorialX, diskGain, steps, tolerance);
+                for (int stage = 0; stage < 2; stage++) {
+                    ShaderInstance program = stage == 0 ? shader : composite;
+                    program.setSampler("WhiteParticleGrid", particleAtlasActive ? particleAtlas : null);
+                    program.safeGetUniform("uWhiteParticleGain").set(particleAtlasActive ? .55f : 0f);
+                }
+                shader.safeGetUniform("uTraceRect").set(rectX, rectY, rectWidth, rectHeight);
+                shader.safeGetUniform("uTraceSize").set((float) width, (float) height);
+                shader.safeGetUniform("uRayJitter").set(jitterX, jitterY);
+                shader.safeGetUniform("uReuseRayExit").set(reuseExit ? 1f : 0f);
+                shader.setSampler("CachedRayExit", reuseExit ? previous.exit : null);
+                shader.safeGetUniform("uCriticalBounds").set(0f, 0f, 0f, 0f);
+                shader.setSampler("CriticalRadii", null);
+                drawTriangle(shader);
+                drawCriticalStrip(composite, frame, diskGain);
+                whiteDirectReady = cacheDirect && stableWhite;
+                if (whiteDirectReady) {
+                    bindOptics(whiteCacheShader, frame, inverseProjection, axis, equatorialX, diskGain, steps, tolerance);
+                    whiteCacheShader.setSampler("WhiteParticleGrid", particleAtlasActive ? particleAtlas : null);
+                    whiteCacheShader.safeGetUniform("uWhiteParticleGain").set(particleAtlasActive ? .55f : 0f);
+                    drawWhiteDirect(frame, worldDepthTexture, directX, directY, directW, directH);
+                }
+            }
+            composite.setSampler("WhiteDirectLight", whiteDirectReady ? whiteDirect.light : null);
+            composite.setSampler("WhiteDirectDepth", whiteDirectReady ? whiteDirect.exit : null);
+            composite.safeGetUniform("uWhiteCacheRect").set((float) directX, (float) directY,
+                    whiteDirectReady ? (float) directW : 0f, whiteDirectReady ? (float) directH : 0f);
             composite.setSampler("RayLight", target.light);
             composite.safeGetUniform("uRayJitter").set(jitterX / width, jitterY / height);
-            int bloom = settings.f(BLOOM) > 0 ? hdr.draw(target.light, width, height, exposure) : 0;
-            float bias = bloom != 0 ? KerrSampling.bloomLodBias(width, height, rectWidth, rectHeight, frame.screenH) : 0;
-            composite.setSampler("RayBloom", bloom != 0 ? bloom : null);
-            composite.safeGetUniform("uRayBloomLod").set(bloom != 0 ? (float) hdr.lastLevel() : 0, bias);
-            var detail = (quality == Quality.ADAPTIVE || quality == Quality.LOW)
+            int bloomSource = target.light;
+            if (worldPrimary && frame.white.debugMode() == 0 && settings.f(BLOOM) > 0) {
+                whiteBloomSource.bind(width, height, 0, -1);
+                RenderSystem.viewport(0, 0, width, height);
+                composite.setSampler("RayBloom", target.light);
+                composite.safeGetUniform("uResolveSize").set((float) width, (float) height);
+                composite.setTransferPass(WHITE_BLOOM_SOURCE_PASS);
+                try {
+                    drawTriangle(composite);
+                } finally {
+                    composite.setTransferPass(0);
+                }
+                bloomSource = whiteBloomSource.light;
+            }
+            int bloom = (settings.f(BLOOM) > 0 || autoExposure)
+                    ? hdr.draw(target.light, bloomSource, width, height, exposure)
+                    : 0;
+            float bloomBias = bloom != 0
+                    ? KerrSampling.bloomLodBias(width, height, rectWidth, rectHeight, frame.screenH) : 0;
+            boolean rawHostBloom = bloom == 0 && bloomSource != target.light;
+            composite.setSampler("RayBloom", bloom != 0 ? bloom : rawHostBloom ? bloomSource : null);
+            composite.safeGetUniform("uRayBloomLod").set(bloom != 0 ? (float) hdr.lastLevel() : rawHostBloom ? -1f : 0f,
+                    bloomBias);
+            var detail = (quality == Quality.ADAPTIVE || quality == Quality.LOW) && frame.white.mix() == 0
                     && (settings.starsSky() > 0 || settings.worldSky() > 0
                         || diskGain > 0 && settings.f(ACCRETION) > 0 && settings.f(EMISSIVITY) * settings.diskFade() > 0)
                     && frame.forwardDist > 0
@@ -153,7 +241,7 @@ final class KerrRenderPass implements AutoCloseable {
         composite.setSampler("RayExit", target.exit);
         composite.setSampler("PixelTransfer", target.light);
         composite.safeGetUniform("uDisplay").set(exposure, settings.f(BLOOM));
-        boolean useHistory = jitter > 0
+        boolean useHistory = !worldPrimary && (frame.white.mix() != 0 || jitter > 0)
                 && history != null && !reuseExit && history.canReproject(frame, axis, settings);
         composite.setSampler("PreviousLight", useHistory ? previous.light : target.light);
         composite.setSampler("PreviousExit", useHistory ? previous.exit : target.exit);
@@ -167,12 +255,47 @@ final class KerrRenderPass implements AutoCloseable {
             composite.safeGetUniform("uPreviousRect").set(history.x, history.y, history.w, history.h);
             composite.safeGetUniform("uPreviousJitter").set(history.jitterX, history.jitterY);
         }
-        history = new History(frame.center, frame.camPos, frame.view, frame.proj, axis, frame.screenW, frame.screenH,
-                frame.rsBlocks, settings, geometry.spin(), rectX, rectY, rectWidth, rectHeight, jitterX / width,
-                jitterY / height, frame.bhView, equatorialX, steps, tolerance, phase, reuseExit);
-        sample = (sample + 1) % targets.length;
-        if (!reuseExit) jitterPhase = (jitterPhase + 1) % JITTER_X.length;
+        if (reuseWhite) {
+            whiteReuseFrames++;
+            whiteCacheHits++;
+        } else {
+            history = new History(frame.center, frame.camPos, frame.view, frame.proj, axis, frame.screenW, frame.screenH,
+                    frame.rsBlocks, settings, frame.white, geometry.spin(), rectX, rectY, rectWidth, rectHeight, jitterX / width,
+                    jitterY / height, frame.bhView, equatorialX, steps, tolerance, phase, reuseExit, worldPrimary);
+            sample = (sample + 1) % targets.length;
+            if (!reuseExit) jitterPhase = (jitterPhase + 1) % JITTER_X.length;
+            whiteRefreshStamp = frame.stampNanos;
+            whiteReuseFrames = 0;
+        }
         completedPasses++;
+    }
+
+    private void drawWhiteDirect(BlackHoleLensRenderer.Frame frame, int worldDepthTexture, int x, int y, int w, int h) {
+        whiteDirect.bind(w, h, directLightAttachment, directDepthAttachment);
+        RenderSystem.viewport(0, 0, w, h);
+        whiteCacheShader.setSampler("SceneDepth", worldDepthTexture != 0 ? worldDepthTexture : null);
+        whiteCacheShader.safeGetUniform("uWhiteSceneDepth").set(worldDepthTexture != 0 ? 1f : 0f);
+        whiteCacheShader.safeGetUniform("uBgRect").set((float) frame.copyX0, (float) frame.copyY0,
+                (float) frame.copyW, (float) frame.copyH);
+        whiteCacheShader.safeGetUniform("uCacheOrigin").set((float) x, (float) y);
+        drawTriangle(whiteCacheShader);
+    }
+
+    private void loadWhiteCacheShader() {
+        try {
+            ShaderInstance candidate = new ShaderInstance(Minecraft.getInstance().getResourceManager(),
+                    new ResourceLocation("gt_shanhai", "guixu_white_cache"), DefaultVertexFormat.POSITION);
+            directLightAttachment = glGetFragDataLocation(candidate.getId(), "directLight");
+            directDepthAttachment = glGetFragDataLocation(candidate.getId(), "directDepth");
+            if (directLightAttachment < 0 || directDepthAttachment < 0 || directLightAttachment == directDepthAttachment) {
+                candidate.close();
+                throw new IOException("Missing white cache framebuffer outputs");
+            }
+            whiteCacheShader = candidate;
+        } catch (IOException failure) {
+            whiteCacheUnavailable = true;
+            GTDishanhaiMod.LOGGER.warn("White-hole direct cache shader unavailable", failure);
+        }
     }
 
     private void bindOptics(ShaderInstance program, BlackHoleLensRenderer.Frame frame,
@@ -182,7 +305,8 @@ final class KerrRenderPass implements AutoCloseable {
         var geometry = frame.geometry;
         int direction = settings.reverse() ? -1 : 1;
         double clockBlock = Math.floor(settings.clock() / 64);
-        float temperature = settings.f(TEMPERATURE);
+        float temperature = Math.fma(frame.white.mix(), frame.white.temperature() - settings.f(TEMPERATURE),
+                settings.f(TEMPERATURE));
         program.safeGetUniform("uInvProj").set(inverseProjection);
         program.safeGetUniform("uBhView").set(frame.bhView);
         program.safeGetUniform("uDiskNormal").set(axis);
@@ -197,21 +321,26 @@ final class KerrRenderPass implements AutoCloseable {
         program.safeGetUniform("uDiskPhysics").set(settings.f(ACCRETION), settings.f(THICKNESS),
                 temperature, settings.f(EMISSIVITY) * settings.diskFade());
         program.safeGetUniform("uOuterDisk").set(settings.f(OUTER_RADIUS));
-        if (exteriorWeight == 0) {
+        if (frame.white.mix() == 0 && exteriorWeight == 0) {
             program.safeGetUniform("uDiskSqrtFlux").set(disk.profile(geometry, direction, settings.value(OUTER_RADIUS)));
         }
         program.safeGetUniform("uIntegration").set(tolerance, (float) steps);
+        frame.white.bind(program);
+        program.safeGetUniform("uWhitePrimary").set(frame.usesWhiteWorldPrimary() ? 1f : 0f);
     }
 
     private void drawCriticalStrip(ShaderInstance composite, BlackHoleLensRenderer.Frame frame, float diskGain) {
         float x = (float) frame.holeScreen[0], y = (float) frame.holeScreen[1];
         float radius = (float) frame.screenR;
         double observerDistance = 2 * frame.dist / frame.rsBlocks;
-        boolean cached = sampling.transferScale() > 0;
-        float span = KerrSampling.blackHoleCriticalStripSpan(sampling.transferScale(), observerDistance);
-        int stripWidth = KerrSampling.blackHoleCriticalStripWidth(radius, frame.screenH, observerDistance, cached);
-        boolean diskActive = diskGain > 0 && frame.kerr.f(ACCRETION) > 0
-                && frame.kerr.f(EMISSIVITY) * frame.kerr.diskFade() > 0;
+        boolean whiteWorld = frame.usesWhiteWorldPrimary();
+        boolean cached = !whiteWorld && sampling.transferScale() > 0;
+        float span = whiteWorld ? 12f : KerrSampling.blackHoleCriticalStripSpan(sampling.transferScale(), observerDistance);
+        int stripWidth = whiteWorld ? KerrSampling.criticalStripWidth(radius, frame.screenH, observerDistance)
+                : KerrSampling.blackHoleCriticalStripWidth(radius, frame.screenH, observerDistance, cached);
+        boolean diskActive = whiteWorld ? frame.white.gain() > 0 && frame.white.diskDensity() > 0
+                : frame.white.mix() == 0 && diskGain > 0 && frame.kerr.f(ACCRETION) > 0
+                  && frame.kerr.f(EMISSIVITY) * frame.kerr.diskFade() > 0;
         boolean enabled = span > 0 && diskActive
                 && stripWidth > 0 && Float.isFinite(x) && Float.isFinite(y)
                 && shader.getUniform("uCriticalBounds") != null && composite.getUniform("uCriticalBounds") != null;
@@ -251,7 +380,7 @@ final class KerrRenderPass implements AutoCloseable {
     void resolveFootprints(RenderTarget main, BlackHoleLensRenderer.ExteriorShader composite,
                            BlackHoleLensRenderer.Frame frame) {
         composite.setTransferPass(0);
-        if (exteriorWeight >= 1f) return;
+        if (exteriorWeight >= 1f || frame.usesWhiteWorldPrimary()) return;
         double scale = sampling.transferScale();
         if (scale == 0) return;
         int w = stableExtent((int) Math.ceil(scale * frame.rectW), transfer.width);
@@ -297,18 +426,19 @@ final class KerrRenderPass implements AutoCloseable {
     void beginFrame(BlackHoleLensRenderer.Frame frame) throws IOException {
         KerrControls.Frame settings = frame.kerr;
         double distance = 2 * frame.dist / frame.rsBlocks;
-        exteriorWeight = KerrSampling.exteriorWeight(settings.quality());
+        exteriorWeight = frame.whiteDemo ? 0f : KerrSampling.exteriorWeight(settings.quality(), frame.white.mix());
         if (exteriorWeight < 1f && shader == null) loadShader();
         if (timer == 0 && (GL.getCapabilities().OpenGL33 || GL.getCapabilities().GL_ARB_timer_query)) timer = glGenQueries();
         boolean adaptive = settings.quality() == Quality.ADAPTIVE && exteriorWeight < 1f;
         double shadowFraction = KerrSampling.shadowFraction(distance, frame.tanHalfFov);
-        double budgetMs = 5.0
+        double budgetMs = 5.0 + 2.0 * frame.white.mix()
                 - 2.0 * Math.max(KerrSampling.nearWeight(distance), shadowFraction * shadowFraction);
         updateTimer(adaptive, budgetMs);
         if (exteriorWeight < 1f) {
             double area = frame.rectW * frame.rectH;
             sampling = KerrSampling.plan(settings.quality(), settings.renderScale(), adaptiveScale,
-                    area, shadowFraction, distance, frame.screenR);
+                    area, shadowFraction, distance, frame.screenR, frame.white.mix());
+            if (frame.usesWhiteWorldPrimary()) sampling = sampling.forWhiteHost(settings.quality(), area, distance);
         }
         timing = timer != 0 && !timerPending && glGetQueryi(GL_TIME_ELAPSED, GL_CURRENT_QUERY) == 0;
         if (timing) {
@@ -346,13 +476,16 @@ final class KerrRenderPass implements AutoCloseable {
 
     String status() {
         String path = exteriorWeight >= 1f ? "L0 analytic" : String.format(Locale.ROOT, "GRRT trace=%dx%d", width, height);
-        return String.format(Locale.ROOT, "%s gpu=%s cpu=%.2fms frames=%d", path,
+        return String.format(Locale.ROOT, "%s gpu=%s cpu=%.2fms frames=%d%s%s", path,
                 gpuMilliseconds == 0 ? "pending" : String.format(Locale.ROOT, "%.2fms", gpuMilliseconds),
-                cpuMilliseconds, completedPasses);
+                cpuMilliseconds, completedPasses, particleAtlasActive ? " +particles" : "",
+                whiteCacheHits > 0 ? " whiteReuse=" + whiteCacheHits : "");
     }
 
     void invalidateHistory() {
         history = null;
+        whiteDirectReady = false;
+        whiteReuseFrames = 0;
     }
 
     void resetMode() {
@@ -360,9 +493,14 @@ final class KerrRenderPass implements AutoCloseable {
         sample = 0;
         jitterPhase = 0;
         completedPasses = 0;
+        whiteCacheHits = 0;
+        whiteDirect.close();
         gpuMilliseconds = cpuMilliseconds = 0;
         adaptiveScale = Quality.ADAPTIVE.scale;
         adaptiveRecoverySamples = 0;
+        lastExposureTimestamp = 0;
+        hdr.adaptExposure(1, 0, false);
+        particleAtlasActive = false;
         exteriorWeight = 0f;
         if (timerPending) {
             glDeleteQueries(timer);
@@ -375,15 +513,24 @@ final class KerrRenderPass implements AutoCloseable {
     public void close() {
         if (shader != null) shader.close();
         shader = null;
+        if (whiteCacheShader != null) whiteCacheShader.close();
+        whiteCacheShader = null;
+        whiteCacheUnavailable = false;
         for (Target target : targets) target.close();
         transfer.close();
+        whiteBloomSource.close();
+        whiteDirect.close();
         diskDetail.close();
         diskHighlights.close();
         criticalRadii.close();
         criticalLight.close();
+        particles.close();
         hdr.close();
+        lastExposureTimestamp = 0;
+        particleAtlasActive = false;
         width = height = 0;
         sample = jitterPhase = completedPasses = 0;
+        whiteCacheHits = 0;
         if (timer != 0) glDeleteQueries(timer);
         timer = 0;
         timerPending = false;
@@ -394,13 +541,27 @@ final class KerrRenderPass implements AutoCloseable {
     }
 
     private record History(double[] center, double[] observer, float[] view, float[] proj, float[] axis,
-                           int screenW, int screenH, double rs, KerrControls.Frame settings, double spin,
+                           int screenW, int screenH, double rs, KerrControls.Frame settings,
+                           WhiteHoleRenderState.Frame white, double spin,
                            float x, float y, float w, float h, float jitterX, float jitterY,
                            float[] lensView, float[] equatorialX, int steps, float tolerance, int phase,
-                           boolean reusedExit) {
+                           boolean reusedExit, boolean worldPrimary) {
+        boolean matchesWhiteHost(BlackHoleLensRenderer.Frame frame, float[] newAxis, float[] newEquatorialX,
+                                 int newSteps, float newTolerance) {
+            return worldPrimary && screenW == frame.screenW && screenH == frame.screenH
+                    && x == (float) frame.rectX0 && y == (float) frame.rectY0
+                    && w == (float) frame.rectW && h == (float) frame.rectH
+                    && (float) rs == (float) frame.rsBlocks && spin == frame.geometry.spin()
+                    && settings.quality() == frame.kerr.quality() && settings.reverse() == frame.kerr.reverse()
+                    && steps == newSteps && tolerance == newTolerance
+                    && Arrays.equals(center, frame.center) && Arrays.equals(lensView, frame.bhView)
+                    && Arrays.equals(proj, frame.proj) && Arrays.equals(axis, newAxis)
+                    && Arrays.equals(equatorialX, newEquatorialX) && frame.white.canReuseHostFrame(white);
+        }
+
         boolean matchesTraceGrid(BlackHoleLensRenderer.Frame frame, float[] newAxis, float[] newEquatorialX,
                                  int newSteps, float newTolerance) {
-            return !reusedExit
+            return !reusedExit && white.mix() == 0 && frame.white.mix() == 0
                     && screenW == frame.screenW && screenH == frame.screenH
                     && x == (float) frame.rectX0 && y == (float) frame.rectY0
                     && w == (float) frame.rectW && h == (float) frame.rectH
@@ -417,6 +578,7 @@ final class KerrRenderPass implements AutoCloseable {
                     && screenW == frame.screenW && screenH == frame.screenH
                     && axis[0] * newAxis[0] + axis[1] * newAxis[1] + axis[2] * newAxis[2] > 0.90
                     && settings.reverse() == current.reverse() && settings.quality() == current.quality()
+                    && frame.white.canReproject(white)
                     && Math.abs(spin - frame.geometry.spin()) < .001
                     && Math.abs(settings.clock() - current.clock()) < 3;
         }

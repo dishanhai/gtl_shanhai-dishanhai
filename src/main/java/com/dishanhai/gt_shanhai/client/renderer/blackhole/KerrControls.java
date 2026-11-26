@@ -10,7 +10,8 @@ import java.util.Locale;
 
 /** Public client API. Overrides last until reset or client restart. */
 public final class KerrControls {
-    static final Optics KERR = new Optics();
+    static final Optics KERR = new Optics(false);
+    static final Optics WHITE = new Optics(true);
 
     private KerrControls() {}
 
@@ -34,6 +35,7 @@ public final class KerrControls {
 
     /** Optical controls and smoothing state owned by a single render mode. */
     static final class Optics {
+        private final boolean white;
         private final EnumMap<Parameter, Double> overrides = new EnumMap<>(Parameter.class);
         private final double[] current = new double[Parameter.values().length];
         private Quality qualityOverride;
@@ -48,6 +50,7 @@ public final class KerrControls {
         private boolean reverseDisk;
         private double renderScale, tolerance, stepBudget;
 
+        private Optics(boolean white) { this.white = white; }
 
         synchronized void set(Parameter parameter, double value) {
             if (!Double.isFinite(value) || value < parameter.min || value > parameter.max) {
@@ -76,7 +79,8 @@ public final class KerrControls {
             if (parameter == Parameter.SPIN && BlackHoleTuning.hasHostCenter()) {
                 return BlackHoleTuning.kerrParameters().spin();
             }
-            return GuixuClientConfig.kerr(parameter);
+            if (!white) return GuixuClientConfig.kerr(parameter);
+            return parameter == Parameter.BLOOM ? .09 : parameter.initial;
         }
 
         synchronized double requested(Parameter parameter) { return target(parameter); }
@@ -162,15 +166,15 @@ public final class KerrControls {
         }
 
         synchronized Quality requestedQuality() {
-            return qualityOverride != null ? qualityOverride : GuixuClientConfig.kerrQuality();
+            return qualityOverride != null ? qualityOverride : white ? Quality.ADAPTIVE : GuixuClientConfig.kerrQuality();
         }
 
         synchronized Background requestedBackground() {
-            return backgroundOverride != null ? backgroundOverride : GuixuClientConfig.kerrBackground();
+            return backgroundOverride != null ? backgroundOverride : white ? Background.WORLD : GuixuClientConfig.kerrBackground();
         }
 
         synchronized boolean requestedReverse() {
-            return reverseOverride != null ? reverseOverride : GuixuClientConfig.kerrReverseDisk();
+            return reverseOverride != null ? reverseOverride : !white && GuixuClientConfig.kerrReverseDisk();
         }
     }
 

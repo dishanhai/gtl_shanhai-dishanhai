@@ -15,6 +15,15 @@ uniform vec4 uDiskPhysics;    // relative accretion rate, H/r, temperature in K,
 uniform float uOuterDisk;     // Boyer–Lindquist disk radius in GM/c²
 uniform float uDiskSqrtFlux[128]; // Page–Thorne steady thin disk, sampled from ISCO to uOuterDisk
 uniform vec2 uIntegration;    // relative tolerance and accepted/rejected step budget
+uniform vec4 uWhiteHole;      // white-hole weight, radial beta, radiance gain, 16-bit seed
+uniform vec4 uWhiteTime;      // simulation seconds, burst age (-1 when inactive), jet gain, burst gain
+uniform vec4 uWhiteStyle;     // disk density, thickness, spectrum index, core gain
+uniform vec4 uWhiteExtraBursts0; // alternate (age, gain), two waves per vector
+uniform vec4 uWhiteExtraBursts1;
+uniform sampler2D WhiteParticleGrid;
+uniform float uWhiteParticleGain;
+uniform float uWhiteObserverBeta;
+uniform float uWhitePrimary; // attached host resolves direct emission in the world compositor
 
 #define SPIN uKerrParameters.x
 #define HORIZON uKerrParameters.y
@@ -285,6 +294,290 @@ void transferDisk(State start, State end, State first, State last, float pt, flo
     }
 }
 
+const float WHITE_DISK_MAX = 25.0;
+const float WHITE_JET_MAX = 38.0;
+const float WHITE_SHELL_MAX = 39.0;
+
+struct WhiteEmission {
+    vec4 style;
+    vec4 olderRadii;
+    vec4 olderGains;
+    float latestRadius;
+    float latestGain;
+    float bound;
+    bool shells;
+};
+
+float whiteDiskThickness(float r, float style) {
+    return max(.10, clamp(style, .10, 5.0) * (.20 + .030 * r + .0026 * r * r));
+}
+
+float whiteJetWidth(float z) {
+    return .21 + .018 * z + .0012 * z * z;
+}
+
+WhiteEmission whiteEmission() {
+    vec4 style = all(equal(uWhiteStyle, vec4(0.0))) ? vec4(1.0, 1.0, 0.0, 1.0) : uWhiteStyle;
+    float radius = HORIZON + 1.7 + 10.0 * max(0.0, uWhiteTime.y);
+    float latestGain = clamp(uWhiteTime.w, 0.0, 4.0) * smoothstep(0.0, .20, uWhiteTime.y)
+                     * (1.0 - smoothstep(26.0, 36.0, radius));
+    vec4 ages = vec4(uWhiteExtraBursts0.xz, uWhiteExtraBursts1.xz);
+    vec4 olderRadii = HORIZON + 1.7 + 10.0 * max(vec4(0.0), ages);
+    vec4 olderGains = clamp(vec4(uWhiteExtraBursts0.yw, uWhiteExtraBursts1.yw), 0.0, 4.0)
+                    * smoothstep(vec4(0.0), vec4(.20), ages)
+                    * (1.0 - smoothstep(vec4(26.0), vec4(36.0), olderRadii));
+    bool shells = latestGain > 0.0 || any(greaterThan(olderGains, vec4(0.0)));
+    float bound = shells ? WHITE_SHELL_MAX : uWhiteTime.z > 0.0 ? WHITE_JET_MAX : WHITE_DISK_MAX;
+    if (uWhiteParticleGain > 0.0) bound = max(bound, 30.0);
+    return WhiteEmission(style, olderRadii, olderGains, radius, latestGain, bound, shells);
+}
+
+vec3 whitePalette(float index) {
+    if (index < 0.5) return vec3(.12, .70, .91);   // platinum
+    if (index < 1.5) return vec3(.14, .40, 1.0);   // blue
+    if (index < 2.5) return vec3(1.0, .52, .14);   // gold
+    if (index < 3.5) return vec3(.55, .24, 1.0);   // violet
+    return vec3(1.0);
+}
+
+float whiteHash(vec3 cell) {
+    vec3 h = fract(cell * vec3(.1031, .11369, .13787));
+    h += dot(h, h.yxz + 19.19);
+    return fract((h.x + h.y) * h.z);
+}
+
+float whiteNoise(vec3 p) {
+    vec3 cell = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    vec4 front = vec4(whiteHash(cell), whiteHash(cell + vec3(1,0,0)),
+                      whiteHash(cell + vec3(0,1,0)), whiteHash(cell + vec3(1,1,0)));
+    cell.z += 1.0;
+    vec4 back = vec4(whiteHash(cell), whiteHash(cell + vec3(1,0,0)),
+                     whiteHash(cell + vec3(0,1,0)), whiteHash(cell + vec3(1,1,0)));
+    vec4 layer = mix(front, back, f.z);
+    return mix(mix(layer.x, layer.y, f.x), mix(layer.z, layer.w, f.x), f.y);
+}
+
+vec3 whiteThermalBands(float frequency, float temperature) {
+    vec3 exponent = clamp(vec3(22100.0, 26650.0, 31950.0) * frequency / temperature, .0001, 80.0);
+    vec3 bands = vec3(1.0, 1.58, 2.35) / (exp(exponent) - 1.0);
+    return bands / max(1e-25, max(bands.r, max(bands.g, bands.b)));
+}
+
+float whiteShellProfile(float shapeRadius, float shellRadius) {
+    float d = (shapeRadius - shellRadius) / (.28 + .030 * shellRadius);
+    float second = d + 1.9;
+    return exp(-d * d) + .25 * exp(-6.0 * second * second);
+}
+
+vec2 whiteParticleUv(vec2 voxel, float slice) {
+    vec2 tile = vec2(mod(slice, 8.0), floor(slice / 8.0));
+    return (tile * 64.0 + voxel + .5) / 512.0;
+}
+
+float whiteParticleDensity(vec3 position) {
+    if (uWhiteParticleGain <= 0.0) return 0.0;
+    float edge = length(position);
+    if (edge >= 30.0) return 0.0;
+    vec3 voxel = clamp((position / 60.0 + .5) * 63.0, 0.0, 63.0);
+    float lower = floor(voxel.z);
+    float nearSlice = texture(WhiteParticleGrid, whiteParticleUv(voxel.xy, lower)).r;
+    float farSlice = texture(WhiteParticleGrid, whiteParticleUv(voxel.xy, min(63.0, lower + 1.0))).r;
+    return mix(nearSlice, farSlice, fract(voxel.z)) * (1.0 - smoothstep(26.0, 30.0, edge)) * uWhiteParticleGain;
+}
+
+void transferWhiteSample(State sampleState, float pt, float affineLength, WhiteEmission emission,
+                         int field, inout vec4 light) {
+    vec3 x = sampleState.x;
+    float r = radius(x);
+    // The past horizon is the endpoint of the backwards ray. Emission belongs
+    // to a regular exterior volume whose density tapers to zero there.
+    if (r <= HORIZON || r >= WHITE_SHELL_MAX) return;
+    float z = abs(x.z), rho = length(x.xy), fromHorizon = r - HORIZON;
+    float nearEdge = smoothstep(.015, .60, fromHorizon);
+    float seed = 6.2831853 * (uWhiteHole.w / 65536.0);
+    float time = uWhiteTime.x;
+    float beta = clamp(uWhiteHole.y, 0.0, .995);
+    float flowSpeed = .38 + 3.10 * beta; // display-scale r_g / simulation second
+    vec4 style = emission.style;
+    bool primary = field >= 0;
+    bool secondary = uWhitePrimary > .5 && !primary;
+    float core = 0.0, disk = 0.0, jet = 0.0, shell = 0.0;
+    float angle = rho > .0001 ? atan(x.y, x.x) : 0.0;
+    if (field <= 0 && fromHorizon < 3.8 && style.w > 0.0) {
+        float wave = sin(5.1 * fromHorizon - 2.6 * time + seed + 2.8 * x.z);
+        vec3 coreCoordinate = 1.58 * x - normalize(x) * (.97 * time) + seed;
+        float veins = .59 + .17 * wave + .24 * whiteNoise(coreCoordinate);
+        float bright = exp(-pow(fromHorizon / (primary ? .78 : 1.02), primary ? 1.85 : 1.60));
+        float shoulder = primary ? (fromHorizon - 1.31) / .56 : (fromHorizon - 1.63) / .96;
+        float ionHalo = (primary ? .070 : .15) * exp(-shoulder * shoulder);
+        float coreTaper = primary ? smoothstep(.015, .39, fromHorizon) : nearEdge;
+        core = style.w * veins * (bright + ionHalo) * coreTaper
+             * (1.0 - smoothstep(2.5, 3.8, fromHorizon));
+        if (primary) {
+            float facing = max(0.0, -dot(sampleState.p, normalize(x)));
+            core *= 1.0 + facing * facing;
+        }
+    }
+    float thickness = whiteDiskThickness(r, style.y);
+    if ((!primary || field == 1) && z < 4.0 * thickness && r < WHITE_DISK_MAX && style.x > 0.0) {
+        // Trace the density pattern back to its launch phase. The flow speed
+        // changes the retarded time while integrated angular shear winds the plume.
+        float travel = fromHorizon / flowSpeed;
+        float launch = time - travel;
+        float winding = ROTATION * (6.4 + 2.5 * SPIN * ROTATION)
+                      * (inversesqrt(HORIZON + .5) - inversesqrt(r + .5)) / flowSpeed;
+        float phi = angle - winding - ROTATION * .56 * launch + seed;
+        vec2 azimuth = vec2(cos(phi), sin(phi));
+        vec3 advected = vec3(azimuth * (1.5 + .24 * r), .82 * x.z / thickness + .46 * launch);
+        float clump = whiteNoise(advected + vec3(seed, 1.9 * seed, 5.1 * seed));
+        float granule = whiteNoise(advected * 2.81 + vec3(4.4, 5.8, 7.2) * clump);
+        float warp = sin(3.0 * phi + .33 * r + x.z / thickness) + 1.55 * (clump - .5);
+        float plume = .5 + .5 * sin(5.0 * phi + .92 * warp + .60 * clump);
+        float threads = .5 + .5 * sin(13.0 * phi + 1.37 * r + 1.2 * warp + 3.2 * granule);
+        float strata = .5 + .5 * sin(26.0 * phi + 2.85 * r - 2.2 * threads + x.z / thickness);
+        if (primary) {
+            // Filter unresolved longitudinal variation while preserving
+            // filaments perpendicular to the ray, even at grazing angles.
+            float angularRate = (x.x * sampleState.p.y - x.y * sampleState.p.x) / max(.2, rho * rho);
+            float radialRate = dot(x, sampleState.p) / r;
+            float threadSpan = abs(13.0 * angularRate + 1.37 * radialRate) * affineLength;
+            float stratumSpan = abs(26.0 * angularRate + 2.85 * radialRate + sampleState.p.z / thickness) * affineLength;
+            threads = mix(.5, threads, exp(-.07 * threadSpan * threadSpan));
+            strata = mix(.5, strata, exp(-.12 * stratumSpan * stratumSpan));
+        }
+        float density = primary
+            ? .032 + .52 * plume * plume * clump + .74 * pow(threads, 4.0) * granule + .22 * strata * strata * granule
+            : .07 + .69 * plume * plume * clump + .44 * threads * threads * granule + .08 * strata * granule;
+        density = mix(.32, density, smoothstep(0.0, .55, rho));
+        float height = (x.z - .30 * thickness * warp) / thickness;
+        float boundary = primary ? 1.0 - smoothstep(2.3, 2.95, z / thickness) : 1.0;
+        disk = style.x * density * exp(-height * height) * boundary * smoothstep(.72, 2.35, fromHorizon)
+             * exp(-fromHorizon / 10.0) * (1.0 - smoothstep(16.0, WHITE_DISK_MAX, r));
+    }
+    if (!secondary && (!primary || field == 2 || field == 3)
+            && uWhiteTime.z > 0.0 && z > HORIZON + .20 && z < WHITE_JET_MAX) {
+        float width = whiteJetWidth(z);
+        if (rho < 4.0 * width) {
+            float winding = sign(x.z) * (.82 * z - 1.8 * time) + seed;
+            float rootFlex = smoothstep(HORIZON + 1.5, HORIZON + 8.0, z);
+            vec2 spine = width * .22 * rootFlex * vec2(cos(winding), sin(winding));
+            vec2 p = (x.xy - spine) / width;
+            float d2 = dot(p, p);
+            float azimuthalKnots = .05 * sin(3.0 * angle - winding + 1.2 * z) * smoothstep(0.0, width, rho);
+            float axialKnots = .87 + .08 * sin(2.6 * z - 5.4 * time + seed);
+            // The host's bright spine follows the machine axis. Its sheath
+            // can twist and flicker without moving the launch axis.
+            float spineD2 = primary ? rho * rho / (width * width) : d2;
+            float jetDensity = 1.50 * exp(-(primary ? 6.8 : 3.80) * spineD2)
+                             * (axialKnots + (primary ? 0.0 : azimuthalKnots))
+                             + (primary ? .039 : .09) * exp(-(primary ? .94 : .51) * d2)
+                             * (axialKnots + azimuthalKnots);
+            jet = uWhiteTime.z * jetDensity
+                * smoothstep(HORIZON + .20, HORIZON + 1.5, z) * exp(-z / 19.0)
+                * (1.0 - smoothstep(28.0, WHITE_JET_MAX, z));
+        }
+    }
+    if ((!primary || field == 4) && emission.shells) {
+        float ripple = whiteNoise(.29 * x + vec3(seed, .3 * seed, .7 * seed));
+        float shapeRadius = r + .17 * x.z * x.z / r - .14 * x.x + .76 * (ripple - .50);
+        float pattern = .56 + .30 * sin(4.0 * angle + .8 * x.z + seed) * sin(.44 * x.x - .31 * x.y) + .14 * ripple;
+        float fronts = emission.latestGain * whiteShellProfile(shapeRadius, emission.latestRadius);
+        for (int i = 0; i < 4; ++i) {
+            if (emission.olderGains[i] > 0.0) {
+                fronts += emission.olderGains[i] * whiteShellProfile(shapeRadius, emission.olderRadii[i]);
+            }
+        }
+        shell = fronts * pattern * (1.0 - smoothstep(32.0, WHITE_SHELL_MAX, r));
+    }
+    float particles = !secondary && (!primary || field == 4) ? whiteParticleDensity(x) * nearEdge : 0.0;
+    float density = core + disk + jet + shell + particles;
+    if (density < .00004) return;
+
+    // Direct world rays use a local lapse and Doppler approximation. The
+    // curved image uses p_mu U^mu from its integrated photon momentum.
+    float eulerFrequency = sqrt(1.0 + 2.0 / r);
+    vec3 localMomentum = sampleState.p;
+    vec3 radial = normalize(x);
+    if (!primary) {
+        Metric m = metric(x);
+        float root = sqrt(1.0 + 2.0 * m.h);
+        float lDotP = dot(m.l, sampleState.p);
+        eulerFrequency = root * pt - 2.0 * m.h * lDotP / root;
+        localMomentum += (1.0 / root - 1.0) * lDotP * m.l;
+        radial = normalize(m.dr + (1.0 / root - 1.0) * dot(m.l, m.dr) * m.l);
+    }
+    vec3 tangent = vec3(-x.y, x.x, 0.0) / max(rho, .0001);
+    float swirl = ROTATION * .40 * inversesqrt(1.0 + .18 * fromHorizon);
+    vec3 spiral = normalize(radial + tangent * swirl);
+    vec3 outflow = beta * mix(radial, spiral, (disk + particles) / density);
+    vec3 polar = vec3(0.0, 0.0, sign(x.z)) * (.50 + .48 * beta);
+    vec3 velocity = mix(outflow, polar, jet / density);
+    float frequency = (eulerFrequency + dot(velocity, localMomentum))
+                    * inversesqrt(max(.005, 1.0 - dot(velocity, velocity)));
+    if (frequency <= .0) return;
+    float g = 1.0 / frequency;
+
+    float absorption = .41 * core + .068 * disk + .18 * jet + .007 * shell + .015 * particles;
+    float properLength = primary ? (frequency / eulerFrequency) * affineLength : frequency * affineLength;
+    float tau = absorption * properLength * clamp(uWhiteHole.x, 0.0, 1.0);
+    float absorbed = tau < .01 ? tau * (1.0 - .5 * tau) : 1.0 - exp(-tau);
+    float outer = smoothstep(1.0, 15.0, fromHorizon);
+    float spectrum = clamp(style.z, 0.0, 5.0);
+    vec3 palette = mix(whitePalette(floor(spectrum)), whitePalette(ceil(spectrum)), fract(spectrum));
+    float temperatureScale = clamp(uDiskPhysics.z / 9400.0, .20, 7.0);
+    float coreEdgeHue = smoothstep(.65, 1.9, fromHorizon);
+    vec3 coreColor = mix(vec3(1.0, .98, .93), vec3(.49, .85, 1.0), .70 * coreEdgeHue);
+    vec3 diskColor = mix(vec3(1.0, .91, .77), palette, outer * .93);
+    vec3 jetColor = mix(vec3(1.0, .96, .93), palette, .24 + .31 * outer);
+    vec3 shellColor = mix(vec3(1.0), palette, .66);
+    float grayscale = max(0.0, 1.0 - abs(spectrum - 4.0));
+    if (grayscale > 0.0) {
+        coreColor = mix(coreColor, vec3(1.0), grayscale);
+        diskColor = mix(diskColor, vec3(1.0), grayscale);
+        jetColor = mix(jetColor, vec3(1.0), grayscale);
+        shellColor = mix(shellColor, vec3(1.0), grayscale);
+    }
+    if (spectrum > 4.0) {
+        // Approximate the band ratios only. The chosen emissivity controls
+        // the integrated power independently of this display spectrum.
+        float physical = spectrum - 4.0;
+        if (core > .0) coreColor = mix(coreColor, whiteThermalBands(frequency, mix(32000.0, 14000.0, outer) * temperatureScale), physical);
+        if (disk > .0) diskColor = mix(diskColor, whiteThermalBands(frequency, mix(16500.0, 4100.0, outer) * temperatureScale), physical);
+        if (jet > .0) jetColor = mix(jetColor, whiteThermalBands(frequency, mix(28000.0, 10500.0, outer) * temperatureScale), physical);
+        if (shell > .0) shellColor = mix(shellColor, whiteThermalBands(frequency, mix(18500.0, 5000.0, outer) * temperatureScale), physical);
+    }
+    float hotDisk = exp(-.16 * (fromHorizon - 2.85) * (fromHorizon - 2.85));
+    vec3 emissivity = (core * 1.37 * coreColor + (disk * (.16 + 1.32 * hotDisk) + particles * .31) * diskColor
+                    + jet * 2.8 * jetColor + shell * .033 * shellColor) * sqrt(temperatureScale);
+    float shifted = g * g * g;
+    light.rgb += light.a * min(vec3(64.0), emissivity * (shifted * uWhiteHole.z * absorbed / absorption));
+    light.a *= 1.0 - absorbed;
+}
+
+void transferWhite(State start, State end, State first, State last, float pt, float h,
+                   WhiteEmission emission, inout vec4 light) {
+    if (uWhiteHole.z <= 0.0 || light.a < .00005) return;
+    float reach = length(end.x - start.x);
+    float startRadius = length(start.x);
+    if (startRadius - reach > emission.bound + 1.0) return;
+    // Curved-segment quadrature follows the same dense trajectory that makes
+    // disk crossings and high-order images possible in black-hole mode.
+    float spacing = max(.26, .095 * startRadius);
+    if (uIntegration.y >= 480.0) spacing *= .70;
+    int count = int(clamp(ceil(reach / spacing), 1.0, 8.0));
+    float affineLength = h / float(count);
+    for (int i = 0; i < 8; i++) {
+        if (i >= count) break;
+        float t = (float(i) + .5) / float(count);
+        float w = t * t * (3.0 - 2.0 * t);
+        float wa = h * t * (1.0 - t) * (1.0 - t), wb = -h * t * t * (1.0 - t);
+        State at = State(mix(start.x, end.x, w) + wa * first.x + wb * last.x,
+                         mix(start.p, end.p, w) + wa * first.p + wb * last.p,
+                         mix(start.t, end.t, w) + wa * first.t + wb * last.t);
+        transferWhiteSample(at, pt, affineLength, emission, -1, light);
+    }
+}
 
 vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool critical, out vec4 light) {
     Metric m = metric(position);
@@ -292,6 +585,18 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool
     State y = observerRay(position, direction, velocity, m, pt);
     State k1 = flow(y, m, pt);
     light = vec4(0.0, 0.0, 0.0, 1.0);
+    float white = clamp(uWhiteHole.x, 0.0, 1.0);
+    // The white-hole scene uses exterior observers only.
+    if (white > 0.0 && m.r <= HORIZON) return vec4(direction, 1.0);
+    WhiteEmission emission;
+    bool secondary = white > 0.0 && uWhitePrimary > .5;
+    if (white > 0.0) emission = whiteEmission();
+    if (secondary) {
+        emission.style.w = 0.0;
+        emission.shells = false;
+        emission.bound = 10.0;
+    }
+    float sweep = 0.0;
 #ifdef KERR_CHECK_INVARIANTS
     vec3 initial = constants(y, m, pt);
 #else
@@ -303,12 +608,13 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool
     float escapeRadius = max(70.0, min(160.0, m.r));
     // Footprint baking needs disk transfer and capture only. Beyond the
     // emitting atmosphere an outward ray has also cleared the photon region.
-    float emissionRadius = 1.0 + uOuterDisk * length(vec2(1.0, 5.0 * uDiskPhysics.y));
+    float emissionRadius = white > 0.0 ? emission.bound + 1.0
+        : 1.0 + uOuterDisk * length(vec2(1.0, 5.0 * uDiskPhysics.y));
     escapeRadius = transferOnly ? emissionRadius : max(escapeRadius, emissionRadius);
 #ifndef KERR_CHECK_INVARIANTS
     // A negative Carter radial potential at the emission bound forbids any crossing.
     // The transfer cache can use this result directly because it never samples the outgoing direction.
-    if (transferOnly && m.r > escapeRadius) {
+    if (transferOnly && white == 0.0 && m.r > escapeRadius) {
         float p = pt * (escapeRadius * escapeRadius + SPIN * SPIN) + SPIN * angular.x;
         float barrier = (escapeRadius - HORIZON) * (escapeRadius - (2.0 - HORIZON)) * angular.y;
         if (p * p < .999 * barrier) return vec4(0.0, 0.0, 0.0, 1.0);
@@ -324,7 +630,7 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool
         if (m.r <= captureRadius) return vec4(0.0, 0.0, 0.0, 2.0);
         float radialSpeed = dot(m.dr, k1.x);
 #if !defined(KERR_CHECK_INVARIANTS) && !defined(KERR_FULL_CAPTURE)
-        if (m.r < ISCO && radialSpeed < -.05 && reachesHorizon(m.r, pt, angular))
+        if (white == 0.0 && m.r < ISCO && radialSpeed < -.05 && reachesHorizon(m.r, pt, angular))
             return vec4(0.0, 0.0, 0.0, 2.0);
 #endif
         if (m.r >= escapeRadius && radialSpeed > 0.0) return vec4(normalize(k1.x), 1.0);
@@ -351,7 +657,21 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool
             vec3 drift = abs(constants(next, nextMetric, pt) - initial) / max(abs(initial), vec3(1.0));
             light.rgb = max(light.rgb, drift);
 #else
-            transferDisk(y, next, k1, k4, pt, stepSize, light);
+            if (white == 0.0) {
+                transferDisk(y, next, k1, k4, pt, stepSize, light);
+            } else if (!secondary) {
+                transferWhite(y, next, k1, k4, pt, stepSize, emission, light);
+            } else if (uWhiteHole.z > 0.0 && min(m.r, nextMetric.r) < 10.0) {
+                // Only the inner disk image after a substantial turn belongs
+                // to the bent pass. It cannot draw a second projected spine.
+                sweep += atan(length(cross(y.x, next.x)), dot(y.x, next.x));
+                if (sweep > 2.1) {
+                    vec4 indirect = vec4(0.0, 0.0, 0.0, 1.0);
+                    transferWhite(y, next, k1, k4, pt, stepSize, emission, indirect);
+                    light.rgb += light.a * indirect.rgb * smoothstep(2.1, 2.8, sweep);
+                    light.a *= indirect.a;
+                }
+            }
 #endif
             y = next;
             k1 = k4;
@@ -417,7 +737,7 @@ float shadowMargin(vec2 px) {
     mat3 basis;
     vec3 observer, direction;
     cameraRay(px, basis, observer, direction);
-    return shadowMargin(observer, direction, vec3(0.0));
+    return shadowMargin(observer, direction, transpose(basis) * vec3(0.0, 0.0, -uWhiteObserverBeta));
 }
 
 float capturedAt(vec2 px) {
@@ -428,7 +748,7 @@ vec4 tracePixel(vec2 px, bool transferOnly, bool critical, out vec4 light) {
     mat3 basis;
     vec3 observer, direction;
     cameraRay(px, basis, observer, direction);
-    vec3 velocity = vec3(0.0);
+    vec3 velocity = transpose(basis) * vec3(0.0, 0.0, -uWhiteObserverBeta);
     vec4 ray = trace(observer, direction, velocity, transferOnly, critical, light);
     ray.xyz = basis * ray.xyz;
     return ray;

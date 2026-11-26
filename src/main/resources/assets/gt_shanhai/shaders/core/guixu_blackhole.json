@@ -32,6 +32,7 @@
             "name": "PixelTransfer"
         },
         {
+            "name": "WhiteParticleGrid"
         },
         {
             "name": "RayBloom"
@@ -48,7 +49,9 @@
         {
             "name": "DiskDetailExit"
         },
-        {"name": "DiskDetailBloom"}
+        {"name": "DiskDetailBloom"},
+        {"name": "WhiteDirectLight"},
+        {"name": "WhiteDirectDepth"}
     ],
     "uniforms": [
         {"name": "uBhView", "type": "float", "count": 3, "values": [0, 0, -10]},
@@ -61,15 +64,26 @@
         {"name": "uDiskSqrtFlux", "type": "float", "count": 128, "values": [0]},
         {"name": "uDiskPhysics", "type": "float", "count": 4, "values": [1, 0.055, 9400, 0.38]},
         {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00016, 384]},
+        {"name": "uWhiteHole", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteTime", "type": "float", "count": 4, "values": [0, -1, 0, 0]},
+        {"name": "uWhiteStyle", "type": "float", "count": 4, "values": [1, 1, 0, 1]},
+        {"name": "uWhiteExtraBursts0", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteExtraBursts1", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteParticleGain", "type": "float", "count": 1, "values": [0]},
         {"name": "uRayBloomLod", "type": "float", "count": 2, "values": [0, 0]},
         {"name": "uCriticalBounds", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
         {"name": "uDiskDetailRect", "type": "float", "count": 4, "values": [0, 0, 1, 0]},
         {"name": "uDiskBloomLod", "type": "float", "count": 2, "values": [0, 0]},
         {"name": "uExterior", "type": "float", "count": 3, "values": [0, 0, 0]},
+        {"name": "uWhiteDebug", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhitePrimary", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhiteSceneDepth", "type": "float", "count": 1, "values": [0]},
+        {"name": "uWhiteObserverBeta", "type": "float", "count": 1, "values": [0]},
         {"name": "uRefine", "type": "float", "count": 1, "values": [0]},
         {"name": "uCaptureDepthOnly", "type": "float", "count": 1, "values": [0]},
         {"name": "uTransferPass", "type": "float", "count": 1, "values": [0]},
         {"name": "uResolveSize", "type": "float", "count": 2, "values": [1, 1]},
+        {"name": "uWhiteCacheRect", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
         {"name": "uProjMat", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
         {"name": "uDiskNormal", "type": "float", "count": 3, "values": [0, 0.31, -0.95]},
         {"name": "uScreenSize", "type": "float", "count": 2, "values": [1920, 1080]},

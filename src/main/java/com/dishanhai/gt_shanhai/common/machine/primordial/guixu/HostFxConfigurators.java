@@ -252,9 +252,11 @@ public final class HostFxConfigurators {
                             Component.literal("§8只管渲染特效：机壳/贴图的工作态外观不受它影响")));
             group.addWidget(new LabelWidget(10, 129, this::fxLabelText));
             group.addWidget(new ButtonWidget(78, 125, 68, 16, GuiTextures.BUTTON,
-                    clickData -> host.setHostLegacyBlackHole(!host.isHostLegacyBlackHole()))
+                    clickData -> host.cycleHostHoleStyle())
                     .setHoverTooltips(Component.translatable("gt_shanhai.guixu.blackhole_style.tooltip")));
-            group.addWidget(new LabelWidget(82, 129, () -> Component.translatable(host.isHostLegacyBlackHole() ? "gt_shanhai.guixu.blackhole_style.legacy"
+            group.addWidget(new LabelWidget(82, 129, () -> Component.translatable(host.isHostWhiteHole()
+                    ? "gt_shanhai.guixu.blackhole_style.white"
+                    : host.isHostLegacyBlackHole() ? "gt_shanhai.guixu.blackhole_style.legacy"
                     : "gt_shanhai.guixu.blackhole_style.kerr").getString()));
 
             // 山海：外層效果可完全停繪，與原本只降級動畫的特效按鈕分開。

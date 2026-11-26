@@ -13,9 +13,29 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
     private static final int TRANSFER_PIXELS = 320_000;
     private static final int CLOSE_TRANSFER_PIXELS = 120_000;
     private static final int NATIVE_COMPOSITE_PIXELS = 480_000;
+    static final int WHITE_DIRECT_CACHE_PIXELS = 4_200_000;
+    private static final int WHITE_HOST_CLOSE_TRACE_PIXELS = 96_000;
+
+    static boolean whiteHostCanReuse(long ageNanos, int reusedFrames) {
+        return ageNanos >= 0 && ageNanos <= 56_000_000 && reusedFrames < 3;
+    }
+
+    KerrSampling forWhiteHost(Quality quality, double area, double observerDistance) {
+        if (quality != Quality.ADAPTIVE && quality != Quality.LOW) return this;
+        // The host integrates its bright material at display resolution. Only the
+        // broad, indirect image needs the near-field pilot grid.
+        double near = smoothUnit((40 - observerDistance) / 20);
+        double capped = Math.min(traceScale, Math.sqrt(WHITE_HOST_CLOSE_TRACE_PIXELS / area));
+        return new KerrSampling(lerp(traceScale, capped, near), 0, subpixels);
+    }
 
     static KerrSampling plan(Quality quality, double requestedScale, double adaptiveScale, double area,
                              double shadowFraction, double observerDistance, double shadowRadiusPixels) {
+        return plan(quality, requestedScale, adaptiveScale, area, shadowFraction, observerDistance, shadowRadiusPixels, 0);
+    }
+
+    static KerrSampling plan(Quality quality, double requestedScale, double adaptiveScale, double area,
+                             double shadowFraction, double observerDistance, double shadowRadiusPixels, double white) {
         boolean lowBudget = quality == Quality.LOW || quality == Quality.COMPATIBILITY;
         if (quality != Quality.ADAPTIVE && !lowBudget) {
             return new KerrSampling(requestedScale, 0, 4);
@@ -28,12 +48,14 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
         if (quality == Quality.ADAPTIVE) {
             double budget = lerp(ADAPTIVE_PIXELS, ADAPTIVE_LARGE_SHADOW_PIXELS, shadowFraction * shadowFraction);
             budget = lerp(budget, ADAPTIVE_CLOSE_TRACE_PIXELS, close);
+            // White volumes carry structure across a wider footprint than a thin accretion disk.
+            budget *= 1 + .85 * white;
             double factor = adaptiveScale / Quality.ADAPTIVE.scale;
             // Thin arcs can fall between pilot rays even when refinement runs at display resolution.
             // Spend spare rays on small distant targets, where the trace rectangle is cheap.
             double detailWeight = smoothUnit((96 - shadowRadiusPixels) / 64)
                     * smoothUnit((observerDistance - 32) / 48);
-            double preferredScale = lerp(requestedScale, 1, detailWeight);
+            double preferredScale = lerp(lerp(requestedScale, Math.max(requestedScale, .62), white), 1, detailWeight);
             traceScale = Math.min(preferredScale * factor, Math.sqrt(budget / area) * Math.min(1, factor));
             traceScale = Math.min(1, traceScale);
         } else {
@@ -44,9 +66,10 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
         double transferScale = 0;
         if (area >= NATIVE_COMPOSITE_PIXELS || observerDistance < 16) {
             double budget = lerp(TRANSFER_PIXELS, CLOSE_TRANSFER_PIXELS, close);
+            if (quality == Quality.ADAPTIVE) budget *= 1 + .48 * white;
             // As the pilot shrinks, the refinement pass shrinks with it. The final
             // compositor still resolves the capture boundary at display resolution.
-            double resolveDensity = 1.65;
+            double resolveDensity = quality == Quality.ADAPTIVE ? 1.65 + .30 * white : 1.65;
             transferScale = Math.min(.74, Math.min(resolveDensity * traceScale, Math.sqrt(budget / area)));
         }
         return new KerrSampling(traceScale, transferScale, subpixels);
@@ -56,8 +79,8 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
         return smoothUnit((20 - observerDistance) / 14);
     }
 
-    static float exteriorWeight(Quality quality) {
-        return quality == Quality.COMPATIBILITY ? 1f : 0f;
+    static float exteriorWeight(Quality quality, double white) {
+        return quality == Quality.COMPATIBILITY && white == 0 ? 1f : 0f;
     }
 
     // Cached composition has no temporal accumulation. Moving its coarse grid
