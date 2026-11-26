@@ -356,7 +356,7 @@ class GuixuStellarEndTest {
     void stellarEndReplacesBackgroundInfallWithoutSwitchingOffTheBlackHole() throws IOException {
         Path hostfx = Path.of("src/main/java/com/dishanhai/gt_shanhai/client/renderer/hostfx");
         String host = Files.readString(hostfx.resolve("GuixuHostFxRenderer.java"));
-        String stars = Files.readString(hostfx.resolve("GuixuStarRenderer.java"));
+        String stars = Files.readString(hostfx.resolve("GuixuStarRenderer.java")).replace("\r\n", "\n");
         assertTrue(host.contains("backgroundInfall = drawBlackHole && !stellarEndActive"));
         assertTrue(host.contains("backgroundInfall ? GuixuStarField.accretionFeed("));
         assertTrue(host.contains("jets, drawBlackHole, backgroundInfall,"));

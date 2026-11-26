@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: dishanhai/SH-Better-UI
-          ref: d91e3bd8feb67b2ca9be96ec3446193779ccaaee
+          ref: 732f64db4bd6cd6fd1eebf77351af7ac7fcf43ce # SHBUI 1.0.14
           path: SH-Better-UI
           persist-credentials: false
 
@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: dishanhai/SH-Common-Lib
-          ref: b02c6c06db3a61f213d9abc463f2eae1f16f596a
+          ref: 56a7cc89692259875b2e4da30dd9f111e2ca2f39 # SHCLIB 0.4.1
           path: SH-Common-Lib
           persist-credentials: false
 
