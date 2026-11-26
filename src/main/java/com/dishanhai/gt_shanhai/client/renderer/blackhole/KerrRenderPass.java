@@ -70,8 +70,9 @@ final class KerrRenderPass implements AutoCloseable {
         }
 
         double scale = sampling.traceScale();
-        width = stableExtent(Math.max(8, ((int) Math.ceil(scale * frame.rectW) + 7) & ~7), width);
-        height = stableExtent(Math.max(8, ((int) Math.ceil(scale * frame.rectH) + 7) & ~7), height);
+        var trace = KerrTraceBudget.extent(scale, frame.rectW, frame.rectH, width, height, 8);
+        width = trace.width();
+        height = trace.height();
         Target target = targets[sample % targets.length];
         Target previous = targets[(sample + 1) % targets.length];
         var geometry = frame.geometry;
