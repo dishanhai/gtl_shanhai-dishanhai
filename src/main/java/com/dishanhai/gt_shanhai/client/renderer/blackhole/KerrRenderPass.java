@@ -61,6 +61,7 @@ final class KerrRenderPass implements AutoCloseable {
     private long whiteRefreshStamp;
     private int whiteReuseFrames, whiteCacheHits;
     private boolean whiteDirectReady;
+    private int whiteDirectDivisor = 1;
     private boolean whiteCacheUnavailable;
     private boolean criticalRadiiReady;
     private int blackFieldHits;
@@ -101,8 +102,9 @@ final class KerrRenderPass implements AutoCloseable {
                 && (frame.whiteDemo || worldDepthTexture != 0);
         boolean quantizePilot = worldPrimary && (quality == Quality.ADAPTIVE || quality == Quality.LOW);
         int tile = quantizePilot ? 16 : 8;
-        width = stableExtent(Math.max(tile, ((int) Math.ceil(scale * frame.rectW) + tile - 1) & -tile), width, tile);
-        height = stableExtent(Math.max(tile, ((int) Math.ceil(scale * frame.rectH) + tile - 1) & -tile), height, tile);
+        var trace = KerrTraceBudget.extent(scale, frame.rectW, frame.rectH, width, height, tile);
+        width = trace.width();
+        height = trace.height();
         Target target = targets[sample % targets.length];
         Target previous = targets[(sample + 1) % targets.length];
         var geometry = frame.geometry;
@@ -110,7 +112,10 @@ final class KerrRenderPass implements AutoCloseable {
         int directW = (int) Math.ceil(frame.rectX0 + frame.rectW) - directX;
         int directH = (int) Math.ceil(frame.rectY0 + frame.rectH) - directY;
         double distance = 2 * frame.dist / frame.rsBlocks;
-        int directDivisor = KerrSampling.whiteDirectDivisor(quality, (double) directW * directH);
+        int directDivisor = worldPrimary
+                ? KerrSampling.whiteDirectDivisor(quality, (double) directW * directH, whiteDirectDivisor)
+                : 1;
+        whiteDirectDivisor = directDivisor;
         int directWidth = KerrSampling.whiteDirectExtent(directW, directDivisor);
         int directHeight = KerrSampling.whiteDirectExtent(directH, directDivisor);
         boolean reducedDirect = directWidth < directW || directHeight < directH;
@@ -466,8 +471,8 @@ final class KerrRenderPass implements AutoCloseable {
             return;
         }
         transferReady = false;
-        int w = stableExtent((int) Math.ceil(scale * frame.rectW), transfer.width, 8);
-        int h = stableExtent((int) Math.ceil(scale * frame.rectH), transfer.height, 8);
+        int w = stableTransferExtent((int) Math.ceil(scale * frame.rectW), transfer.width);
+        int h = stableTransferExtent((int) Math.ceil(scale * frame.rectH), transfer.height);
         int unit = glGetInteger(GL_ACTIVE_TEXTURE);
         try {
             RenderSystem.activeTexture(GL_TEXTURE0);
@@ -492,10 +497,8 @@ final class KerrRenderPass implements AutoCloseable {
         transferReady = true;
     }
 
-    private static int stableExtent(int requested, int allocated, int tile) {
-        // Small changes in the projected rectangle can reuse the existing sampling grid.
-        int tolerance = tile == 16 ? Math.min(tile, requested / 8) : Math.min(tile, requested / 32);
-        return Math.abs(requested - allocated) <= tolerance ? allocated : requested;
+    private static int stableTransferExtent(int requested, int allocated) {
+        return Math.abs(requested - allocated) <= Math.min(8, requested / 32) ? allocated : requested;
     }
 
     private void drawTriangle(ShaderInstance program) {
@@ -587,6 +590,7 @@ final class KerrRenderPass implements AutoCloseable {
     void invalidateHistory() {
         history = null;
         whiteDirectReady = false;
+        whiteDirectDivisor = 1;
         whiteReuseFrames = 0;
         criticalRadiiReady = false;
         reuseBlackField = transferReady = false;
