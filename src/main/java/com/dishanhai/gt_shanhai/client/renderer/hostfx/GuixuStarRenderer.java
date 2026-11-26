@@ -5,12 +5,14 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.Direction;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.util.List;
 
@@ -80,8 +82,10 @@ public final class GuixuStarRenderer {
             ambientGlint(vertices, matrix, head, right, up, star.size() * 0.55F, star.size() * 0.55F,
                     1.0F, 0.96F, 0.90F, alpha);
         }
+        var target = Minecraft.getInstance().getMainRenderTarget();
         if (backgroundInfall) {
-            drawAccretionTrails(vertices, matrix, clip, camera, facing, seconds, surfaceRadius, accretionTrails, diskHeat);
+            drawAccretionTrails(vertices, matrix, clip, camera, facing, seconds, surfaceRadius, accretionTrails,
+                    diskHeat, target.width, target.height);
         }
         if (blackHoleEnabled && jets > 0.001F) {
             drawJets(vertices, matrix, clip, camera, facing, seconds, surfaceRadius, jets);
@@ -101,14 +105,17 @@ public final class GuixuStarRenderer {
     }
 
     static void drawAccretionTrails(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera,
-                                    Direction facing, double seconds, double horizon, int count, float heat) {
-        // The widest orbit spans 4.14 horizons radially and .85 vertically.
-        // Include the billboard width before rotating into the machine frame.
-        if (count == 0 || !HostFxVisibility.isVisible(clip, 0, 0, 0, (float) (4.3 * horizon + .1))) return;
+                                    Direction facing, double seconds, double horizon, int count, float heat,
+                                    int screenWidth, int screenHeight) {
+        // Include the maximum screen-space feather in each trail's world-space bounds.
+        if (count == 0 || !HostFxVisibility.isVisible(clip, 0, 0, 0, (float) (4.4 * horizon + .25))) return;
         var frustum = new FrustumIntersection(clip, false);
         Quaternionf rotation = diskRotation(facing);
         Vector3f head = new Vector3f(), start = new Vector3f(), end = new Vector3f();
+        Vector3f next = new Vector3f(), startWidth = new Vector3f(), endWidth = new Vector3f();
         Vector3f eye = new Vector3f(camera), sight = new Vector3f(), width = new Vector3f(), up = new Vector3f();
+        Vector4f projected = new Vector4f(), projectedWidth = new Vector4f();
+        int segments = count > GuixuStarField.SIMPLE_ACCRETION_TRAILS ? 12 : 8;
         for (int i = 0; i < count; i++) {
             double phase = GuixuStarField.accretionPhase(i, seconds);
             float opacity = (float) Math.min(1, Math.min(phase / .07, (1 - phase) / .085));
@@ -119,27 +126,46 @@ public final class GuixuStarRenderer {
             float size = (float) (horizon * .011 + .035) * (1F + .42F * hot);
             float glow = opacity * (.40F + .47F * hot);
             double tail = Math.max(0, phase - .19);
+            double step = (phase - tail) / segments;
             accretionPoint(start, rotation, i, tail, horizon);
-            for (int segment = 0; segment < 5; segment++) {
-                double fraction = (segment + 1) / 5.0;
-                if (segment == 4) end.set(head);
-                else accretionPoint(end, rotation, i, tail + (phase - tail) * fraction, horizon);
-                if (!frustum.testAab(Math.min(start.x, end.x) - size, Math.min(start.y, end.y) - size,
-                        Math.min(start.z, end.z) - size, Math.max(start.x, end.x) + size,
-                        Math.max(start.y, end.y) + size, Math.max(start.z, end.z) + size)) {
-                    start.set(end);
-                    continue;
+            accretionPoint(end, rotation, i, tail + step, horizon);
+            trailWidth(startWidth, start, start, end, eye, sight, size * .28F);
+            float startAlpha = 0;
+            for (int segment = 1; segment <= segments; segment++) {
+                float fraction = segment / (float) segments;
+                if (segment == segments) next.set(end);
+                else if (segment + 1 == segments) next.set(head);
+                else accretionPoint(next, rotation, i, tail + step * (segment + 1), horizon);
+                float halfWidth = size * (.28F + .72F * fraction);
+                trailWidth(endWidth, start, end, next, eye, sight, halfWidth);
+                clip.transform(projected.set(end.x, end.y, end.z, 1));
+                clip.transform(projectedWidth.set(endWidth.x, endWidth.y, endWidth.z, 0));
+                float spread = 1;
+                if (projected.w > 1e-4F) {
+                    float px = (projectedWidth.x - projected.x * projectedWidth.w / projected.w) * screenWidth;
+                    float py = (projectedWidth.y - projected.y * projectedWidth.w / projected.w) * screenHeight;
+                    float pixels = .5F * (float) Math.hypot(px, py) / projected.w;
+                    spread = Math.clamp(1.2F / Math.max(pixels, .01F), 1, 3);
                 }
-                width.set(end).sub(start).cross(sight.set(eye).sub(end));
-                if (width.lengthSquared() > 1e-9F) {
-                    width.normalize().mul(size * (.28F + .72F * (float) fraction));
-                    float a = glow * segment / 5F, b = glow * (float) fraction;
-                    ambientVertex(vertices, matrix, start.x + width.x, start.y + width.y, start.z + width.z, red, green, blue, a);
-                    ambientVertex(vertices, matrix, end.x + width.x, end.y + width.y, end.z + width.z, red, green, blue, b);
-                    ambientVertex(vertices, matrix, end.x - width.x, end.y - width.y, end.z - width.z, red, green, blue, b);
-                    ambientVertex(vertices, matrix, start.x - width.x, start.y - width.y, start.z - width.z, red, green, blue, a);
+                endWidth.mul(spread);
+                float endAlpha = glow * fraction / spread;
+                float extent = 3 * size;
+                if (frustum.testAab(Math.min(start.x, end.x) - extent, Math.min(start.y, end.y) - extent,
+                        Math.min(start.z, end.z) - extent, Math.max(start.x, end.x) + extent,
+                        Math.max(start.y, end.y) + extent, Math.max(start.z, end.z) + extent)) {
+                    ambientVertex(vertices, matrix, start.x, start.y, start.z, red, green, blue, startAlpha);
+                    ambientVertex(vertices, matrix, end.x, end.y, end.z, red, green, blue, endAlpha);
+                    ambientVertex(vertices, matrix, end.x + endWidth.x, end.y + endWidth.y, end.z + endWidth.z, red, green, blue, 0);
+                    ambientVertex(vertices, matrix, start.x + startWidth.x, start.y + startWidth.y, start.z + startWidth.z, red, green, blue, 0);
+                    ambientVertex(vertices, matrix, start.x - startWidth.x, start.y - startWidth.y, start.z - startWidth.z, red, green, blue, 0);
+                    ambientVertex(vertices, matrix, end.x - endWidth.x, end.y - endWidth.y, end.z - endWidth.z, red, green, blue, 0);
+                    ambientVertex(vertices, matrix, end.x, end.y, end.z, red, green, blue, endAlpha);
+                    ambientVertex(vertices, matrix, start.x, start.y, start.z, red, green, blue, startAlpha);
                 }
                 start.set(end);
+                end.set(next);
+                startWidth.set(endWidth);
+                startAlpha = endAlpha;
             }
             if (!HostFxVisibility.isVisible(clip, head.x, head.y, head.z, size * 1.55F)) continue;
             sight.set(eye).sub(head);
@@ -149,6 +175,12 @@ public final class GuixuStarRenderer {
             up.set(width.normalize()).cross(sight).normalize();
             ambientGlint(vertices, matrix, head, width, up, size * 1.55F, size * 1.55F, red, green, blue, glow);
         }
+    }
+
+    private static void trailWidth(Vector3f out, Vector3f before, Vector3f point, Vector3f after,
+                                   Vector3f eye, Vector3f sight, float width) {
+        out.set(after).sub(before).cross(sight.set(eye).sub(point));
+        if (out.lengthSquared() > 1e-12F) out.normalize(width);
     }
 
     private static void accretionPoint(Vector3f out, Quaternionf rotation, int index, double phase, double horizon) {
