@@ -87,12 +87,12 @@ public final class BlackHoleLensMath {
      * @param out3  出口长度 ≥3
      */
     public static void toView(float[] view, double[] world, double[] cam, float[] out3) {
-        final float x = (float) (world[0] - cam[0]);
-        final float y = (float) (world[1] - cam[1]);
-        final float z = (float) (world[2] - cam[2]);
-        out3[0] = view[0] * x + view[4] * y + view[8] * z;
-        out3[1] = view[1] * x + view[5] * y + view[9] * z;
-        out3[2] = view[2] * x + view[6] * y + view[10] * z;
+        final double x = world[0] - cam[0];
+        final double y = world[1] - cam[1];
+        final double z = world[2] - cam[2];
+        out3[0] = (float) (view[0] * x + view[4] * y + view[8] * z);
+        out3[1] = (float) (view[1] * x + view[5] * y + view[9] * z);
+        out3[2] = (float) (view[2] * x + view[6] * y + view[10] * z);
     }
 
     /** {@code tan(fovY/2)}，从投影矩阵反解（{@code 1/m11}）。无效矩阵返回 {@code NaN}。 */
@@ -115,11 +115,11 @@ public final class BlackHoleLensMath {
         final float x = viewPos[0];
         final float y = viewPos[1];
         final float z = viewPos[2];
-        final float cx = proj[0] * x + proj[4] * y + proj[8] * z + proj[12];
-        final float cy = proj[1] * x + proj[5] * y + proj[9] * z + proj[13];
-        final float cz = proj[2] * x + proj[6] * y + proj[10] * z + proj[14];
-        final float cw = proj[3] * x + proj[7] * y + proj[11] * z + proj[15];
-        if (!(cw > 1e-6f) || !Float.isFinite(cw)) {
+        final double cx = (double) proj[0] * x + (double) proj[4] * y + (double) proj[8] * z + proj[12];
+        final double cy = (double) proj[1] * x + (double) proj[5] * y + (double) proj[9] * z + proj[13];
+        final double cz = (double) proj[2] * x + (double) proj[6] * y + (double) proj[10] * z + proj[14];
+        final double cw = (double) proj[3] * x + (double) proj[7] * y + (double) proj[11] * z + proj[15];
+        if (!(cw > 1e-6) || !Double.isFinite(cw)) {
             return false;
         }
         final double ndcX = cx / cw;
@@ -147,6 +147,69 @@ public final class BlackHoleLensMath {
     }
 
     // ------------------------------------------------------------------ 矩形 / 预算
+
+    /** Conservative screen bounds of a sphere clipped by the camera's near plane. */
+    static Rect projectVolume(float[] proj, float[] center, double radius, int width, int height) {
+        double cx = clipCoordinate(proj, 0, center[0], center[1], center[2]);
+        double cy = clipCoordinate(proj, 1, center[0], center[1], center[2]);
+        double cz = clipCoordinate(proj, 2, center[0], center[1], center[2]);
+        double cw = clipCoordinate(proj, 3, center[0], center[1], center[2]);
+        double nx = (double) proj[3] + proj[2], ny = (double) proj[7] + proj[6], nz = (double) proj[11] + proj[10];
+        double nearLength = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        double nearDistance = (cw + cz) / nearLength;
+        double fx = (double) proj[3] - proj[2], fy = (double) proj[7] - proj[6], fz = (double) proj[11] - proj[10];
+        if (nearDistance < -radius || cw - cz < -radius * Math.sqrt(fx * fx + fy * fy + fz * fz)) return null;
+
+        double capRadius = Math.sqrt(Math.max(0, radius * radius - nearDistance * nearDistance));
+        var volume = new ClippedSphere(radius, nx / nearLength, ny / nearLength, nz / nearLength, nearDistance, capRadius);
+        double left = -volume.screenBound(proj, 0, -1, -cx, cw, width);
+        double right = volume.screenBound(proj, 0, 1, cx, cw, width);
+        double bottom = -volume.screenBound(proj, 1, -1, -cy, cw, height);
+        double top = volume.screenBound(proj, 1, 1, cy, cw, height);
+        // Keep the resolve filter and distant glint inside the submitted region.
+        double x0 = Math.max(0, Math.floor((left + 1) * width * .5) - 4);
+        double y0 = Math.max(0, Math.floor((bottom + 1) * height * .5) - 4);
+        double x1 = Math.min(width, Math.ceil((right + 1) * width * .5) + 4);
+        double y1 = Math.min(height, Math.ceil((top + 1) * height * .5) + 4);
+        double w = x1 - x0, h = y1 - y0;
+        return w > 0 && h > 0 ? new Rect(x0, y0, w, h, Math.min(w, h) * .5) : null;
+    }
+
+    private record ClippedSphere(double radius, double nx, double ny, double nz, double nearDistance, double capRadius) {
+        double screenBound(float[] proj, int row, int sign, double numerator, double denominator, int pixels) {
+            double high = 1 + 8.0 / pixels;
+            double low = -high;
+            if (support(proj, row, sign, numerator, denominator, low) < 0) return Double.NEGATIVE_INFINITY;
+            if (support(proj, row, sign, numerator, denominator, high) >= 0) return high;
+            // The support of clipAxis - bound * clipW is monotone for the visible cap.
+            while ((high - low) * pixels > .5) {
+                double bound = (low + high) * .5;
+                if (support(proj, row, sign, numerator, denominator, bound) >= 0) low = bound;
+                else high = bound;
+            }
+            return high;
+        }
+
+        private double support(float[] proj, int row, int sign, double numerator, double denominator, double bound) {
+            double x = sign * proj[row] - bound * proj[3];
+            double y = sign * proj[row + 4] - bound * proj[7];
+            double z = sign * proj[row + 8] - bound * proj[11];
+            double lengthSquared = x * x + y * y + z * z;
+            double length = Math.sqrt(lengthSquared);
+            double alongNearNormal = x * nx + y * ny + z * nz;
+            // When the sphere's support point is behind the near plane, its
+            // replacement lies on the circular intersection with that plane.
+            double extent = nearDistance * length + radius * alongNearNormal >= 0
+                    ? radius * length
+                    : capRadius * Math.sqrt(Math.max(0, lengthSquared - alongNearNormal * alongNearNormal))
+                            - nearDistance * alongNearNormal;
+            return numerator - bound * denominator + extent;
+        }
+    }
+
+    private static double clipCoordinate(float[] proj, int row, double x, double y, double z) {
+        return proj[row] * x + proj[row + 4] * y + proj[row + 8] * z + proj[row + 12];
+    }
 
     /**
      * 以屏幕点 {@code (cx,cy)} 为中心、半边长 {@code halfPx} 的正方形，裁到画面内，

@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 
 // Author: dishanhai
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensSpec;
+import com.dishanhai.gt_shanhai.client.renderer.blackhole.KerrControls;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -34,8 +35,12 @@ public final class GuixuDeepSpaceBackdrop {
     }
 
     public static void emit(float[] camera, double horizon, Sink sink) {
+        emit(camera, horizon, false, sink);
+    }
+
+    static void emit(float[] camera, double horizon, boolean legacyBlackHole, Sink sink) {
         double length = cameraDistance(camera);
-        float opacity = opacity(length, horizon);
+        float opacity = opacity(length, horizon, legacyBlackHole);
         if (opacity <= 0) return;
         Matrix4f plane = backdropPlane(camera, horizon, length);
         Vector3f point = new Vector3f();
@@ -95,16 +100,24 @@ public final class GuixuDeepSpaceBackdrop {
                 + camera[2]*(double)camera[2]);
     }
 
-    /** 與洞內透鏡共用進入判據；提前淡出，避免透鏡把黑幕當成世界背景取樣。 */
-    private static float opacity(double distance, double horizon) {
-        double threshold = BlackHoleLensSpec.insideThresholdBlocks(horizon / BlackHoleLensSpec.B_CRIT);
-        double fade = Math.max(0, Math.min(1, (distance - threshold) / Math.max(2, horizon * .5)));
+    private static float opacity(double distance, double horizon, boolean legacyBlackHole) {
+        double referenceRs = horizon / BlackHoleLensSpec.B_CRIT;
+        // The legacy lens enters its interior view at the apparent shadow radius.
+        // Kerr enters only at the physical horizon. Keep the capture source clear there.
+        double threshold = legacyBlackHole ? BlackHoleLensSpec.insideThresholdBlocks(referenceRs)
+                : KerrControls.horizonRadiusBound(distance, referenceRs);
+        double width = legacyBlackHole ? Math.max(2, horizon * .5) : Math.clamp(threshold * .5, .5, 2);
+        double fade = Math.clamp((distance - threshold) / width, 0, 1);
         return (float)(fade * fade * (3 - 2 * fade));
     }
 
     public static void render(PoseStack pose, float[] camera, double horizon) {
+        render(pose, camera, horizon, false);
+    }
+
+    static void render(PoseStack pose, float[] camera, double horizon, boolean legacyBlackHole) {
         double length = cameraDistance(camera);
-        float opacity = opacity(length, horizon);
+        float opacity = opacity(length, horizon, legacyBlackHole);
         if (opacity <= 0) return;
         Matrix4f matrix = new Matrix4f(pose.last().pose()).mul(backdropPlane(camera, horizon, length));
         var frustum = new FrustumIntersection(new Matrix4f(RenderSystem.getProjectionMatrix()).mul(matrix), false);

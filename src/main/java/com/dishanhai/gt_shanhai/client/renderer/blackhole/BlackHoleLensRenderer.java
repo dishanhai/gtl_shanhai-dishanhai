@@ -11,6 +11,7 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.config.GuixuClientConfig;
+import com.dishanhai.gt_shanhai.config.KerrRenderConfig;
 import com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuStellarEndRenderer;
 import com.dishanhai.gt_shanhai.client.renderer.hostfx.HostFxGlassArDeferred;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
@@ -47,6 +48,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleTuning.RenderMode;
 import static com.dishanhai.gt_shanhai.config.KerrRenderConfig.Parameter.*;
 
 /**
@@ -290,6 +292,7 @@ public final class BlackHoleLensRenderer {
     private static final int GL_CURRENT_PROGRAM = 35725;
 
     private static final ResourceLocation SHADER_ID = new ResourceLocation("gt_shanhai", "guixu_blackhole");
+    private static final ResourceLocation LEGACY_SHADER_ID = new ResourceLocation("gt_shanhai", "guixu_blackhole_legacy");
     private static final KerrRenderPass KERR_PASS = new KerrRenderPass();
 
     /**
@@ -309,7 +312,15 @@ public final class BlackHoleLensRenderer {
     private static final String[] REQUIRED_UNIFORMS = {
             "uProjMat", "uInvProj", "uDiskNormal", "uEquatorialX", "uScreenSize", "uBgRect", "uBgTexel",
             "uTraceRect", "uRayJitter", "uPreviousProjection", "uPreviousToView", "uPreviousRect", "uPreviousJitter",
-            "uHistoryWeight", "uDisplay", "uSkyMix", "uStrength", "uShadowPixels", "uSampleBackground", "uDepthGate", "uGateEps"
+            "uHistoryWeight", "uDisplay", "uSkyMix", "uStrength", "uShadowPixels", "uSampleBackground", "uDepthGate",
+            "uGateEps"
+    };
+
+    private static final String[] LEGACY_REQUIRED_UNIFORMS = {
+            "uProjMat", "uBhView", "uDiskNormal", "uScreenSize", "uBgRect", "uBgTexel",
+            "uHolePx", "uLensRadiusPx", "uRs", "uTanHalfFov", "uAspect", "uTime",
+            "uDiskGain", "uDiskHeat", "uRingGain", "uStrength", "uSampleBackground", "uKerrParameters",
+            "uDepthGate", "uGateEps", "uCaptureDepthOnly"
     };
 
     /**
@@ -341,6 +352,8 @@ public final class BlackHoleLensRenderer {
 
     private static ExteriorShader lensShader;
     private static boolean shaderTried;
+    private static boolean legacyShader;
+    private static RenderMode renderMode = RenderMode.KERR;
 
     private static RenderType lensType;
     /** 无遮挡版（{@code depth=none}）：{@code always} 深度测试；与 {@code lensType(boolean)} 分开缓存。 */
@@ -604,6 +617,9 @@ public final class BlackHoleLensRenderer {
         float renderSeconds;
         float diskHeat;
         KerrControls.Frame kerr;
+        KerrGeometry geometry;
+        boolean legacyBlackHole;
+        RenderMode mode;
         float[] spinAxis, equatorialX;
         boolean nearField;
         long stampNanos;
@@ -723,7 +739,7 @@ public final class BlackHoleLensRenderer {
         }
         final Frame taken = pending;
         pending = null;
-        renderFrame(guard(), taken, PATH_LENS_AFTER_WEATHER, STAGE_AFTER_WEATHER);
+        renderFrame(taken, PATH_LENS_AFTER_WEATHER, STAGE_AFTER_WEATHER);
     }
 
     /**
@@ -770,7 +786,7 @@ public final class BlackHoleLensRenderer {
                 return false;                               // 上一帧的残渣：别拿旧矩阵画新帧
             }
             f.depthPreserved = depthPreserved;
-            return renderFrame(guard(), f, PATH_LENS_AFTER_COMPOSITE, stage);
+            return renderFrame(f, PATH_LENS_AFTER_COMPOSITE, stage);
         } finally {
             GuixuStellarEndRenderer.flushAfterLens(renderFrameSerial);
             FOREGROUND_OUTLINE.flush(renderFrameSerial);
@@ -816,19 +832,8 @@ public final class BlackHoleLensRenderer {
      * @return null = 这一帧不该画（原因已写进 {@link BlackHoleFrameStats#lastSkip()}）
      */
     private static Frame capture(RenderLevelStageEvent event) {
-        final BlackHoleFallbackGuard g = guard();
-        if (g.isDead()) {                               // 闸门 G1（洞内保留）：三级 = 兜底已放弃
-            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_DEAD);
-            return null;                                // 三级：从此什么都不画
-        }
-        if (!enabled()) {                               // 闸门 G2（洞内保留）：owner 配置 · 总开关
+        if (!enabled()) {
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_DISABLED);
-            return null;
-        }
-        final double[] center = resolveCenter();
-        if (center == null) {                           // 闸门 G3（洞内保留）：owner 配置 · 没配中心
-            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_CENTER);
-            noteIdle();
             return null;
         }
         final Minecraft mc = Minecraft.getInstance();
@@ -843,19 +848,27 @@ public final class BlackHoleLensRenderer {
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_LEVEL);
             return null;
         }
+        final Vec3 camPos = camera.getPosition();
+        final double[] center = resolveCenter();
+        if (center == null) {
+            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_CENTER);
+            noteIdle();
+            return null;
+        }
         // 山海：獨立透鏡事件仍會在 BER 停止後執行，必須自己驗證主機來源而非等待 BER 清理。
         float diskHeat = 0;
+        RenderMode mode = RenderMode.KERR;
         if (BlackHoleTuning.hasHostCenter()) {
-            Vec3 cameraPos = camera.getPosition();
             BlockPos controller = BlockPos.of(BlackHoleTuning.hostCenterControllerPos());
             BlockPos centerPos = BlockPos.containing(center[0], center[1], center[2]);
             boolean available = GuixuClientConfig.hostFxEnabled()
-                    && BlackHoleTuning.hostCenterInRange(mc.level, cameraPos.x, cameraPos.z,
+                    && BlackHoleTuning.hostCenterInRange(mc.level, camPos.x, camPos.z,
                             mc.options.getEffectiveRenderDistance())
                     && mc.level.hasChunkAt(controller) && mc.level.hasChunkAt(centerPos);
             if (available && MetaMachine.getMachine(mc.level, controller) instanceof GuixuVisionCoreMachine host
                     && (host.isFormed() || host.isHostFormedSync())) {
                 diskHeat = host.getAccretionHeat();
+                mode = host.isHostLegacyBlackHole() ? RenderMode.LEGACY : RenderMode.KERR;
             } else {
                 BlackHoleTuning.clearHostCenter();
                 BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_CENTER);
@@ -869,6 +882,8 @@ public final class BlackHoleLensRenderer {
         }
         final Frame f = new Frame();
         f.diskHeat = diskHeat;
+        f.mode = mode;
+        f.legacyBlackHole = mode == RenderMode.LEGACY;
         f.screenW = main.width;
         f.screenH = main.height;
 
@@ -876,7 +891,6 @@ public final class BlackHoleLensRenderer {
         //   用户原话：「还有为什么黑洞太远了就不画了，我要他一直画」
         //   ⇒ 原来的 `if (!(dist <= MAX_DISTANCE_BLOCKS)) return;` 整条删除（那个常量也一起删了）。
         //     距离现在只做两件事：① 进日志（dist=）② 算像素尺度（用前向距离，见下）。
-        final Vec3 camPos = camera.getPosition();
         final double dx = center[0] - camPos.x;
         final double dy = center[1] - camPos.y;
         final double dz = center[2] - camPos.z;
@@ -886,40 +900,26 @@ public final class BlackHoleLensRenderer {
 
         double worldSeconds = (event.getRenderTick() + (double) event.getPartialTick()) / 20;
         f.renderSeconds = (float) worldSeconds;
+        double lensRange = LENS_RANGE_RS;
         double referenceRs = rsBlocks();
-        f.kerr = KerrControls.sample(System.nanoTime(), worldSeconds, f.dist, referenceRs);
-        final double rs0 = f.dist > 1e-8 ? 2 * f.dist / Math.max(1e-8, f.kerr.value(DISTANCE))
-                : referenceRs * f.kerr.value(MASS);
-        double tilt = Math.toRadians(f.kerr.value(TILT));
-        double azimuth = Math.toRadians(f.kerr.value(AZIMUTH));
-        var axis = new Vector3d(Math.sin(tilt) * Math.sin(azimuth), Math.cos(tilt),
-                Math.sin(tilt) * Math.cos(azimuth));
-        var equatorialX = new Vector3d(Math.cos(azimuth), 0, -Math.sin(azimuth));
-        if (f.kerr.inclinationWeight() > 0 && f.dist > 1e-8) {
-            var towardObserver = new Vector3d(-dx / f.dist, -dy / f.dist, -dz / f.dist);
-            var tangent = new Vector3d(axis).fma(-axis.dot(towardObserver), towardObserver);
-            if (tangent.lengthSquared() < 1e-8) {
-                tangent.set(equatorialX).fma(-equatorialX.dot(towardObserver), towardObserver);
+        if (f.legacyBlackHole) {
+            f.rsBlocks = referenceRs;
+            f.spinAxis = WORLD_DISK_NORMAL;
+            f.insideThr = BlackHoleLensSpec.insideThresholdBlocks(referenceRs);
+            f.inside = f.dist <= f.insideThr;
+        } else {
+            captureKerrGeometry(f, worldSeconds, referenceRs, dx, dy, dz);
+            if (mode == RenderMode.KERR && f.kerr.quality() != KerrRenderConfig.Quality.COMPATIBILITY) {
+                // Bounds are in Schwarzschild radii (2 M). Include the disk atmosphere
+                // and a margin for lensed rays before clipping the screen rectangle.
+                lensRange = Math.max(lensRange, .55 * f.kerr.value(OUTER_RADIUS)
+                        * Math.hypot(1, 5 * f.kerr.value(THICKNESS)) + 2);
             }
-            double naturalAngle = Math.acos(Math.clamp(axis.dot(towardObserver), -1, 1));
-            double inclination = Math.fma(Math.toRadians(f.kerr.value(INCLINATION)) - naturalAngle,
-                    f.kerr.inclinationWeight(), naturalAngle);
-            axis.set(towardObserver).mul(Math.cos(inclination)).fma(Math.sin(inclination), tangent.normalize());
-            if (Math.abs(equatorialX.dot(axis)) > .999) equatorialX.set(towardObserver).cross(tangent).normalize();
         }
-        f.spinAxis = new float[]{(float) axis.x, (float) axis.y, (float) axis.z};
-        f.equatorialX = new float[]{(float) equatorialX.x, (float) equatorialX.y, (float) equatorialX.z};
+        final double rs0 = f.rsBlocks;
         final double shadowR = BlackHoleLensMath.B_CRIT * rs0;
-        var geometry = f.kerr.geometry();
-        double radialHeight = -(axis.x * dx + axis.y * dy + axis.z * dz) * 2 / rs0;
-        double radialPlane = Math.sqrt(Math.max(0, 4 * f.dist * f.dist / (rs0 * rs0) - radialHeight * radialHeight));
-        double radialCoordinate = geometry.radialCoordinate(radialPlane, 0, radialHeight);
-        final double insideThr = radialCoordinate > 1e-8 ? f.dist * geometry.outerHorizon() / radialCoordinate
-                : rs0 * geometry.outerHorizon() / 2;
-        f.rsBlocks = rs0;
-        f.insideThr = insideThr;
-        if (radialCoordinate <= geometry.outerHorizon()) {
-            f.inside = true;
+        final double insideThr = f.insideThr;
+        if (f.inside) {
             f.insideShadowR = shadowR;
             f.insideRatio = shadowR > 1.0e-6D ? f.dist / shadowR : 0.0D;
             // 进洞多深：0 = 刚跨进判据边界、1 = 正在球心。洞内的窗口半径/拖影/色散/金带宽度全由它驱动
@@ -982,32 +982,8 @@ public final class BlackHoleLensRenderer {
         final float[] bhView = new float[3];
         BlackHoleLensMath.toView(f.view, center, f.camPos, bhView);
         f.bhView = bhView;                              // ← 着色器的 uBhView 直接取它（相机空间）
-        // Inside the emitting volume a visible arc may extend behind the camera
-        // even when its centre is off screen. Trace the complete field of view.
-        if (f.dist <= rs0 * LENS_RANGE_RS) {
-            f.nearField = true;
-            f.proj = new float[16];
-            event.getProjectionMatrix().get(f.proj);
-            f.tanHalfFov = BlackHoleLensMath.tanHalfFovY(f.proj);
-            f.holeScreen = new double[]{f.screenW * .5, f.screenH * .5, 0};
-            f.forwardDist = -bhView[2];
-            float[] observerProjection = f.forwardDist > .05 ? bhView : new float[]{0, 0, -(float) f.dist};
-            BlackHoleLensMath.projectToScreen(f.proj, observerProjection, f.screenW, f.screenH, f.holeScreen);
-            f.holeScreen[2] = Math.clamp(f.holeScreen[2], -0.9999, 0.9999);
-            f.holeDepthWin = f.holeScreen[2] * .5 + .5;
-            f.depthEpsPerBlock = Math.abs(windowDepth(f.proj, observerProjection[2] - 1)
-                    - windowDepth(f.proj, observerProjection[2]));
-            f.gateEps = Math.max(GATE_EPS_MIN, GATE_EPS_BLOCKS * f.depthEpsPerBlock);
-            f.rectW = f.screenW;
-            f.rectH = f.screenH;
-            f.rectHalf = Math.max(f.screenW, f.screenH) * .5;
-            f.screenR = BlackHoleFallbackQuad.clampScreenR(shadowR * f.screenH /
-                    (2 * f.tanHalfFov * Math.max(rs0, f.dist)), f.screenH);
-            f.stampNanos = System.nanoTime();
-            f.renderTick = event.getRenderTick();
-            return f;
-        }
-        if (!(bhView[2] < -0.05F)) {                    // 闸门 G7（洞内跳过）：洞在相机【前方】
+        if (f.mode == RenderMode.KERR) return captureKerrVolume(f, event, lensRange * rs0, shadowR);
+        if (!(bhView[2] < -0.05F)) {
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_BEHIND);
             return null;                                // 在相机背后 / 贴在镜头上（不是距离闸门）
         }
@@ -1069,7 +1045,7 @@ public final class BlackHoleLensRenderer {
         //   screenR=1725.9 与 parts=disk 出现在同一批帧上）。口径见 BlackHoleFallbackQuad.clampScreenR。
         screenRRaw = f.rsBlocks * BlackHoleLensMath.B_CRIT * pxPerBlock;
         f.screenR = BlackHoleFallbackQuad.clampScreenR(screenRRaw, f.screenH);
-        final double lensHalfPx = rsPx * LENS_RANGE_RS;
+        final double lensHalfPx = rsPx * lensRange;
         if (!specLogged) {
             specLogged = true;
             GTDishanhaiMod.LOGGER.info("{} spec {}（改前：rs=1.00格 黑盘半径=2.60格 透镜半径=3.10格 "
@@ -1082,10 +1058,19 @@ public final class BlackHoleLensRenderer {
         //   现在：抬到 MIN_LENS_RADIUS_PX 继续走；只有"没有中心 / 开关关闭 / shader 失败"三种情况才不画。
         f.lensHalfPx = Math.max(lensHalfPx, MIN_LENS_RADIUS_PX);
 
-        // Cropping the emitter to a sampling budget cuts a square into the disk on approach.
-        // KerrRenderPass budgets the ray field independently of the visible image extent.
-        final BlackHoleLensMath.Rect rect = BlackHoleLensMath.rectAround(
-                f.holeScreen[0], f.holeScreen[1], f.lensHalfPx, f.screenW, f.screenH, 0);
+        final BlackHoleLensMath.Rect rect;
+        double shadowHalf = 0;
+        if (f.legacyBlackHole) {
+            double maxPixels = Math.min((double) MAX_TEX_SIDE * MAX_TEX_SIDE,
+                    f.screenW * (double) f.screenH * MAX_PIXEL_FRACTION);
+            shadowHalf = Math.min(f.lensHalfPx, screenRRaw * 1.45D);
+            rect = BlackHoleLensMath.rectWithShadow(f.holeScreen[0], f.holeScreen[1], f.lensHalfPx,
+                    shadowHalf, f.screenW, f.screenH, maxPixels);
+        } else {
+            // KerrRenderPass budgets the ray field independently of the visible image extent.
+            rect = BlackHoleLensMath.rectAround(f.holeScreen[0], f.holeScreen[1],
+                    f.lensHalfPx, f.screenW, f.screenH, 0);
+        }
         if (rect.w < 4.0D || rect.h < 4.0D) {        // 闸门 G11（洞内跳过）：整块在画面外
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_RECT);
             return null;                                // 整个黑洞都在画面外（不是"太小"）
@@ -1094,7 +1079,7 @@ public final class BlackHoleLensRenderer {
         f.rectY0 = rect.y0;
         f.rectW = rect.w;
         f.rectH = rect.h;
-        f.rectHalf = rect.half;
+        f.rectHalf = Math.max(rect.half, shadowHalf);
 
         final org.joml.Vector3f up = camera.getUpVector();
         final org.joml.Vector3f left = camera.getLeftVector();
@@ -1106,14 +1091,114 @@ public final class BlackHoleLensRenderer {
         return f;
     }
 
+    private static Frame captureKerrVolume(Frame f, RenderLevelStageEvent event, double extent, double shadowRadius) {
+        f.proj = event.getProjectionMatrix().get(new float[16]);
+        f.tanHalfFov = BlackHoleLensMath.tanHalfFovY(f.proj);
+        if (!(f.tanHalfFov >= .02) || f.tanHalfFov > 20) {
+            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_BAD_PROJECTION);
+            return null;
+        }
+        var rect = BlackHoleLensMath.projectVolume(f.proj, f.bhView, extent, f.screenW, f.screenH);
+        if (rect == null) {
+            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_OUT_OF_FRUSTUM);
+            return null;
+        }
+        f.forwardDist = -f.bhView[2];
+        f.holeScreen = new double[3];
+        f.nearField = f.forwardDist <= .05 || !BlackHoleLensMath.projectToScreen(f.proj, f.bhView,
+                f.screenW, f.screenH, f.holeScreen);
+        float depthZ = f.bhView[2];
+        if (f.nearField) {
+            // A volume may intersect the viewport even when its centre cannot be projected.
+            depthZ = -(float) f.dist;
+            f.holeScreen[0] = f.screenW * .5;
+            f.holeScreen[1] = f.screenH * .5;
+            f.holeScreen[2] = 2 * windowDepth(f.proj, depthZ) - 1;
+        }
+        f.holeScreen[2] = Math.clamp(f.holeScreen[2], -.9999, .9999);
+        f.holeDepthWin = f.holeScreen[2] * .5 + .5;
+        f.depthEpsPerBlock = Math.abs(windowDepth(f.proj, depthZ - 1) - windowDepth(f.proj, depthZ));
+        f.gateEps = Math.max(GATE_EPS_MIN, GATE_EPS_BLOCKS * f.depthEpsPerBlock);
+        double scaleDistance = Math.max(f.dist * .5, f.forwardDist);
+        screenRRaw = BlackHoleLensMath.screenRadiusPx(shadowRadius, scaleDistance, f.tanHalfFov, f.screenH);
+        f.screenR = BlackHoleFallbackQuad.clampScreenR(screenRRaw, f.screenH);
+        f.lensHalfPx = Math.max(MIN_LENS_RADIUS_PX,
+                BlackHoleLensMath.screenRadiusPx(extent, scaleDistance, f.tanHalfFov, f.screenH));
+        f.rectX0 = rect.x0;
+        f.rectY0 = rect.y0;
+        f.rectW = rect.w;
+        f.rectH = rect.h;
+        f.rectHalf = rect.half;
+        f.renderTick = event.getRenderTick();
+        f.stampNanos = System.nanoTime();
+        return f;
+    }
+
+    private static void captureKerrGeometry(Frame f, double worldSeconds, double referenceRs,
+                                            double dx, double dy, double dz) {
+        f.kerr = KerrControls.KERR.sample(System.nanoTime(), worldSeconds, f.dist, referenceRs);
+        final double rs = f.dist > 1e-8 ? 2 * f.dist / Math.max(1e-8, f.kerr.value(DISTANCE))
+                : referenceRs * f.kerr.value(MASS);
+        double tilt = Math.toRadians(f.kerr.value(TILT));
+        double inclinationWeight = f.kerr.inclinationWeight();
+        double azimuth = Math.toRadians(f.kerr.value(AZIMUTH));
+        var axis = new Vector3d(Math.sin(tilt) * Math.sin(azimuth), Math.cos(tilt),
+                Math.sin(tilt) * Math.cos(azimuth));
+        var equatorialX = new Vector3d(Math.cos(azimuth), 0, -Math.sin(azimuth));
+        if (inclinationWeight > 0 && f.dist > 1e-8) {
+            var towardObserver = new Vector3d(-dx / f.dist, -dy / f.dist, -dz / f.dist);
+            var tangent = new Vector3d(axis).fma(-axis.dot(towardObserver), towardObserver);
+            if (tangent.lengthSquared() < 1e-8) {
+                tangent.set(equatorialX).fma(-equatorialX.dot(towardObserver), towardObserver);
+            }
+            double naturalAngle = Math.acos(Math.clamp(axis.dot(towardObserver), -1, 1));
+            double inclination = Math.fma(Math.toRadians(f.kerr.value(INCLINATION)) - naturalAngle,
+                    inclinationWeight, naturalAngle);
+            axis.set(towardObserver).mul(Math.cos(inclination)).fma(Math.sin(inclination), tangent.normalize());
+            if (Math.abs(equatorialX.dot(axis)) > .999) equatorialX.set(towardObserver).cross(tangent).normalize();
+        }
+        f.spinAxis = new float[]{(float) axis.x, (float) axis.y, (float) axis.z};
+        f.equatorialX = new float[]{(float) equatorialX.x, (float) equatorialX.y, (float) equatorialX.z};
+        f.geometry = f.kerr.geometry();
+        var geometry = f.geometry;
+        double radialHeight = -(axis.x * dx + axis.y * dy + axis.z * dz) * 2 / rs;
+        double radialPlane = Math.sqrt(Math.max(0, 4 * f.dist * f.dist / (rs * rs) - radialHeight * radialHeight));
+        double radialCoordinate = geometry.radialCoordinate(radialPlane, 0, radialHeight);
+        f.rsBlocks = rs;
+        f.insideThr = radialCoordinate > 1e-8 ? f.dist * geometry.outerHorizon() / radialCoordinate
+                : rs * geometry.outerHorizon() / 2;
+        f.inside = radialCoordinate <= geometry.outerHorizon();
+    }
+
     /**
-     * 拿一帧读数去画（一级 → 失败立刻二级；两条路互斥）。
+     * 拿一帧读数去画。
      *
      * @param path  {@link #PATH_LENS_AFTER_COMPOSITE} 或 {@link #PATH_LENS_AFTER_WEATHER}
      * @param stage 注入点的字符串（进日志）
-     * @return 是否走了一级（真透镜）
+     * @return 是否提交了黑洞效果
      */
-    private static boolean renderFrame(BlackHoleFallbackGuard g, Frame f, String path, String stage) {
+    private static boolean renderFrame(Frame f, String path, String stage) {
+        if (renderMode != f.mode) {
+            if (legacyShader != f.legacyBlackHole) closeShaderQuietly();
+            else KERR_PASS.resetMode();
+            if (renderMode != f.mode) {
+                if (renderMode == RenderMode.KERR) KerrControls.KERR.suspend();
+            }
+            renderMode = f.mode;
+            legacyShader = f.legacyBlackHole;
+            guard = new BlackHoleFallbackGuard(LOG_SINK);
+            LEVEL_RETRY.disarm();
+            shaderTried = false;
+            copyVerified = false;
+            bhViewBadFrames = 0;
+            bhViewBadWarned = false;
+            lensOnLogged = false;
+        }
+        final BlackHoleFallbackGuard g = guard();
+        if (g.isDead()) {
+            BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_DEAD);
+            return false;
+        }
         // 🔴 2026-10-25 第二十改：**这一帧真正生效**的透镜档位 —— 主机接管优先（机器字段为准），
         //   没主机时仍是 /shanhai bh lens auto|on|off。这是本文件里【唯一】读透镜档位的地方：
         //   下面的 G13 闸门（allowFull）与日志都吃这一个变量，所以"机器关掉透镜"不会只关一半。
@@ -1187,7 +1272,7 @@ public final class BlackHoleLensRenderer {
                 GTDishanhaiMod.LOGGER.info(
                         "{} lens_on path={} rect=[{},{} {}x{}] rsPx={} dist={} {}",
                         PREFIX, path, f1(f.rectX0), f1(f.rectY0), f1(f.rectW), f1(f.rectH),
-                        f1(f.screenR), f1(f.dist), KERR_PASS.status());
+                        f1(f.screenR), f1(f.dist), exteriorStatus(f));
             }
         }
 
@@ -1273,7 +1358,7 @@ public final class BlackHoleLensRenderer {
                 PREFIX, drawnPath, stage, shaderpack, depthOk ? "ok" : "none",
                 f.depthPreserved, f.inside, drew ? "lens" : "none",
                 f1(f.dist), f1(f.insideThr), f1(f.screenR),
-                f.inside ? PARTS_INSIDE : drewFull ? "kerr " + KERR_PASS.status() : "none",
+                f.inside ? PARTS_INSIDE : drewFull ? exteriorStatus(f) : "none",
                 drew ? "yes" : "no",
                 g.level(), g.reason(),
                 "[" + f1(f.rectX0) + "," + f1(f.rectY0) + " " + f1(f.rectW) + "x" + f1(f.rectH) + "]",
@@ -1887,8 +1972,9 @@ public final class BlackHoleLensRenderer {
         if (shader == null) {
             return false;
         }
-        final boolean copyWorld = sampleBackground && f.kerr.worldSky() > 0.0F;
-        if (copyWorld && !ensureBgTexture(g, (int) Math.ceil(f.rectW), (int) Math.ceil(f.rectH))) {
+        final boolean copyWorld = sampleBackground && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F);
+        final boolean copyScene = copyWorld;
+        if (copyScene && !ensureBgTexture(g, (int) Math.ceil(f.rectW), (int) Math.ceil(f.rectH))) {
             return false;
         }
         final Minecraft mc = Minecraft.getInstance();
@@ -1898,7 +1984,6 @@ public final class BlackHoleLensRenderer {
         }
         try {
             final float[] diskN = directionToView(f.view, f.spinAxis);
-            final float[] equatorialX = directionToView(f.view, f.equatorialX);
             final float nx = diskN[0];
             final float ny = diskN[1];
             final float nz = diskN[2];
@@ -1910,7 +1995,7 @@ public final class BlackHoleLensRenderer {
             // 🔴 2026-10-24 深夜：uBhView 必须是【相机空间】（着色器里 dir 就是相机空间射线）。
             //    之前这里错给了"世界空间差值" ⇒ b/bn 全错 ⇒ 黑盘/环/盘一件都不出（只剩 warp）。
             Matrix4f inverseProjection = new Matrix4f().set(f.proj).invert();
-            final double bnAtCenter = f.nearField ? 0 : centerBn(f, inverseProjection);
+            final double bnAtCenter = f.nearField || f.mode == RenderMode.KERR ? 0 : centerBn(f, inverseProjection);
             if (!(bnAtCenter < BlackHoleShaderProbe.B_CRIT)) {
                 // 🔴 2026-10-25 传送 bug 的真凶之一。
                 //   改前：这一帧不达标 ⇒ 立刻 degradeTo(LEVEL_QUAD)，而那个降级【只降不升】⇒ 整局变贴图。
@@ -1938,43 +2023,57 @@ public final class BlackHoleLensRenderer {
                 bhViewBadFrames = 0;                    // 连续超标断了 ⇒ 清零（下一次重新计数）
                 bhViewBadWarned = false;
             }
-            if (copyWorld && !copyBackground(g, main, f)) {
+            if (!f.legacyBlackHole) {
+                // Feedback needs the cost of the scene copies as well as the Kerr passes.
+                KERR_PASS.beginFrame(f);
+            }
+            if (copyScene && !copyBackground(g, main, f, copyWorld)) {
                 return false;
             }
             // 洞外透镜的采样深度门与颜色共用像素坐标。开关打开且本帧有世界深度时才复制。
             boolean gate = false;
-            if (copyWorld && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {
+            if (copyScene && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {
                 copyDepthRect(f.copyX0, f.copyY0, f.copyW, f.copyH);
                 gate = !depthGateDisabled;
             }
-            KERR_PASS.draw(main, shader, f, inverseProjection, diskN, equatorialX, (float) (DISK_GAIN * BlackHoleTuning.disk()));
+            shader.setSampler("SceneDepth", gate ? depthTexId : null);
+            if (copyScene) {
+                // Use the actual integer copy rectangle in both the bloom source and the display pass.
+                shader.safeGetUniform("uBgRect").set((float) f.copyX0, (float) f.copyY0,
+                        (float) f.copyW, (float) f.copyH);
+            }
+            final float diskGain = (float) (DISK_GAIN * BlackHoleTuning.disk());
+            if (f.legacyBlackHole) {
+                setLegacyUniforms(shader, f, sampleBackground, diskGain);
+            } else {
+                final float[] equatorialX = directionToView(f.view, f.equatorialX);
+                KERR_PASS.draw(main, shader, f, inverseProjection, diskN, equatorialX, diskGain);
+                shader.safeGetUniform("uEquatorialX").set(equatorialX);
+                shader.safeGetUniform("uStrength").set((float) deflectStrength());
+                shader.safeGetUniform("uShadowPixels").set((float) f.screenR);
+            }
             shader.safeGetUniform("uDiskNormal").set(nx / nlen, ny / nlen, nz / nlen);
-            shader.safeGetUniform("uEquatorialX").set(equatorialX);
             shader.safeGetUniform("uScreenSize").set((float) f.screenW, (float) f.screenH);
-            shader.safeGetUniform("uStrength").set((float) deflectStrength());
-            shader.safeGetUniform("uShadowPixels").set((float) f.screenR);
             shader.setSampleBackground(sampleBackground);
-            shader.safeGetUniform("uDepthGate").set(gate ? 1.0F : 0.0F);
+            shader.safeGetUniform("uDepthGate").set(gate && BlackHoleTuning.depthGate() ? 1.0F : 0.0F);
             // 采样深度和合成深度使用同一洞心平面，远处天空不抬高采样门。
             shader.safeGetUniform("uHoleDepth").set((float) f.holeDepthWin);
             // 容差单独走 uGateEps（与 uHoleDepth 解耦：一个是参照，一个是容差）
             shader.safeGetUniform("uGateEps").set((float) f.gateEps);
-            shader.setSampler("SceneDepth", gate ? depthTexId : null);
 
             // 背景贴图绑到 0 号纹理单元（见 bindTextureForShader 的注释：setShaderTexture 只"记账"不绑）
-            if (copyWorld) {
+            if (copyScene) {
                 shader.safeGetUniform("uProjMat").set(new Matrix4f().set(f.proj));
-                // 用实际拷贝的整数矩形，未偏折像素才会对准各自的 texel。
-                shader.safeGetUniform("uBgRect").set((float) f.copyX0, (float) f.copyY0,
-                        (float) f.copyW, (float) f.copyH);
                 final float texel = 1.0F / (float) bgTexWidth;
                 shader.safeGetUniform("uBgTexel").set(texel, 1f / bgTexHeight);
-                shader.setSampler("SceneColor", bgTexId);
+                shader.setSampler("SceneColor", copyWorld ? bgTexId : null);
             } else {
                 shader.setSampler("SceneColor", null);
                 main.bindWrite(false);
             }
-            KERR_PASS.resolveFootprints(main, shader, f);
+            if (!f.legacyBlackHole) {
+                KERR_PASS.resolveFootprints(main, shader, f);
+            }
             drawLensQuad(f, depthOk, gate);
             if (depthOk && GuixuStellarEndRenderer.hasDeferredBodies(renderFrameSerial)) {
                 writeCapturedDepth(f, shader);
@@ -1982,12 +2081,35 @@ public final class BlackHoleLensRenderer {
             return true;
         } catch (Throwable t) {
             g.degradeTo(BlackHoleFallbackGuard.LEVEL_QUAD, "lens_draw:" + t.getClass().getSimpleName());
-            GTDishanhaiMod.LOGGER.warn("{} Kerr render pass failed", PREFIX, t);
+            GTDishanhaiMod.LOGGER.warn("{} black hole render failed (legacy={})", PREFIX, f.legacyBlackHole, t);
             KERR_PASS.invalidateHistory();
             return false;
         } finally {
-            KERR_PASS.finishTiming();
+            if (!f.legacyBlackHole) {
+                KERR_PASS.finishTiming();
+            }
         }
+    }
+
+    private static void setLegacyUniforms(ExteriorShader shader, Frame f, boolean sampleBackground, float diskGain) {
+        shader.safeGetUniform("uBhView").set(f.bhView[0], f.bhView[1], f.bhView[2]);
+        shader.safeGetUniform("uHolePx").set((float) f.holeScreen[0], (float) f.holeScreen[1]);
+        shader.safeGetUniform("uLensRadiusPx").set((float) f.rectHalf);
+        shader.safeGetUniform("uRs").set((float) f.rsBlocks);
+        shader.safeGetUniform("uTanHalfFov").set((float) f.tanHalfFov);
+        shader.safeGetUniform("uAspect").set((float) f.screenW / f.screenH);
+        shader.safeGetUniform("uTime").set(f.renderSeconds);
+        shader.safeGetUniform("uStrength").set((float) (sampleBackground ? deflectStrength() : BlackHoleLensSpec.DEFLECT_GAIN));
+        shader.safeGetUniform("uDiskGain").set(diskGain);
+        shader.safeGetUniform("uDiskHeat").set(f.diskHeat);
+        shader.safeGetUniform("uRingGain").set(RING_GAIN);
+        var kerr = BlackHoleTuning.kerrParameters();
+        shader.safeGetUniform("uKerrParameters").set(kerr.spin(), kerr.horizon(), kerr.diskInner());
+    }
+
+    private static String exteriorStatus(Frame f) {
+        if (f.legacyBlackHole) return "legacy";
+        return "kerr " + KERR_PASS.status();
     }
 
     private static void writeCapturedDepth(Frame f, ShaderInstance shader) {
@@ -2309,8 +2431,8 @@ public final class BlackHoleLensRenderer {
             transferPass = pass;
             safeGetUniform("uTransferPass").set((float) pass);
         }
-        private ExteriorShader() throws IOException {
-            super(Minecraft.getInstance().getResourceManager(), SHADER_ID, DefaultVertexFormat.POSITION);
+        private ExteriorShader(ResourceLocation id) throws IOException {
+            super(Minecraft.getInstance().getResourceManager(), id, DefaultVertexFormat.POSITION);
         }
 
         private void setSampleBackground(boolean sampleBackground) {
@@ -2345,8 +2467,10 @@ public final class BlackHoleLensRenderer {
         }
         shaderTried = true;
         try {
-            final ExteriorShader sh = new ExteriorShader();
-            final String missing = firstMissingUniform(sh);
+            final ResourceLocation id = legacyShader ? LEGACY_SHADER_ID : SHADER_ID;
+            final String[] required = legacyShader ? LEGACY_REQUIRED_UNIFORMS : REQUIRED_UNIFORMS;
+            final ExteriorShader sh = new ExteriorShader(id);
+            final String missing = firstMissingUniform(sh, required);
             if (missing != null) {
                 try {
                     sh.close();
@@ -2362,7 +2486,7 @@ public final class BlackHoleLensRenderer {
             //   在日志里是**可读的**（optional_missing=[] 就是"读到了"）。
             final java.util.List<String> optionalMissing = noteOptionalUniforms(sh);
             GTDishanhaiMod.LOGGER.info("{} shader_ok id={} uniforms_checked={} optional={} optional_missing={}",
-                    PREFIX, SHADER_ID, REQUIRED_UNIFORMS.length, OPTIONAL_UNIFORMS.length, optionalMissing);
+                    PREFIX, id, required.length, OPTIONAL_UNIFORMS.length, optionalMissing);
             return sh;
         } catch (Throwable t) {
             g.degradeTo(BlackHoleFallbackGuard.LEVEL_QUAD, "shader_load:" + t.getClass().getSimpleName());
@@ -2378,8 +2502,8 @@ public final class BlackHoleLensRenderer {
      * 所以正常情况下这里根本轮不到它；但万一以后有人把某个可选项又写回上面那张表，
      * 也不许因此把整条一级透镜打成二级 —— <b>"着色器里没人读它"不是"着色器坏了"</b>。
      */
-    private static String firstMissingUniform(ShaderInstance sh) {
-        for (String name : REQUIRED_UNIFORMS) {
+    private static String firstMissingUniform(ShaderInstance sh, String[] required) {
+        for (String name : required) {
             if (sh.getUniform(name) != null) {
                 continue;
             }
@@ -2718,6 +2842,10 @@ public final class BlackHoleLensRenderer {
      * 一次会话只做一次，成本可忽略，但能保证"这条通路在你机器上到底行不行"是个<b>实测结论</b>而不是假设。
      */
     private static boolean copyBackground(BlackHoleFallbackGuard g, RenderTarget main, Frame f) {
+        return copyBackground(g, main, f, true);
+    }
+
+    private static boolean copyBackground(BlackHoleFallbackGuard g, RenderTarget main, Frame f, boolean copyColor) {
         final int left = (int) Math.floor(f.rectX0);
         final int bottom = (int) Math.floor(f.rectY0);
         final int right = (int) Math.ceil(f.rectX0 + f.rectW);
@@ -2740,14 +2868,15 @@ public final class BlackHoleLensRenderer {
         try {
             // GL_FRAMEBUFFER（36160）同时绑读/写 ⇒ bindWrite 之后 READ framebuffer 就是主目标
             main.bindWrite(false);
-            GlStateManager._bindTexture(bgTexId);
-            GlStateManager._glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, x, y, w, h);
-            GlStateManager._bindTexture(0);
             // 🔴 把"真正拷进贴图的整数矩形"记进这一帧：着色器 uBgRect 用它（见 Frame.copyX0 的注释）
             f.copyX0 = x;
             f.copyY0 = y;
             f.copyW = w;
             f.copyH = h;
+            if (!copyColor) return true;
+            GlStateManager._bindTexture(bgTexId);
+            GlStateManager._glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, x, y, w, h);
+            GlStateManager._bindTexture(0);
 
             // ---- 探针②（洞内专属的一次性实测）：源矩形 / 目标纹理 / 此刻绑定的读+写 FBO / glGetError ----
             //   为什么还要再排干+再拷一次：上面的那次拷贝可能继承到别的 pass 留下的历史错误，
@@ -3128,6 +3257,7 @@ public final class BlackHoleLensRenderer {
         }
         return centerCache;
     }
+
 
     private static void noteBoot(Frame f, boolean shaderpack, String path) {
         if (bootLogged) {
