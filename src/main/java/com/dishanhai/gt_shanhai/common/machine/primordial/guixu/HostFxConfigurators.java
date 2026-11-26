@@ -253,7 +253,9 @@ public final class HostFxConfigurators {
             group.addWidget(new LabelWidget(10, 129, this::fxLabelText));
             group.addWidget(new ButtonWidget(78, 125, 68, 16, GuiTextures.BUTTON,
                     clickData -> host.cycleHostHoleStyle())
-                    .setHoverTooltips(Component.translatable("gt_shanhai.guixu.blackhole_style.tooltip")));
+                    .setHoverTooltips(Component.translatable(host.isHostWhiteHoleUnlocked()
+                            ? "gt_shanhai.guixu.blackhole_style.tooltip.unlocked"
+                            : "gt_shanhai.guixu.blackhole_style.tooltip")));
             group.addWidget(new LabelWidget(82, 129, () -> Component.translatable(host.isHostWhiteHole()
                     ? "gt_shanhai.guixu.blackhole_style.white"
                     : host.isHostLegacyBlackHole() ? "gt_shanhai.guixu.blackhole_style.legacy"

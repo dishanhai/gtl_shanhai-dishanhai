@@ -149,6 +149,7 @@
   "gt_shanhai.white_hole.preset.cinematic_white_hole": "Cinematic White Hole",
   "gt_shanhai.white_hole.preset.scientific_visualization": "Scientific Visualization",
   "gt_shanhai.guixu.blackhole_style.tooltip": "Cycle between Kerr and legacy black holes. Use a Guixu Horizon Inversion Matrix to add white hole mode.",
+  "gt_shanhai.guixu.blackhole_style.tooltip.unlocked": "Cycle between Kerr, legacy black hole, and white hole.",
   "gt_shanhai.command.bh.lens.off": "Gravitational lensing disabled. The exterior black hole remains animated and the background stays in place.",
   "gt_shanhai.shop.currency_sale.limit": "Base low-tier sale quota (doubles per tier, 0 = disabled)",
   "gt_shanhai.shop.currency_sale.period": "Low-tier sale refresh period (real seconds)",

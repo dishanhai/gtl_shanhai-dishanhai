@@ -69,7 +69,7 @@ public final class WhiteHoleBloomGpuProbe {
         }
 
         int highlights;
-        try (var bloom = new CompactHdrPostProcessing(extension -> Files.readString(SHADERS.resolve("bright_pass." + extension)))) {
+        try (var bloom = new CompactHdrPostProcessing(extension -> Files.readString(SHADERS.resolve("../post/bright_pass." + extension)))) {
             highlights = bloom.draw(input, W, H, 1);
             require(highlights != 0, "Bloom failed to create a floating-point pyramid");
             require(glGetInteger(GL_ACTIVE_TEXTURE) == GL_TEXTURE3 && glGetInteger(GL_TEXTURE_BINDING_2D) == input,
