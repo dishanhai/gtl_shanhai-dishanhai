@@ -12,13 +12,14 @@ uniform float uDiskGain;
 uniform float uDiskHeat;
 uniform vec4 uKerrParameters; // a*, r+, ISCO, sign of disk rotation
 uniform vec4 uDiskPhysics;    // relative accretion rate, H/r, temperature in K, emissivity
+uniform float uOuterDisk;     // Boyer–Lindquist disk radius in GM/c²
+uniform float uDiskSqrtFlux[128]; // Page–Thorne steady thin disk, sampled from ISCO to uOuterDisk
 uniform vec2 uIntegration;    // relative tolerance and accepted/rejected step budget
 
 #define SPIN uKerrParameters.x
 #define HORIZON uKerrParameters.y
 #define ISCO uKerrParameters.z
 #define ROTATION uKerrParameters.w
-const float OUTER_DISK = 18.0;
 
 struct Metric {
     float r;
@@ -76,12 +77,21 @@ State flow(State y, Metric m, float pt) {
     return State(y.p - coupling * m.l, q * q * m.dh + coupling * dlp, -pt + coupling);
 }
 
-State observerRay(vec3 position, vec3 direction, Metric m, out float pt) {
-    // Eulerian observer of the outgoing KS slices, using the symmetric spatial
-    // orthonormal tetrad. This launch includes the observer's relativistic aberration.
+State observerRay(vec3 position, vec3 direction, vec3 velocity, Metric m, out float pt) {
+    // Boost the past-directed ray (-1, direction) from the camera tetrad
+    // to the Eulerian tetrad before constructing its canonical momentum.
+    float energy = 1.0;
+    vec3 momentum = direction;
+    float beta2 = dot(velocity, velocity);
+    if (beta2 > 0.0) {
+        float gamma = inversesqrt(1.0 - beta2);
+        float along = dot(velocity, direction);
+        energy = gamma * (1.0 - along);
+        momentum += (gamma * (gamma * along / (gamma + 1.0) - 1.0)) * velocity;
+    }
     float root = sqrt(1.0 + 2.0 * m.h);
-    vec3 p = direction + (root - 1.0) * dot(m.l, direction) * m.l;
-    pt = 1.0 / root + (2.0 * m.h / (root * root)) * dot(m.l, p);
+    vec3 p = momentum + (root - 1.0) * dot(m.l, momentum) * m.l;
+    pt = energy / root + (2.0 * m.h / (root * root)) * dot(m.l, p);
     return State(position, p, 0.0);
 }
 
@@ -139,13 +149,27 @@ float erfApprox(float x) {
     return sign(x) * (1.0 - inverse * inverse * inverse * inverse);
 }
 
-float emissivityPattern(float phase, float logRadius, float epoch) {
+// Smooth material-space fluctuations. Wrap the angular lattice across atan's seam.
+float diskNoise(float phase, float logRadius, float sectors, float seed) {
+    vec2 p = vec2(phase * (.15915494 * sectors), logRadius);
+    vec2 cell = floor(p), f = fract(p);
+    vec2 az = mod(cell.x + vec2(0.0, 1.0), sectors);
+    vec4 h = fract((az.xyxy * .1031 + (cell.y + vec4(0,0,1,1)) * .11369 + seed) * .917);
+    h *= h + 19.19;
+    h = fract(h * (h + 2.73));
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h.x, h.y, f.x), mix(h.z, h.w, f.x), f.y) - .5;
+}
+
+float emissivityPattern(float phase, float logRadius, float epoch, float filamentDetail) {
     float seed = fract(sin(0.917 * epoch + 4.12) * 15487.317) * 6.2831853;
-    float ripple = sin(4.1 * logRadius + 2.0 * phase + seed);
-    float ridge = sin(3.0 * phase + 6.2 * logRadius + seed + 0.73 * ripple);
-    float filament = sin(7.0 * phase - 13.1 * logRadius - seed * 1.7 + 1.1 * ripple);
-    return 1.0 + .38 * ridge + .23 * filament + .12 * ridge * filament
-        + .13 * sin(11.0 * phase + 18.7 * logRadius + seed * 2.1);
+    float eddy = sin(3.0 * phase - 5.4 * logRadius + seed);
+    float lane = sin(2.0 * phase + 10.1 * logRadius + seed + 1.1 * eddy);
+    float filament = .5 + .5 * sin(5.0 * phase + 24.0 * logRadius - 1.7 * seed + 1.6 * eddy);
+    float plasma = diskNoise(phase, 8.0 * logRadius + eddy, 10.0, seed);
+    float threads = diskNoise(phase + .09 * eddy, 26.0 * logRadius + 2.4 * plasma, 22.0, seed + .39);
+    return 1.0 + .19 * lane + .09 * eddy + .52 * plasma
+        + filamentDetail * (.24 * threads + (.11 + .06 * lane) * (2.0 * filament * filament - .75));
 }
 
 void transferSlice(State start, State end, float pt, float stepSize, inout vec4 light) {
@@ -167,7 +191,7 @@ void transferSlice(State start, State end, float pt, float stepSize, inout vec4 
     }
     vec2 atXY = mix(start.x.xy, end.x.xy, mid);
     float r2 = dot(atXY, atXY) - SPIN * SPIN;
-    if (r2 <= ISCO * ISCO || r2 >= OUTER_DISK * OUTER_DISK) return;
+    if (r2 <= ISCO * ISCO || r2 >= uOuterDisk * uOuterDisk) return;
     float r = sqrt(r2);
     float height = max(0.014, r * uDiskPhysics.y);
     float a = start.x.z / height, b = end.x.z / height;
@@ -196,13 +220,20 @@ void transferSlice(State start, State end, float pt, float stepSize, inout vec4 
     float epoch = uTime.y + blockOffset;
     float age = timeWithinBlock - 64.0 * blockOffset;
     float logR = log(r);
-    float turbulence = mix(emissivityPattern(angle - omega * (age + 64.0), logR, epoch - 1.0),
-        emissivityPattern(angle - omega * age, logR, epoch), smoothstep(0.0, 64.0, age));
-    float edge = (1.0 - smoothstep(11.5, OUTER_DISK, r)) * smoothstep(ISCO, ISCO + 0.20, r);
+    // Advect the texture inward while circular Kerr velocities set the frequency shift.
+    // Fade narrow filaments when one transfer slice spans a substantial fraction of a lane.
+    float inflow = .012 / r;
+    float filamentDetail = 1.0 - smoothstep(.10, .28, length(end.x.xy - start.x.xy) / r);
+    float turbulence = mix(emissivityPattern(angle - omega * (age + 64.0), logR + inflow * (age + 64.0), epoch - 1.0, filamentDetail),
+        emissivityPattern(angle - omega * age, logR + inflow * age, epoch, filamentDetail), smoothstep(0.0, 64.0, age));
+    float edge = (1.0 - smoothstep(.8 * uOuterDisk, uOuterDisk, r)) * smoothstep(ISCO, ISCO + 0.20, r);
     float innerEdge = sqrt(ISCO / r);
-    float flux = uDiskPhysics.x / (r * r * r) * max(0.0, 1.0 - innerEdge);
+    float index = 127.0 * sqrt(clamp((r - ISCO) / (uOuterDisk - ISCO), 0.0, 1.0));
+    int i = min(126, int(index));
+    float sqrtFlux = mix(uDiskSqrtFlux[i], uDiskSqrtFlux[i + 1], index - float(i));
+    float flux = uDiskPhysics.x * sqrtFlux * sqrtFlux;
     float temperature = uDiskPhysics.z * sqrt(sqrt(1800.0 * flux))
-        * (1.0 + uDiskHeat * .42 * innerEdge) * mix(.78, 1.22, .5 * turbulence);
+        * (1.0 + uDiskHeat * .42 * innerEdge) * (.70 + .30 * turbulence);
     // Invariance of I_nu/nu³ yields B_nu(gT) for thermal emission. Three display
     // bands sample the Planck spectrum; this is a display false-color approximation.
     vec3 exponent = min(vec3(80.0), vec3(22100.0, 26650.0, 31950.0) * (frequency / max(temperature, 1.0)));
@@ -218,23 +249,25 @@ void transferSlice(State start, State end, float pt, float stepSize, inout vec4 
 
 void transferDisk(State start, State end, State first, State last, float pt, float h, inout vec4 light) {
     if (uDiskGain <= 0.0 || uDiskPhysics.x <= 0.0 || uDiskPhysics.w <= 0.0 || light.a < .00005) return;
-    float reach = length(end.x - start.x);
     float startR2 = dot(start.x.xy, start.x.xy);
-    float startR = sqrt(startR2);
-    if (startR - reach > OUTER_DISK + 1.0 ||
-        abs(start.x.z) - reach > 4.0 * uDiskPhysics.y * OUTER_DISK) return;
     // A cubic Hermite segment lies inside its four Bezier control points'
-    // convex hull. Reject segments wholly inside the disk's inner edge or above its atmosphere.
+    // convex hull. Bound its atmosphere and both radial edges before subdividing.
     vec3 b1 = start.x + (h / 3.0) * first.x, b2 = end.x - (h / 3.0) * last.x;
+    vec3 lo = min(min(start.x, end.x), min(b1, b2));
+    vec3 hi = max(max(start.x, end.x), max(b1, b2));
+    float minHeight = max(lo.z, -hi.z);
+    if (minHeight > 4.0 * uOuterDisk * uDiskPhysics.y) return;
+    float spin2 = SPIN * SPIN;
+    vec2 nearest = max(vec2(0.0), max(lo.xy, -hi.xy));
+    if (dot(nearest, nearest) >= uOuterDisk * uOuterDisk + spin2) return;
     float maxR2 = max(max(startR2, dot(end.x.xy, end.x.xy)), max(dot(b1.xy, b1.xy), dot(b2.xy, b2.xy)));
-    if (maxR2 < ISCO * ISCO + SPIN * SPIN - .001) return;
-    float lowZ = min(min(start.x.z, end.x.z), min(b1.z, b2.z));
-    float highZ = max(max(start.x.z, end.x.z), max(b1.z, b2.z));
-    float maxR = min(OUTER_DISK, sqrt(maxR2));
-    if (max(lowZ, -highZ) > 4.0 * max(.014, maxR * uDiskPhysics.y)) return;
+    if (maxR2 <= ISCO * ISCO + spin2) return;
+    float maxR = min(uOuterDisk, sqrt(maxR2));
+    if (minHeight > 4.0 * max(.014, maxR * uDiskPhysics.y)) return;
     // Hermite dense output retains curved grazing intersections. Transfer has
     // its own quadrature scale; a small geodesic error alone cannot resolve ISCO.
-    int slices = int(clamp(ceil(reach / max(.12, .06 * startR)), 1.0, 12.0));
+    float reach = length(end.x - start.x);
+    int slices = int(clamp(ceil(reach / max(.12, .06 * sqrt(startR2))), 1.0, 12.0));
     float sliceStep = h / float(slices);
     State prev = start;
     for (int i = 1; i <= slices; i++) {
@@ -252,10 +285,11 @@ void transferDisk(State start, State end, State first, State last, float pt, flo
     }
 }
 
-vec4 trace(vec3 position, vec3 direction, bool transferOnly, out vec4 light) {
+
+vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, bool critical, out vec4 light) {
     Metric m = metric(position);
     float pt;
-    State y = observerRay(position, direction, m, pt);
+    State y = observerRay(position, direction, velocity, m, pt);
     State k1 = flow(y, m, pt);
     light = vec4(0.0, 0.0, 0.0, 1.0);
 #ifdef KERR_CHECK_INVARIANTS
@@ -269,11 +303,22 @@ vec4 trace(vec3 position, vec3 direction, bool transferOnly, out vec4 light) {
     float escapeRadius = max(70.0, min(160.0, m.r));
     // Footprint baking needs disk transfer and capture only. Beyond the
     // emitting atmosphere an outward ray has also cleared the photon region.
-    if (transferOnly) escapeRadius = 1.0 + OUTER_DISK * length(vec2(1.0, 5.0 * uDiskPhysics.y));
+    float emissionRadius = 1.0 + uOuterDisk * length(vec2(1.0, 5.0 * uDiskPhysics.y));
+    escapeRadius = transferOnly ? emissionRadius : max(escapeRadius, emissionRadius);
+#ifndef KERR_CHECK_INVARIANTS
+    // A negative Carter radial potential at the emission bound forbids any crossing.
+    // The transfer cache can use this result directly because it never samples the outgoing direction.
+    if (transferOnly && m.r > escapeRadius) {
+        float p = pt * (escapeRadius * escapeRadius + SPIN * SPIN) + SPIN * angular.x;
+        float barrier = (escapeRadius - HORIZON) * (escapeRadius - (2.0 - HORIZON)) * angular.y;
+        if (p * p < .999 * barrier) return vec4(0.0, 0.0, 0.0, 1.0);
+    }
+#endif
     float stepSize = 0.20 * m.r;
     // Close observers magnify errors in the location of the first few disk
     // samples. Match step control continuously to that observing distance.
     float tolerance = mix(min(uIntegration.x, .000002), uIntegration.x, smoothstep(6.0, 16.0, m.r));
+    if (critical) tolerance = min(tolerance, .000006);
     int budget = int(uIntegration.y);
     for (int i = 0; i < 768; ++i) {
         if (m.r <= captureRadius) return vec4(0.0, 0.0, 0.0, 2.0);
@@ -336,13 +381,10 @@ void cameraRay(vec2 px, out mat3 basis, out vec3 observer, out vec3 localDirecti
 // exterior barrier contains the local minimum, the larger positive root of R'.
 // Negative inside the shadow. Factor R(r) - R(rMin) at the stationary point
 // so the sign stays continuous for observers on either side of the photon orbit.
-float shadowMargin(vec2 px) {
-    mat3 basis;
-    vec3 observer, direction;
-    cameraRay(px, basis, observer, direction);
+float shadowMargin(vec3 observer, vec3 direction, vec3 velocity) {
     Metric m = metric(observer);
     float pt;
-    State y = observerRay(observer, direction, m, pt);
+    State y = observerRay(observer, direction, velocity, m, pt);
     if (pt <= 0.0) return -1.0;
     float dr = dot(m.dr, flow(y, m, pt).x);
     vec2 angular = angularConstants(y, m, pt);
@@ -371,15 +413,27 @@ float shadowMargin(vec2 px) {
     return dr < 0.0 ? -1.0 : 1.0;
 }
 
+float shadowMargin(vec2 px) {
+    mat3 basis;
+    vec3 observer, direction;
+    cameraRay(px, basis, observer, direction);
+    return shadowMargin(observer, direction, vec3(0.0));
+}
+
 float capturedAt(vec2 px) {
     return float(shadowMargin(px) < 0.0);
 }
 
-vec4 tracePixel(vec2 px, bool transferOnly, out vec4 light) {
+vec4 tracePixel(vec2 px, bool transferOnly, bool critical, out vec4 light) {
     mat3 basis;
     vec3 observer, direction;
     cameraRay(px, basis, observer, direction);
-    vec4 ray = trace(observer, direction, transferOnly, light);
+    vec3 velocity = vec3(0.0);
+    vec4 ray = trace(observer, direction, velocity, transferOnly, critical, light);
     ray.xyz = basis * ray.xyz;
     return ray;
+}
+
+vec4 tracePixel(vec2 px, bool transferOnly, out vec4 light) {
+    return tracePixel(px, transferOnly, false, light);
 }

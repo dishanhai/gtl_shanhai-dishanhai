@@ -204,6 +204,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     @Persisted
     @DescSynced
+    private boolean hostLegacyBlackHole;
+
+    @Persisted
+    @DescSynced
     private boolean hostArMaskEnabled = true;
 
     @Persisted
@@ -527,6 +531,17 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     public boolean isHostLensEnabled() {
         return hostLensEnabled;
+    }
+
+    public boolean isHostLegacyBlackHole() {
+        return hostLegacyBlackHole;
+    }
+
+    public void setHostLegacyBlackHole(boolean value) {
+        if (hostLegacyBlackHole == value) return;
+        hostLegacyBlackHole = value;
+        markDirty();
+        pushHostFxSync();
     }
 
     public boolean isHostArMaskEnabled() {
@@ -1743,7 +1758,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 "containmentCollapseTick",
                 "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
-                "hostOuterStarsEnabled", "hostNebulaEnabled",
+                "hostLegacyBlackHole", "hostOuterStarsEnabled", "hostNebulaEnabled",
                 "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostArStatus", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
                 "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",

@@ -29,15 +29,16 @@ public final class GuixuStarRenderer {
     public static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
                               float density, float brightness, float jets, boolean infallEnabled, boolean ambientEnabled) {
         render(pose, camera, seconds, surfaceRadius, density, brightness, jets, infallEnabled, infallEnabled, ambientEnabled,
-                Direction.EAST, List.of(), GuixuStarField.ACCRETION_TRAILS, 0);
+                Direction.EAST, List.of(), GuixuStarField.ACCRETION_TRAILS, 0, false);
     }
 
     static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
                        float density, float brightness, float jets, boolean blackHoleEnabled, boolean backgroundInfall,
                        boolean ambientEnabled,
-                       Direction facing, List<GuixuStellarEnd.GravityWave> stellarWaves, int accretionTrails, float diskHeat) {
+                       Direction facing, List<GuixuStellarEnd.GravityWave> stellarWaves, int accretionTrails, float diskHeat,
+                       boolean legacyBlackHole) {
         if (!blackHoleEnabled && !ambientEnabled) return;
-        if (ambientEnabled && blackHoleEnabled) GuixuDeepSpaceBackdrop.render(pose, camera, surfaceRadius);
+        if (ambientEnabled && blackHoleEnabled) GuixuDeepSpaceBackdrop.render(pose, camera, surfaceRadius, legacyBlackHole);
         var layer = HostFxDraw.beamLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer vertices = buffers.getBuffer(layer);

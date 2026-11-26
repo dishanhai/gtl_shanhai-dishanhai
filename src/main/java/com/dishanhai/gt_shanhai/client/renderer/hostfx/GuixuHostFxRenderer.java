@@ -441,7 +441,7 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             final boolean backgroundInfall = drawBlackHole && !stellarEndActive;
             float feed = backgroundInfall ? GuixuStarField.accretionFeed(effectSeconds, accretionTrails) : 0;
             if (linkedMatterActive) feed += .46F;
-            if (stellar != null) feed += stellar.accretionFeed() + .72F * stellar.horizonGlow();
+            if (stellar != null && drawBlackHole) feed += stellar.accretionFeed() + .72F * stellar.horizonGlow();
             final float diskHeat = host.updateAccretionHeat(effectSeconds, feed);
 
             // 🔴 seconds 必须传进去：粒子沿轴流动的相位来自它（停世界 ⇒ 自然冻结）
@@ -453,7 +453,8 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             final var profile = host.getVisualProfile(effectSeconds);
             final boolean structureFinale = stellar != null && stellar.stage() == GuixuStellarEnd.Stage.STRUCTURE;
             HostFxDraw.drawBeams(poseStack, cx, cy, cz, facing, controllerPos, cam.x, cam.y, cam.z,
-                    holeR, HostFxGeometry.ringDeg(spinSeconds), seconds, profile.brightness(), spinSeconds, !structureFinale);
+                    holeR, HostFxGeometry.ringDeg(spinSeconds), seconds, profile.brightness(), spinSeconds,
+                    !structureFinale);
 
             // 山海：保留 master 的狀態密度、亮度、噴流及向黑洞收束的星辰效果。
             final double starHorizon = BlackHoleLensRenderer.rsBlocks() * BlackHoleLensMath.B_CRIT;
@@ -469,7 +470,7 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                 GuixuStarRenderer.render(poseStack, starCamera, effectSeconds, starHorizon,
                         profile.density(), profile.brightness(), jets, drawBlackHole, backgroundInfall,
                         host.isHostOuterStarsEnabled(), facing, stellar == null ? List.of() : stellar.waves(),
-                        accretionTrails, diskHeat);
+                        accretionTrails, diskHeat, host.isHostLegacyBlackHole());
                 if (drawBlackHole) {
                     GuixuBlackHoleMechanicsRenderer.render(poseStack, host, facing, holeR,
                             effectTick, simpleAccretion, preview);

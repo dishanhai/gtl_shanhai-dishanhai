@@ -30,7 +30,25 @@
         },
         {
             "name": "PixelTransfer"
-        }
+        },
+        {
+        },
+        {
+            "name": "RayBloom"
+        },
+        {
+            "name": "CriticalLight"
+        },
+        {
+            "name": "CriticalRadii"
+        },
+        {
+            "name": "DiskDetail"
+        },
+        {
+            "name": "DiskDetailExit"
+        },
+        {"name": "DiskDetailBloom"}
     ],
     "uniforms": [
         {"name": "uBhView", "type": "float", "count": 3, "values": [0, 0, -10]},
@@ -39,8 +57,15 @@
         {"name": "uDiskGain", "type": "float", "count": 1, "values": [1]},
         {"name": "uDiskHeat", "type": "float", "count": 1, "values": [0]},
         {"name": "uKerrParameters", "type": "float", "count": 4, "values": [0.65, 1.7599342, 3.6159372, 1]},
+        {"name": "uOuterDisk", "type": "float", "count": 1, "values": [40]},
+        {"name": "uDiskSqrtFlux", "type": "float", "count": 128, "values": [0]},
         {"name": "uDiskPhysics", "type": "float", "count": 4, "values": [1, 0.055, 9400, 0.38]},
         {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00016, 384]},
+        {"name": "uRayBloomLod", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uCriticalBounds", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uDiskDetailRect", "type": "float", "count": 4, "values": [0, 0, 1, 0]},
+        {"name": "uDiskBloomLod", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uExterior", "type": "float", "count": 3, "values": [0, 0, 0]},
         {"name": "uRefine", "type": "float", "count": 1, "values": [0]},
         {"name": "uCaptureDepthOnly", "type": "float", "count": 1, "values": [0]},
         {"name": "uTransferPass", "type": "float", "count": 1, "values": [0]},

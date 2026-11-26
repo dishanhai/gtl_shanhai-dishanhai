@@ -4,13 +4,14 @@ package com.dishanhai.gt_shanhai.config;
 public final class KerrRenderConfig {
     public enum Parameter {
         MASS(0.1, 10, 1),
-        SPIN(-1, 1, 0.65),
+        SPIN(-1, 1, 0.95),
         TILT(0, 180, 32),
         AZIMUTH(-180, 180, 20),
         DISTANCE(0, 500, 0),
         INCLINATION(-1, 180, -1),
         ACCRETION(0, 8, 1),
-        THICKNESS(0.004, 0.24, 0.055),
+        THICKNESS(0.004, 0.24, 0.06),
+        OUTER_RADIUS(12, 64, 40),
         TEMPERATURE(1000, 100000, 9400),
         EMISSIVITY(0, 5, 0.38),
         TIME_SCALE(0, 300, 16),
@@ -35,7 +36,10 @@ public final class KerrRenderConfig {
         HIGH(0.72, 0.000060, 480),
         MEDIUM(0.52, 0.00016, 384),
         LOW(0.35, 0.00040, 320),
-        ADAPTIVE(0.44, 0.00022, 384);
+        ADAPTIVE(0.44, 0.00022, 384),
+        COMPATIBILITY(0.28, 0.00055, 272),
+        CINEMATIC(1.0, 0.000012, 704),
+        SCIENTIFIC(1.0, 0.000004, 768);
 
         public final double scale, tolerance;
         public final int steps;

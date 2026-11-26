@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.client.renderer.blackhole;
 
+
 /**
  * 山海重构 · 黑洞渲染件的 <b>运行期可调参数</b>（纯逻辑：零 MC / 零 Forge / 零 GL）。
  *
@@ -22,6 +23,8 @@ package com.dishanhai.gt_shanhai.client.renderer.blackhole;
  * —— 这样"我敲了 99 为什么没变"在聊天栏里当场就有答案，不用去翻代码。
  */
 public final class BlackHoleTuning {
+
+    public enum RenderMode { KERR, LEGACY }
 
     /** {@code /shanhai bh lens} 的三档。 */
     public enum LensMode {
@@ -384,6 +387,7 @@ public final class BlackHoleTuning {
     public static long hostCenterControllerPos() {
         return hostCenterControllerPos;
     }
+
 
     public static boolean hostCenterInRange(Object world, double cameraX, double cameraZ, int renderChunks) {
         var source = hostCenterWorld;

@@ -58,7 +58,7 @@ import java.util.Locale;
  *   y=83   洞径   Label(4,86) + IntInput(64,83,82,20)           底 103
  *   y=105  引力透镜 Button(4,105,72,16)+Label(10,109)           底 121
  *          AR遮罩   Button(74,105,72,16)+Label(80,109)
- *   y=125  特效渲染 Button(4,125,72,16)+Label(10,129)           底 141
+ *   y=125  特效渲染与黑洞渲染并排，底 141
  *   y=145  外層星辰／外層星雲兩個獨立按鈕，底 161
  *   → 161 + 5 = 166（{@link #PANEL_H}）
  * </pre>
@@ -251,6 +251,11 @@ public final class HostFxConfigurators {
                                     + "解压机主光柱消失（12 条细紫小束与黑洞照画）"),
                             Component.literal("§8只管渲染特效：机壳/贴图的工作态外观不受它影响")));
             group.addWidget(new LabelWidget(10, 129, this::fxLabelText));
+            group.addWidget(new ButtonWidget(78, 125, 68, 16, GuiTextures.BUTTON,
+                    clickData -> host.setHostLegacyBlackHole(!host.isHostLegacyBlackHole()))
+                    .setHoverTooltips(Component.translatable("gt_shanhai.guixu.blackhole_style.tooltip")));
+            group.addWidget(new LabelWidget(82, 129, () -> Component.translatable(host.isHostLegacyBlackHole() ? "gt_shanhai.guixu.blackhole_style.legacy"
+                    : "gt_shanhai.guixu.blackhole_style.kerr").getString()));
 
             // 山海：外層效果可完全停繪，與原本只降級動畫的特效按鈕分開。
             group.addWidget(new ButtonWidget(4, 145, 68, 16, GuiTextures.BUTTON,
@@ -307,7 +312,7 @@ public final class HostFxConfigurators {
         rows.add("下舰 Label(4,64) + IntInput(" + INPUT_X + ",61," + INPUT_W + "," + INPUT_H + ")");
         rows.add("洞径 Label(4,86) + IntInput(" + INPUT_X + ",83," + INPUT_W + "," + INPUT_H + ")");
         rows.add("引力透镜 Button(4,105,72,16)+Label(10,109) ／ AR遮罩 Button(74,105,72,16)+Label(80,109)");
-        rows.add("特效渲染 Button(4,125,72,16)+Label(10,129)");
+        rows.add("特效渲染 Button(4,125,72,16)+Label(10,129) ／ 黑洞渲染 Button(78,125,68,16)+Label(82,129)");
         rows.add("外层星辰 Button(4,145,68,16)+Label(8,149) ／ 外层星云 Button(74,145,72,16)+Label(78,149)");
         return rows;
     }

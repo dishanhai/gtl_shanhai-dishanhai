@@ -87,12 +87,12 @@ public final class BlackHoleLensMath {
      * @param out3  出口长度 ≥3
      */
     public static void toView(float[] view, double[] world, double[] cam, float[] out3) {
-        final float x = (float) (world[0] - cam[0]);
-        final float y = (float) (world[1] - cam[1]);
-        final float z = (float) (world[2] - cam[2]);
-        out3[0] = view[0] * x + view[4] * y + view[8] * z;
-        out3[1] = view[1] * x + view[5] * y + view[9] * z;
-        out3[2] = view[2] * x + view[6] * y + view[10] * z;
+        final double x = world[0] - cam[0];
+        final double y = world[1] - cam[1];
+        final double z = world[2] - cam[2];
+        out3[0] = (float) (view[0] * x + view[4] * y + view[8] * z);
+        out3[1] = (float) (view[1] * x + view[5] * y + view[9] * z);
+        out3[2] = (float) (view[2] * x + view[6] * y + view[10] * z);
     }
 
     /** {@code tan(fovY/2)}，从投影矩阵反解（{@code 1/m11}）。无效矩阵返回 {@code NaN}。 */
@@ -115,11 +115,11 @@ public final class BlackHoleLensMath {
         final float x = viewPos[0];
         final float y = viewPos[1];
         final float z = viewPos[2];
-        final float cx = proj[0] * x + proj[4] * y + proj[8] * z + proj[12];
-        final float cy = proj[1] * x + proj[5] * y + proj[9] * z + proj[13];
-        final float cz = proj[2] * x + proj[6] * y + proj[10] * z + proj[14];
-        final float cw = proj[3] * x + proj[7] * y + proj[11] * z + proj[15];
-        if (!(cw > 1e-6f) || !Float.isFinite(cw)) {
+        final double cx = (double) proj[0] * x + (double) proj[4] * y + (double) proj[8] * z + proj[12];
+        final double cy = (double) proj[1] * x + (double) proj[5] * y + (double) proj[9] * z + proj[13];
+        final double cz = (double) proj[2] * x + (double) proj[6] * y + (double) proj[10] * z + proj[14];
+        final double cw = (double) proj[3] * x + (double) proj[7] * y + (double) proj[11] * z + proj[15];
+        if (!(cw > 1e-6) || !Double.isFinite(cw)) {
             return false;
         }
         final double ndcX = cx / cw;
