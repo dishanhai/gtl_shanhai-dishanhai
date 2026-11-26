@@ -6,6 +6,7 @@ import org.joml.Vector3f;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.core.Direction;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -61,7 +62,29 @@ class GuixuFxVisibilityTest {
                     return proxy;
                 });
         GuixuStarRenderer.drawAccretionTrails(vertices, new Matrix4f(), clip, new float[]{0, 0, 20},
-                Direction.EAST, seconds, 6, 1, .5F);
-        assertTrue(count[0] >= 4 && count[0] < 20);
+                Direction.EAST, seconds, 6, 1, .5F, 800, 560);
+        assertTrue(count[0] >= 8 && count[0] < 64);
+    }
+
+    @Test void accretionRibbonHasSharedTransverseEdges() {
+        record Point(float x, float y, float z) {}
+        var points = new ArrayList<Point>();
+        var vertices = (VertexConsumer) Proxy.newProxyInstance(VertexConsumer.class.getClassLoader(),
+                new Class<?>[]{VertexConsumer.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("vertex") && args.length == 4) {
+                        points.add(new Point((float) args[1], (float) args[2], (float) args[3]));
+                    }
+                    return proxy;
+                });
+        GuixuStarRenderer.drawAccretionTrails(vertices, new Matrix4f(), new Matrix4f().scaling(.025f),
+                new float[]{0, 0, 20}, Direction.EAST, 3.05, 6, 1, .5F, 800, 560);
+        int segments = (points.size() - 4) / 8; // The last four vertices are the head glint.
+        assertTrue(segments >= 8);
+        for (int i = 0; i < segments - 1; i++) {
+            int start = i * 8, next = start + 8;
+            assertEquals(points.get(start + 1), points.get(next));
+            assertEquals(points.get(start + 2), points.get(next + 3));
+            assertEquals(points.get(start + 5), points.get(next + 4));
+        }
     }
 }
