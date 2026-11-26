@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 class IntegrateBlackHoleTest {
+
     @Test
     void approachingTheVisibleShadowKeepsTheExteriorAndPreservesItsDrawArea() {
         for (double rs : new double[]{0.4, 2, 4.6}) {
@@ -93,7 +94,7 @@ class IntegrateBlackHoleTest {
         String backgroundCopy = source.substring(source.indexOf("private static boolean copyBackground("),
                 source.indexOf("private static void drainGlErrors("));
         assertFalse(backgroundCopy.contains("copyDepthRect("), "The interior shares the color copy");
-        int gatedCopy = source.indexOf("if (copyWorld && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {");
+        int gatedCopy = source.indexOf("if (copyScene && depthOk && BlackHoleTuning.depthGate() && ensureDepthTexture()) {");
         assertTrue(gatedCopy >= 0, "Only valid world depth may be copied for lens sampling");
         assertTrue(source.substring(gatedCopy, source.indexOf('}', gatedCopy))
                 .contains("copyDepthRect(f.copyX0, f.copyY0, f.copyW, f.copyH);"));
@@ -120,9 +121,10 @@ class IntegrateBlackHoleTest {
         String fragment = Files.readString(shaders.resolve("guixu_blackhole.fsh"));
         String program = Files.readString(shaders.resolve("guixu_blackhole.json"));
         assertTrue(source.contains("drawExterior(g, f, depthOk, sampleBackground)"));
-        assertTrue(source.contains("copyWorld = sampleBackground && f.kerr.worldSky() > 0.0F"));
-        assertTrue(source.contains("copyWorld && !ensureBgTexture("));
-        assertTrue(source.contains("copyWorld && !copyBackground(g, main, f)"));
+        assertTrue(source.contains("copyWorld = sampleBackground && (f.legacyBlackHole || f.kerr.worldSky() > 0.0F)"));
+        assertTrue(source.contains("copyScene && !ensureBgTexture("));
+        assertTrue(source.contains("copyScene && !copyBackground(g, main, f, copyWorld)"));
+        assertTrue(source.contains("shader.setSampler(\"SceneColor\", copyWorld ? bgTexId : null)"));
         assertTrue(source.contains("\"uSampleBackground\").set(sampleBackground ? 1.0F : 0.0F)"));
         assertTrue(fragment.contains("if (uSampleBackground < 0.5)"));
         assertTrue(fragment.contains("float coverage = 1.0 - transmitted * (1.0 - skyCoverage);"));

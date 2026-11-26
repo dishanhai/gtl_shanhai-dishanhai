@@ -6,6 +6,52 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KerrGeometryTest {
     @Test
+    void pageThorneProfileMatchesTheClosedSchwarzschildIntegral() {
+        float[] profile = new KerrThinDisk().profile(new KerrGeometry(0), 1, 40);
+        double inner = Math.sqrt(6), root3 = Math.sqrt(3);
+        for (int i = 1; i < profile.length; i++) {
+            double u = (double) i / (profile.length - 1);
+            double r = 6 + 34 * u * u, x = Math.sqrt(r);
+            double log = Math.log((x - root3) / (x + root3) * (inner + root3) / (inner - root3));
+            double flux = (x - inner - .5 * root3 * log) / (r * r * x * (r - 3));
+            assertEquals(flux, profile[i] * profile[i], Math.max(1e-15, 5e-6 * flux));
+        }
+    }
+
+    @Test
+    void rotatingDiskMatchesCircularOrbitEnergyAndAngularMomentumTransport() {
+        var disk = new KerrThinDisk();
+        for (double a : new double[]{-.95, .65, .95, .9999}) {
+            var geometry = new KerrGeometry(a);
+            double inner = geometry.isco(1);
+            double r = inner, l = angularMomentum(a, r), integral = 0;
+            int n = 8192;
+            for (int i = 1; i <= n; i++) {
+                double next = inner + (40 - inner) * i / n;
+                double nextL = angularMomentum(a, next);
+                integral += (nextL - l) * geometry.circularLapse((r + next) / 2, 1);
+                r = next;
+                l = nextL;
+            }
+            double omega = geometry.circularAngularVelocity(r, 1), lapse = geometry.circularLapse(r, 1);
+            double expected = integral * omega * omega / (Math.sqrt(r) * lapse * lapse);
+            float[] profile = disk.profile(geometry, 1, r);
+            assertEquals(expected, Math.pow(profile[profile.length - 1], 2), expected * 1e-5);
+            assertArrayEquals(profile.clone(), disk.profile(new KerrGeometry(-a), -1, r));
+        }
+        for (double spin : new double[]{-1, 1 - 1e-12, 1}) {
+            var profile = disk.profile(new KerrGeometry(spin), 1, 64);
+            for (float sample : profile) assertTrue(Float.isFinite(sample) && sample >= 0);
+            assertEquals(spin == 1 ? 2.0 / 9 : 0, profile[0] * profile[0], 1e-7);
+        }
+    }
+
+    private static double angularMomentum(double a, double r) {
+        double x = Math.sqrt(r);
+        return (r * r - 2 * a * x + a * a) / Math.sqrt(r * x * (r * x - 3 * x + 2 * a));
+    }
+
+    @Test
     void schwarzschildLimit() {
         var metric = new KerrGeometry(0);
         assertEquals(2, metric.outerHorizon());
