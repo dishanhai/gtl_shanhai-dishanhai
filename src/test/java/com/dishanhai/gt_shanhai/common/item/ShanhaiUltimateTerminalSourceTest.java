@@ -62,7 +62,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void terminalDoesNotExtendOrDecodeTheGtlcoreTerminal() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
 
         assertFalse(behavior.contains("extends UltimateTerminalBehavior"));
         assertFalse(behavior.contains("getAutoBuildSetting("));
@@ -85,7 +85,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void interactionBindsScansHighlightsAndRequiresSecondBuildConfirmation() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
 
         assertTrue(behavior.contains(
                 "public InteractionResult onItemUseFirst(ItemStack itemStack, UseOnContext context)"));
@@ -111,7 +111,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void dismantleModeFailsExplicitlyWhenNoControllerCanDefineTheFootprint() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
 
         assertTrue(behavior.contains("if (plan == null)"));
         assertTrue(behavior.contains("ShanhaiUltimateTerminalConfig.isDismantleMode(terminal)"));
@@ -121,7 +121,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void chamberCandidatesAreOnlyReportedAndNeverPlacedByTheBehavior() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
 
         assertTrue(behavior.contains("CHAMBER_HINT"));
         assertTrue(behavior.contains("可放仓室"));
@@ -145,7 +145,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void leftClickOnlyScansWhileRightClickKeepsTheBuildWorkflow() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
         String interaction = Files.readString(INTERACTION);
 
         assertTrue(interaction.contains("PlayerInteractEvent.LeftClickBlock"));
@@ -175,7 +175,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void scanUsesTheFirstChamberCandidateAndSendsOneColoredHighlightBatch() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
         String packet = Files.readString(HIGHLIGHT_PACKET);
         String client = Files.readString(HIGHLIGHT_CLIENT);
         String network = Files.readString(NETWORK);
@@ -208,7 +208,7 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void tooltipReadsConfigCopyAndIncludesDetailedUsageAndStatusLines() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String behavior = Files.readString(BEHAVIOR).replace("\r\n", "\n");
         String zhCn = Files.readString(Path.of("src", "main", "resources", "assets",
                 "gt_shanhai", "lang", "zh_cn.json"));
         String enUs = Files.readString(Path.of("src", "main", "resources", "assets",

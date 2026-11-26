@@ -300,6 +300,6 @@ class MEStellarStockPartMachineSourceTest {
 
     private static String readMachine() throws Exception {
         assertTrue(Files.isRegularFile(MACHINE), "ME stellar stock machine has not been implemented");
-        return Files.readString(MACHINE);
+        return Files.readString(MACHINE).replace("\r\n", "\n");
     }
 }
