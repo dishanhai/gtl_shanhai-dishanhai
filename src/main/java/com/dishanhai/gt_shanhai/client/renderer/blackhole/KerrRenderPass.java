@@ -31,7 +31,7 @@ final class KerrRenderPass implements AutoCloseable {
     private final Target transfer = new Target();
     private final Target whiteBloomSource = new Target();
     private final Target whiteOptical = new Target();
-    private final Target whiteDirect = new Target(false, GL_R32F);
+    private final WhiteDirectTargets whiteDirect = new WhiteDirectTargets();
     private final Target diskDetail = new Target(false, GL_RGBA32F);
     private final CompactHdrPostProcessing diskHighlights = new CompactHdrPostProcessing();
     private final KerrThinDisk disk = new KerrThinDisk();
@@ -126,7 +126,8 @@ final class KerrRenderPass implements AutoCloseable {
         boolean stableWhite = worldPrimary && history != null && history.whiteSkyRays == whiteSkyRays
                 && history.matchesWhiteHost(frame, axis, equatorialX, steps, tolerance);
         boolean reuseWhite = stableWhite && previous.width == width && previous.height == height
-                && (!cacheDirect || whiteDirectReady && whiteDirect.width == directWidth && whiteDirect.height == directHeight)
+                && (!cacheDirect || whiteDirectReady && whiteDirect.active().width == directWidth
+                    && whiteDirect.active().height == directHeight)
                 && KerrSampling.whiteHostCanReuse(frame.stampNanos - whiteRefreshStamp, whiteReuseFrames);
         boolean black = frame.white.mix() == 0;
         boolean lowBudget = quality == Quality.ADAPTIVE || quality == Quality.LOW;
@@ -217,8 +218,8 @@ final class KerrRenderPass implements AutoCloseable {
                     drawWhiteDirect(frame, worldDepthTexture, directX, directY, directW, directH, directWidth, directHeight);
                 }
             }
-            composite.setSampler("WhiteDirectLight", whiteDirectReady ? whiteDirect.light : null);
-            composite.setSampler("WhiteDirectDepth", whiteDirectReady ? whiteDirect.exit : null);
+            composite.setSampler("WhiteDirectLight", whiteDirectReady ? whiteDirect.active().light : null);
+            composite.setSampler("WhiteDirectDepth", whiteDirectReady ? whiteDirect.active().exit : null);
             composite.safeGetUniform("uWhiteCacheRect").set((float) directX, (float) directY,
                     whiteDirectReady ? (float) directW : 0f, whiteDirectReady ? (float) directH : 0f);
             composite.safeGetUniform("uWhiteCacheReduced").set(reducedDirect ? 1f : 0f);
@@ -582,7 +583,7 @@ final class KerrRenderPass implements AutoCloseable {
         return String.format(Locale.ROOT, "%s gpu=%s cpu=%.2fms frames=%d%s%s%s%s", path,
                 gpuMilliseconds == 0 ? "pending" : String.format(Locale.ROOT, "%.2fms", gpuMilliseconds),
                 cpuMilliseconds, completedPasses, particleAtlasActive ? " +particles" : "",
-                whiteDirectReady ? " whiteDirect=" + whiteDirect.width + "x" + whiteDirect.height : "",
+                whiteDirectReady ? " whiteDirect=" + whiteDirect.active().width + "x" + whiteDirect.active().height : "",
                 whiteCacheHits > 0 ? " whiteReuse=" + whiteCacheHits : "",
                 blackFieldHits > 0 ? " blackReuse=" + blackFieldHits : "");
     }
@@ -706,6 +707,37 @@ final class KerrRenderPass implements AutoCloseable {
                     && frame.white.canReproject(white)
                     && Math.abs(spin - frame.geometry.spin()) < .001
                     && Math.abs(settings.clock() - current.clock()) < 3;
+        }
+    }
+
+    /** Reuse attachments, not image history, across adjacent adaptive tile sizes. */
+    static final class WhiteDirectTargets implements AutoCloseable {
+        // One standby RGBA16F + R32F pair at most: 6 MiB.
+        private static final long MAX_STANDBY_PIXELS = 512L * 1024;
+        private Target active = new Target(false, GL_R32F);
+        private Target standby = new Target(false, GL_R32F);
+
+        Target active() {
+            return active;
+        }
+
+        void bind(int width, int height, int lightLocation, int depthLocation) {
+            long pixels = (long) width * height;
+            if (pixels > MAX_STANDBY_PIXELS) {
+                standby.close();
+            } else if (active.framebuffer != 0 && (active.width != width || active.height != height)
+                    && (long) active.width * active.height <= MAX_STANDBY_PIXELS) {
+                Target previous = active;
+                active = standby;
+                standby = previous;
+            }
+            active.bind(width, height, lightLocation, depthLocation);
+        }
+
+        @Override
+        public void close() {
+            active.close();
+            standby.close();
         }
     }
 
