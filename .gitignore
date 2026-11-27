@@ -64,6 +64,10 @@ Thumbs.db
 !src/test/python/generate_recipe_thread_hatch_texture.py
 !src/test/python/generate_stellar_cloud_library_overlay.py
 !src/test/python/test_stellar_cloud_library_overlay.py
+!src/test/python/convert_aetherophasic_structure.py
+!src/test/python/compile_star_lifter_structure.py
+!src/test/python/draw_star_lifter_structure.py
+!src/test/python/generate_star_lifter_capture_texture.py
 !config/**/*.md
 /.gradle-task/
 /.gradle-task17/

@@ -12,7 +12,7 @@ class GuixuNativeEnergyContractTest {
     void realDependencyFactoryNegatesThePerTickCostBeforeStoringIt() throws Exception {
         List<String> instructions = new ArrayList<>();
         try (var bytes = getClass().getClassLoader().getResourceAsStream(
-                "com/gtladd/gtladditions/utils/RecipeCalculationHelper.class")) {
+                "com/gtladd/gtladditions/utils/recipe/RecipeCalculationHelper.class")) {
             assertNotNull(bytes);
             new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
                 @Override public MethodVisitor visitMethod(int access, String name, String descriptor,

@@ -1,0 +1,107 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 100,
+  "data": {
+    "euTier": 13
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtlcore:stellar_containment_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtceu:double_tritanium_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:double_neutronium_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:hssg_frame"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:graphene_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2,
+          "ingredient": {
+            "tag": "gtceu:circuits/opv"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 10,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2304,
+          "value": [
+            {
+              "fluid": "gtceu:polybenzimidazole"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_casing"
+          }
+        }
+      }
+    ]
+  }
+}

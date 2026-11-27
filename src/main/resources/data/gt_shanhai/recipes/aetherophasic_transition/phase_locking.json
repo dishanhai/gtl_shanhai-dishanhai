@@ -1,0 +1,15 @@
+{
+  "type": "gtceu:aetherophasic_transition",
+  "data": { "euTier": 13, "stage": "phase_locking" },
+  "duration": 1800,
+  "tickInputs": { "eu": [{ "content": 503316480 }] },
+  "inputs": {
+    "fluid": [
+      { "content": { "amount": 4000, "value": [{ "fluid": "gt_shanhai:unstable_aetherophase" }] } },
+      { "content": { "amount": 2000, "value": [{ "fluid": "gtceu:starmetal_plasma" }] } }
+    ]
+  },
+  "outputs": {
+    "fluid": [{ "content": { "amount": 1000, "value": [{ "fluid": "gt_shanhai:stable_aetherophase" }] } }]
+  }
+}

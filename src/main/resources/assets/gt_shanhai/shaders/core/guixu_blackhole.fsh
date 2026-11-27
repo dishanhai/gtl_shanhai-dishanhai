@@ -3,11 +3,21 @@
 
 uniform sampler2D SceneColor;
 uniform sampler2D SceneDepth;
+uniform sampler2D WhiteDirectLight;
+uniform sampler2D WhiteDirectDepth;
 uniform sampler2D RayLight;
 uniform sampler2D RayExit;
 uniform sampler2D PreviousLight;
 uniform sampler2D PreviousExit;
 uniform sampler2D PixelTransfer;
+uniform sampler2D RayBloom;
+uniform sampler2D CriticalLight;
+uniform sampler2D CriticalRadii;
+uniform sampler2D DiskDetail;
+uniform sampler2D LocalRayExit; // black-hole disk detail or white-hole critical sky strip
+uniform sampler2D DiskDetailBloom;
+uniform vec2 uDiskBloomLod;
+uniform vec4 uDiskDetailRect; // integer screen origin, width, blend weight
 
 uniform mat4 uProjMat;
 uniform mat4 uPreviousProjection;
@@ -23,16 +33,38 @@ uniform float uStrength;
 uniform float uShadowPixels;
 uniform float uRefine;
 uniform float uCaptureDepthOnly;
-uniform float uTransferPass; // 0 native, 1 integrate pixel footprints, 2 present field
+uniform float uKerrDepth;
+uniform float uTransferPass; // 0 native, 1 integrate footprints, 2 present field, 3 seed host bloom, 4 filter host optics
 uniform vec2 uResolveSize;
 uniform float uSampleBackground;
 uniform float uDepthGate;
 uniform float uHoleDepth;
 uniform float uGateEps;
 uniform vec2 uDisplay; // exposure multiplier, bloom strength
+uniform vec2 uRayBloomLod; // highest mip (-1 for unfiltered host source), screen-space scale bias
+uniform vec4 uCriticalBounds;
+uniform vec3 uExterior; // analytic exterior weight, projected centre
+uniform float uWhiteDebug;
+uniform float uWhiteSceneDepth;
+uniform float uWhiteHostSky;
+uniform vec4 uWhiteCacheRect;
+uniform float uWhiteCacheReduced;
+uniform float uWhiteOpticalLayer; // 1 prefiltered, 0 pilot, -1 disabled
 uniform vec3 uSkyMix; // live world, procedural stars, dark
 
 out vec4 fragColor;
+
+vec3 viewDirection(vec2 px, vec3 eye) {
+    vec4 nearPoint = uInvProj * vec4(px / uScreenSize * 2.0 - 1.0, -1.0, 1.0);
+    return normalize(nearPoint.xyz - eye * nearPoint.w);
+}
+
+float kerrDepth(vec3 eye, vec3 direction) {
+    // Closest approach is invariant under camera rotation. The projected
+    // depth of the centre alone is only correct for the centre ray.
+    vec4 clip = uProjMat * vec4(eye + direction * max(0.0, dot(uBhView - eye, direction)), 1.0);
+    return clamp(.5 + .5 * clip.z / max(clip.w, 1e-6), 0.0, 1.0);
+}
 
 vec3 linearize(vec3 color) {
     return mix(color / 12.92, pow((color + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), color));
@@ -89,46 +121,55 @@ float rectangleCoverage(vec2 px, vec4 rect, float feather) {
 
 // For a perspective camera, window depth is affine in inverse view distance.
 // This is D_ls / D_s for a source plane and a single lens plane.
-float sourceDistanceFactor(float depth, float infinityDepth) {
+float sourceDistanceFactor(float depth, float lensDepth, float infinityDepth) {
     if (depth >= 1.0) return 1.0;
-    return clamp((depth - uHoleDepth) / max(infinityDepth - uHoleDepth, 0.000001), 0.0, 1.0);
+    return clamp((depth - lensDepth) / max(infinityDepth - lensDepth, 0.000001), 0.0, 1.0);
 }
 
 // Color uses bilinear filtering. Every contributing texel must be behind the
 // lens, including the foreground side of a one-pixel silhouette.
-bool behindLens(vec2 uv) {
+bool behindLens(vec2 uv, float lensDepth) {
     vec2 p = uv / uBgTexel - 0.5;
     vec2 lo = clamp(floor(p) + 0.5, vec2(0.5), uBgRect.zw - 0.5) * uBgTexel;
     vec2 hi = clamp(ceil(p) + 0.5, vec2(0.5), uBgRect.zw - 0.5) * uBgTexel;
     float nearest = min(min(texture(SceneDepth, lo).r, texture(SceneDepth, hi).r),
         min(texture(SceneDepth, vec2(lo.x, hi.y)).r, texture(SceneDepth, vec2(hi.x, lo.y)).r));
-    return nearest > uHoleDepth + uGateEps;
+    return nearest > lensDepth + uGateEps;
 }
 
-vec3 background(vec2 px, vec3 viewing, vec4 exitRay, float traceEdge, bool filterWorld, out float coverage) {
+vec3 background(vec2 px, vec3 viewing, vec4 exitRay, float traceEdge, float skyEdge,
+                bool filterWorld, bool keepWorld, float starVisibility,
+                out float coverage) {
     coverage = 0.0;
     if (uSampleBackground < 0.5) return vec3(0.0);
+    vec3 skyMix = keepWorld ? vec3(uSkyMix.x, 0.0, 0.0) : uSkyMix;
     vec3 direction = exitRay.w > 0.5 && length(exitRay.xyz) > 0.05 ? normalize(exitRay.xyz) : viewing;
-    float artificialCoverage = (uSkyMix.y + uSkyMix.z) * traceEdge;
+    float artificialCoverage = (skyMix.y + skyMix.z) * skyEdge;
     float angularFootprint = 1.0 / uScreenSize.y;
     if (filterWorld && uSkyMix.y > 0.0) {
         angularFootprint = max(length(dFdx(direction)), length(dFdy(direction)));
     }
-    vec3 artificialColor = uSkyMix.y > 0.0 ? sky(direction, angularFootprint) * uSkyMix.y * traceEdge : vec3(0.0);
+    vec3 artificialColor = skyMix.y * skyEdge > 0.0
+        ? sky(direction, angularFootprint) * skyMix.y * skyEdge * starVisibility : vec3(0.0);
     coverage = artificialCoverage;
-    if (uSkyMix.x <= 0.0) return artificialColor / max(coverage, 0.0001);
+    if (skyMix.x <= 0.0) return artificialColor / max(coverage, 0.0001);
     vec2 local = px - uBgRect.xy;
     vec2 border = min(local, uBgRect.zw - local);
     // Preserve the live Minecraft color at the rectangular cache boundary.
     float cacheFeather = max(4.0, min(uBgRect.z, uBgRect.w) * 0.035);
-    float worldCoverage = uSkyMix.x * rectangleCoverage(px, uBgRect, cacheFeather);
+    float worldCoverage = skyMix.x * rectangleCoverage(px, uBgRect, cacheFeather);
     coverage += worldCoverage;
     vec2 self = clamp(local, vec2(0.5), uBgRect.zw - 0.5) * uBgTexel;
     vec4 clip = uProjMat * vec4(direction, 0.0);
     vec2 sampled = self;
-    if (exitRay.w > 0.5 && clip.w > 0.0001 && uStrength > 0.0) {
+    vec2 delta = vec2(0.0);
+    float sourceFactor = 1.0;
+    float lensDepth = uHoleDepth;
+    if (uDepthGate > .5 && uKerrDepth > .5) lensDepth = kerrDepth(uInvProj[2].xyz / uInvProj[2].w, viewing);
+    bool warpWorld = worldCoverage > 0.0 && exitRay.w > 0.5 && clip.w > 0.0001 && uStrength > 0.0;
+    if (warpWorld) {
         vec2 outgoingPx = (clip.xy / clip.w * 0.5 + 0.5) * uScreenSize;
-        vec2 delta = outgoingPx - px;
+        delta = outgoingPx - px;
         // A single view only resolves a local image of the world. Bound the
         // displacement by both its sampling footprint and available cache margin.
         float limit = min(0.55 * uShadowPixels, 0.5 * min(border.x, border.y));
@@ -136,38 +177,68 @@ vec3 background(vec2 px, vec3 viewing, vec4 exitRay, float traceEdge, bool filte
         delta *= limit / (max(limit, 0.001) + length(delta)) * confidence * traceEdge * clamp(uStrength, 0.0, 1.0);
         if (uDepthGate > 0.5) {
             float infinityDepth = 0.5 + 0.5 * clip.z / clip.w;
-            float factor = sourceDistanceFactor(texture(SceneDepth, self).r, infinityDepth);
+            float factor = sourceDistanceFactor(texture(SceneDepth, self).r, lensDepth, infinityDepth);
             vec2 candidate = self + delta * factor * uBgTexel;
-            factor = sourceDistanceFactor(texture(SceneDepth, candidate).r, infinityDepth);
+            factor = sourceDistanceFactor(texture(SceneDepth, candidate).r, lensDepth, infinityDepth);
             candidate = self + delta * factor * uBgTexel;
-            float donorFactor = sourceDistanceFactor(texture(SceneDepth, candidate).r, infinityDepth);
+            float donorFactor = sourceDistanceFactor(texture(SceneDepth, candidate).r, lensDepth, infinityDepth);
             // At a depth discontinuity the first estimate can jump to another
             // surface. Accept a donor only if it projects back within one pixel.
-            if (length(delta) * abs(donorFactor - factor) <= 1.0 && behindLens(candidate)) sampled = candidate;
+            if (length(delta) * abs(donorFactor - factor) <= 1.0 && behindLens(candidate, lensDepth)) {
+                sampled = candidate;
+                sourceFactor = factor;
+            }
         } else {
             sampled += delta * uBgTexel;
         }
     }
-    vec3 worldColor = linearize(texture(SceneColor, sampled).rgb);
-    // Integrate compressed world detail along the long axis of the pixel
-    // footprint. Unit-scale donors retain their exact, single source sample.
     vec2 dx = vec2(0.0), dy = vec2(0.0);
     if (filterWorld) {
-        dx = dFdx(sampled) / uBgTexel;
-        dy = dFdy(sampled) / uBgTexel;
+        // Differentiate the lens mapping at the current source plane. A
+        // neighboring pixel can select a different plane or reject its donor;
+        // that discontinuity is an edge, not a large sampling footprint.
+        dx = dFdx(delta);
+        dy = dFdy(delta);
+        dx = vec2(1.0, 0.0) + (dFdx(float(warpWorld)) == 0.0 ? sourceFactor * dx : vec2(0.0));
+        dy = vec2(0.0, 1.0) + (dFdy(float(warpWorld)) == 0.0 ? sourceFactor * dy : vec2(0.0));
     }
-    vec2 axis = dot(dx,dx) > dot(dy,dy) ? dx : dy;
-    float span = length(axis);
-    if (span > 1.35 && span < 8.0 && worldCoverage > .0) {
-        vec2 stepUv = axis * (min(1.0, 6.0 / span) * .25) * uBgTexel;
+    if (worldCoverage <= 0.0) return artificialColor / max(coverage, 0.0001);
+    vec3 worldColor = linearize(texture(SceneColor, sampled).rgb);
+    if (filterWorld && any(notEqual(sampled, self)) && worldCoverage > 0.0) {
+        // Eigenvalues of J*transpose(J) give the major/minor footprint lengths,
+        // including oblique compression that neither screen derivative captures alone.
+        vec2 diagonal = dx * dx + dy * dy;
+        float xy = dx.x * dx.y + dy.x * dy.y;
+        float spread = length(vec2(diagonal.x - diagonal.y, 2.0 * xy));
+        float major = sqrt(max(0.0, .5 * (diagonal.x + diagonal.y + spread)));
+        float minor = abs(dx.x * dy.y - dx.y * dy.x) / max(major, .001);
+        if (major <= 1.25) return (artificialColor + worldColor * worldCoverage) / max(coverage, 0.0001);
+
+        float angle = .5 * atan(2.0 * xy, diagonal.x - diagonal.y + 1e-8);
+        vec2 axis = vec2(cos(angle), sin(angle));
+        // A tent with sqrt(2) times the box width keeps its variance and
+        // suppresses the sidelobes that leave repeating stripes in the resolve.
+        vec2 span = min(vec2(major, minor) * 1.41421356, vec2(12.0, 8.0));
+        vec2 along = axis * span.x * uBgTexel;
+        vec2 across = vec2(-axis.y, axis.x) * (span.y * smoothstep(1.25, 2.0, minor)) * uBgTexel;
+        int columns = max(2, int(ceil(span.x)));
+        int rows = minor > 1.25 ? int(ceil(span.y)) : 1;
         vec2 lo = .5 * uBgTexel, hi = (uBgRect.zw - .5) * uBgTexel;
         vec3 filtered = vec3(0.0);
-        for (int j = 0; j < 4; j++) {
-            vec2 tap = clamp(sampled + (float(j) - 1.5) * stepUv, lo, hi);
-            filtered += uDepthGate < .5 || behindLens(tap)
-                ? linearize(texture(SceneColor, tap).rgb) : worldColor;
+        float totalWeight = 0.0;
+        for (int y = 0; y < rows; ++y) {
+            float v = (float(y) + .5) / float(rows) - .5;
+            vec2 centre = sampled + v * across;
+            for (int x = 0; x < columns; ++x) {
+                float u = (float(x) + .5) / float(columns) - .5;
+                vec2 tap = clamp(centre + u * along, lo, hi);
+                float weight = (1.0 - 2.0 * abs(u)) * (1.0 - 2.0 * abs(v));
+                filtered += weight * (uDepthGate < .5 || behindLens(tap, lensDepth)
+                    ? linearize(texture(SceneColor, tap).rgb) : worldColor);
+                totalWeight += weight;
+            }
         }
-        worldColor = mix(worldColor, .25 * filtered, smoothstep(1.35, 2.4, span));
+        worldColor = mix(worldColor, filtered / totalWeight, smoothstep(1.25, 2.0, major));
     }
     return (artificialColor + worldColor * worldCoverage) / max(coverage, 0.0001);
 }
@@ -177,25 +248,38 @@ float traceCoverage(vec2 px) {
     return rectangleCoverage(px, uTraceRect, feather);
 }
 
-vec4 exitAt(sampler2D field, vec2 uv, out float captured) {
+ivec2 rayTexelIndex(ivec2 cell, ivec2 size, bool repeatX) {
+    ivec2 index = clamp(cell, ivec2(0), size - 1);
+    if (repeatX) index.x = (cell.x + size.x) % size.x;
+    return index;
+}
+
+vec4 exitAt(sampler2D field, vec2 uv, bool resolveDirection, bool repeatX, out float captured) {
     ivec2 size = textureSize(field, 0);
     vec2 pixel = uv * vec2(size) - 0.5;
     ivec2 cell = ivec2(floor(pixel));
     vec2 f = fract(pixel);
-    vec4 nearest = texelFetch(field, clamp(ivec2(pixel + 0.5), ivec2(0), size - 1), 0);
+    vec4 nearest = resolveDirection
+        ? texelFetch(field, rayTexelIndex(ivec2(pixel + 0.5), size, repeatX), 0) : vec4(0.0);
     captured = 0.0;
     vec3 outgoing = vec3(0.0);
     float valid = 0.0;
     for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
-        vec4 sampleRay = texelFetch(field, clamp(cell + ivec2(x, y), ivec2(0), size - 1), 0);
+        vec4 sampleRay = texelFetch(field, rayTexelIndex(cell + ivec2(x, y), size, repeatX), 0);
         float weight = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
         captured += weight * float(sampleRay.w > 1.5);
-        float compatible = float(sampleRay.w == 1.0)
-                         * float(nearest.w != 1.0 || dot(sampleRay.xyz, nearest.xyz) > 0.85);
-        outgoing += weight * compatible * sampleRay.xyz;
-        valid += weight * compatible;
+        if (resolveDirection) {
+            float compatible = float(sampleRay.w == 1.0)
+                             * float(nearest.w != 1.0 || dot(sampleRay.xyz, nearest.xyz) > 0.85);
+            outgoing += weight * compatible * sampleRay.xyz;
+            valid += weight * compatible;
+        }
     }
     return vec4(outgoing, float(valid > 0.0));
+}
+
+vec4 exitAt(sampler2D field, vec2 uv, bool resolveDirection, out float captured) {
+    return exitAt(field, uv, resolveDirection, false, captured);
 }
 
 // Inspect neighboring samples in the pilot ray field. Resolve only actual
@@ -214,7 +298,8 @@ bool needsSubpixels(vec2 uv) {
 }
 
 vec3 bright(vec2 uv, vec2 offset) {
-    vec3 emission = texture(RayLight, uv + offset).rgb * uDisplay.x;
+    vec3 emission = (uRayBloomLod.x < 0.0 ? texture(RayBloom, uv + offset).rgb
+                                         : texture(RayLight, uv + offset).rgb) * uDisplay.x;
     float peak = max(emission.r, max(emission.g, emission.b));
     return emission * smoothstep(0.58, 1.65, peak);
 }
@@ -225,14 +310,14 @@ vec4 cubicWeights(float t) {
                      t + 4.0*t2 - 3.0*t3, -t2 + t3);
 }
 
-vec4 reconstructCriticalTransfer(vec2 uv) {
-    ivec2 size = textureSize(PixelTransfer, 0);
+vec4 reconstructTransfer(sampler2D field, vec2 uv) {
+    ivec2 size = textureSize(field, 0);
     vec2 px = uv * vec2(size) - .5;
     ivec2 base = ivec2(floor(px));
     vec4 wx = cubicWeights(fract(px.x)), wy = cubicWeights(fract(px.y));
     vec4 result = vec4(0.0), lo = vec4(1e6), hi = vec4(0.0);
     for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
-        vec4 sampleLight = texelFetch(PixelTransfer, clamp(base + ivec2(x-1,y-1), ivec2(0), size-1), 0);
+        vec4 sampleLight = texelFetch(field, clamp(base + ivec2(x-1,y-1), ivec2(0), size-1), 0);
         result += wx[x]*wy[y]*sampleLight;
         if ((x == 1 || x == 2) && (y == 1 || y == 2)) {
             lo = min(lo, sampleLight); hi = max(hi, sampleLight);
@@ -241,8 +326,19 @@ vec4 reconstructCriticalTransfer(vec2 uv) {
     return clamp(result, lo, hi);
 }
 
+vec3 filteredBloom(sampler2D highlights, vec2 uv, vec3 scales, vec2 levels) {
+    vec3 lod = clamp(scales + levels.y, vec3(0.0), vec3(levels.x));
+    return uDisplay.y * (.43 * textureLod(highlights, uv, lod.x).rgb
+                       + .36 * textureLod(highlights, uv, lod.y).rgb
+                       + .21 * textureLod(highlights, uv, lod.z).rgb);
+}
+
 vec3 bloom(vec2 uv) {
-    if (uDisplay.y <= 0.0) return vec3(0.0);
+    if (uDisplay.y <= 0.0 || (uExterior.x > 0.0 && uWhiteHole.x == 0.0)) return vec3(0.0);
+    if (uRayBloomLod.x > 0.0) {
+        vec3 scales = uWhiteHole.x > 0.0 ? vec3(.7, 2.2, 4.2) : vec3(.6, 1.75, 3.1);
+        return filteredBloom(RayBloom, uv, scales, uRayBloomLod);
+    }
     vec3 sum = vec3(0.0);
     vec2 pixelScale = clamp(uScreenSize.y / 672.0, 0.65, 3.5) / uTraceRect.zw;
     for (int i = 0; i < 10; ++i) {
@@ -254,27 +350,11 @@ vec3 bloom(vec2 uv) {
     return sum * uDisplay.y;
 }
 
-// A hot arc advances around the physical shadow, leaving its interior dark.
-// Width is in display pixels, independent of the adaptive radiance texture.
-vec3 horizonArc(float distancePx, float width, vec3 viewing, vec3 eye) {
-    float d = distancePx / width;
-    if (abs(d) > 9.0 || uDiskGain <= 0.0) return vec3(0.0);
-    vec3 tangent = cross(uBhView - eye, viewing);
-    tangent /= max(length(tangent), .0001);
-    float phase = ROTATION * uTime.x * (6.2831853 / 64.0);
-    vec3 orbit = cos(phase) * uEquatorialX + sin(phase) * cross(uDiskNormal, uEquatorialX);
-    float arc = smoothstep(-.65, .95, dot(tangent, orbit));
-    float core = exp2(-1.6 * d*d);
-    float veil = exp2(-.65 * abs(d)) * (1.0 - smoothstep(-1.0, 2.0, d))
-               * (1.0 - smoothstep(7.0, 9.0, abs(d)));
-    float strength = uDiskGain * clamp(uDiskPhysics.w * uDiskPhysics.x * 3.0, 0.0, 1.0);
-    return strength * (.65 + .55 * uDiskHeat) * (.32 + .68 * arc)
-        * (core * vec3(.48, .30, .17) + veil * vec3(.072, .035, .11));
-}
-
-bool nearShadow(vec2 uv, float captured, float width) {
+bool nearShadow(vec2 uv, float captured) {
     if (captured > .0001 && captured < .9999) return true;
-    vec2 reach = (9.0 * width + 2.0) / uTraceRect.zw + 1.0 / vec2(textureSize(RayExit, 0));
+    // Five display pixels cover the cubic reconstruction band. The extra
+    // pilot texel keeps the analytic coverage active across coarse samples.
+    vec2 reach = 6.0 / uTraceRect.zw + 1.0 / vec2(textureSize(RayExit, 0));
     bool inside = captured > .5;
     return (textureLod(RayExit, uv + reach, 0.0).w > 1.5) != inside
         || (textureLod(RayExit, uv - reach, 0.0).w > 1.5) != inside
@@ -282,20 +362,87 @@ bool nearShadow(vec2 uv, float captured, float width) {
         || (textureLod(RayExit, uv - vec2(reach.x,-reach.y), 0.0).w > 1.5) != inside;
 }
 
-void main() {
+// Balanced 8x8 blue-noise mask with suppressed low spatial frequencies.
+// Both diagonals have the same centre so limiting refinement to two rays
+// does not bias the image. The tile stays fixed while pilot jitter advances.
+int subpixelPair() {
+    ivec2 cell = ivec2(gl_FragCoord.xy) & 7;
+    const uvec2 mask = uvec2(0x6ea15e91u, 0x6e916e91u);
+    return 2 * int((mask[cell.y >> 2] >> ((cell.y & 3) * 8 + cell.x)) & 1u);
+}
+
+// Area of a unit pixel on the visible side of the locally linear critical curve.
+float shadowVisibility(float distancePx, vec2 normal) {
+    vec2 slope = abs(normal);
+    float major = max(slope.x, slope.y);
+    float minor = min(slope.x, slope.y);
+    float d = abs(distancePx);
+    if (major < .0001) return step(0.0, distancePx);
+    if (d <= .5 * (major - minor)) return .5 + distancePx / major;
+    float corner = max(0.0, .5 * (major + minor) - d);
+    return .5 + sign(distancePx) * (.5 - corner * corner / max(2.0 * major * minor, 1e-8));
+}
+
+vec4 integrateCriticalTransfer(vec2 px, vec2 center, out bool valid) {
+    vec2 delta = px - center;
+    float radialDistance = length(delta);
+    vec2 radial = delta / max(radialDistance, .001);
+    vec2 tangent = vec2(-radial.y, radial.x);
+    const float tau = 6.2831853;
+    float azimuth = atan(delta.y, delta.x) / tau;
+    vec3 head = textureLod(CriticalRadii, vec2(azimuth, .5), 0.0).rgb;
+    valid = head.z > .999;
+    if (!valid) return vec4(0.0);
+
+    // Resolve a display pixel from the cached Kerr rays. The strip holds
+    // linear radiance, including emission on paths ending on the horizon.
+    vec4 integral = vec4(0.0);
+    vec2 escaped = vec2(0.0);
+    float samples = 0.0;
+    vec2 extent = criticalParam(criticalExtent(uCriticalBounds.z));
+    float offsetFromRim = radialDistance - head.x - head.y;
+    int grid = uCriticalArc.y > 0.0 && abs(offsetFromRim) > 4.0 ? 2 : (uRefine >= 4.0 ? 4 : 3);
+    int count = grid * grid;
+    for (int i = 0; i < 16; ++i) {
+        if (i >= count) break;
+        vec2 cell = vec2(i % grid, i / grid);
+        vec2 offset = (cell + .5) / float(grid) - .5;
+        float t = azimuth + dot(tangent, offset) / max(radialDistance * tau, .001);
+        vec3 sampleHead = textureLod(CriticalRadii, vec2(t, .5), 0.0).rgb;
+        if (sampleHead.z < .999) continue;
+        samples += 1.0;
+        float d = radialDistance + dot(radial, offset) - sampleHead.x - sampleHead.y;
+        float row = criticalRow(d, extent);
+        vec4 emitted = textureLod(CriticalLight, vec2(t, row), 0.0);
+        integral += emitted;
+        if (d > 0.0) escaped += vec2(emitted.a, 1.0);
+    }
+    valid = samples > 0.0;
+    integral /= max(1.0, samples);
+    if (escaped.y > .00001) integral.a = escaped.x / escaped.y;
+    return integral;
+}
+
+#moj_import <gt_shanhai:guixu_kerr_exterior.glsl>
+#moj_import <gt_shanhai:guixu_white_primary.glsl>
+#moj_import <gt_shanhai:guixu_white_world.glsl>
+
+void drawVolume() {
     bool baking = uTransferPass == 1.0;
     bool cached = uTransferPass == 2.0;
+    // World opacity comes from the emitting medium. The numerical endpoint
+    // still stops the ray and disallows a lensed donor.
+    float whiteWorld = uWhiteHole.x * (uSampleBackground > .5 ? uSkyMix.x : 1.0);
     vec2 footprint = baking ? uTraceRect.zw / uResolveSize : vec2(1.0);
     vec2 px = baking ? uTraceRect.xy + gl_FragCoord.xy * footprint : gl_FragCoord.xy;
-    vec2 ndc = px / uScreenSize * 2.0 - 1.0;
     vec3 eye = uInvProj[2].xyz / uInvProj[2].w;
-    vec4 nearPoint = uInvProj * vec4(ndc, -1.0, 1.0);
-    vec3 viewing = normalize(nearPoint.xyz - eye * nearPoint.w);
+    vec3 viewing = viewDirection(px, eye);
     vec2 uv = (px - uTraceRect.xy) / uTraceRect.zw - uRayJitter;
     vec4 light = texture(RayLight, uv);
     float captured;
-    vec4 exitRay = exitAt(RayExit, uv, captured);
+    vec4 exitRay = exitAt(RayExit, uv, !baking && uCaptureDepthOnly <= .5, captured);
     if (uCaptureDepthOnly > .5) {
+        if (uWhiteHole.x >= .5) discard;
         // Only the event's deferred bodies need a depth proxy. Resolve the
         // critical curve at the pixel centre using the same geodesic launch.
         if (captured > .0001 && captured < .9999) {
@@ -305,23 +452,102 @@ void main() {
         fragColor = vec4(0.0);
         return;
     }
+    if (!baking && uWhiteHole.x > .0 && uWhiteDebug > .5) {
+        // Visualize the numerical endpoint of each traced ray or the integrated optical depth.
+        float edge = traceCoverage(px);
+        vec3 diagnostic;
+        if (uWhiteDebug < 1.5) {
+            float outcome = texture(RayExit, uv).w;
+            diagnostic = outcome > 1.5 ? vec3(1.0, .39, .08)
+                       : outcome > .5 ? vec3(.04, .25, .34) : vec3(1.0, .08, .63);
+        } else {
+            float depth = -log(max(light.a, .0001));
+            diagnostic = mix(vec3(.06, .11, .22), vec3(1.0, .83, .34), 1.0 - exp(-.6 * depth));
+        }
+        fragColor = vec4(diagnostic * edge, edge);
+        return;
+    }
 
+    vec2 detailUv = (px - uDiskDetailRect.xy) / max(1.0, uDiskDetailRect.z);
+    // Keep the first lensed arcs in the finest grid. Use the outer part of the
+    // tile for blending into the lower-resolution transfer field.
+    float diskWeight = baking ? 0.0 : uDiskDetailRect.w * (1.0 - smoothstep(.82, 1.0, length(2.0 * detailUv - 1.0)));
+    float pilotCaptured = captured;
+    if (diskWeight > 0.0) {
+        float detailCaptured;
+        vec4 fine = exitAt(LocalRayExit, detailUv, true, detailCaptured);
+        captured = mix(captured, detailCaptured, diskWeight);
+        // Blend directions only within the same image of the sky. Across a
+        // capture boundary or a wrapped image, interpolating would invent a star path.
+        if (diskWeight >= .999 || exitRay.w < .5) exitRay = fine;
+        else if (fine.w > .5 && dot(normalize(exitRay.xyz), normalize(fine.xyz)) > .85)
+            exitRay.xyz = mix(normalize(exitRay.xyz), normalize(fine.xyz), diskWeight);
+        else if (diskWeight >= .5) exitRay = fine;
+    }
     bool mixedShadow = captured > .0001 && captured < .9999;
-    bool refine = !cached && uRefine > .5 && ((!baking && mixedShadow) || needsSubpixels(uv));
-    if (!cached && uHistoryWeight > 0.0 && !refine) {
+    bool radiantDisk = uWhiteHole.x == 0.0 && uDiskGain > 0.0 && uDiskPhysics.x > 0.0 && uDiskPhysics.w > 0.0;
+    bool nearRim = !baking && whiteWorld < .999 && (mixedShadow || nearShadow(uv, pilotCaptured));
+    float arcWeight = 0.0;
+    if (!baking && (cached || uCriticalArc.y > 0.0) && uCriticalBounds.w > .5 && radiantDisk) {
+        // Keep the contour active even when all coarse pilot taps miss the rim.
+        vec2 fromCenter = px - uCriticalBounds.xy;
+        vec3 contour = textureLod(CriticalRadii,
+            vec2(atan(fromCenter.y, fromCenter.x) / 6.2831853, .5), 0.0).rgb;
+        float offset = length(fromCenter) - contour.x - contour.y;
+        if (contour.z > .999) {
+            nearRim = nearRim || (cached && abs(offset) < uCriticalBounds.z);
+            if (uCriticalArc.y > 0.0) {
+                float reach = offset < 0.0 ? uCriticalArc.x : uCriticalArc.y;
+                arcWeight = 1.0 - smoothstep(.72 * reach, reach, abs(offset));
+            }
+        }
+    }
+    float margin = nearRim ? shadowMargin(px) : (captured > .5 ? -1.0 : 1.0);
+    vec2 gradient = vec2(dFdx(margin), dFdy(margin)) / footprint;
+    // Do not differentiate across the synthetic +/-1 values outside the work region.
+    bool wholeQuad = fwidth(float(nearRim)) == 0.0;
+    if (nearRim && !wholeQuad) {
+        vec2 dx = vec2(.5, 0.0), dy = vec2(0.0, .5);
+        gradient = vec2(shadowMargin(px + dx) - shadowMargin(px - dx),
+                        shadowMargin(px + dy) - shadowMargin(px - dy));
+    }
+    float slope = length(gradient);
+    vec2 normal = gradient / max(slope, 1e-8);
+    float distancePx = margin / max(1e-8, min(slope, .12));
+    float criticalWeight = arcWeight;
+    vec4 criticalTransfer;
+    if (uCriticalBounds.w > .5 && !baking && uRefine > .5 && radiantDisk && nearRim && slope > 1e-8) {
+        float halfSpan = .5 * dot(abs(normal), footprint);
+        float extension = cached ? .5 * (uCriticalBounds.z - 5.0) : 0.0;
+        criticalWeight = max(criticalWeight,
+            1.0 - smoothstep(halfSpan + .25 + extension, halfSpan + .95 + extension, abs(distancePx)));
+    }
+    if (criticalWeight > 0.0) {
+        bool valid;
+        criticalTransfer = integrateCriticalTransfer(px, uCriticalBounds.xy, valid);
+        if (!valid) criticalWeight = 0.0;
+    }
+    float pilotSignal = max(light.r, max(light.g, light.b)) * uDisplay.x;
+    bool resolveVolume = baking && uWhiteHole.x > 0.0 && max(footprint.x, footprint.y) > 1.5
+                      && pilotSignal > .035 && pilotSignal < 2.2;
+    bool refine = !cached && diskWeight < 1.0 && uRefine > .5 && (resolveVolume || criticalWeight > 0.0
+               || (!baking && mixedShadow && whiteWorld < .999) || needsSubpixels(uv));
+    if (!cached && uHistoryWeight > 0.0 && !refine && diskWeight < 1.0) {
         vec4 projected = uPreviousProjection * vec4(viewing, 0.0);
         vec2 previousPx = (projected.xy / max(projected.w, 0.001) * 0.5 + 0.5) * uScreenSize;
         vec2 previousUv = (previousPx - uPreviousRect.xy) / uPreviousRect.zw - uPreviousJitter;
         if (projected.w > 0.0 && all(greaterThan(previousUv, vec2(0.01))) &&
             all(lessThan(previousUv, vec2(0.99)))) {
             float previousCaptured;
-            vec4 previousRay = exitAt(PreviousExit, previousUv, previousCaptured);
+            vec4 previousRay = exitAt(PreviousExit, previousUv, !baking, previousCaptured);
             vec4 previous = texture(PreviousLight, previousUv);
             float alphaConsistency = 1.0 - smoothstep(0.06, 0.34, abs(light.a - previous.a));
             float captureConsistency = 1.0 - smoothstep(0.15, 0.60, abs(captured - previousCaptured));
-            float weight = uHistoryWeight * alphaConsistency * captureConsistency;
+            vec3 delta = abs(light.rgb - previous.rgb) / (.10 + max(light.rgb, previous.rgb));
+            float radianceConsistency = 1.0 - smoothstep(.18, .60, max(delta.r, max(delta.g, delta.b)));
+            float weight = uHistoryWeight * (1.0 - diskWeight) * alphaConsistency * captureConsistency * radianceConsistency;
             light = mix(light, previous, weight);
-            captured = mix(captured, previousCaptured, uHistoryWeight);
+            captured = mix(captured, previousCaptured, weight);
             if (exitRay.w > 0.5 && previousRay.w > 0.5) {
                 vec3 priorDirection = (uPreviousToView * vec4(previousRay.xyz, 0.0)).xyz;
                 float directionAgreement = dot(normalize(exitRay.xyz), normalize(priorDirection));
@@ -334,22 +560,26 @@ void main() {
     float edge = traceCoverage(px);
     vec3 incoming = vec3(0.0);
     skyCoverage = 0.0;
-    float width = clamp(.008 * uShadowPixels, .85, 3.5);
-    bool nearRim = !baking && nearShadow(uv, captured, width);
-    if (cached && captured >= .99999 && !nearRim && edge == 1.0) {
+    if (cached && diskWeight == 0.0 && criticalWeight == 0.0 && uWhiteHole.x <= 0.0 && captured >= .99999 && !nearRim && edge == 1.0) {
         vec2 transferUv = (px - uTraceRect.xy) / uTraceRect.zw;
         fragColor = vec4(displayEncode(toneMap(texture(PixelTransfer, transferUv).rgb)), 1.0);
         return;
     }
-    if (!baking && (captured < .9999 || nearRim || edge < 1.0 || refine))
-        incoming = background(px, viewing, exitRay, edge, true, skyCoverage);
+    if (!baking && (whiteWorld > 0.0 || captured < .9999 || nearRim || edge < 1.0 || refine))
+        incoming = background(px, viewing, exitRay, edge, edge, true, false, 1.0, skyCoverage);
     float transmitted = light.a * (1.0 - captured);
+    float mediumThrough = light.a;
     float escapeFraction = 1.0 - captured;
     const vec2 offsets[4] = vec2[4](vec2(-.375,-.125), vec2(.375,.125),
                                     vec2(.125,-.375), vec2(-.125,.375));
-    if (refine) {
+    if (!cached && criticalWeight > 0.0) {
+        float covered = nearRim ? shadowVisibility(distancePx, normal) : escapeFraction;
+        light = mix(light, criticalTransfer, criticalWeight);
+        escapeFraction = mix(escapeFraction, covered, criticalWeight);
+        transmitted = light.a * escapeFraction;
+    } else if (refine) {
         vec3 radiance = vec3(0.0), skyLight = vec3(0.0);
-        float transmission = 0.0, covered = 0.0, escaped = 0.0;
+        float transmission = 0.0, allTransmission = 0.0, covered = 0.0, escaped = 0.0;
         int count = int(uRefine);
         // A large footprint means the GPU budget has already reduced the
         // transfer grid. Reserve the extra two subring rays for finer grids.
@@ -358,65 +588,120 @@ void main() {
             if (coarse) count = mixedShadow ? 2 : 1;
             else if (count == 2) count = mixedShadow ? 4 : 1;
         }
+        int pair = count == 2 && uWhiteHole.x == 0.0 ? subpixelPair() : 0;
         for (int i = 0; i < 4; i++) {
             if (i >= count) break;
-            vec2 sub = count == 1 ? px : px + offsets[i] * footprint;
+            vec2 sub = count == 1 ? px : px + offsets[i + pair] * footprint;
             vec4 emitted;
             vec4 ray = tracePixel(sub, baking, emitted);
             float through = emitted.a * float(ray.w < 1.5);
             escaped += float(ray.w < 1.5);
             if (!baking) {
                 float layer;
-                vec3 source = background(sub, viewing, ray, edge, false, layer);
-                skyLight += through * layer * source;
-                covered += through * layer;
+                vec3 source = background(sub, viewing, ray, edge, edge, false, false, 1.0, layer);
+                float backgroundThrough = mix(through, emitted.a, whiteWorld);
+                skyLight += backgroundThrough * layer * source;
+                covered += backgroundThrough * layer;
             }
+            allTransmission += emitted.a;
             transmission += through;
             radiance += emitted.rgb;
         }
         light.rgb = radiance / float(count);
         if (covered > .000001) incoming = skyLight / covered;
-        skyCoverage = transmission > .000001 ? covered / transmission : skyCoverage;
+        float backgroundThrough = mix(transmission, allTransmission, whiteWorld);
+        skyCoverage = backgroundThrough > .000001 ? covered / backgroundThrough : skyCoverage;
         transmitted = transmission / float(count);
+        mediumThrough = allTransmission / float(count);
         escapeFraction = escaped / float(count);
     }
+    float escapedThrough = escapeFraction > .00001 ? transmitted / escapeFraction : light.a;
     if (baking) {
         fragColor = vec4(light.rgb * uDisplay.x + bloom(uv),
-                         escapeFraction > .00001 ? transmitted / escapeFraction : light.a);
+                         mix(escapedThrough, mediumThrough, whiteWorld));
         return;
     }
-    float margin = nearRim ? shadowMargin(px) : (captured > .5 ? -1.0 : 1.0);
-    vec2 gradient = vec2(dFdx(margin), dFdy(margin));
-    // A quad straddling the boundary of our narrow work region has no
-    // derivative on its missing side. It is already outside the visible rim.
-    bool wholeQuad = fwidth(float(nearRim)) == 0.0;
-    float distancePx = margin / max(1e-8, min(length(gradient), wholeQuad ? .12 : .001));
-    float visible = nearRim ? smoothstep(-.65, .65, distancePx) : escapeFraction;
+    float visible = nearRim ? shadowVisibility(distancePx, normal) : escapeFraction;
     vec3 radiance;
     if (cached) {
         vec2 transferUv = (px - uTraceRect.xy) / uTraceRect.zw;
         vec4 transfer = texture(PixelTransfer, transferUv);
-        if (nearRim && abs(distancePx) < 4.0) {
-            // Smooth unresolved subrings along the silhouette. Sampling across
-            // its normal instead would spread bright disk light into the core.
-            vec2 tangent = vec2(-gradient.y, gradient.x) / max(length(gradient), 1e-8);
-            vec2 texels = vec2(textureSize(PixelTransfer, 0)) / uTraceRect.zw;
-            vec2 along = tangent / max(length(tangent * texels), .001) / uTraceRect.zw;
-            transfer = .5 * reconstructCriticalTransfer(transferUv)
-                     + .25 * (texture(PixelTransfer, transferUv + along)
-                            + texture(PixelTransfer, transferUv - along));
+        float detail = 0.0;
+        if (nearRim && abs(distancePx) < 5.0) {
+            // Keep the cached radiance's local contrast across the rim.
+            // The clamped cubic avoids overshoot, and the blend avoids a seam.
+            detail = 1.0 - smoothstep(2.0, 5.0, abs(distancePx));
+        }
+        float intensity = max(transfer.r, max(transfer.g, transfer.b));
+        detail = max(detail, uWhiteHole.x * smoothstep(.014, .085, intensity));
+        if (detail > 0.0 && criticalWeight < 1.0) {
+            transfer = mix(transfer, reconstructTransfer(PixelTransfer, transferUv), detail);
+        }
+        if (criticalWeight > 0.0) {
+            vec4 fromStrip = vec4(criticalTransfer.rgb * uDisplay.x + bloom(uv), criticalTransfer.a);
+            transfer = mix(transfer, fromStrip, criticalWeight);
         }
         radiance = transfer.rgb;
-        transmitted = transfer.a * visible;
+        transmitted = transfer.a * mix(visible, 1.0, whiteWorld);
     } else {
         radiance = light.rgb * uDisplay.x + bloom(uv);
-        transmitted = (escapeFraction > .00001 ? transmitted / escapeFraction : light.a) * visible;
+        transmitted = mix(escapedThrough * visible, mediumThrough, whiteWorld);
     }
-    transmitted = mix(1.0, transmitted, edge);
-    vec3 emission = toneMap(radiance + horizonArc(distancePx, width, viewing, eye) * uDisplay.x);
+    if (diskWeight > 0.0) {
+        vec4 disk = reconstructTransfer(DiskDetail, detailUv);
+        // The polar strip integrates subpixel images at the actual critical curve.
+        // The Cartesian samples resolve the independent disk edge crossing its interior.
+        if (criticalWeight > 0.0) disk = mix(disk, criticalTransfer, criticalWeight);
+        vec3 halo = uDiskBloomLod.x > 0.0
+            ? filteredBloom(DiskDetailBloom, detailUv, vec3(.6, 1.75, 3.1), uDiskBloomLod) : bloom(uv);
+        radiance = mix(radiance, disk.rgb * uDisplay.x + halo, diskWeight);
+        transmitted = mix(transmitted, disk.a * visible, diskWeight);
+    }
+    // The live framebuffer is a display image, not the asymptotic sky of
+    // the metric. Limit its absorption so the bright core remains a glow.
+    transmitted = mix(1.0, transmitted, edge * (1.0 - .80 * whiteWorld));
+    vec3 emission = toneMap(radiance);
     // Apply scene-layer opacity once. The host framebuffer is the unwarped
     // transmitted source where a scene copy is unavailable or disabled.
     float coverage = 1.0 - transmitted * (1.0 - skyCoverage);
-    vec3 scene = displayEncode(clamp(incoming * transmitted + emission * edge, 0.0, 1.0));
+    vec3 base = incoming * transmitted;
+    vec3 source = emission * edge;
+    vec3 scene = displayEncode(clamp(base + source * (1.0 - whiteWorld * base), 0.0, 1.0));
     fragColor = vec4(mix(displayEncode(emission) * edge, scene, skyCoverage), coverage);
+}
+
+void main() {
+    gl_FragDepth = gl_FragCoord.z;
+    if (uTransferPass == 4.0) {
+        fragColor = vec4(whitePilotImage(gl_FragCoord.xy / uResolveSize), 1.0);
+        return;
+    }
+    if (uKerrDepth > .5 && uTransferPass < 3.0 && uTransferPass != 1.0) {
+        vec3 eye = uInvProj[2].xyz / uInvProj[2].w;
+        gl_FragDepth = kerrDepth(eye, viewDirection(gl_FragCoord.xy, eye));
+    }
+    if (uTransferPass == 3.0) {
+        drawWhiteWorldBloomSource();
+        return;
+    }
+    if (uWhitePrimary > .5 && uWhiteDebug <= .5 && uCaptureDepthOnly <= .5 && uTransferPass == 0.0) {
+        drawWhiteWorld();
+        return;
+    }
+    if (uTransferPass == 1.0 || uExterior.x <= 0.0) {
+        drawVolume();
+        return;
+    }
+    if (uCaptureDepthOnly > .5) {
+        if (capturedAt(gl_FragCoord.xy) < .5) discard;
+        fragColor = vec4(0.0);
+        return;
+    }
+    vec4 exterior = drawKerrExterior(gl_FragCoord.xy);
+    if (uExterior.x >= 1.0) {
+        fragColor = exterior;
+        return;
+    }
+    drawVolume();
+    fragColor = mix(fragColor, exterior, uExterior.x);
 }

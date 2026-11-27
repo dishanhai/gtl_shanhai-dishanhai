@@ -13,13 +13,8 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gtladd.gtladditions.api.machine.logic.GTLAddMultipleWirelessRecipesLogic;
 import com.gtladd.gtladditions.common.data.ParallelData;
-import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.ints.IntList;
-import it.unimi.dsi.fastutil.longs.LongArrayList;
-import it.unimi.dsi.fastutil.longs.LongList;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import it.unimi.dsi.fastutil.objects.ObjectList;
+import com.gtladd.gtladditions.utils.recipe.RecipeCalculationHelper;
+import it.unimi.dsi.fastutil.longs.LongBooleanPair;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -564,29 +559,9 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             invalidateLookupSetCache();
             return null;
         }
-        long remaining = totalParallel;
-        long[] parallels = new long[recipes.size()];
-        int index = 0;
-        ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(recipes.size());
-        LongArrayList remainingWants = new LongArrayList(recipes.size());
-        IntArrayList remainingIndices = new IntArrayList(recipes.size());
-        for (GTRecipe recipe : recipes) {
-            long max = getMaxParallel(recipe, totalParallel);
-            if (max <= 0) {
-                continue;
-            }
-            recipeList.add(recipe);
-            long allocated = Math.min(max, totalParallel / recipes.size());
-            parallels[index] = allocated;
-            long want = max - allocated;
-            if (want > 0) {
-                remainingWants.add(want);
-                remainingIndices.add(index);
-            }
-            remaining -= allocated;
-            index++;
-        }
-        if (recipeList.isEmpty()) {
+        ParallelData allocation = RecipeCalculationHelper.INSTANCE.calculateParallelsWithFairAllocation(
+                recipes, totalParallel, recipe -> LongBooleanPair.of(getMaxParallel(recipe, totalParallel), true));
+        if (allocation == null) {
             // 实测回归：材料不足时若不失效 SET 缓存，会让机器在整个 20-tick 窗口内反复对同一批
             // （可能很大的）候选 GTRecipe 逐个 getMaxParallel() 校验，比"偶尔全量重搜、多数情况下
             // 直接命中空集快速返回"更贵——曾尝试去掉这里的失效，代理执行者延迟从 307μs 涨到 761μs，
@@ -597,18 +572,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             }
             return null;
         }
-        ParallelData allocation = RecipeCalculationHelper.INSTANCE.getFinalParallelData(
-                remaining,
-                parallels,
-                (LongList) remainingWants,
-                (IntList) remainingIndices,
-                (ObjectList<GTRecipe>) recipeList);
-        if (allocation != null) {
-            for (long amount : allocation.getParallels()) {
-                long positive = Math.max(0L, amount);
-                stellarLastAllocatedParallel = positive > Long.MAX_VALUE - stellarLastAllocatedParallel
-                        ? Long.MAX_VALUE : stellarLastAllocatedParallel + positive;
-            }
+        for (long amount : allocation.getParallels()) {
+            long positive = Math.max(0L, amount);
+            stellarLastAllocatedParallel = positive > Long.MAX_VALUE - stellarLastAllocatedParallel
+                    ? Long.MAX_VALUE : stellarLastAllocatedParallel + positive;
         }
         return allocation;
     }

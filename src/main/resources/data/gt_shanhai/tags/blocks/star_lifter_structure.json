@@ -1,0 +1,15 @@
+{
+  "replace": false,
+  "values": [
+    "gt_shanhai:star_lifter_beam",
+    "gt_shanhai:star_lifter_armor",
+    "gt_shanhai:star_lifter_ceramic",
+    "gt_shanhai:star_lifter_socket",
+    "gt_shanhai:star_lifter_conduit",
+    "gt_shanhai:star_lifter_magnet",
+    "gt_shanhai:star_lifter_extractor",
+    "gt_shanhai:star_lifter_stellar",
+    "gt_shanhai:star_lifter_terminal",
+    "gt_shanhai:star_lifter_interface"
+  ]
+}

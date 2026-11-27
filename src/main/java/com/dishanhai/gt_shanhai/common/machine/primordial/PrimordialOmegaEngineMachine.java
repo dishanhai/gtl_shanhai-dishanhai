@@ -26,7 +26,7 @@ import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.network.SHideRingPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 
-import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
+import com.gtladd.gtladditions.utils.module.AntichristPosHelper;
 
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineHost;
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;

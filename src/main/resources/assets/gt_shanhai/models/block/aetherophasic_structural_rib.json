@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "gt_shanhai:block/aetherophasic_structural_rib"
+  }
+}

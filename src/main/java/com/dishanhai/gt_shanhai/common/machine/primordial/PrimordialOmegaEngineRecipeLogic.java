@@ -8,7 +8,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuRecipeMath;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
-import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
+import com.gtladd.gtladditions.utils.recipe.RecipeCalculationHelper;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.network.chat.Component;
 

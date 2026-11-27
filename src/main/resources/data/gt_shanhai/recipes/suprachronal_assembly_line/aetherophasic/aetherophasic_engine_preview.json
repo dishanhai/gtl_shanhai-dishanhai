@@ -1,0 +1,217 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 12000,
+  "data": {
+    "euTier": 13
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1806,
+          "ingredient": {
+            "item": "gtceu:opv_machine_hull"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 30347,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 26214,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_conduit"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 13480,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_fastener"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 15785,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_structural_rib"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32401,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_aperture"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 31342,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_optical_coupler"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 30506,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_heat_vent"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 13309,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_stellar_surface"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4190,
+          "ingredient": {
+            "item": "gtceu:opv_field_generator"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 3599,
+          "ingredient": {
+            "item": "gtceu:gravitation_engine_unit"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 7923,
+          "ingredient": {
+            "item": "gtladditions:central_graviton_flow_regulator"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2169,
+          "ingredient": {
+            "tag": "gtceu:circuits/max"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 6064,
+          "ingredient": {
+            "tag": "gtceu:circuits/opv"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 830,
+          "ingredient": {
+            "item": "gtlcore:spacetimebendingcore"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1600,
+          "ingredient": {
+            "item": "gtladditions:relativistic_heat_capacitor"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 6911413,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 18597326,
+          "value": [
+            {
+              "fluid": "gtceu:starmetal_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 12163694,
+          "value": [
+            {
+              "fluid": "gtceu:starmetal"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 36174061,
+          "value": [
+            {
+              "fluid": "gtceu:super_mutated_living_solder"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_engine_preview"
+          }
+        }
+      }
+    ]
+  }
+}

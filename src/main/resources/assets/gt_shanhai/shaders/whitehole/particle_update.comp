@@ -1,0 +1,139 @@
+#version 430 core
+
+layout(local_size_x = 128) in;
+layout(r32ui, binding = 0) uniform uimage2D Accumulation;
+uniform uvec2 uSeed;
+uniform uint uTick;
+uniform uint uCount;
+uniform vec4 uFlow; // radial beta, jet intensity, outer horizon in r_g, budget normalization
+
+struct Particle {
+    vec4 positionAge;
+    vec4 velocityLifetime;
+    vec4 previousPosition;
+    vec4 olderPosition;
+    vec4 emission; // normalized mass, temperature in K, kinetic energy, emission
+    vec4 color;
+    uvec4 key; // emitter id, launch epoch, deterministic random key, emitter type
+};
+
+layout(std430, binding = 0) writeonly buffer ParticleBuffer {
+    Particle particles[];
+};
+
+const float TAU = 6.28318530718;
+const float TICK_SECONDS = 1.0 / 30.0;
+
+uint hash(uint value) {
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16);
+}
+
+float random(uint key, uint channel) {
+    return float(hash(key + channel * 0x9e3779b9u) >> 8) / 16777216.0;
+}
+
+struct Emitter {
+    float angle;
+    float slope;
+    float velocity;
+    float lobe;
+    float phase;
+    float opening;
+    uint type;
+};
+
+vec3 orbit(Emitter emitter, float age) {
+    float launch = uFlow.z + .43;
+    float r = launch + emitter.velocity * age;
+    // Integrate a decreasing angular speed to preserve the identity of each
+    // material strand as it winds and travels outwards.
+    float shear = (4.9 * emitter.lobe / emitter.velocity) * (1.0 / sqrt(launch) - inversesqrt(r));
+    float phase = emitter.angle + shear + .12 * sin(.86 * age + emitter.phase);
+    float latitude = emitter.slope;
+    if (emitter.type == 0u) {
+        latitude += .055 * sin(.74 * age + emitter.phase) + emitter.slope * .065 * age;
+    } else if (emitter.type == 2u) {
+        float axial = emitter.lobe * (uFlow.z + .43 + emitter.velocity * age);
+        float width = .13 + .065 * emitter.opening * age + .014 * age * age;
+        float twist = emitter.angle + emitter.lobe * .86 * age;
+        return vec3(width * vec2(cos(twist), sin(twist)), axial);
+    } else if (emitter.type == 3u) {
+        latitude += .10 * sin(.35 * age + emitter.phase);
+    }
+
+    // In Cartesian Kerr–Schild coordinates constant-r shells are oblate.
+    float spin2 = max(0.0, uFlow.z * (2.0 - uFlow.z));
+    float cylinder = sqrt(r * r + spin2) * cos(latitude);
+    return vec3(cylinder * vec2(cos(phase), sin(phase)), r * sin(latitude));
+}
+
+void deposit(vec3 xyz, float much) {
+    vec3 voxel = (xyz / 60.0 + .5) * 63.0;
+    if (any(lessThan(voxel, vec3(0.0))) || any(greaterThanEqual(voxel, vec3(63.0)))) return;
+    ivec3 base = ivec3(voxel);
+    vec3 f = fract(voxel);
+    for (int z = 0; z < 2; ++z) {
+        int slice = base.z + z;
+        ivec2 tile = ivec2(slice % 8, slice / 8) * 64 + base.xy;
+        float weightZ = z == 0 ? 1.0 - f.z : f.z;
+        for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+            vec2 weightXY = vec2(x == 0 ? 1.0 - f.x : f.x, y == 0 ? 1.0 - f.y : f.y);
+            uint quantized = uint(much * weightZ * weightXY.x * weightXY.y + .5);
+            if (quantized > 0u) imageAtomicAdd(Accumulation, tile + ivec2(x,y), quantized);
+        }
+    }
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uCount) return;
+
+    uint stable = hash(hash(id + uSeed.x) ^ uSeed.y);
+    uint interval = 165u + hash(stable ^ 0x0b7e3bc1u) % 205u;
+    uint offset = hash(stable ^ 0xcba6af71u) % interval;
+    uint epoch = uTick / interval;
+    uint phaseTick = uTick % interval + offset;
+    epoch += phaseTick / interval;
+    phaseTick %= interval;
+    uint birth = hash(stable ^ hash(epoch));
+    float age = float(phaseTick) * TICK_SECONDS;
+    float lifetime = float(interval) * TICK_SECONDS * mix(.79, .99, random(birth, 0u));
+    float kind = random(stable, 1u);
+    uint type = kind < .58 ? 0u : kind < .80 ? 1u : kind < .96 ? 2u : 3u;
+    float lobe = random(birth, 3u) < .5 ? -1.0 : 1.0;
+    if (type == 0u) lobe = 1.0;
+    float angle = TAU * random(birth, 4u);
+    float slope = asin(2.0 * random(birth, 5u) - 1.0);
+    if (type == 0u) slope *= .16;
+    if (type == 3u) { slope = .33 + .24 * slope; angle = .75 + .70 * sin(angle); }
+    float beta = clamp(uFlow.x, 0.0, .995);
+    float speed = mix(.60, 3.30, beta) * mix(.70, 1.50, random(birth, 6u));
+    if (type == 2u) speed *= 1.85;
+    Emitter emitter = Emitter(angle, slope, speed, lobe, TAU * random(birth, 7u), random(birth, 8u), type);
+    vec3 at = orbit(emitter, age);
+    vec3 previous = orbit(emitter, max(0.0, age - TICK_SECONDS));
+    vec3 older = orbit(emitter, max(0.0, age - 7.0 * TICK_SECONDS));
+    vec3 velocity = (at - previous) / TICK_SECONDS;
+
+    float mass = mix(.22, 1.0, random(birth, 9u));
+    float temperature = mix(16000.0, 46000.0, random(birth, 10u)) * exp(-.17 * age);
+    float kinetic = mass * (inversesqrt(1.0 - beta * beta) - 1.0);
+    float emission = smoothstep(0.0, .25, age) * (1.0 - smoothstep(.58, 1.0, age / lifetime));
+    emission *= mass * (.35 + .65 * sqrt(temperature / 46000.0));
+    emission *= type == 2u ? clamp(uFlow.y, 0.0, 2.0) : 1.0;
+    vec3 color = mix(vec3(.12, .70, .91), vec3(.99, .97, .90), smoothstep(8000.0, 34000.0, temperature));
+    particles[id] = Particle(vec4(at, age), vec4(velocity, lifetime), vec4(previous, 0), vec4(older, 0),
+                             vec4(mass, temperature, kinetic, emission), vec4(color, 0), uvec4(id, epoch, birth, type));
+
+    float amount = 260.0 * emission * uFlow.w;
+    if (amount <= .5) return;
+    deposit(at, amount);
+    deposit(previous, amount * .60);
+    deposit(orbit(emitter, max(0.0, age - 3.0 * TICK_SECONDS)), amount * .43);
+    deposit(orbit(emitter, max(0.0, age - 5.0 * TICK_SECONDS)), amount * .28);
+    deposit(older, amount * .15);
+}

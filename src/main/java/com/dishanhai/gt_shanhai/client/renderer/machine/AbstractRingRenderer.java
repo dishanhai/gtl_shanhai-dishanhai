@@ -21,7 +21,7 @@ import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
 
 import com.gtladd.gtladditions.utils.CommonUtils;
-import com.gtladd.gtladditions.utils.antichrist.ClientRingBlockHelper;
+import com.dishanhai.gt_shanhai.client.ShanhaiRingHelper;
 
 import org.joml.Quaternionf;
 
@@ -88,11 +88,10 @@ public abstract class AbstractRingRenderer extends WorkableCasingMachineRenderer
         // 环方块隐藏/恢复（每帧，与修改矩阵一致）
         var clientLevel = Minecraft.getInstance().level;
         if (clientLevel instanceof ClientLevel) {
-            long posLong = blockEntity.getBlockPos().asLong();
             if (controller.isFormed()) {
-                ClientRingBlockHelper.INSTANCE.hideRingsAtPosition(clientLevel, posLong, facing);
+                ShanhaiRingHelper.hideRings(clientLevel, blockEntity.getBlockPos(), facing);
             } else {
-                ClientRingBlockHelper.INSTANCE.restoreRingsAtPosition(clientLevel, posLong, facing);
+                ShanhaiRingHelper.restoreRings(clientLevel, blockEntity.getBlockPos(), facing);
             }
         }
 

@@ -1,0 +1,98 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 100,
+  "data": {
+    "euTier": 13
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:neutronium_ring"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtceu:orichalcum_screw"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:tritanium_bolt"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:small_transcendentmetal_gear"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "tag": "gtceu:circuits/opv"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 2304,
+          "value": [
+            {
+              "fluid": "gtceu:indalloy_140"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:lubricant"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_fastener"
+          }
+        }
+      }
+    ]
+  }
+}

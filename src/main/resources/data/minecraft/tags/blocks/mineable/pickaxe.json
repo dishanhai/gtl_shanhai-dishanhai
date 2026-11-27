@@ -1,0 +1,14 @@
+{
+  "replace": false,
+  "values": [
+    "gt_shanhai:aetherophasic_casing",
+    "gt_shanhai:aetherophasic_conduit",
+    "gt_shanhai:aetherophasic_fastener",
+    "gt_shanhai:aetherophasic_aperture",
+    "gt_shanhai:aetherophasic_stellar_surface",
+    "gt_shanhai:aetherophasic_structural_rib",
+    "gt_shanhai:aetherophasic_heat_vent",
+    "gt_shanhai:aetherophasic_optical_coupler",
+    "#gt_shanhai:star_lifter_structure"
+  ]
+}

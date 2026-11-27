@@ -96,7 +96,10 @@ class ShanhaiNyarlathotepLinkGeometryTest {
         int pivot=host.lastIndexOf("HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing)",portal);
         int pop=host.indexOf("poseStack.popPose()",pivot);
         assertTrue(pivot>=0 && portal>pivot && portal<pop,"Portal must use the existing orientation and cell-center pivot");
-        assertTrue(host.contains("drawBlackHole = BlackHoleTuning.enabled() && blackHoleVisible"));
+        assertTrue(host.contains("drawHorizon = BlackHoleTuning.enabled() && blackHoleVisible"));
+        assertTrue(host.contains("drawBlackHole = drawHorizon && !whiteHole"),
+                "The inward portal belongs to the black hole's accretion effects");
+        assertTrue(host.contains("BlackHoleTuning.hostRenderMode(clientLevel, controllerPos.asLong()"));
         assertTrue(host.contains("linkedMatterActive = host.isNyarlathotepLinkReady() && drawBlackHole"));
         assertTrue(host.substring(portal, pop).contains("linkedMatterActive && host.isHostOuterStarsEnabled()"));
     }

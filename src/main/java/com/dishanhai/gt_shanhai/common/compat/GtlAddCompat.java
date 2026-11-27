@@ -2,7 +2,7 @@ package com.shanhai.common.compat;
 
 import com.gtladd.gtladditions.common.machine.multiblock.structure.StructureResourceLoader;
 import com.gtladd.gtladditions.common.recipe.GTLAddRecipesTypes;
-import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
+import com.gtladd.gtladditions.utils.module.AntichristPosHelper;
 import com.gregtechceu.gtceu.api.pattern.FactoryBlockPattern;
 import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -18,7 +18,7 @@ import java.lang.reflect.Method;
  * <p>当前转发<b>两组</b>非 api 符号，都注明来源 FQN：
  * <ul>
  *   <li>结构/几何四个：{@code com.gtladd.gtladditions.common.machine.multiblock.structure.StructureResourceLoader}
- *       与 {@code com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper}；</li>
+ *       与 {@code com.gtladd.gtladditions.utils.module.AntichristPosHelper}；</li>
  *   <li>配方类型十三个（2026-09-22 新增）：{@code com.gtladd.gtladditions.common.recipe.GTLAddRecipesTypes}。</li>
  * </ul>
  *

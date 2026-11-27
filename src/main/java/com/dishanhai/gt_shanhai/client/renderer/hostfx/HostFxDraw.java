@@ -272,11 +272,12 @@ public final class HostFxDraw {
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
                                  float holeSurfaceR, float spinDeg, float seconds, float brightness, float spinSeconds,
-                                 boolean structureLightning) {
+                                 boolean structureLightning, boolean blackHoleBeams) {
         beamBrightness = clamp(brightness);
         try {
             drawBeamsInternal(poseStack, cx, cy, cz, facing, controllerPos,
-                    camWorldX, camWorldY, camWorldZ, holeSurfaceR, spinDeg, seconds, spinSeconds, structureLightning);
+                    camWorldX, camWorldY, camWorldZ, holeSurfaceR, spinDeg, seconds, spinSeconds,
+                    structureLightning, blackHoleBeams);
         } finally {
             beamBrightness = 1.0F;
         }
@@ -286,7 +287,7 @@ public final class HostFxDraw {
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
                                  float holeSurfaceR, float spinDeg, float seconds, float spinSeconds,
-                                 boolean structureLightning) {
+                                 boolean structureLightning, boolean blackHoleBeams) {
         lastQuads = 0;
         lastBatches = 0;
         lastParticles = 0;
@@ -306,7 +307,8 @@ public final class HostFxDraw {
         final float[] camSpin = HostFxGeometry.rotateYDeg(-spinDeg, cam[0], cam[1], cam[2]);
         // ① 自绘管壳：只剩 12 条细紫光束（每座解压机 3 条，绕本座喷口轴 120° 均布）
         final List<HostFxGeometry.Quad> quads =
-                HostFxGeometry.buildBeamQuads(camSpin[0], camSpin[1], camSpin[2], holeSurfaceR, seconds);
+                blackHoleBeams ? HostFxGeometry.buildBeamQuads(camSpin[0], camSpin[1], camSpin[2], holeSurfaceR, seconds)
+                        : List.of();
         if (!quads.isEmpty()) {
             final RenderType layer = beamLayer();
             poseStack.pushPose();
@@ -336,27 +338,29 @@ public final class HostFxDraw {
         //     所以只能用 VertexBuffer + drawWithShader（顶点保持本地坐标、pose 当 ModelViewMat）。
         //  ⚠️ 也【不套 spin】：光柱在竖轴上，自转只会让贴图沿角向漂移（伪神那边贴图是"沿轴流"）。
         //  着色器建不起来时回落到 buildPillarQuads（上一版的自绘管壳），主光柱不会消失。
-        poseStack.pushPose();
-        try {
-            HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
-            final float tipR = HostFxGeometry.tipRadius(holeSurfaceR);
-            lastPillarPasses = HostFxPillarBeam.draw(poseStack, tipR, seconds,
-                    cam[0], cam[1], cam[2], HostFxGeometry.jetGlowRgb());
-            if (lastPillarPasses == 0) {
-                final List<HostFxGeometry.Quad> pillar = HostFxGeometry.buildPillarQuads(
-                        cam[0], cam[1], cam[2], holeSurfaceR, seconds);
-                final RenderType layer = beamLayer();
-                final MultiBufferSource.BufferSource buffers =
-                        MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
-                final VertexConsumer vc = buffers.getBuffer(layer);
-                emitQuads(vc, poseStack.last().pose(), pillar);
-                buffers.endBatch(layer);
-                lastFallbackPillarQuads = pillar.size();
-                lastQuads += pillar.size();
-                lastBatches++;
+        if (blackHoleBeams) {
+            poseStack.pushPose();
+            try {
+                HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
+                final float tipR = HostFxGeometry.tipRadius(holeSurfaceR);
+                lastPillarPasses = HostFxPillarBeam.draw(poseStack, tipR, seconds,
+                        cam[0], cam[1], cam[2], HostFxGeometry.jetGlowRgb());
+                if (lastPillarPasses == 0) {
+                    final List<HostFxGeometry.Quad> pillar = HostFxGeometry.buildPillarQuads(
+                            cam[0], cam[1], cam[2], holeSurfaceR, seconds);
+                    final RenderType layer = beamLayer();
+                    final MultiBufferSource.BufferSource buffers =
+                            MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
+                    final VertexConsumer vc = buffers.getBuffer(layer);
+                    emitQuads(vc, poseStack.last().pose(), pillar);
+                    buffers.endBatch(layer);
+                    lastFallbackPillarQuads = pillar.size();
+                    lastQuads += pillar.size();
+                    lastBatches++;
+                }
+            } finally {
+                poseStack.popPose();
             }
-        } finally {
-            poseStack.popPose();
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════
@@ -371,7 +375,7 @@ public final class HostFxDraw {
         //     用户原话：「周围物质解压机的小光束还在，主光束消失」—— 这里的"主光束"就是这 4 根。
         //     ⚠️ 刻意写成 `if` 跳段，**不是**"把颜色改成 alpha=0"：那种擦边写法照样会提交顶点、
         //        照样把 lastMdBeamPasses 记成 8，日志与顶点数一起骗人（本工程的红线）。
-        if (HostFxSwitch.mdMainBeamsOn()) {
+        if (blackHoleBeams && HostFxSwitch.mdMainBeamsOn()) {
             poseStack.pushPose();
             try {
                 HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);

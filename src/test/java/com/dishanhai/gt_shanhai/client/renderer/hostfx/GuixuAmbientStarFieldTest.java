@@ -31,13 +31,14 @@ class GuixuAmbientStarFieldTest {
             Object star = sample("sampleSky", i, 12.5);
             double distance = radius(star);
             assertTrue(distance >= 76.0 && distance <= GuixuStarField.SKY_OUTER_RADIUS);
+            if (i % 4 < 2) assertTrue(distance <= 168.0, "Keep the nearer band and shell populated at short view distances");
             farthest = Math.max(farthest, distance);
             assertTrue(value(star, "alpha") > 0 && value(star, "alpha") <= 1);
             lowest = Math.min(lowest, value(star, "headY"));
             highest = Math.max(highest, value(star, "headY"));
         }
         assertTrue(lowest < -110 && highest > 110, "扩展星空应覆盖主机上下方");
-        assertTrue(farthest >= 166, "最外层星点应覆盖到扩展后的星空边缘");
+        assertTrue(farthest >= 236, "最外层星点应覆盖到扩展后的星空边缘");
     }
 
     @Test void skyAndOrbitSamplingAreDeterministicAndFiniteAtLongTimes() throws Exception {
@@ -92,12 +93,14 @@ class GuixuAmbientStarFieldTest {
         int count = type().getField("VOLUME_COUNT").getInt(null);
         assertTrue(count >= 256 && count <= 512);
         var sample = type().getMethod("sampleVolume", int.class, double.class, double.class);
+        assertEquals(44.0, GuixuStarField.environmentRadius(12));
         for (double horizon : new double[]{.8, 3, 12}) {
             int[] octants = new int[8];
             int interior = 0;
             for (int i = 0; i < count; i++) {
                 Object star = sample.invoke(null, i, 12.5, horizon);
-                assertTrue(radius(star) > horizon * 1.4 && radius(star) + value(star, "size") * 2.6 < 4 + 2.2 * horizon,
+                assertTrue(radius(star) > horizon * 1.4
+                                && radius(star) + value(star, "size") * 2.6 < GuixuStarField.environmentRadius(horizon),
                         "New stars must remain inside the local black-hole environment");
                 if (radius(star) < 45) interior++;
                 int octant = (value(star, "headX") > 0 ? 1 : 0) | (value(star, "headY") > 0 ? 2 : 0)
@@ -117,7 +120,7 @@ class GuixuAmbientStarFieldTest {
         var sample = type().getMethod("sampleDust", int.class, double.class, double.class);
         for (int i = 0; i < count; i++) for (double time : new double[]{0, 20, 1_000_000_000.25}) {
             Object dust = sample.invoke(null, i, time, 12D);
-            assertTrue(radius(dust) > 17 && radius(dust) + value(dust, "size") < 30.4);
+            assertTrue(radius(dust) > 17 && radius(dust) + value(dust, "size") < GuixuStarField.environmentRadius(12));
             assertTrue(value(dust, "alpha") > 0 && value(dust, "alpha") <= .065, "No opaque or overexposed fog");
             assertEquals(dust, sample.invoke(null, i, time, 12D));
             for (String axis : new String[]{"headX", "headY", "headZ"}) assertTrue(Double.isFinite(value(dust, axis)));

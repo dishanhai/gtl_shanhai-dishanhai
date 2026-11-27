@@ -79,13 +79,21 @@ dependencies {
     implementation kotlinForForge
 
     implementation fileTree(dir: 'libs', include: '*.jar',
-            excludes: ['sh_better_ui-*.jar', 'sh-common-lib-forge-1.20.1-*.jar', 'spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar', 'GTL-Enhancedcore-*.jar'])
+            excludes: ['sh_better_ui-*.jar', 'sh-common-lib-forge-1.20.1-*.jar', 'spark-*.jar', 'jei-*.jar', 'gtlcore-*.jar', 'kotlinforforge-*.jar', 'GTL-Enhancedcore-*.jar', 'gtladditions-*.jar'])
+    implementation files("libs/gtladditions-${gtl_additions_version}.jar")
+    testImplementation(fg.deobf("local:gtladditions:${gtl_additions_version}")) { transitive = false }
     testImplementation(fg.deobf('local:appliedenergistics2-forge:15.4.10')) { transitive = false }
     // JUnit 使用开发映射的 Minecraft；生产 GTCEu JAR 中的 SRG 成员不可直接加载。
     testImplementation(fg.deobf('local:gtceu-1.20.1:1.4.4')) { transitive = false }
     // The IO editor uses LDLib FluidStack; the test JVM sees Mojang-mapped Fluids.
     testImplementation(fg.deobf('local:ldlib-forge-1.20.1:1.0.33.b')) { transitive = false }
-    implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
+    implementation files("libs/gtlcore-${gtl_core_version}.jar")
+    // GTLCore 以 Jar-in-Jar 提供 CGSE；只给编译与单测读取，不打进山海 JAR。
+    def gtlCoreGraphEngine = zipTree(file("libs/gtlcore-${gtl_core_version}.jar")).matching {
+        include 'META-INF/jars/cgse-engine-*.jar'
+    }
+    compileOnly files(gtlCoreGraphEngine)
+    testImplementation files(gtlCoreGraphEngine)
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     compileOnly fileTree(dir: 'libs', include: 'spark-*.jar')
@@ -104,6 +112,7 @@ tasks.withType(Test).configureEach {
     // 主模組既有 AE2 file 依賴保留；單測使用同一原件的映射副本以執行 NBT 方法。
     classpath = classpath.filter { it.name != 'appliedenergistics2-forge-15.4.10.jar'
             && it.name != 'gtceu-1.20.1-1.4.4.jar'
+            && it.name != "gtladditions-${gtl_additions_version}.jar"
             && it.name != 'ldlib-forge-1.20.1-1.0.33.b.jar' }
 }
 
@@ -147,6 +156,8 @@ processResources {
             minecraft_version: minecraft_version, forge_version: forge_version,
             sh_better_ui_version: sh_better_ui_version,
             sh_common_lib_version: sh_common_lib_version,
+            gtl_additions_version: gtl_additions_version,
+            gtl_core_version: gtl_core_version,
     ]
     inputs.properties replaceProperties
     filesMatching(['META-INF/mods.toml']) {
@@ -298,6 +309,34 @@ tasks.register('kerrGpuProbe', JavaExec) {
     systemProperty 'kerr.stabilityFrames', providers.gradleProperty('kerrStabilityFrames').getOrElse('0')
     systemProperty 'kerr.width', providers.gradleProperty('kerrWidth').getOrElse('800')
     systemProperty 'kerr.height', providers.gradleProperty('kerrHeight').getOrElse('560')
+    def shaderRoot = providers.gradleProperty('kerrShaderRoot').orNull
+    if (shaderRoot != null) systemProperty 'kerr.shaderRoot', shaderRoot
+}
+
+tasks.register('whiteHoleGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Runs the white hole visual regression and GPU timing checks.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.GuixuWhiteHoleGpuProbe'
+    systemProperty 'kerr.width', providers.gradleProperty('whiteHoleWidth').getOrElse('800')
+    systemProperty 'kerr.height', providers.gradleProperty('whiteHoleHeight').getOrElse('560')
+}
+
+tasks.register('whiteHoleParticleGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Verifies the OpenGL 4.3 white hole particle and density atlas path.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.WhiteHoleParticleGpuProbe'
+}
+
+tasks.register('whiteHoleBloomGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Verifies the HDR soft-knee filter, mip bloom, and GL state restoration.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.WhiteHoleBloomGpuProbe'
 }
 
 // .rtui 配方 UI 克隆

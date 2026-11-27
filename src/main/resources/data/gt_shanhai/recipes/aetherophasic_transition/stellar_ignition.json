@@ -1,0 +1,12 @@
+{
+  "type": "gtceu:aetherophasic_transition",
+  "data": { "euTier": 13, "stage": "stellar_ignition" },
+  "duration": 1200,
+  "tickInputs": { "eu": [{ "content": 503316480 }] },
+  "inputs": {
+    "fluid": [{ "content": { "amount": 16000, "value": [{ "fluid": "gtceu:raw_star_matter_plasma" }] } }]
+  },
+  "outputs": {
+    "fluid": [{ "content": { "amount": 4000, "value": [{ "fluid": "gt_shanhai:unstable_aetherophase" }] } }]
+  }
+}

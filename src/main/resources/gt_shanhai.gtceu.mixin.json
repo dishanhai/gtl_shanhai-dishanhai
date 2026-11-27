@@ -26,6 +26,7 @@
     "GTLAddWirelessRecipeLoadWarmupMixin",
     "SimplePredicateFilterMixin",
     "MultiblockStateCacheInitMixin",
+    "StarLifterPatternChangeMixin",
     "StructureFormGetPartsMixin",
     "SearchRecipeTempMixin",
     "CoilTypeOverrideMixin",

@@ -1,0 +1,9 @@
+{
+  "animation": {
+    "frametime": 2,
+    "interpolate": true
+  },
+  "ldlib": {
+    "connection": "gt_shanhai:block/aetherophasic_conduit_ctm"
+  }
+}

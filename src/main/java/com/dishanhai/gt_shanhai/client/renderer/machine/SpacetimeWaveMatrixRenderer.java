@@ -14,8 +14,7 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gtladd.gtladditions.utils.CommonUtils;
 import com.gtladd.gtladditions.client.RenderMode;
 import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristRenderProfile;
-import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristStarRenderer;
-import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristBeamRenderer;
+import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristDeferredRenderer;
 
 import org.gtlcore.gtlcore.utils.RenderUtil;
 
@@ -25,7 +24,7 @@ import java.util.function.Consumer;
 
 /**
  * 终焉超时空波动矩阵 TESR 渲染器
- * 使用 add（gtladditions 3.2.1）的 Antichrist 新 API 渲染恒星与光束
+ * 使用 GTL Additions 3.6.2 的场景管线渲染恒星与光束。
  */
 public class SpacetimeWaveMatrixRenderer extends AbstractRingRenderer {
 
@@ -70,23 +69,13 @@ public class SpacetimeWaveMatrixRenderer extends AbstractRingRenderer {
         float radius = swm.getRadiusMultiplier();
         float starRadius = 0.175f * radius;
 
-        // 使用 AntichristRenderer 3.2.1 新 API 渲染恒星与光束
+        // 当前 API 显式传入旋转角，星体与光束交给场景管线按层绘制。
         AntichristRenderProfile profile = new AntichristRenderProfile(
                 smoothTick, true, facing, RenderMode.NORMAL, centerPos,
-                r, g, b, starRadius, 0.0f
+                r, g, b, starRadius, 0.0f, smoothTick % 360000.0f
         );
 
-        // 光束（从机器到恒星位置）
-        AntichristBeamRenderer.INSTANCE.render(profile, poseStack, blockEntity);
-
-        // 渲染恒星（不透明层 + 透明覆盖层）
-        poseStack.pushPose();
-        poseStack.translate(centerPos.x, centerPos.y, centerPos.z);
-
-        AntichristStarRenderer.INSTANCE.renderOpaque(profile, poseStack);
-        AntichristStarRenderer.INSTANCE.renderTransparent(profile, poseStack);
-
-        poseStack.popPose();
+        AntichristDeferredRenderer.INSTANCE.enqueue(blockEntity, profile, false, true);
     }
 
     @Override

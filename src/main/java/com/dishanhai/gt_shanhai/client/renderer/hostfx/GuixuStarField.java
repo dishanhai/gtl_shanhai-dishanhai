@@ -4,7 +4,8 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 public final class GuixuStarField {
     public static final int PARTICLE_COUNT = 192;
     public static final int SKY_COUNT = 512;
-    public static final double SKY_OUTER_RADIUS = 168.0;
+    public static final double SKY_OUTER_RADIUS = 240.0;
+    private static final double SKY_INNER_LAYER_OUTER_RADIUS = 168.0;
     public static final int ORBIT_COUNT = 64;
     public static final int METEOR_COUNT = 8;
     public static final int VOLUME_COUNT = 384;
@@ -39,7 +40,9 @@ public final class GuixuStarField {
 
     /** 山海：外圍星帶與球殼，位置緩慢漂移，亮度各自閃爍。 */
     public static Sample sampleSky(int index, double seconds) {
-        double radius = 76.0 + (SKY_OUTER_RADIUS - 76.0) * seed(index, 11);
+        // Keep nearby stars in both the spherical layer and the tilted band.
+        double outer = index % 4 < 2 ? SKY_INNER_LAYER_OUTER_RADIUS : SKY_OUTER_RADIUS;
+        double radius = 76.0 + (outer - 76.0) * seed(index, 11);
         double latitude = seed(index, 12) * 2.0 - 1.0;
         double vertical = index % 2 == 0 ? latitude : .24 * latitude;
         double angle = seed(index, 13) * TAU + seconds * 0.0012;
@@ -52,8 +55,9 @@ public final class GuixuStarField {
                 planeZ * Math.cos(tilt) - height * Math.sin(tilt));
         double twinkle = 0.5 + 0.5 * Math.sin(seconds * (0.5 + seed(index, 14)) + seed(index, 15) * TAU);
         float size = (float) (index % 17 == 0 ? 0.30 + seed(index, 16) * 0.18 : 0.12 + seed(index, 16) * 0.12);
-        // Maintain angular size in the distant layer; fading stays continuous during approach.
-        return ambient(point, point, size * (float) Math.sqrt(radius / 90.0),
+        // Preserve the angular size beyond the inner layer so distant points remain visible.
+        double scale = radius / Math.sqrt(90.0 * Math.min(radius, SKY_INNER_LAYER_OUTER_RADIUS));
+        return ambient(point, point, size * (float) scale,
                 (float) (.55 + twinkle * .36), index % 9 == 0);
     }
 
@@ -96,9 +100,9 @@ public final class GuixuStarField {
         return 256 + (int) (Math.max(0.0F, Math.min(1.0F, density)) * (SKY_COUNT - 256));
     }
 
-    /** 新增環境限於視界近旁；最大 30.4 格，小於半徑 48 格的機器內環。 */
+    /** 局部深空環境最大半徑 44 格，留在半徑 48 格的機器內環之內。 */
     public static double environmentRadius(double horizon) {
-        return 4 + 2.2 * Math.max(.8, Math.min(12, horizon));
+        return 8 + 3 * Math.max(.8, Math.min(12, horizon));
     }
 
     /** 山海：只在黑洞近旁填入三維星空，均勻分層緯度避免又變成一條薄環。 */

@@ -23,7 +23,7 @@ import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
 import com.gtladd.gtladditions.common.data.ParallelData;
-import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
+import com.gtladd.gtladditions.utils.recipe.RecipeCalculationHelper;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 /** 山海：在原生無線 EU/t 讀點減免，之後再由原生聚合並行數與耗時。 */

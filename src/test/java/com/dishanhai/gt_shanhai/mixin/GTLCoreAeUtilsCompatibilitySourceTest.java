@@ -22,7 +22,8 @@ class GTLCoreAeUtilsCompatibilitySourceTest {
         String quantumLogic = Files.readString(QUANTUM_LOGIC);
         String mixin = Files.readString(AE_UTILS_MIXIN);
 
-        assertTrue(build.contains("libs/gtlcore-1.2.3.2-fix4.jar"));
+        assertTrue(build.contains("libs/gtlcore-${gtl_core_version}.jar"));
+        assertTrue(Files.readString(Path.of("gradle.properties")).contains("gtl_core_version=1.2.3.3-fix4"));
         assertTrue(quantumLogic.contains("AEUtils.extractForProcessingPattern(details, inventory,"));
         assertFalse(quantumLogic.contains(
                 "AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory,"));

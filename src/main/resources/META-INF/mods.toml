@@ -26,16 +26,16 @@ description="Shanhai's private stash - Spacetime Wave Matrix"
     versionRange="[1.4.4,)"
     ordering="AFTER"
     side="BOTH"
-[[mods.dependencies]]
+[[dependencies.gt_shanhai]]
     modId="gtlcore"
     mandatory=true
-    versionRange="[1.2.2.9,)"
+    versionRange="[${gtl_core_version},)"
     ordering="AFTER"
     side="BOTH"
-[[mods.dependencies]]
+[[dependencies.gt_shanhai]]
     modId="gtladditions"
     mandatory=true
-    versionRange="[3.1,)"
+    versionRange="[${gtl_additions_version},)"
     ordering="AFTER"
     side="BOTH"
 [[mods.dependencies]]

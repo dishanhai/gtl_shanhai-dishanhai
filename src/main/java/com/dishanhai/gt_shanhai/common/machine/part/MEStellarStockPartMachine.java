@@ -820,7 +820,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     }
 
     @Override
-    protected CompoundTag writeConfigToTag() {
+    public CompoundTag writeConfigToTag() {
         CompoundTag tag = super.writeConfigToTag();
         tag.putString("TagWhite", tagWhite);
         tag.putString("TagBlack", tagBlack);
@@ -829,7 +829,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     }
 
     @Override
-    protected void readConfigFromTag(CompoundTag tag) {
+    public void readConfigFromTag(CompoundTag tag) {
         super.readConfigFromTag(tag);
         if (tag.contains("TagWhite")) {
             tagWhite = tag.getString("TagWhite");

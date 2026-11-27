@@ -449,7 +449,7 @@ public final class JeiPatternQuickEncodeService {
 
     private static List<ItemStack> encodeMultiblockPatterns(MultiblockMachineDefinition multiblock,
             EncodeFailure failure) {
-        String[] filters = ConfigHolder.INSTANCE.filterHatch;
+        String[] filters = ConfigHolder.INSTANCE.machines.filterHatch;
         List<GenericStack> inputs = new ArrayList<>();
         for (MaterialEntry entry : DShanhaiMaterialCounter.countMaterials(multiblock)) {
             if (entry == null || entry.count <= 0 || isFilteredHatch(entry.itemId, filters)) {

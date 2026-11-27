@@ -1,0 +1,107 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 120,
+  "data": {
+    "euTier": 13
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtlcore:advanced_stellar_containment_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtceu:draconiumawakened_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:starmetal_foil"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:hassium_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:cosmicneutronium_spring"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2,
+          "ingredient": {
+            "tag": "gtceu:circuits/max"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 20,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 4000,
+          "value": [
+            {
+              "fluid": "gtceu:draconiumawakened_plasma"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_stellar_surface"
+          }
+        }
+      }
+    ]
+  }
+}

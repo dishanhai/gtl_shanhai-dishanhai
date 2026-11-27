@@ -11,13 +11,22 @@ import org.joml.Vector3f;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GuixuDeepSpaceBackdropTest {
+    @Test void kerrBackdropKeepsTheSkyDarkWhenCrossingTheApparentShadowRadius() throws Exception {
+        for (double horizon : new double[]{3, 5.196152422706632, 12}) {
+            assertTrue(emission(new float[]{0, 0, (float)(horizon * .75)}, horizon)[1] > .99,
+                    "The camera is close to the apparent shadow but still outside the Kerr horizon");
+            assertEquals(0, emission(new float[]{0, 0, (float)(horizon * .35)}, horizon)[0],
+                    "The Kerr interior must not receive the outer backdrop");
+        }
+    }
+
     @Test void blackBackdropStaysBehindTheEnvironmentHasSoftEdgesAndABoundedBudget() throws Exception {
         Class<?> type = Class.forName("com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuDeepSpaceBackdrop");
         Class<?> sinkType = Class.forName(type.getName() + "$Sink");
         for (double horizon : new double[]{.8, 3, 12})
         for (float[] camera : new float[][]{{0, 0, 60}, {30, 50, -80}, {0, 60, 0}}) {
             int[] vertices = {0}; float[] alphaRange = {1, 0};
-            double radius = 4 + 2.2 * horizon;
+            double radius = GuixuStarField.environmentRadius(horizon);
             double length = Math.sqrt(camera[0]*camera[0]+camera[1]*camera[1]+camera[2]*camera[2]);
             Object sink = Proxy.newProxyInstance(sinkType.getClassLoader(), new Class<?>[]{sinkType}, (proxy, method, args) -> {
                 if (!method.getName().equals("vertex")) return null;
@@ -44,7 +53,7 @@ class GuixuDeepSpaceBackdropTest {
                 // Float cameras can round just outside the double threshold.
                 if (d > threshold) d = Math.nextDown(d);
                 for (float[] camera : new float[][]{{d, 0, 0}, {0, -d, 0}, {0, 0, d}})
-                    assertEquals(0, emission(camera, horizon)[0], "Inside source must contain no black curtain");
+                    assertEquals(0, emission(camera, horizon, true)[0], "Inside source must contain no black curtain");
             }
         }
     }
@@ -75,7 +84,7 @@ class GuixuDeepSpaceBackdropTest {
         double threshold = BlackHoleLensSpec.insideThresholdBlocks(horizon / BlackHoleLensSpec.B_CRIT);
         double previous = 0;
         for (double offset : new double[]{.0001, .01, .1, .5, 1, 2, 4, 20}) {
-            double alpha = emission(new float[]{0, 0, (float)(threshold + offset)}, horizon)[1];
+            double alpha = emission(new float[]{0, 0, (float)(threshold + offset)}, horizon, true)[1];
             assertTrue(alpha >= previous && alpha <= .99701, "Approaching the hole must smoothly remove the curtain");
             if (offset <= .01) assertTrue(alpha < .001, "No opacity jump at the inside boundary");
             previous = alpha;
@@ -83,18 +92,16 @@ class GuixuDeepSpaceBackdropTest {
         assertTrue(previous > .99, "Distant deep space must retain its black background");
     }
 
-    private static double[] emission(float[] camera, double horizon) throws Exception {
-        Class<?> type = Class.forName("com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuDeepSpaceBackdrop");
-        Class<?> sinkType = Class.forName(type.getName() + "$Sink");
+    private static double[] emission(float[] camera, double horizon) {
+        return emission(camera, horizon, false);
+    }
+
+    private static double[] emission(float[] camera, double horizon, boolean legacyBlackHole) {
         double[] result = {0, 0};
-        Object sink = Proxy.newProxyInstance(sinkType.getClassLoader(), new Class<?>[]{sinkType}, (proxy, method, args) -> {
-            if (method.getName().equals("vertex")) {
-                result[0]++;
-                result[1] = Math.max(result[1], ((Number)args[3]).doubleValue());
-            }
-            return null;
+        GuixuDeepSpaceBackdrop.emit(camera, horizon, legacyBlackHole, (x, y, z, alpha) -> {
+            result[0]++;
+            result[1] = Math.max(result[1], alpha);
         });
-        type.getMethod("emit", float[].class, double.class, sinkType).invoke(null, camera, horizon, sink);
         return result;
     }
 }

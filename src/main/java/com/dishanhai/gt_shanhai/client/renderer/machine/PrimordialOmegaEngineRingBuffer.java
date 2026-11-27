@@ -48,7 +48,7 @@ public class PrimordialOmegaEngineRingBuffer {
 
     private static VertexBuffer[] buildAllBuffers() {
         try {
-            // 优先反射调用 RingStructure（与终焉矩阵相同数据），失败则回退内联图案
+            // 与终焉矩阵共用当前 GTL Additions 的环资源。
             String[][][] rings = loadAntichristRingData();
             if (rings == null) rings = createFallbackPatterns();
 
@@ -64,15 +64,11 @@ public class PrimordialOmegaEngineRingBuffer {
         }
     }
 
-    // ========== 通过反射获取神锻环数据（无编译时依赖） ==========
+    // ========== 当前依赖的神锻环数据 ==========
 
     private static String[][][] loadAntichristRingData() {
         try {
-            Class<?> rsClass = Class.forName(
-                    "com.gtladd.gtladditions.common.machine.multiblock.structure.RingStructure");
-            Object instance = rsClass.getField("INSTANCE").get(null);
-            Object ringsObj = rsClass.getMethod("getRINGS").invoke(instance);
-            return (String[][][]) ringsObj;
+            return com.dishanhai.gt_shanhai.client.ShanhaiRingHelper.ringPatterns();
         } catch (Exception ignored) {
             return null; // 回退内联
         }

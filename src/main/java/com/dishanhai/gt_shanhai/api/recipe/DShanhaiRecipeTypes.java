@@ -11,6 +11,7 @@ import com.gregtechceu.gtceu.common.data.GTSoundEntries;
 import com.gtladd.gtladditions.common.modify.GTLAddSoundEntries;
 
 import com.lowdragmc.lowdraglib.gui.texture.ProgressTexture;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.List;
 public class DShanhaiRecipeTypes {
 
     public static GTRecipeType STEAM_GENERATION;
+    public static GTRecipeType AETHEROPHASIC_TRANSITION;
 
     public static GTRecipeType SPACETIME_DISTORTION;
     public static GTRecipeType GUIXU_MATTER_DECOMPRESSION;
@@ -82,6 +84,12 @@ public class DShanhaiRecipeTypes {
         STEAM_GENERATION = register("steam_generation", "multiblock")
                 .setMaxIOSize(0, 0, 1, 1).setEUIO(IO.NONE)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+        AETHEROPHASIC_TRANSITION = register("aetherophasic_transition", "multiblock")
+                .setMaxIOSize(0, 0, 2, 1).setEUIO(IO.IN)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .addDataInfo(data -> data.contains("stage")
+                        ? Component.translatable("gt_shanhai.aetherophasic_transition." + data.getString("stage")).getString()
+                        : "");
         // 山海：歸墟三種專屬模式；具體配方與倍率消耗另行定義。
         GUIXU_MATTER_DECOMPRESSION = register("guixu_matter_decompression", "multiblock")
                 .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.IN)

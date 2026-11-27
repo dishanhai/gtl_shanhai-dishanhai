@@ -11,14 +11,81 @@ class GuixuOuterFxControlsTest {
         return (Host) ((sun.misc.Unsafe) field.get(null)).allocateInstance(Host.class);
     }
 
-    @Test void bothFlagsAreRegisteredForSaveAndClientSync() throws Exception {
+    @Test void screenEffectsAreRegisteredForSaveAndClientSync() throws Exception {
         var fields = host().getFieldHolder().getFields();
-        for (String name : new String[]{"hostOuterStarsEnabled", "hostNebulaEnabled"}) {
+        for (String name : new String[]{"hostOuterStarsEnabled", "hostNebulaEnabled", "hostLegacyBlackHole",
+                "hostWhiteHole", "hostWhiteHoleUnlocked"}) {
             var key = java.util.Arrays.stream(fields).filter(candidate -> candidate.getName().equals(name))
                     .findFirst().orElseThrow(() -> new AssertionError("Missing managed field: " + name));
             assertTrue(key.isPersist(), name);
             assertTrue(key.isDestSync(), name);
         }
+    }
+
+    @Test void lockedHostCyclesBetweenKerrAndLegacy() throws Exception {
+        Host host = host();
+        host.cycleHostHoleStyle();
+        assertTrue(host.isHostLegacyBlackHole());
+        assertFalse(host.isHostWhiteHole());
+        host.cycleHostHoleStyle();
+        assertFalse(host.isHostLegacyBlackHole());
+        assertFalse(host.isHostWhiteHole());
+        assertEquals(2, host.dirty);
+        assertEquals(2, host.sync);
+    }
+
+    @Test void unlockSwitchesToWhiteAndAllowsCyclingBackWithoutAnotherMatrix() throws Exception {
+        Host host = host();
+        assertFalse(host.unlockHostWhiteHole());
+        host.formed = true;
+        host.remote = true;
+        assertFalse(host.unlockHostWhiteHole());
+        assertEquals(0, host.dirty);
+        assertEquals(0, host.sync);
+        host.remote = false;
+        host.setHostLegacyBlackHole(true);
+        assertTrue(host.unlockHostWhiteHole());
+        assertFalse(host.isHostLegacyBlackHole());
+        assertTrue(host.isHostWhiteHole());
+        assertTrue(host.isHostWhiteHoleUnlocked());
+        assertFalse(host.unlockHostWhiteHole());
+        host.cycleHostHoleStyle();
+        assertFalse(host.isHostLegacyBlackHole());
+        assertFalse(host.isHostWhiteHole());
+        assertEquals(3, host.dirty);
+        assertEquals(3, host.sync);
+        assertFalse(host.unlockHostWhiteHole());
+        host.cycleHostHoleStyle();
+        host.cycleHostHoleStyle();
+        assertTrue(host.isHostWhiteHole());
+    }
+
+    @Test void savedWhiteHoleRemainsUnlockedAfterSwitchingAway() throws Exception {
+        Host host = host();
+        var oldFlag = GuixuVisionCoreMachine.class.getDeclaredField("hostWhiteHole");
+        oldFlag.setAccessible(true);
+        oldFlag.setBoolean(host, true);
+        assertTrue(host.isHostWhiteHoleUnlocked());
+        host.cycleHostHoleStyle();
+        assertFalse(host.isHostWhiteHole());
+        assertTrue(host.isHostWhiteHoleUnlocked());
+        host.cycleHostHoleStyle();
+        host.cycleHostHoleStyle();
+        assertTrue(host.isHostWhiteHole());
+    }
+
+    @Test void blackHoleStyleDefaultsToKerrAndSavesBothTransitions() throws Exception {
+        Host host = host();
+        assertFalse(host.isHostLegacyBlackHole());
+        host.setHostLegacyBlackHole(true);
+        host.setHostLegacyBlackHole(true);
+        assertTrue(host.isHostLegacyBlackHole());
+        assertEquals(1, host.dirty);
+        assertEquals(1, host.sync);
+        host.setHostLegacyBlackHole(false);
+        assertFalse(host.isHostLegacyBlackHole());
+        assertEquals(2, host.dirty);
+        assertEquals(2, host.sync);
     }
 
     @Test void eachToggleSavesAndSyncsOnlyWhenItsValueChanges() throws Exception {
@@ -40,10 +107,11 @@ class GuixuOuterFxControlsTest {
         }
     }
 
-    @Test void renderPanelContainsBothControlsAndHasRoomForTheirLastRow() throws Exception {
+    @Test void renderPanelContainsTheControlsAndHasRoomForTheirLastRow() throws Exception {
         String layout = String.join("\n", HostFxConfigurators.layoutTable());
         assertTrue(layout.contains("外层星辰"));
         assertTrue(layout.contains("外层星云"));
+        assertTrue(layout.contains("黑洞渲染"));
         var height = HostFxConfigurators.class.getDeclaredField("PANEL_H");
         height.setAccessible(true);
         assertTrue(height.getInt(null) >= 145 + 16 + 5);
@@ -51,8 +119,10 @@ class GuixuOuterFxControlsTest {
 
     private static class Host extends GuixuVisionCoreMachine {
         int dirty, sync;
+        boolean formed, remote;
         Host() { super(null); }
-        @Override public boolean isRemote() { return false; }
+        @Override public boolean isRemote() { return remote; }
+        @Override public boolean isFormed() { return formed; }
         @Override public void markDirty() { dirty++; }
         @Override public void notifyBlockUpdate() { sync++; }
     }

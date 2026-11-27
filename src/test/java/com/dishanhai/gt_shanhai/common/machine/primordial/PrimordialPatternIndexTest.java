@@ -60,7 +60,7 @@ class PrimordialPatternIndexTest {
 
     @Test
     void realHostAndModuleResourcesKeepAllRequiredPositions() throws Exception {
-        try (ZipFile jar = new ZipFile(Path.of("libs/gtladditions-3.3.1Custom.jar").toFile())) {
+        try (ZipFile jar = new ZipFile(Path.of("libs/gtladditions-3.6.2Custom.jar").toFile())) {
             verifyResource(jar, "forge_of_the_antichrist", 688721, 19851);
             verifyResource(jar, "forge_of_the_antichrist_module", 637, 89);
         }

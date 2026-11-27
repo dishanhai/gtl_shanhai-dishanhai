@@ -18,13 +18,26 @@ import static com.dishanhai.gt_shanhai.config.KerrRenderConfig.Parameter.*;
 final class KerrDebugScreen extends Screen {
     private static final Parameter[][] PAGES = {
             {MASS, SPIN, TILT, AZIMUTH, DISTANCE, INCLINATION, ACCRETION, THICKNESS, TEMPERATURE, EMISSIVITY},
-            {TIME_SCALE, EXPOSURE, BLOOM, ACCURACY, STEPS}
+            {TIME_SCALE, EXPOSURE, BLOOM, ACCURACY, STEPS, OUTER_RADIUS}
     };
 
     private int page;
     private int left, top;
+    private final Screen previous;
+    private final KerrControls.Optics optics;
 
-    KerrDebugScreen() { super(label("title")); }
+    KerrDebugScreen() { this(null, KerrControls.KERR); }
+
+    KerrDebugScreen(Screen previous, KerrControls.Optics optics) {
+        super(optics == KerrControls.WHITE ? Component.translatable("gt_shanhai.white_hole.optics") : label("title"));
+        this.previous = previous;
+        this.optics = optics;
+    }
+
+    @Override
+    public void onClose() {
+        minecraft.setScreen(previous);
+    }
 
     @Override
     public boolean isPauseScreen() { return false; }
@@ -41,25 +54,28 @@ final class KerrDebugScreen extends Screen {
                 .bounds(left + column + 6, top + 14, column, 20).build()).active = page != 1;
         Parameter[] parameters = PAGES[page];
         for (int i = 0; i < parameters.length; i++) {
+            if (parameters[i] == OUTER_RADIUS && optics == KerrControls.WHITE) continue;
             addRenderableWidget(new ParameterSlider(left + i % 2 * (column + 6), top + 38 + 21 * (i / 2),
-                    column, parameters[i]));
+                    column, parameters[i], optics));
         }
 
         if (page == 0) {
-            addRenderableWidget(CycleButton.onOffBuilder(KerrControls.requestedReverse())
+            addRenderableWidget(CycleButton.onOffBuilder(optics.requestedReverse())
                     .create(left, top + 143, column, 20, label("reverse_disk"),
-                            (b, reverse) -> KerrControls.setReverseDisk(reverse)));
+                            (b, reverse) -> optics.setReverseDisk(reverse)));
         } else {
-            addRenderableWidget(CycleButton.<Quality>builder(q -> label(key(q)))
-                    .withValues(Quality.values()).withInitialValue(KerrControls.requestedQuality())
-                    .create(left, top + 101, column, 20, label("quality"), (b, q) -> KerrControls.setQuality(q)));
+            addRenderableWidget(CycleButton.<Quality>builder(q -> label(q == Quality.COMPATIBILITY && optics == KerrControls.KERR
+                            ? "compatibility_analytic" : key(q)))
+                    .withValues(Quality.values()).withInitialValue(optics.requestedQuality())
+                    .create(left, top + 101, column, 20, label("quality"), (b, q) -> optics.setQuality(q)));
             addRenderableWidget(CycleButton.<Background>builder(b -> label(key(b)))
-                    .withValues(Background.values()).withInitialValue(KerrControls.requestedBackground())
+                    .withValues(Background.values()).withInitialValue(optics.requestedBackground(
+                            WhiteHoleRenderState.isDemonstrating() || BlackHoleTuning.hasHostCenter()))
                     .create(left + column + 6, top + 101, column, 20, label("background"),
-                            (b, background) -> KerrControls.setBackground(background)));
+                            (b, background) -> optics.setBackground(background)));
         }
         addRenderableWidget(Button.builder(label("reset"), b -> {
-            KerrControls.reset();
+            optics.reset();
             rebuildWidgets();
         }).bounds(left + column + 6, top + 143, column, 20).build());
     }
@@ -82,11 +98,13 @@ final class KerrDebugScreen extends Screen {
 
     private static final class ParameterSlider extends AbstractSliderButton {
         private final Parameter parameter;
+        private final KerrControls.Optics optics;
 
-        ParameterSlider(int x, int y, int width, Parameter parameter) {
+        ParameterSlider(int x, int y, int width, Parameter parameter, KerrControls.Optics optics) {
             super(x, y, width, 20, Component.empty(),
-                    (KerrControls.requested(parameter) - parameter.min) / (parameter.max - parameter.min));
+                    (optics.requested(parameter) - parameter.min) / (parameter.max - parameter.min));
             this.parameter = parameter;
+            this.optics = optics;
             updateMessage();
             if (parameter == DISTANCE || parameter == INCLINATION || parameter == MASS || parameter == STEPS) {
                 setTooltip(Tooltip.create(label(key(parameter) + ".hint")));
@@ -107,6 +125,6 @@ final class KerrDebugScreen extends Screen {
         }
 
         @Override
-        protected void applyValue() { KerrControls.set(parameter, actual()); }
+        protected void applyValue() { optics.set(parameter, actual()); }
     }
 }

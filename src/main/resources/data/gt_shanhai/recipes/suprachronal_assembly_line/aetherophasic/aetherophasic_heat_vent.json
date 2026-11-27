@@ -1,0 +1,98 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 100,
+  "data": {
+    "euTier": 13
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:neutronium_frame"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtladditions:thermal_superconductor"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:silver_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "gtladditions:relativistic_heat_capacitor"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2,
+          "ingredient": {
+            "tag": "gtceu:circuits/opv"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 4000,
+          "value": [
+            {
+              "fluid": "gtceu:liquid_helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 4000,
+          "value": [
+            {
+              "fluid": "gtceu:sodium_potassium"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_heat_vent"
+          }
+        }
+      }
+    ]
+  }
+}

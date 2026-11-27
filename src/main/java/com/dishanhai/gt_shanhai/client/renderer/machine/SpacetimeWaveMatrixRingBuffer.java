@@ -17,7 +17,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.client.model.data.ModelData;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import com.gtladd.gtladditions.common.machine.multiblock.structure.RingStructure;
+import com.dishanhai.gt_shanhai.client.ShanhaiRingHelper;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -48,7 +48,7 @@ public class SpacetimeWaveMatrixRingBuffer {
 
     private static VertexBuffer[] buildAllBuffers() {
         try {
-            String[][][] rings = RingStructure.INSTANCE.getRINGS();
+            String[][][] rings = ShanhaiRingHelper.ringPatterns();
             VertexBuffer[] buffers = new VertexBuffer[rings.length];
             for (int i = 0; i < rings.length; i++) {
                 buffers[i] = buildRingBuffer(rings[i]);

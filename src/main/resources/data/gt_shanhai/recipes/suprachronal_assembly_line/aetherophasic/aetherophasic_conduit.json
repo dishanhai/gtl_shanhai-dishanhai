@@ -1,0 +1,107 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 100,
+  "data": {
+    "euTier": 13
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 503316480
+      }
+    ]
+  },
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtceu:cosmicneutronium_hex_wire"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:spacetime_normal_fluid_pipe"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:normal_optical_pipe"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtladditions:spacetime_stasis_device"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2,
+          "ingredient": {
+            "tag": "gtceu:circuits/max"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 4000,
+          "value": [
+            {
+              "fluid": "gtceu:starmetal_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2304,
+          "value": [
+            {
+              "fluid": "gtceu:trinium"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:aetherophasic_conduit"
+          }
+        }
+      }
+    ]
+  }
+}

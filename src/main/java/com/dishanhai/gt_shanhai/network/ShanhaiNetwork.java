@@ -20,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "25";
+    private static final String PROTOCOL_VERSION = "26";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 
@@ -639,6 +639,9 @@ public class ShanhaiNetwork {
         CHANNEL.registerMessage(packetId++, GuixuAnnihilationPacket.class,
                 GuixuAnnihilationPacket::encode, GuixuAnnihilationPacket::new,
                 GuixuAnnihilationPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, StarLifterSyncPacket.class,
+                StarLifterSyncPacket::encode, StarLifterSyncPacket::new,
+                StarLifterSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         RecipeSyncPacket.init();
     }
 

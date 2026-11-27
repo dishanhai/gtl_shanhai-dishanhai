@@ -102,7 +102,7 @@ public class ShanhaiHubSlotCompatibilityTest {
                 GT + "api/pattern/predicates/SimplePredicate", SimpleBase.class,
                 Set.of("test", "testLimited", "testGlobal", "testLayer"),
                 "ShanhaiHubIoPredicateMixin");
-        traceClass = graft(loader, "libs/gtlcore-1.2.3.2-fix4.jar",
+        traceClass = graft(loader, "libs/gtlcore-1.2.3.3-fix4.jar",
                 "org/gtlcore/gtlcore/mixin/gtm/api/pattern/TraceabilityPredicateMixin", TraceBase.class,
                 Set.of("test"), "ShanhaiHubAdmissionMixin");
         try (InputStream in = ShanhaiHubSlotCompatibilityTest.class.getClassLoader()

@@ -8,15 +8,13 @@ import com.mojang.blaze3d.vertex.PoseStack;
 
 import com.gtladd.gtladditions.client.RenderMode;
 import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristRenderProfile;
-import com.gtladd.gtladditions.client.render.machine.deferred.DeferredMachineRenderer;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 
 /**
  * 中子星渲染：不自绘球体，直接复用伪神之煅炉（{@code gtladditions:forge_of_the_antichrist}）的星体管线。
  * <p>
- * 入队 gtladditions 的 {@code DeferredMachineRenderer} 后，由伪神锻自己的延迟批次在
- * {@code AFTER_TRANSLUCENT_BLOCKS} 阶段统一绘制 —— 三层球壳、星体着色器、Oculus 光影兼容全部沿用，
+ * 通过 gtladditions 的场景 API 提交宿主与微缩星 —— 三层球壳、星体着色器、Oculus 光影兼容全部沿用，
  * 不需要我们再维护一套。<b>2026-09-21 起按用户要求<b>点亮等离子体光束</b>（{@code beamAlpha = isWorking ? 1.0 : 0.0}，
  * 严格照上游"只在工作时亮"）—— 详见 {@link #BEAM_ALPHA} 的注释；球体尺寸本类不变。</b>
  *
@@ -166,11 +164,10 @@ final class PrimordialNeutronStarSphereRenderer {
                 starPos,
                 color[0], color[1], color[2],
                 radius,
-                isWorking ? BEAM_ALPHA : 0.0f);
-        // 延迟批次按方块坐标覆盖，第二条记录会把宿主星体挤掉。微缩星放进同一条。
-        DeferredMachineRenderer.INSTANCE.enqueue$gtladditions(
-                new PrimordialNeutronStarFrame(blockEntity, profile, miniatureProfile(
-                        facing, continuousTick, isWorking, starPos, color, radius)));
+                isWorking ? BEAM_ALPHA : 0.0f,
+                continuousTick % 360000.0f);
+        PrimordialNeutronStarFrame.enqueue(blockEntity, profile, miniatureProfile(
+                facing, continuousTick, isWorking, starPos, color, radius));
     }
 
     private static AntichristRenderProfile miniatureProfile(Direction facing, float continuousTick,
@@ -188,7 +185,8 @@ final class PrimordialNeutronStarSphereRenderer {
                 position,
                 color[0], color[1], color[2],
                 PrimordialNeutronStarSuction.MINIATURE_RADIUS,
-                0.0f);
+                0.0f,
+                continuousTick % 360000.0f);
     }
 
     /**

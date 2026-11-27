@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.client.renderer.blackhole;
 
+import java.lang.ref.WeakReference;
+
 /**
  * 山海重构 · 黑洞渲染件的 <b>运行期可调参数</b>（纯逻辑：零 MC / 零 Forge / 零 GL）。
  *
@@ -22,6 +24,8 @@ package com.dishanhai.gt_shanhai.client.renderer.blackhole;
  * —— 这样"我敲了 99 为什么没变"在聊天栏里当场就有答案，不用去翻代码。
  */
 public final class BlackHoleTuning {
+
+    public enum RenderMode { KERR, LEGACY, WHITE_HOLE }
 
     /** {@code /shanhai bh lens} 的三档。 */
     public enum LensMode {
@@ -115,6 +119,7 @@ public final class BlackHoleTuning {
     private static volatile double[] centerOverride;   // null = 跟 toml（已含 +0.5 补正）
     private static volatile java.lang.ref.WeakReference<Object> hostCenterWorld;
     private static volatile long hostCenterControllerPos;
+    private static volatile HostWhiteHoleOverride hostWhiteHoleOverride;
     private static final BlackHoleLensSpec.KerrParameters DEFAULT_KERR =
             BlackHoleLensSpec.kerrParameters(BlackHoleLensSpec.KERR_SPIN);
     private static volatile BlackHoleLensSpec.KerrParameters hostKerr = DEFAULT_KERR;
@@ -384,6 +389,26 @@ public final class BlackHoleTuning {
     public static long hostCenterControllerPos() {
         return hostCenterControllerPos;
     }
+
+    static void forceHostWhiteHole(Object world, long controllerPos) {
+        hostWhiteHoleOverride = new HostWhiteHoleOverride(new WeakReference<>(world), controllerPos);
+    }
+
+    static void clearHostWhiteHoleOverride() {
+        hostWhiteHoleOverride = null;
+    }
+
+    static boolean isHostWhiteHoleForced(Object world, long controllerPos) {
+        var override = hostWhiteHoleOverride;
+        return override != null && override.world().get() == world && override.controllerPos() == controllerPos;
+    }
+
+    public static RenderMode hostRenderMode(Object world, long controllerPos, boolean legacy, boolean white) {
+        if (white || isHostWhiteHoleForced(world, controllerPos)) return RenderMode.WHITE_HOLE;
+        return legacy ? RenderMode.LEGACY : RenderMode.KERR;
+    }
+
+    private record HostWhiteHoleOverride(WeakReference<Object> world, long controllerPos) {}
 
     public static boolean hostCenterInRange(Object world, double cameraX, double cameraZ, int renderChunks) {
         var source = hostCenterWorld;

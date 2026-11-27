@@ -25,8 +25,9 @@ class GtlCoreGraphPresenceCompatibilitySourceTest {
     @Test
     void buildUsesTheGraphCompatibleGtlCoreDependency() throws Exception {
         String build = Files.readString(BUILD_GRADLE);
-        assertTrue(build.contains("implementation files('libs/gtlcore-1.2.3.2-fix4.jar')"),
-                "GRAPH 回归使用仓库固定的 fix4 JAR");
+        assertTrue(build.contains("implementation files(\"libs/gtlcore-${gtl_core_version}.jar\")"),
+                "GRAPH 回归使用版本属性固定的 GTLCore JAR");
+        assertTrue(Files.readString(Path.of("gradle.properties")).contains("gtl_core_version=1.2.3.3-fix4"));
         assertTrue(!build.contains("implementation files('libs/gtlcore-1.2.3.2-fix2.jar')"),
                 "不能继续以 fix2 编译并误判独立 GRAPH 路径");
     }

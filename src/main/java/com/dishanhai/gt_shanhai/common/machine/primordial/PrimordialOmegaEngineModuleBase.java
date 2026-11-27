@@ -33,7 +33,7 @@ import com.gregtechceu.gtceu.api.pattern.BlockPattern;
 
 
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
-import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
+import com.gtladd.gtladditions.utils.module.AntichristPosHelper;
 
 import com.lowdragmc.lowdraglib.side.item.IItemTransfer;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;

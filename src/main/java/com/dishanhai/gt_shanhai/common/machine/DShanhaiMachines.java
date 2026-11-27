@@ -101,6 +101,8 @@ public class DShanhaiMachines {
     public static MachineDefinition AE_STEAM_BINDER_BLOCK;
     public static MultiblockMachineDefinition NYARLATHOTEPS_TENTACLE_PREVIEW;
     public static MultiblockMachineDefinition NYARLATHOTEPS_ECHO;
+    public static MultiblockMachineDefinition AETHEROPHASIC_ENGINE_PREVIEW;
+    public static MultiblockMachineDefinition STAR_LIFTER;
 
     // GTNL 移植机器
     public static MultiblockMachineDefinition ADVANCED_MASS_FABRICATOR;
@@ -231,6 +233,8 @@ public class DShanhaiMachines {
         AE_STEAM_BINDER_BLOCK = com.dishanhai.gt_shanhai.common.machine.steam.ShanhaiAeSteamBinderMachine.register();
         NYARLATHOTEPS_TENTACLE_PREVIEW = com.dishanhai.gt_shanhai.common.machine.preview.ShanhaiNyarlathotepPreviewMachine.register();
         NYARLATHOTEPS_ECHO = com.dishanhai.gt_shanhai.common.machine.preview.ShanhaiNyarlathotepEchoMachine.register();
+        AETHEROPHASIC_ENGINE_PREVIEW = com.dishanhai.gt_shanhai.common.machine.aetherophasic.AetherophasicEnginePreviewMachine.register();
+        STAR_LIFTER = com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterControllerMachine.register();
         // ========== GTNL 移植机器 ==========
         
         // 进阶质量发生器
