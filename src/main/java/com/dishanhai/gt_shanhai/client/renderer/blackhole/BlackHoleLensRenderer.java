@@ -2144,6 +2144,7 @@ public final class BlackHoleLensRenderer {
             }
             if (!f.legacyBlackHole) {
                 KERR_PASS.resolveFootprints(main, shader, f);
+                KERR_PASS.prepareWhiteRepair(shader, f, whiteWorld && gate ? depthTexId : 0);
             }
             // Volumetric white emission clips at the copied depth for each ray.
             drawLensQuad(f, depthOk && !(whiteWorld && gate), gate);

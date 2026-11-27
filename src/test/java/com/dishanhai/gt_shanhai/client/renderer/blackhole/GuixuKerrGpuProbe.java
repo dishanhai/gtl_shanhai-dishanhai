@@ -1921,7 +1921,7 @@ class GuixuKerrGpuProbe {
         int id = glCreateShader(type);
         String source = Files.readString(SHADERS.resolve(file));
         for (String include : new String[]{"guixu_kerr.glsl", "guixu_kerr_exterior.glsl",
-                "guixu_white_primary.glsl", "guixu_white_world.glsl"}) {
+                "guixu_white_primary.glsl", "guixu_white_cache_depth.glsl", "guixu_white_world.glsl"}) {
             source = source.replace("#moj_import <gt_shanhai:" + include + ">",
                     Files.readString(SHADERS.resolve("../include").resolve(include)));
         }

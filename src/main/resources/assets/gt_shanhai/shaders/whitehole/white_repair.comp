@@ -1,0 +1,55 @@
+#version 430
+#moj_import <gt_shanhai:guixu_kerr.glsl>
+uniform sampler2D SceneDepth;
+uniform sampler2D WhiteDirectDepth;
+uniform float uWhiteSceneDepth;
+uniform vec4 uBgRect;
+uniform vec4 uWhiteCacheRect;
+#moj_import <gt_shanhai:guixu_white_primary.glsl>
+#moj_import <gt_shanhai:guixu_white_cache_depth.glsl>
+layout(std430, binding=0) buffer Work { uint size; uint groups; uint y; uint z; uint pixels[]; };
+
+#ifdef CLASSIFY
+layout(local_size_x=8, local_size_y=8) in;
+layout(r32f, binding=0) uniform writeonly image2D missIndex;
+void main() {
+    ivec2 local = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 extent = ivec2(uWhiteCacheRect.zw);
+    if (any(greaterThanEqual(local, extent))) return;
+    vec2 px = vec2(local) + vec2(.5) + uWhiteCacheRect.xy;
+    mat3 basis;
+    vec3 origin, direction;
+    cameraRay(px, basis, origin, direction);
+    float depth = whiteSceneDepth(px);
+    float cutoff = whiteWorldDistance(px, basis * direction, depth);
+    float ref = 0.0;
+    if (!whiteCacheCoversDepth(px, (vec2(local) + vec2(.5)) / vec2(extent), origin, direction, cutoff, depth)) {
+        uint i = atomicAdd(size, 1u);
+        if (i < uint(pixels.length())) {
+            pixels[i] = uint(local.y * extent.x + local.x);
+            if ((i & 63u) == 0u) atomicMax(groups, i / 64u + 1u);
+            ref = float(i + 1u);
+        } else {
+            ref = -1.0;
+        }
+    }
+    imageStore(missIndex, local, vec4(ref, 0.0, 0.0, 0.0));
+}
+#else
+layout(local_size_x=64) in;
+layout(rgba32f, binding=0) uniform writeonly image2D result;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= min(size, uint(pixels.length()))) return;
+    int width = int(uWhiteCacheRect.z);
+    uint pixel = pixels[i];
+    ivec2 local = ivec2(pixel % uint(width), pixel / uint(width));
+    vec2 px = vec2(local) + vec2(.5) + uWhiteCacheRect.xy;
+    mat3 basis;
+    vec3 origin, direction;
+    cameraRay(px, basis, origin, direction);
+    float depth = whiteSceneDepth(px);
+    float cutoff = whiteWorldDistance(px, basis * direction, depth);
+    imageStore(result, ivec2(i % 1024u,i / 1024u), whitePrimaryLight(origin,direction,cutoff,false));
+}
+#endif

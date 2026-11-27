@@ -73,7 +73,7 @@ pub extern "system" fn Java_com_dishanhai_gt_1shanhai_client_renderer_blackhole_
     _env: *mut c_void,
     _class: *mut c_void,
 ) -> i32 {
-    1
+    2
 }
 
 #[unsafe(no_mangle)]
@@ -183,9 +183,79 @@ pub unsafe extern "system" fn Java_com_dishanhai_gt_1shanhai_client_renderer_bla
     }
 }
 
+// Each pixel gets a float index (four bytes). Queue+result reserve only
+// one slot per sixteen pixels; overflow pixels stay on the exact inline path.
+fn sparse_capacity(width: i32, height: i32) -> i32 {
+    let area = i64::from(width) * i64::from(height);
+    if width <= 0 || height <= 0 || !(480_000..=4_200_000).contains(&area) {
+        return 0;
+    }
+    ((area + 16_383) / 16_384 * 1024) as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_dishanhai_gt_1shanhai_client_renderer_blackhole_RustWhiteHoleRenderer_planSparse(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    width: i32,
+    height: i32,
+) -> i32 {
+    sparse_capacity(width, height)
+}
+
+/// # Safety
+/// Addresses come from the current OpenGL 4.3 context. The caller owns the
+/// linked programs, already reset/bound job buffer, images, and GL-state restore.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_dishanhai_gt_1shanhai_client_renderer_blackhole_RustWhiteHoleRenderer_dispatchSparse(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    use_program: i64,
+    bind_image: i64,
+    dispatch: i64,
+    indirect: i64,
+    barrier: i64,
+    classify: i32,
+    repair: i32,
+    map: i32,
+    light: i32,
+    width: i32,
+    height: i32,
+) {
+    const COMMAND: u32 = 0x0040;
+    const BUFFER_UPDATE: u32 = 0x0200;
+    const R32F: u32 = 0x822e;
+    const RGBA32F: u32 = 0x8814;
+    unsafe {
+        let program: unsafe extern "system" fn(u32) = transmute(use_program as usize);
+        let image: unsafe extern "system" fn(u32, u32, i32, u8, i32, u32, u32) =
+            transmute(bind_image as usize);
+        let groups: unsafe extern "system" fn(u32, u32, u32) = transmute(dispatch as usize);
+        let queued: unsafe extern "system" fn(isize) = transmute(indirect as usize);
+        let sync: unsafe extern "system" fn(u32) = transmute(barrier as usize);
+        program(classify as u32);
+        image(0, map as u32, 0, 0, 0, WRITE_ONLY, R32F);
+        groups((width as u32).div_ceil(8), (height as u32).div_ceil(8), 1);
+        sync(COMMAND | STORAGE);
+        program(repair as u32);
+        image(0, light as u32, 0, 0, 0, WRITE_ONLY, RGBA32F);
+        queued(4); // The indirect command begins after the leading job counter.
+        sync(IMAGE | TEXTURE_FETCH | STORAGE | BUFFER_UPDATE);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sparse_queue_budget_is_bounded_and_row_aligned() {
+        assert_eq!(sparse_capacity(2560, 1600), 256_000);
+        assert_eq!(sparse_capacity(3840, 2160), 0);
+        assert_eq!(sparse_capacity(800, 560), 0);
+        assert_eq!(sparse_capacity(-800, -800), 0);
+        assert_eq!(sparse_capacity(1001, 540) % 1024, 0);
+    }
 
     #[test]
     fn direct_resolution_grows_immediately_and_releases_with_hysteresis() {

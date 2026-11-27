@@ -22,7 +22,7 @@ final class RustWhiteHoleRenderer {
         if (library == null || library.isBlank()) return false;
         try {
             System.load(Path.of(library).toString());
-            if (abi() == 1) return true;
+            if (abi() == 2) return true;
             LogUtils.getLogger().warn("Unsupported Rust white-hole ABI; using the Java OpenGL path");
         } catch (LinkageError | IllegalArgumentException failure) {
             LogUtils.getLogger().warn("Rust white-hole backend unavailable; using the Java OpenGL path", failure);
@@ -44,6 +44,17 @@ final class RustWhiteHoleRenderer {
         return ACTIVE ? planReuse(ageNanos, reusedFrames) : KerrSampling.whiteHostCanReuse(ageNanos, reusedFrames);
     }
 
+    private static final boolean SPARSE = !"false".equalsIgnoreCase(System.getProperty("gtsh.whitehole.sparse"));
+
+    static int sparseCapacity(int width, int height) {
+        return ACTIVE && SPARSE ? planSparse(width, height) : 0;
+    }
+
+    static void repair(GLCapabilities gl, int classify, int integrate, int map, int light, int width, int height) {
+        dispatchSparse(gl.glUseProgram, gl.glBindImageTexture, gl.glDispatchCompute,
+                gl.glDispatchComputeIndirect, gl.glMemoryBarrier, classify, integrate, map, light, width, height);
+    }
+
     static long tick(double seconds) {
         return ACTIVE ? particleTick(seconds) : Math.max(0, (long) Math.floor(seconds * 30));
     }
@@ -58,6 +69,11 @@ final class RustWhiteHoleRenderer {
     }
 
     static native void draw(long drawArrays);
+
+    private static native int planSparse(int width, int height);
+    private static native void dispatchSparse(long useProgram, long bindImage, long dispatch, long indirect,
+                                              long barrier, int classify, int integrate, int map, int light,
+                                              int width, int height);
 
     private static native int abi();
     private static native int planDirect(boolean adaptive, double area, int previous);

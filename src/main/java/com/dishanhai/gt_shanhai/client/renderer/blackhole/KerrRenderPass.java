@@ -37,6 +37,8 @@ final class KerrRenderPass implements AutoCloseable {
     private final KerrThinDisk disk = new KerrThinDisk();
     private final Target criticalRadii = new Target(true, GL_RGBA16F, GL_RGBA32F);
     private final Target criticalLight = new Target(true);
+    private final WhiteHoleSparseRepair whiteRepair = new WhiteHoleSparseRepair();
+    private int whiteRepairAtlas;
     private final WhiteHoleParticleGrid particles = new WhiteHoleParticleGrid();
     private final CompactHdrPostProcessing hdr = new CompactHdrPostProcessing();
     private ShaderInstance shader;
@@ -184,6 +186,7 @@ final class KerrRenderPass implements AutoCloseable {
                                 frame.white.jets(), (float) geometry.outerHorizon(), budget)
                         : 0;
                 particleAtlasActive = particleAtlas != 0;
+                whiteRepairAtlas = particleAtlas;
                 target.bind(width, height, attachmentLight, attachmentExit);
                 RenderSystem.viewport(0, 0, width, height);
                 bindOptics(shader, frame, inverseProjection, axis, equatorialX, diskGain, steps, tolerance);
@@ -314,6 +317,24 @@ final class KerrRenderPass implements AutoCloseable {
             whiteReuseFrames = 0;
         }
         completedPasses++;
+    }
+
+    void prepareWhiteRepair(BlackHoleLensRenderer.ExteriorShader shader, BlackHoleLensRenderer.Frame frame, int sceneDepth) {
+        shader.safeGetUniform("uWhiteSparse").set(0f);
+        if (!frame.usesWhiteWorldPrimary() || !whiteDirectReady || whiteDirectDivisor <= 1 || sceneDepth == 0) return;
+        int w = (int) Math.ceil(frame.rectX0 + frame.rectW) - (int) Math.floor(frame.rectX0);
+        int h = (int) Math.ceil(frame.rectY0 + frame.rectH) - (int) Math.floor(frame.rectY0);
+        if (RustWhiteHoleRenderer.sparseCapacity(w, h) == 0 || !GL.getCapabilities().OpenGL43) return;
+        shader.apply();
+        try {
+            if (whiteRepair.repair(shader.getId(), w, h, sceneDepth, whiteDirect.active().exit, whiteRepairAtlas)) {
+                shader.setSampler("PreviousExit", whiteRepair.indexMap());
+                shader.setSampler("PreviousLight", whiteRepair.light());
+                shader.safeGetUniform("uWhiteSparse").set(1f);
+            }
+        } finally {
+            shader.clear();
+        }
     }
 
     private void drawWhiteLayer(BlackHoleLensRenderer.ExteriorShader composite, Target target, int pass) {
@@ -618,6 +639,8 @@ final class KerrRenderPass implements AutoCloseable {
         whiteCacheHits = 0;
         blackFieldHits = 0;
         whiteDirect.close();
+        whiteRepair.close();
+        whiteRepairAtlas = 0;
         gpuMilliseconds = cpuMilliseconds = 0;
         adaptiveScale = Quality.ADAPTIVE.scale;
         adaptiveRecoverySamples = 0;
@@ -646,6 +669,8 @@ final class KerrRenderPass implements AutoCloseable {
         whiteBloomSource.close();
         whiteOptical.close();
         whiteDirect.close();
+        whiteRepair.close();
+        whiteRepairAtlas = 0;
         diskDetail.close();
         diskHighlights.close();
         criticalRadii.close();

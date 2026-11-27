@@ -5,6 +5,7 @@ uniform sampler2D SceneColor;
 uniform sampler2D SceneDepth;
 uniform sampler2D WhiteDirectLight;
 uniform sampler2D WhiteDirectDepth;
+uniform float uWhiteSparse;
 uniform sampler2D RayLight;
 uniform sampler2D RayExit;
 uniform sampler2D PreviousLight;
@@ -425,6 +426,7 @@ vec4 integrateCriticalTransfer(vec2 px, vec2 center, out bool valid) {
 
 #moj_import <gt_shanhai:guixu_kerr_exterior.glsl>
 #moj_import <gt_shanhai:guixu_white_primary.glsl>
+#moj_import <gt_shanhai:guixu_white_cache_depth.glsl>
 #moj_import <gt_shanhai:guixu_white_world.glsl>
 
 void drawVolume() {

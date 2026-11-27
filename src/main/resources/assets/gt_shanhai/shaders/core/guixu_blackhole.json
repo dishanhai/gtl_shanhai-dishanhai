@@ -87,6 +87,7 @@
         {"name": "uTransferPass", "type": "float", "count": 1, "values": [0]},
         {"name": "uResolveSize", "type": "float", "count": 2, "values": [1, 1]},
         {"name": "uWhiteCacheRect", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uWhiteSparse", "type": "float", "count": 1, "values": [0]},
         {"name": "uWhiteCacheReduced", "type": "float", "count": 1, "values": [0]},
         {"name": "uWhiteOpticalLayer", "type": "float", "count": 1, "values": [0]},
         {"name": "uProjMat", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},

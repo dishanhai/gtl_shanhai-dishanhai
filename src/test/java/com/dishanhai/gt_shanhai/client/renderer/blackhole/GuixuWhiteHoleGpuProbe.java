@@ -38,7 +38,10 @@ public final class GuixuWhiteHoleGpuProbe {
     private static final KerrRenderPass.Target HOST_BLOOM_SOURCE = new KerrRenderPass.Target();
     private static final KerrRenderPass.Target HOST_OPTICAL = new KerrRenderPass.Target();
     private static final KerrRenderPass.WhiteDirectTargets HOST_DIRECT = new KerrRenderPass.WhiteDirectTargets();
+    private static final WhiteHoleSparseRepair REPAIR = new WhiteHoleSparseRepair(
+            name -> Files.readString(PARTICLE_SHADERS.resolve("..").resolve(name)));
     private static int hostDirectProgram;
+    private static int sparseFrames;
     private static int particleAtlas;
     private static CompactHdrPostProcessing hdr;
     private static float observerBeta;
@@ -101,7 +104,11 @@ public final class GuixuWhiteHoleGpuProbe {
                             hostDirectProgram = program("guixu_white_cache");
                             try {
                                 verifyHostViews(hostParticles);
+                                if (hostParticles && RustWhiteHoleRenderer.sparseCapacity(W, H) > 0)
+                                    require(sparseFrames > 0, "Requested sparse repair never ran");
+                                System.out.println("Sparse repair dispatches: " + sparseFrames);
                             } finally {
+                                REPAIR.close();
                                 HOST_OPTICAL.close();
                                 glDeleteProgram(hostDirectProgram);
                             }
@@ -784,6 +791,21 @@ public final class GuixuWhiteHoleGpuProbe {
         var clipped = readImage();
         presentHostView(scene, depth, effect.exposure(), 0, true, divisor);
         double clippedError = meanPixelError(clipped, readImage());
+        if (RustWhiteHoleRenderer.sparseCapacity(W, H) > 0 && GL.getCapabilities().OpenGL43) {
+            // The live foreground invalidates the previously open cache across more pixels
+            // than the packed queue holds. Both queued and overflow fragments must clip.
+            glActiveTexture(GL_TEXTURE5);
+            glBindTexture(GL_TEXTURE_2D, REPAIR.indexMap());
+            int stride = glGetTexLevelParameteri(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH);
+            int rows = glGetTexLevelParameteri(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT);
+            var map = BufferUtils.createFloatBuffer(stride * rows);
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, map);
+            int overflow = 0;
+            for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+                if (map.get(y * stride + x) < 0) overflow++;
+            require(overflow > 0, "Large depth discontinuity did not exercise the sparse overflow path");
+            System.out.println("Sparse overflow pixels clipped inline: " + overflow);
+        }
         require(clippedError < .16, "Reduced host cache must clip at the live foreground depth");
         bakeHostDirect(camera, effect, depth, 0, divisor);
         presentHostView(scene, depth, effect.exposure(), 0, true, divisor);
@@ -1105,6 +1127,13 @@ public final class GuixuWhiteHoleGpuProbe {
             highlights = hdr.draw(rayLightTexture(), HOST_BLOOM_SOURCE.light, rayWidth(), rayHeight(), exposure);
             glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
             glViewport(0, 0, W, H);
+        }
+        boolean sparse = divisor > 1 && REPAIR.repair(composite, W, H, depth, HOST_DIRECT.active().exit, particleAtlas);
+        set(composite, "uWhiteSparse", sparse ? 1 : 0);
+        if (sparse) {
+            sparseFrames++;
+            bindHostTexture(composite, "PreviousExit", 5, REPAIR.indexMap());
+            bindHostTexture(composite, "PreviousLight", 4, REPAIR.light());
         }
         glActiveTexture(GL_TEXTURE0 + BLOOM_UNIT);
         glBindTexture(GL_TEXTURE_2D, highlights);
