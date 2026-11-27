@@ -37,7 +37,7 @@ public final class GuixuWhiteHoleGpuProbe {
     private static final int BLOOM_UNIT = 10;
     private static final KerrRenderPass.Target HOST_BLOOM_SOURCE = new KerrRenderPass.Target();
     private static final KerrRenderPass.Target HOST_OPTICAL = new KerrRenderPass.Target();
-    private static final KerrRenderPass.Target HOST_DIRECT = new KerrRenderPass.Target(false, GL_R32F);
+    private static final KerrRenderPass.WhiteDirectTargets HOST_DIRECT = new KerrRenderPass.WhiteDirectTargets();
     private static int hostDirectProgram;
     private static int particleAtlas;
     private static CompactHdrPostProcessing hdr;
@@ -93,6 +93,7 @@ public final class GuixuWhiteHoleGpuProbe {
                             ext -> Files.readString(PARTICLE_SHADERS.resolve("../post/bright_pass." + ext)))) {
                         hdr = post;
                         if (flags.contains("--host-views")) {
+                            verifyWhiteDirectAttachments();
                             hostDirectProgram = program("guixu_white_cache");
                             try {
                                 verifyHostViews(hostParticles);
@@ -800,6 +801,36 @@ public final class GuixuWhiteHoleGpuProbe {
         setHostDepth(depth, 1);
     }
 
+    private static void verifyWhiteDirectAttachments() {
+        int[] framebuffers = new int[2];
+        int[] rgb = new int[2];
+        int[] depths = new int[2];
+        try (var targets = new KerrRenderPass.WhiteDirectTargets()) {
+            for (int frame = 0; frame < 240; frame++) {
+                int bucket = frame & 1;
+                targets.bind(576 + 32 * bucket, 576, 0, 1);
+                var active = targets.active();
+                if (frame < 2) {
+                    framebuffers[bucket] = active.framebuffer;
+                    rgb[bucket] = active.light;
+                    depths[bucket] = active.exit;
+                } else {
+                    require(active.framebuffer == framebuffers[bucket] && active.light == rgb[bucket]
+                                    && active.exit == depths[bucket],
+                            "Crossing adjacent white host size buckets must not recreate textures");
+                }
+            }
+            require(glIsTexture(rgb[0]) && glIsTexture(rgb[1])
+                            && glIsTexture(depths[0]) && glIsTexture(depths[1]),
+                    "Both attachment pairs must remain alive while zooming");
+            System.out.println("White direct attachments: two allocations across 240 alternating size binds");
+        }
+        for (int bucket = 0; bucket < framebuffers.length; bucket++) {
+            require(!glIsFramebuffer(framebuffers[bucket]) && !glIsTexture(rgb[bucket]) && !glIsTexture(depths[bucket]),
+                    "Both white host attachment pairs must be released");
+        }
+    }
+
     private static void verifyHostMotionWithParticles(Emission effect, int scene, int depth) throws IOException {
         int divisor = KerrSampling.whiteDirectDivisor(Quality.ADAPTIVE, (double) W * H);
         require(divisor > 1, "Particle host timing requires a large enough viewport for the reduced direct cache");
@@ -1029,8 +1060,8 @@ public final class GuixuWhiteHoleGpuProbe {
         set(composite, "uWhiteCacheReduced", divisor > 1 ? 1 : 0);
         set(composite, "uWhiteOpticalLayer", divisor > 1 ? 1 : 0);
         if (cached) {
-            bindHostTexture(composite, "WhiteDirectLight", 14, HOST_DIRECT.light);
-            bindHostTexture(composite, "WhiteDirectDepth", 15, HOST_DIRECT.exit);
+            bindHostTexture(composite, "WhiteDirectLight", 14, HOST_DIRECT.active().light);
+            bindHostTexture(composite, "WhiteDirectDepth", 15, HOST_DIRECT.active().exit);
         }
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, scene);
