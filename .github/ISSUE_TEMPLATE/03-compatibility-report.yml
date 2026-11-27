@@ -1,0 +1,95 @@
+name: 兼容性报告 / Compatibility report
+description: 报告 GTSH 与其他模组、平台或接入方的兼容问题。 / Report an interoperability issue.
+title: '[Compat] '
+labels:
+- bug
+body:
+- type: markdown
+  attributes:
+    value: 先[搜索已有 Issue](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)，有相同问题请补充到原帖。中文和英文都可以。 / [Search existing issues](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)
+      first; Chinese and English are both welcome.
+- type: dropdown
+  id: platform
+  attributes:
+    label: 运行平台 / Platform
+    description: 选择发生问题的 Minecraft 与加载器组合。 / Select the affected Minecraft and loader combination.
+    options:
+    - Forge · Minecraft 1.20.1
+    - 其他或未知 / Other or unknown
+  validations:
+    required: true
+- type: input
+  id: versions
+  attributes:
+    label: 具体版本 / Exact versions
+    description: 整合包或 JAR 版本、Forge 版本、GT/AE2 及相关附属模组版本 / Pack or JAR version, Forge, GT/AE2 and add-ons.
+  validations:
+    required: true
+- type: dropdown
+  id: environment
+  attributes:
+    label: 运行环境 / Environment
+    description: 选择问题发生的环境。 / Select where the issue occurs.
+    options:
+    - 单人或客户端 / Single-player or client
+    - 专用服务器或联机 / Dedicated server or multiplayer
+    - 客户端及服务端均出现 / Both client and server
+    - 开发或构建环境 / Development or build
+    - 不确定 / Unsure
+  validations:
+    required: true
+- type: input
+  id: area
+  attributes:
+    label: 涉及模块 / Affected area
+    description: 涉及的机器、任务、配方或系统；如为存档升级问题，请写升级前后的版本。 / Name the machine, quest, recipe, or system; include both versions for an upgrade issue.
+- type: input
+  id: other-mods
+  attributes:
+    label: 受影响的模组或组件 / Other mods or components
+    description: 请包含名称和精确版本。 / Include names and exact versions.
+  validations:
+    required: true
+- type: dropdown
+  id: isolation
+  attributes:
+    label: 最小组合测试 / Isolation check
+    description: 移除无关模组后是否仍出现？ / Does it still happen with unrelated mods removed?
+    options:
+    - 仍可复现 / Still reproducible
+    - 只在完整组合出现 / Only in the full setup
+    - 尚未测试 / Not tested
+  validations:
+    required: true
+- type: textarea
+  id: reproduction
+  attributes:
+    label: 复现步骤 / Steps to reproduce
+    description: 请给出最短操作顺序，并注明复现频率。 / Give the shortest sequence of actions and how often it happens.
+    placeholder: '1.
+
+      2.
+
+      3.'
+  validations:
+    required: true
+- type: textarea
+  id: actual
+  attributes:
+    label: 实际结果 / Actual behavior
+    description: 描述看到的结果，保留错误原文。 / Describe what happened and include the exact error if any.
+  validations:
+    required: true
+- type: textarea
+  id: expected
+  attributes:
+    label: 预期结果 / Expected behavior
+    description: 说明正常情况下应发生什么。 / Describe what should happen instead.
+  validations:
+    required: true
+- type: textarea
+  id: evidence
+  attributes:
+    label: 日志与附件 / Logs and attachments
+    description: 可拖入 latest.log、崩溃报告、截图或视频。上传前删去密钥、令牌、服务器地址及个人信息。 / Attach logs or media if available; redact secrets, server addresses and personal
+      data.

@@ -40,7 +40,7 @@ public final class GuixuWhiteHoleGpuProbe {
     private static final KerrRenderPass.Target HOST_DIRECT = new KerrRenderPass.Target(false, GL_R32F);
     private static int hostDirectProgram;
     private static int particleAtlas;
-    private static WhiteHoleHDRPostProcessing hdr;
+    private static CompactHdrPostProcessing hdr;
     private static float observerBeta;
     private static boolean autoExposure;
     private static double displayDelta;
@@ -80,8 +80,8 @@ public final class GuixuWhiteHoleGpuProbe {
                     glfwSwapInterval(smokeViewer ? 0 : 1);
                     RenderSystem.initRenderThread();
                     try (var grid = new WhiteHoleParticleGrid(name -> Files.readString(PARTICLE_SHADERS.resolve(name)));
-                         var post = new WhiteHoleHDRPostProcessing(
-                                 ext -> Files.readString(PARTICLE_SHADERS.resolve("bright_pass." + ext)))) {
+                         var post = new CompactHdrPostProcessing(
+                                 ext -> Files.readString(PARTICLE_SHADERS.resolve("../post/bright_pass." + ext)))) {
                         hdr = post;
                         new Viewer(window, grid).run(smokeViewer, expectParticles);
                     } finally {
@@ -89,8 +89,8 @@ public final class GuixuWhiteHoleGpuProbe {
                     }
                 } else if (flags.contains("--world-appearance") || flags.contains("--host-views")) {
                     RenderSystem.initRenderThread();
-                    try (var post = new WhiteHoleHDRPostProcessing(
-                            ext -> Files.readString(PARTICLE_SHADERS.resolve("bright_pass." + ext)))) {
+                    try (var post = new CompactHdrPostProcessing(
+                            ext -> Files.readString(PARTICLE_SHADERS.resolve("../post/bright_pass." + ext)))) {
                         hdr = post;
                         if (flags.contains("--host-views")) {
                             hostDirectProgram = program("guixu_white_cache");

@@ -69,7 +69,7 @@ public final class WhiteHoleBloomGpuProbe {
         }
 
         int highlights;
-        try (var bloom = new WhiteHoleHDRPostProcessing(extension -> Files.readString(SHADERS.resolve("bright_pass." + extension)))) {
+        try (var bloom = new CompactHdrPostProcessing(extension -> Files.readString(SHADERS.resolve("../post/bright_pass." + extension)))) {
             highlights = bloom.draw(input, W, H, 1);
             require(highlights != 0, "Bloom failed to create a floating-point pyramid");
             require(glGetInteger(GL_ACTIVE_TEXTURE) == GL_TEXTURE3 && glGetInteger(GL_TEXTURE_BINDING_2D) == input,
@@ -158,7 +158,7 @@ public final class WhiteHoleBloomGpuProbe {
         return id;
     }
 
-    private static void verifyExposure(WhiteHoleHDRPostProcessing bloom) {
+    private static void verifyExposure(CompactHdrPostProcessing bloom) {
         int dark = uniformInput(W, H, .09f);
         int bright = uniformInput(1, 1, 7f);
         int brightBloomSource = uniformInput(W, H, 7f);
@@ -253,7 +253,7 @@ public final class WhiteHoleBloomGpuProbe {
         return texture;
     }
 
-    private static void benchmark(WhiteHoleHDRPostProcessing bloom) {
+    private static void benchmark(CompactHdrPostProcessing bloom) {
         int input = highlightsInput(576, 404);
         for (int i = 0; i < 12; i++) bloom.draw(input, 576, 404, 1);
         int timer = glGenQueries();

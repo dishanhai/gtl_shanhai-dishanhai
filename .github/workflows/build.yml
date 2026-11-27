@@ -29,11 +29,20 @@ jobs:
           path: GTSH
           persist-credentials: false
 
+      - name: Resolve latest compatible Forge releases
+        id: libraries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: GTSH
+        run: |
+          python3 -B -m unittest discover -s .github -p 'test_resolve_forge_dependencies.py'
+          python3 -B .github/resolve_forge_dependencies.py gradle.properties
+
       - name: Check out compatible SH-Better-UI
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: dishanhai/SH-Better-UI
-          ref: d91e3bd8feb67b2ca9be96ec3446193779ccaaee
+          ref: ${{ steps.libraries.outputs.shbui_ref }}
           path: SH-Better-UI
           persist-credentials: false
 
@@ -41,7 +50,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: dishanhai/SH-Common-Lib
-          ref: b02c6c06db3a61f213d9abc463f2eae1f16f596a
+          ref: ${{ steps.libraries.outputs.shclib_ref }}
           path: SH-Common-Lib
           persist-credentials: false
 

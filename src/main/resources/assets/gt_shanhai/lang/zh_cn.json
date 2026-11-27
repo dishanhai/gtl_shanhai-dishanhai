@@ -149,6 +149,7 @@
   "gt_shanhai.white_hole.preset.cinematic_white_hole": "电影级白洞",
   "gt_shanhai.white_hole.preset.scientific_visualization": "科学可视化",
   "gt_shanhai.guixu.blackhole_style.tooltip": "在克尔黑洞与旧版黑洞之间循环。使用归墟视界反演矩阵后可切换到白洞。",
+  "gt_shanhai.guixu.blackhole_style.tooltip.unlocked": "在克尔黑洞、旧版黑洞与白洞之间循环。",
   "gt_shanhai.command.bh.lens.off": "引力透镜已关闭。洞外保留动态黑洞，背景保持原样。",
   "gt_shanhai.shop.currency_sale.limit": "低阶货币基础限额（每升一档翻倍，0 = 禁售）",
   "gt_shanhai.shop.currency_sale.period": "低阶货币刷新周期（现实秒）",

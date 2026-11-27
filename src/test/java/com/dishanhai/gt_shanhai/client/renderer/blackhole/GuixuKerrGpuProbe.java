@@ -40,7 +40,7 @@ class GuixuKerrGpuProbe {
     private static int stripWidth, stripRows, radiiFbo, radiiTex, stripFbo, stripTex, stripExit;
     private static float cameraDistance, cameraOffset, diskGain;
     private static boolean diagnostic, fullCapture;
-    private static WhiteHoleHDRPostProcessing hdr;
+    private static CompactHdrPostProcessing hdr;
     private static final KerrThinDisk diskModel = new KerrThinDisk();
 
     public static void main(String[] args) throws Exception {
@@ -51,8 +51,8 @@ class GuixuKerrGpuProbe {
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         long context = glfwCreateWindow(W, H, "Guixu Kerr GLSL probe", 0, 0);
         if (context == 0) throw new IllegalStateException("OpenGL context creation failed");
-        try (var post = new WhiteHoleHDRPostProcessing(extension ->
-                Files.readString(SHADERS.resolve("../whitehole/bright_pass." + extension)))) {
+        try (var post = new CompactHdrPostProcessing(extension ->
+                Files.readString(SHADERS.resolve("../post/bright_pass." + extension)))) {
             glfwMakeContextCurrent(context);
             GL.createCapabilities();
             RenderSystem.initRenderThread();
@@ -637,8 +637,8 @@ class GuixuKerrGpuProbe {
         glDeleteQueries(timer);
         BufferedImage coreOnly, actual;
         double arcMs = 0;
-        try (var detailHdr = new WhiteHoleHDRPostProcessing(extension ->
-                Files.readString(SHADERS.resolve("../whitehole/bright_pass." + extension)))) {
+        try (var detailHdr = new CompactHdrPostProcessing(extension ->
+                Files.readString(SHADERS.resolve("../post/bright_pass." + extension)))) {
             int glow = bloom > 0 ? detailHdr.draw(detailTexture, detail.samples(), detail.samples(), 1.15f) : 0;
             glUseProgram(composite);
             sampler("DiskDetailBloom", 15, glow);

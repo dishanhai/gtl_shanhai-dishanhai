@@ -15,14 +15,22 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
     private static final int NATIVE_COMPOSITE_PIXELS = 480_000;
     static final int WHITE_DIRECT_CACHE_PIXELS = 4_200_000;
     private static final int WHITE_DIRECT_BUDGET = 320_000;
+    private static final int WHITE_DIRECT_HIGH_BUDGET = 2_100_000;
     private static final int WHITE_HOST_CLOSE_TRACE_PIXELS = 48_000;
 
     static int whiteDirectDivisor(Quality quality, double area) {
-        if ((quality != Quality.ADAPTIVE && quality != Quality.LOW) || area < 480_000) {
-            return 1;
-        }
-        // Zoom can enlarge the footprint without bringing the observer any closer.
-        return (int) Math.ceil(Math.sqrt(area / WHITE_DIRECT_BUDGET));
+        return whiteDirectDivisor(quality, area, 1);
+    }
+
+    static int whiteDirectDivisor(Quality quality, double area, int previousDivisor) {
+        boolean adaptive = quality == Quality.ADAPTIVE || quality == Quality.LOW;
+        int budget = adaptive ? WHITE_DIRECT_BUDGET : WHITE_DIRECT_HIGH_BUDGET;
+        int nativeLimit = adaptive ? NATIVE_COMPOSITE_PIXELS : budget;
+        int requested = area < nativeLimit ? 1 : Math.max(1, (int) Math.ceil(Math.sqrt(area / budget)));
+        if (requested >= previousDivisor) return requested;
+        // Shrink promptly past several tiers, but don't alternate near a single boundary.
+        double boundary = requested == 1 ? nativeLimit : (double) budget * requested * requested;
+        return requested == previousDivisor - 1 && area > .85 * boundary ? previousDivisor : requested;
     }
 
     static int whiteDirectExtent(int pixels, int divisor) {
@@ -166,7 +174,7 @@ record KerrSampling(double traceScale, double transferScale, int subpixels) {
         // Use a denser interior grid for wide close-ups where the foreground
         // disk edge spans many pixels. Near the horizon the original cap applies.
         double foregroundDetail = extraDetail * smoothUnit((18 - observerDistance) / 7);
-        int sampleLimit = 224 + 8 * (int) Math.round(20 * extraDetail + 8 * foregroundDetail);
+        int sampleLimit = 224 + 8 * (int) Math.round(20 * extraDetail + 4 * foregroundDetail);
         int samples = Math.min(sampleLimit, side);
         double base = Math.max(traceScale, transferScale);
         double densityGain = samples / (side * base);

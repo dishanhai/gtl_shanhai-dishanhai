@@ -8,6 +8,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KerrSamplingTest {
     @Test
+    void directCacheDoesNotOscillateAroundSingleQualityBoundary() {
+        assertEquals(2, KerrSampling.whiteDirectDivisor(ADAPTIVE, 480_000, 1));
+        assertEquals(2, KerrSampling.whiteDirectDivisor(ADAPTIVE, 470_000, 2));
+        assertEquals(1, KerrSampling.whiteDirectDivisor(ADAPTIVE, 390_000, 2));
+        assertEquals(2, KerrSampling.whiteDirectDivisor(HIGH, 2_050_000, 2));
+        assertEquals(1, KerrSampling.whiteDirectDivisor(HIGH, 1_600_000, 2));
+    }
+
+    @Test
     void whiteHostReuseIsBoundedInFramesAndWallTime() {
         assertTrue(KerrSampling.whiteHostCanReuse(0, 0));
         assertTrue(KerrSampling.whiteHostCanReuse(55_000_000, 2));
@@ -29,7 +38,10 @@ class KerrSamplingTest {
         assertSame(plan, plan.forWhiteHost(HIGH, area, 17));
         assertEquals(4, KerrSampling.whiteDirectDivisor(ADAPTIVE, area));
         assertEquals(2, KerrSampling.whiteDirectDivisor(LOW, 1280 * 720));
-        assertEquals(1, KerrSampling.whiteDirectDivisor(HIGH, area));
+        assertEquals(2, KerrSampling.whiteDirectDivisor(HIGH, area));
+        assertEquals(1, KerrSampling.whiteDirectDivisor(HIGH, 1920 * 1080));
+        assertEquals(2, KerrSampling.whiteDirectDivisor(HIGH, 3840 * 2160));
+        assertEquals(3, KerrSampling.whiteDirectDivisor(HIGH, 5120 * 2160));
         assertEquals(1, KerrSampling.whiteDirectDivisor(ADAPTIVE, 160 * 160));
         assertEquals(864, KerrSampling.whiteDirectExtent(2560, 3));
         assertEquals(864, KerrSampling.whiteDirectExtent(2552, 3));
