@@ -16,7 +16,6 @@ import static org.lwjgl.opengl.GL43C.*;
 final class WhiteHoleParticleGrid implements AutoCloseable {
     static final int SIDE = 512;
     static final int MAX_PARTICLES = 32_768;
-    private static final int UPDATES_PER_SECOND = 30;
     // Seven aligned vec4/uvec4 fields in the std430 particle structure.
     private static final int PARTICLE_STRIDE = 112;
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -54,7 +53,7 @@ final class WhiteHoleParticleGrid implements AutoCloseable {
         RenderSystem.assertOnRenderThread();
         if (budget <= 0 || unavailable || !GL.getCapabilities().OpenGL43) return 0;
         int count = Math.min(budget, MAX_PARTICLES);
-        long tick = Math.max(0, (long) Math.floor(timeSeconds * UPDATES_PER_SECOND));
+        long tick = RustWhiteHoleRenderer.tick(timeSeconds);
         if (tick == lastTick && seed == lastSeed && count == lastCount && Math.abs(beta - lastBeta) < .025f
                 && Math.abs(jets - lastJets) < .025f && Math.abs(horizonRg - lastHorizon) < .025f) {
             return density;
@@ -63,27 +62,13 @@ final class WhiteHoleParticleGrid implements AutoCloseable {
         var original = GlState.capture();
         try {
             if (density == 0) initialize();
-            glBindImageTexture(0, accumulator, 0, false, 0, GL_READ_WRITE, GL_R32UI);
-            glBindImageTexture(1, density, 0, false, 0, GL_WRITE_ONLY, GL_R16F);
-            glUseProgram(atlasProgram);
-            glUniform1i(normalizeLocation, 0);
-            glDispatchCompute(SIDE / 16, SIDE / 16, 1);
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-            glUseProgram(particleProgram);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particles);
-            glUniform2ui(seedLocation, (int) seed, (int) (seed >>> 32));
-            glUniform1ui(tickLocation, (int) tick);
-            glUniform1ui(countLocation, count);
-            float normalize = Math.clamp(8192f / count, .25f, 8f);
-            glUniform4f(flowLocation, beta, jets, horizonRg, normalize);
-            glDispatchCompute((count + 127) / 128, 1, 1);
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
-
-            glUseProgram(atlasProgram);
-            glUniform1i(normalizeLocation, 1);
-            glDispatchCompute(SIDE / 16, SIDE / 16, 1);
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+            if (RustWhiteHoleRenderer.active()) {
+                RustWhiteHoleRenderer.submit(GL.getCapabilities(), atlasProgram, particleProgram, accumulator,
+                        density, particles, normalizeLocation, seedLocation, tickLocation, countLocation,
+                        flowLocation, seed, tick, count, beta, jets, horizonRg);
+            } else {
+                submitJava(seed, tick, count, beta, jets, horizonRg);
+            }
             lastTick = tick;
             lastSeed = seed;
             lastCount = count;
@@ -99,6 +84,30 @@ final class WhiteHoleParticleGrid implements AutoCloseable {
         } finally {
             original.restore();
         }
+    }
+
+    private void submitJava(long seed, long tick, int count, float beta, float jets, float horizonRg) {
+        glBindImageTexture(0, accumulator, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+        glBindImageTexture(1, density, 0, false, 0, GL_WRITE_ONLY, GL_R16F);
+        glUseProgram(atlasProgram);
+        glUniform1i(normalizeLocation, 0);
+        glDispatchCompute(SIDE / 16, SIDE / 16, 1);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+        glUseProgram(particleProgram);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particles);
+        glUniform2ui(seedLocation, (int) seed, (int) (seed >>> 32));
+        glUniform1ui(tickLocation, (int) tick);
+        glUniform1ui(countLocation, count);
+        float normalize = Math.clamp(8192f / count, .25f, 8f);
+        glUniform4f(flowLocation, beta, jets, horizonRg, normalize);
+        glDispatchCompute((count + 127) / 128, 1, 1);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+
+        glUseProgram(atlasProgram);
+        glUniform1i(normalizeLocation, 1);
+        glDispatchCompute(SIDE / 16, SIDE / 16, 1);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
     }
 
     private void initialize() throws IOException {

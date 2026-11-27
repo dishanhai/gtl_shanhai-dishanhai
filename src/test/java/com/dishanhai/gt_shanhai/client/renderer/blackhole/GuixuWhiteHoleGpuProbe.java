@@ -75,6 +75,10 @@ public final class GuixuWhiteHoleGpuProbe {
                 glfwMakeContextCurrent(window);
                 GL.createCapabilities();
                 System.out.printf("%s / %s / %s%n", glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_VERSION));
+                if (System.getProperty("gtsh.whitehole.rustLibrary") != null && !RustWhiteHoleRenderer.active()) {
+                    throw new IllegalStateException("The requested Rust backend did not load");
+                }
+                System.out.println("White-hole backend: " + (RustWhiteHoleRenderer.active() ? "Rust" : "Java"));
                 initializePipeline();
                 if (interactive || smokeViewer) {
                     glfwSwapInterval(smokeViewer ? 0 : 1);
@@ -118,6 +122,11 @@ public final class GuixuWhiteHoleGpuProbe {
         } finally {
             glfwTerminate();
         }
+    }
+
+    private static void submitTriangle() {
+        if (RustWhiteHoleRenderer.active()) RustWhiteHoleRenderer.draw(GL.getCapabilities().glDrawArrays);
+        else glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
     private static void verify(boolean updateGolden) throws Exception {
@@ -383,7 +392,7 @@ public final class GuixuWhiteHoleGpuProbe {
         set(composite, "uWhiteSceneDepth", 0);
         glClear(GL_COLOR_BUFFER_BIT);
         glEnable(GL_BLEND);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
         glDisable(GL_BLEND);
         var missingDepth = readImage();
         for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
@@ -1039,7 +1048,7 @@ public final class GuixuWhiteHoleGpuProbe {
         set(program, "uWhiteSceneDepth", 1);
         set(program, "uCacheOrigin", 0, 0);
         set(program, "uCacheStride", (float) W / width, (float) H / height);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
     }
 
     private static void bindHostTexture(int program, String sampler, int unit, int texture) {
@@ -1078,7 +1087,7 @@ public final class GuixuWhiteHoleGpuProbe {
             glViewport(0, 0, rayWidth(), rayHeight());
             set(composite, "uResolveSize", rayWidth(), rayHeight());
             set(composite, "uTransferPass", KerrRenderPass.WHITE_OPTICAL_PASS);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            submitTriangle();
             set(composite, "uTransferPass", 0);
             bindHostTexture(composite, "DiskDetail", 7, HOST_OPTICAL.light);
             glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
@@ -1091,7 +1100,7 @@ public final class GuixuWhiteHoleGpuProbe {
             glViewport(0, 0, rayWidth(), rayHeight());
             set(composite, "uResolveSize", rayWidth(), rayHeight());
             set(composite, "uTransferPass", KerrRenderPass.WHITE_BLOOM_SOURCE_PASS);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            submitTriangle();
             set(composite, "uTransferPass", 0);
             highlights = hdr.draw(rayLightTexture(), HOST_BLOOM_SOURCE.light, rayWidth(), rayHeight(), exposure);
             glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
@@ -1103,7 +1112,7 @@ public final class GuixuWhiteHoleGpuProbe {
         set(composite, "uRayBloomLod", highlights == 0 ? 0 : hdr.lastLevel(),
                 KerrSampling.bloomLodBias(rayWidth(), rayHeight(), W, H, H));
         set(composite, "uDisplay", exposure, bloom);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
     }
 
     private static double timeWorldAppearance(Camera camera, Emission effect, KerrSampling plan, int scene, double radius) {
@@ -1165,7 +1174,7 @@ public final class GuixuWhiteHoleGpuProbe {
         glUniform1i(glGetUniformLocation(composite, "RayBloom"), BLOOM_UNIT);
         set(composite, "uRayBloomLod", hdr.lastLevel(), KerrSampling.bloomLodBias(width, height, W, H, H));
         if (plan.transferScale() > 0) bakeFootprintsAtScale(plan.transferScale());
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
     }
 
     private static BufferedImage renderDistant(Camera camera, int side, double scale, double radius) {
@@ -1181,7 +1190,7 @@ public final class GuixuWhiteHoleGpuProbe {
         set(composite, "uTraceRect", x, y, side, side);
         set(composite, "uDisplay", STEADY.exposure(), .18f);
         set(composite, "uRefine", 4f);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
         return readImage().getSubimage(x, y, side, side);
     }
 
@@ -1202,7 +1211,7 @@ public final class GuixuWhiteHoleGpuProbe {
         renderRays(camera, kerr, true);
         prepareComposite(camera.inclination(), 1, .18f);
         set(composite, "uRefine", 4f);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
         verifyGolden("a+0.65-i65", readImage());
     }
 
@@ -1273,7 +1282,7 @@ public final class GuixuWhiteHoleGpuProbe {
         set(composite, "uRayBloomLod", bloom != 0 ? hdr.lastLevel() : 0, 0);
         set(composite, "uDisplay", exposure, .24f);
         set(composite, "uRefine", highQuality ? 4f : 2f);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        submitTriangle();
     }
 
     private static void verifyRayBuffers() {
@@ -1314,12 +1323,12 @@ public final class GuixuWhiteHoleGpuProbe {
             glClear(GL_DEPTH_BUFFER_BIT);
             glColorMask(false, false, false, false);
             set(composite, "uCaptureDepthOnly", 1);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            submitTriangle();
             float[] pixel = new float[1];
             glReadPixels(W / 2, H / 2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, pixel);
             require(pixel[0] == 1, "The white radiating volume was replaced by a solid depth proxy");
             set(composite, "uWhiteHole", 0, 0, 0, 0);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            submitTriangle();
             glReadPixels(W / 2, H / 2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, pixel);
             require(Math.abs(pixel[0] - .5f) < .0001f, "Depth test did not exercise the proxy pass");
         } finally {

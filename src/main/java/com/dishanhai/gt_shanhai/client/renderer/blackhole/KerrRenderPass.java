@@ -113,14 +113,13 @@ final class KerrRenderPass implements AutoCloseable {
         int directH = (int) Math.ceil(frame.rectY0 + frame.rectH) - directY;
         double distance = 2 * frame.dist / frame.rsBlocks;
         int directDivisor = worldPrimary
-                ? KerrSampling.whiteDirectDivisor(quality, (double) directW * directH, whiteDirectDivisor)
+                ? RustWhiteHoleRenderer.directDivisor(quality, (double) directW * directH, whiteDirectDivisor)
                 : 1;
         whiteDirectDivisor = directDivisor;
         int directWidth = KerrSampling.whiteDirectExtent(directW, directDivisor);
         int directHeight = KerrSampling.whiteDirectExtent(directH, directDivisor);
         boolean reducedDirect = directWidth < directW || directHeight < directH;
-        boolean cacheDirect = worldPrimary && (reducedDirect || distance <= 70)
-                && (long) directWidth * directHeight <= KerrSampling.WHITE_DIRECT_CACHE_PIXELS;
+        boolean cacheDirect = worldPrimary && RustWhiteHoleRenderer.cacheDirect(reducedDirect, distance, directWidth, directHeight);
         if (cacheDirect && whiteCacheShader == null && !whiteCacheUnavailable) loadWhiteCacheShader();
         cacheDirect &= whiteCacheShader != null;
         boolean stableWhite = worldPrimary && history != null && history.whiteSkyRays == whiteSkyRays
@@ -128,7 +127,7 @@ final class KerrRenderPass implements AutoCloseable {
         boolean reuseWhite = stableWhite && previous.width == width && previous.height == height
                 && (!cacheDirect || whiteDirectReady && whiteDirect.active().width == directWidth
                     && whiteDirect.active().height == directHeight)
-                && KerrSampling.whiteHostCanReuse(frame.stampNanos - whiteRefreshStamp, whiteReuseFrames);
+                && RustWhiteHoleRenderer.canReuse(frame.stampNanos - whiteRefreshStamp, whiteReuseFrames);
         boolean black = frame.white.mix() == 0;
         boolean lowBudget = quality == Quality.ADAPTIVE || quality == Quality.LOW;
         boolean needsDirection = !black || sampleBackground && (settings.worldSky() > 0 || settings.starsSky() > 0);
@@ -201,7 +200,7 @@ final class KerrRenderPass implements AutoCloseable {
                 shader.setSampler("CachedRayExit", reuseExit ? previous.exit : null);
                 shader.safeGetUniform("uCriticalBounds").set(0f, 0f, 0f, 0f);
                 shader.setSampler("CriticalRadii", null);
-                drawTriangle(shader);
+                drawTriangle(shader, worldPrimary);
                 drawCriticalStrip(composite, frame, diskGain, whiteSkyRays, sameGeometry);
                 if (whiteOptics) {
                     // Filter the broad secondary image once at pilot resolution.
@@ -323,7 +322,7 @@ final class KerrRenderPass implements AutoCloseable {
         composite.safeGetUniform("uResolveSize").set((float) width, (float) height);
         composite.setTransferPass(pass);
         try {
-            drawTriangle(composite);
+            drawTriangle(composite, true);
         } finally {
             composite.setTransferPass(0);
         }
@@ -339,7 +338,7 @@ final class KerrRenderPass implements AutoCloseable {
                 (float) frame.copyW, (float) frame.copyH);
         whiteCacheShader.safeGetUniform("uCacheOrigin").set((float) x, (float) y);
         whiteCacheShader.safeGetUniform("uCacheStride").set((float) w / width, (float) h / height);
-        drawTriangle(whiteCacheShader);
+        drawTriangle(whiteCacheShader, true);
     }
 
     private void loadWhiteCacheShader() {
@@ -503,6 +502,10 @@ final class KerrRenderPass implements AutoCloseable {
     }
 
     private void drawTriangle(ShaderInstance program) {
+        drawTriangle(program, false);
+    }
+
+    private void drawTriangle(ShaderInstance program, boolean white) {
         if (triangle == null) {
             var buffer = Tesselator.getInstance().getBuilder();
             buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION);
@@ -516,7 +519,17 @@ final class KerrRenderPass implements AutoCloseable {
             triangle.bind();
         }
         try {
-            triangle.drawWithShader(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix(), program);
+            if (white && RustWhiteHoleRenderer.active()) {
+                // The Guixu vertex shader consumes NDC Position directly, with no Minecraft matrices.
+                program.apply();
+                try {
+                    RustWhiteHoleRenderer.draw(GL.getCapabilities().glDrawArrays);
+                } finally {
+                    program.clear();
+                }
+            } else {
+                triangle.drawWithShader(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix(), program);
+            }
         } finally {
             VertexBuffer.unbind();
         }

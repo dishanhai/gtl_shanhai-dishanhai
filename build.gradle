@@ -319,6 +319,8 @@ tasks.register('whiteHoleGpuProbe', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.GuixuWhiteHoleGpuProbe'
+    def rustLibrary = providers.gradleProperty('rustWhiteHoleLibrary').orNull
+    if (rustLibrary != null) systemProperty 'gtsh.whitehole.rustLibrary', file(rustLibrary).absolutePath
     systemProperty 'kerr.width', providers.gradleProperty('whiteHoleWidth').getOrElse('800')
     systemProperty 'kerr.height', providers.gradleProperty('whiteHoleHeight').getOrElse('560')
 }
@@ -329,6 +331,8 @@ tasks.register('whiteHoleParticleGpuProbe', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.WhiteHoleParticleGpuProbe'
+    def rustLibrary = providers.gradleProperty('rustWhiteHoleLibrary').orNull
+    if (rustLibrary != null) systemProperty 'gtsh.whitehole.rustLibrary', file(rustLibrary).absolutePath
 }
 
 tasks.register('whiteHoleBloomGpuProbe', JavaExec) {

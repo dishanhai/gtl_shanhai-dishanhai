@@ -33,12 +33,74 @@ public final class WhiteHoleParticleGpuProbe {
                 GL.createCapabilities();
                 RenderSystem.initRenderThread();
                 System.out.printf("%s / %s%n", glGetString(GL_RENDERER), glGetString(GL_VERSION));
+                boolean rust = RustWhiteHoleRenderer.active();
+                require(System.getProperty("gtsh.whitehole.rustLibrary") == null || rust,
+                        "The requested Rust backend did not load");
+                System.out.println("Particle backend: " + (rust ? "Rust" : "Java"));
+                if (rust) verifyNativeRaster();
                 run();
             } finally {
                 glfwDestroyWindow(window);
             }
         } finally {
             glfwTerminate();
+        }
+    }
+
+    private static void verifyNativeRaster() throws Exception {
+        var adaptive = com.dishanhai.gt_shanhai.config.KerrRenderConfig.Quality.ADAPTIVE;
+        require(RustWhiteHoleRenderer.directDivisor(adaptive, 480_000, 1) == 2
+                && RustWhiteHoleRenderer.directDivisor(adaptive, 450_000, 2) == 2
+                && RustWhiteHoleRenderer.cacheDirect(true, 100, 2100, 2000)
+                && !RustWhiteHoleRenderer.cacheDirect(false, 100, 2100, 2000)
+                && RustWhiteHoleRenderer.canReuse(56_000_000, 2)
+                && !RustWhiteHoleRenderer.canReuse(56_000_001, 2), "Native frame planner mismatch");
+
+        int vao = glGenVertexArrays();
+        int positions = glGenBuffers();
+        int program = glCreateProgram();
+        int vertex = glCreateShader(GL_VERTEX_SHADER);
+        int fragment = glCreateShader(GL_FRAGMENT_SHADER);
+        try {
+            glShaderSource(vertex, Files.readString(SHADERS.resolve("../core/guixu_blackhole.vsh")));
+            glShaderSource(fragment, "#version 150\nout vec4 color; void main() { color=vec4(.125,.5,.875,1); }");
+            glCompileShader(vertex);
+            glCompileShader(fragment);
+            require(glGetShaderi(vertex, GL_COMPILE_STATUS) != 0, glGetShaderInfoLog(vertex));
+            require(glGetShaderi(fragment, GL_COMPILE_STATUS) != 0, glGetShaderInfoLog(fragment));
+            glAttachShader(program, vertex);
+            glAttachShader(program, fragment);
+            glBindAttribLocation(program, 0, "Position");
+            glLinkProgram(program);
+            require(glGetProgrami(program, GL_LINK_STATUS) != 0, glGetProgramInfoLog(program));
+            glUseProgram(program);
+            glBindVertexArray(vao);
+            glBindBuffer(GL_ARRAY_BUFFER, positions);
+            glBufferData(GL_ARRAY_BUFFER, new float[]{-1, -1, 0, 3, -1, 0, -1, 3, 0}, GL_STATIC_DRAW);
+            glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0L);
+            glEnableVertexAttribArray(0);
+            glViewport(0, 0, 128, 128);
+            glClearColor(0, 0, 0, 0);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            var expected = BufferUtils.createByteBuffer(128 * 128 * 4);
+            glReadPixels(0, 0, 128, 128, GL_RGBA, GL_UNSIGNED_BYTE, expected);
+            glClear(GL_COLOR_BUFFER_BIT);
+            RustWhiteHoleRenderer.draw(GL.getCapabilities().glDrawArrays);
+            var actual = BufferUtils.createByteBuffer(128 * 128 * 4);
+            glReadPixels(0, 0, 128, 128, GL_RGBA, GL_UNSIGNED_BYTE, actual);
+            require((actual.get(1) & 255) >= 127 && expected.equals(actual), "Native raster differs from Java");
+            require(glGetError() == GL_NO_ERROR, "Native raster generated an OpenGL error");
+            System.out.println("Native frame planner and fullscreen raster A/B passed");
+        } finally {
+            glUseProgram(0);
+            glBindVertexArray(0);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glDeleteShader(vertex);
+            glDeleteShader(fragment);
+            glDeleteProgram(program);
+            glDeleteBuffers(positions);
+            glDeleteVertexArrays(vao);
         }
     }
 
@@ -76,6 +138,7 @@ public final class WhiteHoleParticleGpuProbe {
                     && glGetIntegeri(GL_IMAGE_BINDING_ACCESS, 1) == GL_READ_WRITE, "Compute altered an image binding");
             float[] first = read(atlas);
             volume(first);
+            System.out.printf("Atlas A/B checksum: %08x%n", Arrays.hashCode(first));
             require(render(grid, 4.259, SEED, .8f, 8192) == atlas, "Same tick replaced the cached texture");
             require(Arrays.equals(first, read(atlas)), "Subtick changes altered the particle state");
             render(grid, 4.75, SEED, .8f, 8192);
