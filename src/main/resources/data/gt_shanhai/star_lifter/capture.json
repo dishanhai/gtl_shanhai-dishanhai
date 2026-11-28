@@ -1,0 +1,8 @@
+{
+  "work_ticks": 144000,
+  "reactivation_items": [
+    { "item": "gtlcore:max_field_generator", "count": 8 },
+    { "item": "gtlcore:max_emitter", "count": 4 },
+    { "item": "gtlcore:max_sensor", "count": 4 }
+  ]
+}

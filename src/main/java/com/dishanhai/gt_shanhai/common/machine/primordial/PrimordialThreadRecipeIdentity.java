@@ -51,7 +51,7 @@ public final class PrimordialThreadRecipeIdentity {
         result.data.put(KEY, list);
     }
 
-    static List<Identity> sourcesOf(GTRecipe recipe) {
+    public static List<Identity> sourcesOf(GTRecipe recipe) {
         if (recipe == null) return List.of();
         ListTag saved = recipe.data.getList(KEY, 10);
         if (saved.isEmpty()) {

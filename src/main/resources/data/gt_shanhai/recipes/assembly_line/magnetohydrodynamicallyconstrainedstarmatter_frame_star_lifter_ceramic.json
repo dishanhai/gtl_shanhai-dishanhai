@@ -1,0 +1,107 @@
+{
+  "data": {
+    "star_lifter_construction": true,
+    "euTier": 14
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2147483647
+      }
+    ]
+  },
+  "type": "gtceu:star_lifting",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 144,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 144,
+          "value": [
+            {
+              "fluid": "gtceu:black_dwarf_mtter"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:magnetohydrodynamicallyconstrainedstarmatter_frame"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "gtceu:double_cinobite_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "kubejs:special_ceramics"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "kubejs:special_ceramics"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 8,
+          "ingredient": {
+            "item": "gtceu:cosmicneutronium_plate"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:star_lifter_ceramic"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembly_line/magnetohydrodynamicallyconstrainedstarmatter_frame_star_lifter_ceramic",
+      "defaultEnabled": true
+    }
+  ]
+}

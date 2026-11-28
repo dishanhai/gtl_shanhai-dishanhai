@@ -1,12 +1,14 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterControllerMachine;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
@@ -37,6 +39,14 @@ import java.util.Map;
  */
 @Mixin(value = org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper.class, remap = false)
 public abstract class RecipeRunnerHelperOutputMixin {
+
+    @Inject(method = "handleRecipeOutput", at = @At("RETURN"))
+    private static void gtShanhai$recordStellarOutput(IRecipeLogicMachine holder, GTRecipe recipe,
+                                                     CallbackInfoReturnable<Boolean> cir) {
+        if (cir.getReturnValueZ() && holder instanceof StarLifterControllerMachine starLifter) {
+            starLifter.recordCompletedBatch();
+        }
+    }
 
     @Inject(method = "matchRecipeOutput", at = @At("RETURN"), cancellable = true, require = 0)
     private static void gtShanhai$hyperstableBlackHoleOutputMatch(IRecipeCapabilityHolder holder,

@@ -1,0 +1,162 @@
+{
+  "data": {
+    "star_lifter_construction": true,
+    "euTier": 14
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2147483647
+      }
+    ]
+  },
+  "type": "gtceu:star_lifting",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 144,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 288,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 288,
+          "value": [
+            {
+              "fluid": "gtceu:super_mutated_living_solder"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:star_lifter_armor"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:fine_shirabon_wire"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:fine_shirabon_wire"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:fine_shirabon_wire"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:fine_shirabon_wire"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:me_extended_export_buffer"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:me_dual_hatch_stock_part_machine"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtlcore:max_sensor"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtlcore:max_emitter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 2,
+          "ingredient": {
+            "item": "kubejs:opv_universal_circuit"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:star_lifter_interface"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembly_line/star_lifter_armor_star_lifter_interface",
+      "defaultEnabled": true
+    }
+  ]
+}

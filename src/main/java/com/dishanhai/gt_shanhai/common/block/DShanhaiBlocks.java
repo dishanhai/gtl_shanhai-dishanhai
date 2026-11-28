@@ -10,6 +10,7 @@ import com.tterrag.registrate.util.entry.BlockEntry;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterGeometry;
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterShellBlock;
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterInnerLatchBlock;
 
 import java.util.EnumMap;
 import java.util.Locale;
@@ -68,6 +69,13 @@ public class DShanhaiBlocks {
     public static final Map<StarLifterGeometry.Surface, BlockEntry<StarLifterShellBlock>> STAR_LIFTER_SHELL = registerStarLifterShell();
     public static final BlockEntry<Block> STAR_LIFTER_TERMINAL = registerAetherophasicBlock("star_lifter_terminal", 0);
     public static final BlockEntry<Block> STAR_LIFTER_INTERFACE = registerAetherophasicBlock("star_lifter_interface", 0);
+    public static final BlockEntry<Block> STAR_LIFTER_MANIFOLD = registerAetherophasicBlock("star_lifter_manifold", 0);
+    public static final BlockEntry<StarLifterInnerLatchBlock> STAR_LIFTER_INNER_LATCH = GTDishanhaiRegistration.REGISTRATE
+            .block("star_lifter_inner_latch", StarLifterInnerLatchBlock::new)
+            .initialProperties(() -> Blocks.IRON_BLOCK)
+            .item(BlockItem::new)
+            .build()
+            .register();
 
     private static Map<StarLifterGeometry.Surface, BlockEntry<StarLifterShellBlock>> registerStarLifterShell() {
         var blocks = new EnumMap<StarLifterGeometry.Surface, BlockEntry<StarLifterShellBlock>>(StarLifterGeometry.Surface.class);

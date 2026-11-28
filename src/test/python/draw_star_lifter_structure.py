@@ -16,7 +16,8 @@ from compile_star_lifter_structure import mesh_wedge, read_mesh
 
 COLORS = dict(beam="#8292c5", armor="#65568a", ceramic="#a2b7d4", socket="#c7b4f4",
               conduit="#eabf73", magnet="#a58de8", extractor="#7ed4f1", stellar="#99caff",
-              terminal="#537892", interface="#6de6c6", star_lifter="#fff1ad")
+              terminal="#537892", interface="#6de6c6", star_lifter="#fff1ad", manifold="#eabf73",
+              inner_latch="#9ba7df")
 BG = "#131b2b"
 INK = "#e0ecff"
 MUTED = "#a9b9d6"
@@ -81,6 +82,81 @@ def paint_mesh(draw, rings, scale, radius, project, wire=False):
                 draw.polygon(vertices, fill=None if wire else tint, outline="#69e9ff" if wire else None)
 
 
+def cabin_plates(builder_export, geometry_path, output):
+    output.mkdir(parents=True, exist_ok=True)
+    data = json.loads(geometry_path.read_text(encoding="utf-8"))
+    controller = np.asarray(data["controller"])
+    export = nbt.load(builder_export)
+    fixed = {tuple(p["pos"]) for p in data["builder_plan"]}
+    ring = []
+    cabin = []
+    tints = []
+    for block in export["blocks"]:
+        pos = tuple(map(int, block["pos"]))
+        if pos in fixed:
+            material = str(export["palette"][int(block["state"])]["Name"]).split(":")[1]
+            cabin.append(np.asarray(pos) - controller)
+            tints.append(COLORS[material.removeprefix("star_lifter_")])
+        elif pos[0] >= controller[0] - 19 and abs(pos[2] - controller[2]) <= 15:
+            ring.append(np.asarray(pos) - controller)
+    cabin = np.asarray(cabin)
+    tints = np.asarray(tints)
+    ring = np.asarray(ring)
+    front = view((0,0,1), (0,1,0), (1,0,0), (425,355), 31)
+    side = view((1,0,0), (0,1,0), (0,0,1), (605,355), 48)
+
+    plate, draw = card("摘星者固定主控舱 · 正面", "薄荷色为六个可更换仓位，金白色为固定汇流槽", (850, 650))
+    paint_blocks(draw, cabin, tints, front, 28)
+    plate.save(output / "cabin-front.png")
+
+    plate, draw = card("摘星者固定主控舱 · 侧面", "蓝灰色为外环静态模板，彩色为固定构件", (850, 650))
+    paint_blocks(draw, ring, None, side, 45, "#3e4a65")
+    paint_blocks(draw, cabin, tints, side, 45)
+    plate.save(output / "cabin-side.png")
+
+    plate, draw = card("汇流脊柱 · 四层剖面", "从外侧操作面向环体方向剖切，保留中央设备口和上下承力肋", (980, 950))
+    for column, x in enumerate((1, 0, -1, -2)):
+        origin = (252 + 476 * (column % 2), 294 + 400 * (column // 2))
+        proj = view((0,0,1), (0,1,0), (1,0,0), origin, 19)
+        mask = cabin[:,0] == x
+        paint_blocks(draw, cabin[mask], tints[mask], proj, 17)
+        draw.text((origin[0]-190,origin[1]-162), f"X = {controller[0]+x}", font=font(19), fill=INK)
+    plate.save(output / "cabin-section.png")
+
+    plate, draw = card("固定区域体积 · 改造前后", "只显示固定体，从同一侧斜视，未绘制动态环体", (1160, 680))
+    before = (cabin[:,0] == 0) & (np.abs(cabin[:,1]) <= 1) & (np.abs(cabin[:,2]) <= 1)
+    for origin, keep, label in (((300,365), before, "原 3×3 操作面"),
+                                ((865,365), np.ones(len(cabin), dtype=bool), "固定舱、内部支撑及输运槽")):
+        proj = view((.55,0,-1),(-.25,1,-.2),(1,.4,.55),origin,23)
+        paint_blocks(draw, cabin[keep], tints[keep], proj, 20)
+        draw.text((origin[0]-110,585), label, font=font(18), fill=INK)
+    plate.save(output / "cabin-before-after.png")
+
+    plate, draw = card("动静分区 · 主控侧", "彩色固定区与灰蓝色的外环接管区均来自 Builder 导出", (850, 650))
+    under = view((0,0,1),(-1,0,0),(0,1,0),(425,445),29)
+    paint_blocks(draw, ring, None, under, 27, "#3e4a65")
+    paint_blocks(draw, cabin, tints, under, 27)
+    plate.save(output / "cabin-partitions.png")
+
+    detail = view((1,0,0),(0,1,0),(0,0,1),(755,355),36)
+    is_latch = tints == COLORS["inner_latch"]
+    radius = data["rings"][-1]["radial_limits"][1]
+    for side, cut, name in (("右侧", 9, "cabin-coupling.png"), ("左侧", -13, "cabin-coupling-left.png")):
+        plate, draw = card(f"{side}闭合扣箍 · 径向剖面", "左为内侧锁梁，右接主控舱，外环截面从中通过", (850, 700))
+        part = cabin[:,2] == cut
+        resting = ring[ring[:,2] == cut]
+        paint_blocks(draw, resting, None, detail, 35, "#3e4a65")
+        paint_blocks(draw, cabin[part & ~is_latch], tints[part & ~is_latch], detail, 35)
+        for x, y, _ in detail(cabin[part & is_latch]):
+            draw.rectangle((x-11.25, y-18, x+11.25, y+18), fill=COLORS["inner_latch"])
+        radial_x = (radius**2 - (cut + controller[2] - data["center"][2])**2)**.5
+        point = detail((radial_x + data["center"][0] - controller[0], 0, 0))
+        draw.line((point[0],point[1]-100,point[0],point[1]+100),fill="#f8b267",width=3)
+        draw.text((35,653), f"固定方块至所有环体的最小净距下界  {min(data['fixed_clearance']):.3f} 格",
+                  font=font(18), fill=INK)
+        plate.save(output / name)
+
+
 def make_plates(mesh, export, data_dir, output):
     output.mkdir(parents=True, exist_ok=True)
     g = json.loads((data_dir / "star-lifter-geometry.json").read_text(encoding="utf-8"))
@@ -143,7 +219,7 @@ def make_plates(mesh, export, data_dir, output):
     controller = np.asarray(g["controller"])-g["center"]
     coords = np.max(np.abs(points-controller), axis=1) <= 4
     plate, draw = card("Star Lifter | East service node",
-                       f"Controller {tuple(g['controller'])} · four reserved interfaces · access from +X")
+                       f"Controller {tuple(g['controller'])} · {len(g['interfaces'])} hatch positions · access from +X")
     node = view((0,0,1), (0,1,0), (1,0,0), (425,390), 62)
     paint_blocks(draw, points[coords]-controller, np.asarray(colors)[coords], node, 57)
     for x,y,z in g["interfaces"]:
@@ -172,5 +248,8 @@ if __name__ == "__main__":
     parser = ArgumentParser(description=__doc__)
     for argument in ("mesh", "builder_nbt", "geometry_dir", "output"):
         parser.add_argument(argument, type=Path)
+    parser.add_argument("--cabin-only", action="store_true")
     args = parser.parse_args()
-    make_plates(args.mesh, args.builder_nbt, args.geometry_dir, args.output)
+    if not args.cabin_only:
+        make_plates(args.mesh, args.builder_nbt, args.geometry_dir, args.output)
+    cabin_plates(args.builder_nbt, args.geometry_dir / "star-lifter-geometry.json", args.output)

@@ -393,6 +393,8 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
             BigInteger accumulatedEu = BigInteger.ZERO;
             boolean processedRecipe = false;
             long actualParallel = 0L;
+            String paidSourceFlag = paidBatchSourceFlag();
+            boolean allPaidSourcesFlagged = paidSourceFlag != null && parallelData.getShouldProcess();
 
             for (int i = 0; i < size; i++) {
                 GTRecipe recipe = parallelData.getOriginRecipeList().get(i);
@@ -422,6 +424,7 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                             && handleRecipeInputHandlePartCache(processed)) {
                         accumulatedEu = nextEu;
                         processedRecipe = true;
+                        allPaidSourcesFlagged = allPaidSourcesFlagged && recipe.data.getBoolean(paidSourceFlag);
                         onThreadRecipeInputHandled(recipe);
                         onBatchRecipeProcessed(recipe, parallel);
                         actualParallel = parallel > Long.MAX_VALUE - actualParallel
@@ -460,11 +463,22 @@ public abstract class PrimordialModuleRecipeLogic extends PrimordialThreadedReci
                 return null;
             }
             WirelessGTRecipe result = buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
-            if (result != null) result.data.putLong(ACTUAL_PARALLEL_KEY, actualParallel);
+            if (result != null) {
+                result.data.putLong(ACTUAL_PARALLEL_KEY, actualParallel);
+                if (paidSourceFlag != null) {
+                    result.data.putBoolean(paidSourceFlag, processedRecipe && allPaidSourcesFlagged);
+                }
+            }
             return result;
         } finally {
             matchableScaledRecipeCache.clear();
         }
+    }
+
+    /** 将指定的配方标记随批次保存，仅当所有实际扣料的来源都带有该标记时为 true。 */
+    @Nullable
+    protected String paidBatchSourceFlag() {
+        return null;
     }
 
     /** 山海：僅在真實扣料成功後通知批次副作用；候選查找不得啟動廣播。 */

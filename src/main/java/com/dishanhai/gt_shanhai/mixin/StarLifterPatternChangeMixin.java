@@ -22,8 +22,8 @@ public abstract class StarLifterPatternChangeMixin {
     private void shanhai$checkStarLifterCell(BlockPos pos, BlockState state, CallbackInfo callback) {
         if (pos.equals(controllerPos) || !(world instanceof ServerLevel level)) return;
         var structure = (MultiblockState) (Object) this;
-        if (structure.getController() instanceof StarLifterControllerMachine machine && machine.isFormed()) {
-            machine.checkChangedPosition(level, pos);
+        if (structure.getController() instanceof StarLifterControllerMachine machine && machine.isFormed()
+                && machine.checkChangedPosition(level, pos)) {
             callback.cancel();
         }
     }

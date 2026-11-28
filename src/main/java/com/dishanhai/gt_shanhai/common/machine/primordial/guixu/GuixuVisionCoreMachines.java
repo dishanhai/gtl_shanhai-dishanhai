@@ -17,6 +17,7 @@ public final class GuixuVisionCoreMachines {
     private static MultiblockMachineDefinition definition;
     public static final String CONTAINMENT_ID = "guixu_penrose_containment_field";
     public static final String KERR_ID = "guixu_kerr_singularity_engine";
+    public static final String STAR_LIFTING_ID = "guixu_star_lifting_module";
     private static MultiblockMachineDefinition containmentDefinition;
 
     private GuixuVisionCoreMachines() {}
@@ -65,6 +66,16 @@ public final class GuixuVisionCoreMachines {
                 .appearanceBlock(GuixuPenroseContainmentStructure::appearanceBlock)
                 .workableCasingRenderer(new ResourceLocation("kubejs", "block/hollow_casing"), overlay)
                 .tooltips(Component.translatable("gt_shanhai.multiblock.guixu_kerr_singularity_engine.tooltip"))
+                .register();
+        GTDishanhaiRegistration.REGISTRATE
+                .multiblock(STAR_LIFTING_ID, GuixuStarLiftingModule::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(DShanhaiRecipeTypes.STAR_LIFTING)
+                .pattern(GuixuPenroseContainmentStructure::createStarLiftingPattern)
+                .appearanceBlock(GuixuPenroseContainmentStructure::appearanceBlock)
+                .workableCasingRenderer(new ResourceLocation("kubejs", "block/hollow_casing"),
+                        GTCEu.id("block/multiblock/fusion_reactor"))
+                .tooltips(Component.translatable("gt_shanhai.multiblock.guixu_star_lifting_module.tooltip"))
                 .register();
     }
 

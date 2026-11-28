@@ -25,6 +25,7 @@ import com.dishanhai.gt_shanhai.common.item.GuixuHyperdimensionalLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuEventHorizonMatrixItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuHorizonInversionMatrixItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuNyarlathotepLinkModuleItem;
+import com.dishanhai.gt_shanhai.common.item.StellarAbyssResonanceCoreItem;
 import com.dishanhai.gt_shanhai.common.item.NyarlathotepEchoLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GravitonShardItem;
 import com.dishanhai.gt_shanhai.common.item.GuideBookItem;
@@ -104,6 +105,10 @@ public class GTDishanhaiMod {
         () -> new GuixuNyarlathotepLinkModuleItem(new Item.Properties()
             .stacksTo(1)
             .rarity(Rarity.EPIC)));
+
+    public static final RegistryObject<Item> STELLAR_ABYSS_RESONANCE_CORE = ITEMS.register(
+        "stellar_abyss_resonance_core",
+        () -> new StellarAbyssResonanceCoreItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> GUIXU_EVENT_HORIZON_MATRIX = ITEMS.register(
         "guixu_event_horizon_matrix",

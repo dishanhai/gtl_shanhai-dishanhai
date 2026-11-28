@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "ingredients": [
+    {"item": "gt_shanhai:star_lifter_beam"}
+  ],
+  "result": {"item": "gt_shanhai:star_lifter_inner_latch"}
+}

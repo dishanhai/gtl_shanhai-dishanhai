@@ -1,6 +1,9 @@
 package com.dishanhai.gt_shanhai.client.renderer.preview;
 
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterGeometry;
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterVisualState;
+import com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.StarLifterMotion;
+import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +12,25 @@ import java.util.EnumSet;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class StarLifterGeometryTest {
+    @Test
+    void fullscreenProjectionKeepsTheStarInsideTheDepthRangeThroughoutTheTransition() {
+        var camera = new Matrix4f();
+        var projection = new Matrix4f();
+        for (float aspect : new float[]{.8f, 1.6f, 2.7f}) {
+            for (float zoom : new float[]{1, 2.3f}) {
+                for (int step = 0; step <= 20; step++) {
+                    float blend = step / 20f;
+                    var view = new StarLifterTerminalPreview.View(.3f, .52f, zoom, 0, 0, 0, 0, -1, false,
+                            0, 0, StarLifterMotion.STANDARD, StarLifterVisualState.IDLE, 0, 1,
+                            StarLifterTerminalPreview.fitSpan(aspect, 0), .55f, 1, 1, 1.22f, 0, 1, 0, blend);
+                    StarLifterTerminalPreview.project(view, aspect, camera, projection);
+                    var center = new Matrix4f(projection).mul(camera).transformProject(new Vector3f());
+                    assertTrue(Math.abs(center.z) < 1, () -> "The star is clipped at blend " + blend + ", Z=" + center.z);
+                }
+            }
+        }
+    }
+
     @Test
     void thickRingsKeepIndependentRadialClearanceAllTheWayAround() {
         assertEquals(4, StarLifterGeometry.RINGS.size());
@@ -105,6 +127,18 @@ final class StarLifterGeometryTest {
             }
         });
         for (int hit : hits) assertEquals(1, hit);
+    }
+
+    @Test
+    void closedClaspPulsesOnlyNearAnOuterServiceMagnetAndWrapsWithTheRim() {
+        for (double z : new double[]{-11.5, 11.5}) {
+            double angle = -Math.toDegrees(Math.asin(z / 89.046) - .46 * (2 * Math.PI / 150));
+            assertEquals(.5, StarLifterGeometry.claspProgress(z, angle), 1e-10);
+            assertEquals(.5, StarLifterGeometry.claspProgress(z, angle + 360), 1e-10);
+            assertEquals(.5, StarLifterGeometry.claspProgress(z, angle + 24), 1e-10);
+            double between = StarLifterGeometry.claspProgress(z, angle + 12);
+            assertFalse(between >= 0 && between <= 1);
+        }
     }
 
     private static double triangleSquaredArea(StarLifterGeometry.Point a, StarLifterGeometry.Point b,

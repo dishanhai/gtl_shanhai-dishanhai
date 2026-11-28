@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.StarLifterSyncPacket;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
@@ -23,6 +24,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -62,15 +64,35 @@ public final class StarLifterWorld {
         return false;
     }
 
-    static void activateController(ServerLevel level, BlockPos pos, Vec3 center, float heading, long startTick) {
+    static void activateController(ServerLevel level, BlockPos pos, Vec3 center, float heading, long startTick,
+                                   StarLifterVisualState visual) {
         var data = data(level);
         var current = data.controllers.get(pos);
         if (current != null && current.heading() == heading) return;
         var installation = new StarLifterInstallation("controller:" + pos.asLong(), center,
                 StarLifterInstallation.DEFAULT_RADIUS, heading, startTick);
+        installation.setVisual(visual);
         data.controllers.put(pos.immutable(), installation);
         data.refreshSnapshot();
         sync(level);
+    }
+
+    @SubscribeEvent
+    public static void updateVisuals(TickEvent.LevelTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || !(event.level instanceof ServerLevel level)
+                || level.getGameTime() % 5 != 0) return;
+        boolean changed = false;
+        for (var entry : data(level).controllers.entrySet()) {
+            var pos = entry.getKey();
+            var chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+            if (chunk == null || !(MetaMachine.getMachine(chunk, pos) instanceof StarLifterControllerMachine machine)) continue;
+            var installation = entry.getValue();
+            var visual = machine.visualState(level);
+            if (visual.equals(installation.visual())) continue;
+            installation.setVisual(visual);
+            changed = true;
+        }
+        if (changed) sync(level);
     }
 
     static void deactivateController(ServerLevel level, BlockPos pos) {
@@ -78,6 +100,49 @@ public final class StarLifterWorld {
         if (data.controllers.remove(pos) == null) return;
         data.refreshSnapshot();
         sync(level);
+    }
+
+    static CaptureReserve captureReserve(ServerLevel level, BlockPos center) {
+        var data = data(level);
+        return data.reserves.computeIfAbsent(center, ignored -> new CaptureReserve(data, 0, 0));
+    }
+
+    /** The reserve belongs to the stellar center, including across controller replacement. */
+    static final class CaptureReserve {
+        private final Data data;
+        private long spent;
+        private int blockedCost;
+
+        private CaptureReserve(Data data, long spent, int blockedCost) {
+            this.data = data;
+            this.spent = spent;
+            this.blockedCost = blockedCost;
+        }
+
+        long remaining() { return Math.max(0, StellarCaptureRules.current().workTicks() - spent); }
+
+        boolean depleted() {
+            long remaining = remaining();
+            return remaining == 0 || remaining < blockedCost;
+        }
+
+        void block(int cost) {
+            if (blockedCost == cost) return;
+            blockedCost = cost;
+            data.setDirty();
+        }
+
+        void extract(int cost) {
+            spent += cost;
+            blockedCost = 0;
+            data.setDirty();
+        }
+
+        void replenish() {
+            spent = 0;
+            blockedCost = 0;
+            data.setDirty();
+        }
     }
 
     public static List<VoxelShape> collisions(Level level, Entity entity, AABB query) {
@@ -181,6 +246,7 @@ public final class StarLifterWorld {
     private static final class Data extends SavedData {
         private final Map<String, StarLifterInstallation> entries = new LinkedHashMap<>();
         private final Map<BlockPos, StarLifterInstallation> controllers = new LinkedHashMap<>();
+        private final Map<BlockPos, CaptureReserve> reserves = new LinkedHashMap<>();
         private List<StarLifterInstallation> snapshot = List.of();
 
         static Data load(CompoundTag tag) {
@@ -192,6 +258,12 @@ public final class StarLifterWorld {
                 } catch (IllegalArgumentException exception) {
                     GTDishanhaiMod.LOGGER.warn("跳过损坏的摘星者装置记录", exception);
                 }
+            }
+            for (Tag entry : tag.getList("CaptureReserves", Tag.TAG_COMPOUND)) {
+                var reserve = (CompoundTag) entry;
+                if (!reserve.contains("Center", Tag.TAG_LONG)) continue;
+                data.reserves.put(BlockPos.of(reserve.getLong("Center")), new CaptureReserve(data,
+                        Math.max(0, reserve.getLong("Spent")), Math.max(0, reserve.getInt("BlockedCost"))));
             }
             data.refreshSnapshot();
             return data;
@@ -213,6 +285,16 @@ public final class StarLifterWorld {
             var list = new ListTag();
             entries.values().forEach(entry -> list.add(entry.save()));
             tag.put("Installations", list);
+            var capture = new ListTag();
+            reserves.forEach((center, reserve) -> {
+                if (reserve.spent == 0 && reserve.blockedCost == 0) return;
+                var entry = new CompoundTag();
+                entry.putLong("Center", center.asLong());
+                entry.putLong("Spent", reserve.spent);
+                entry.putInt("BlockedCost", reserve.blockedCost);
+                capture.add(entry);
+            });
+            tag.put("CaptureReserves", capture);
             return tag;
         }
     }

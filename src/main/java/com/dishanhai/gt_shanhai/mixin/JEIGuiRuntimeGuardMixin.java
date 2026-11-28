@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterFullscreen;
 import mezz.jei.common.Internal;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -15,9 +16,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class JEIGuiRuntimeGuardMixin {
 
     @Inject(method = "onDrawScreenPost", at = @At("HEAD"), cancellable = true, remap = false)
-    private void gtShanhai$skipDrawWithoutRuntime(Screen screen, GuiGraphics graphics,
+    private void gtShanhai$skipDrawWhenUnavailable(Screen screen, GuiGraphics graphics,
             int mouseX, int mouseY, CallbackInfo ci) {
-        if (Internal.getOptionalJeiRuntime().isEmpty()) {
+        if (StarLifterFullscreen.isActive(screen) || Internal.getOptionalJeiRuntime().isEmpty()) {
             ci.cancel();
         }
     }

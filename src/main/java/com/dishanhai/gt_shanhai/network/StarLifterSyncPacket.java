@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterInstallation;
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterVisualState;
 import com.dishanhai.gt_shanhai.client.renderer.preview.StarLifterBlockModels;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -12,9 +13,14 @@ import java.util.function.Supplier;
 
 public record StarLifterSyncPacket(ResourceLocation dimension, List<StarLifterInstallation> installations) {
     public StarLifterSyncPacket(FriendlyByteBuf buffer) {
-        this(buffer.readResourceLocation(), buffer.readList(buf -> new StarLifterInstallation(buf.readUtf(64),
-                new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble()),
-                buf.readFloat(), buf.readFloat(), buf.readLong())));
+        this(buffer.readResourceLocation(), buffer.readList(buf -> {
+            var installation = new StarLifterInstallation(buf.readUtf(64),
+                    new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble()),
+                    buf.readFloat(), buf.readFloat(), buf.readLong());
+            installation.setVisual(StarLifterVisualState.decode(buf.readUnsignedByte(), buf.readLong(), buf.readBoolean(),
+                    buf.readUnsignedShort(), buf.readFloat(), buf.readLong()));
+            return installation;
+        }));
     }
 
     public void encode(FriendlyByteBuf buffer) {
@@ -28,6 +34,13 @@ public record StarLifterSyncPacket(ResourceLocation dimension, List<StarLifterIn
             buf.writeFloat(installation.radius());
             buf.writeFloat(installation.heading());
             buf.writeLong(installation.startTick());
+            var visual = installation.visual();
+            buf.writeByte(visual.mode().ordinal());
+            buf.writeLong(visual.since());
+            buf.writeBoolean(visual.resonance());
+            buf.writeShort(visual.reserveLevel());
+            buf.writeFloat(visual.previousReserve());
+            buf.writeLong(visual.reserveSince());
         });
     }
 

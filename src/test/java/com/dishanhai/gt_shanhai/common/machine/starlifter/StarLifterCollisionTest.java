@@ -40,6 +40,20 @@ final class StarLifterCollisionTest {
     }
 
     @Test
+    void depletedPhotosphereFreesItsOldSurfaceAndReactivationRestoresIt() {
+        var point = installation.center().add(.40 * installation.radius(), 0, 0);
+        long start = installation.startTick();
+        assertTrue(blocked(point, start));
+        var depleted = installation.visual().update(StarLifterVisualState.Mode.FAULT, start, false, 0);
+        installation.setVisual(depleted);
+        assertFalse(blocked(point, start + 31));
+        assertTrue(blocked(installation.center(), start + 31));
+        installation.setVisual(depleted.update(StarLifterVisualState.Mode.IDLE, start + 40, false,
+                StarLifterVisualState.FULL_RESERVE));
+        assertTrue(blocked(point, start + 71));
+    }
+
+    @Test
     void savedPlacementRetainsRotationEpoch() {
         var decoded = StarLifterInstallation.load(installation.save());
         assertEquals(installation.name(), decoded.name());

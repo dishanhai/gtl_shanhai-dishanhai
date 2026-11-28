@@ -1,10 +1,15 @@
 package com.dishanhai.gt_shanhai.client.renderer.preview;
 
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterBootTimeline;
+
+import com.dishanhai.gt_shanhai.config.ShanhaiUiClientConfig.StarLifterVisual;
+
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleIris;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensRenderer;
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterGeometry;
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterInstallation;
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterStructure;
 import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterWorld;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -29,6 +34,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
@@ -37,10 +43,13 @@ import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.client.event.RegisterShadersEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.event.GameShuttingDownEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+import org.lwjgl.opengl.GL33;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,17 +60,23 @@ import java.util.function.Consumer;
 @Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID, value = Dist.CLIENT)
 public final class StarLifterRenderer {
     private static final RenderType SURFACE = RenderType.entitySolid(InventoryMenu.BLOCK_ATLAS);
+    private static final Quaternionf WORLD_ROTATION = new Quaternionf();
+    private static final Vector3f RING_NORMAL = new Vector3f();
+    private static final Matrix4f FALLBACK_POSE = new Matrix4f();
+    private static final int ALL_RINGS = (1 << StarLifterGeometry.RINGS.size()) - 1;
 
     private record Preview(ClientLevel level, StarLifterInstallation installation) {}
-    private record Effects(Matrix4f pose, Quaternionf heading, Vec3 eye, double ticks) {}
+    private record Effects(Matrix4f pose, Quaternionf heading, Vec3 eye, double ticks, boolean plasma, boolean clasp,
+                           int ringMask, StarLifterEffects.Activity activity) {}
     private record DeferredEffects(ClientLevel level, List<Effects> instances, Matrix4f modelView, Matrix4f projection,
                                    VertexSorting sorting, Vec3 cameraUp) {}
-    private record Buffers(VertexBuffer star, VertexBuffer plasma, VertexBuffer[] rings) implements AutoCloseable {
+    private record SurfaceMesh(VertexBuffer buffer, int vertices, double radius, double halfHeight) {}
+    private record Buffers(SurfaceMesh star, VertexBuffer plasma, SurfaceMesh[] rings) implements AutoCloseable {
         @Override
         public void close() {
-            star.close();
+            star.buffer().close();
             plasma.close();
-            for (VertexBuffer ring : rings) ring.close();
+            for (SurfaceMesh ring : rings) ring.buffer().close();
         }
     }
 
@@ -105,6 +120,20 @@ public final class StarLifterRenderer {
         preview = null;
         deferred = null;
         StarLifterWorld.clearClient();
+        StarLifterTerminalPreview.closeFrame();
+        StarLifterProfile.finish();
+    }
+
+    @SubscribeEvent
+    public static void onShutdown(GameShuttingDownEvent event) {
+        StarLifterProfile.finish();
+        release();
+    }
+
+    @SubscribeEvent
+    public static void profileFrame(TickEvent.RenderTickEvent event) {
+        if (event.phase == TickEvent.Phase.START) StarLifterProfile.startFrame();
+        else StarLifterProfile.endFrame();
     }
 
     @SubscribeEvent
@@ -114,6 +143,12 @@ public final class StarLifterRenderer {
             return;
         }
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) return;
+        try (var profile = StarLifterProfile.begin("WorldSubmission", true)) {
+            renderInstallations(event);
+        }
+    }
+
+    private static void renderInstallations(RenderLevelStageEvent event) {
         deferred = null;
         ClientLevel level = Minecraft.getInstance().level;
         if (level == null) return;
@@ -152,21 +187,40 @@ public final class StarLifterRenderer {
                                          StarLifterInstallation installation, List<Effects> visible) {
         Vec3 relative = installation.center().subtract(event.getCamera().getPosition());
         double drawDistance = Math.max(256.0, installation.radius() * 6.0);
-        if (relative.lengthSqr() > drawDistance * drawDistance || !event.getFrustum().isVisible(installation.bounds())) return;
-        if (meshes == null) meshes = bake();
+        if (relative.lengthSqr() > drawDistance * drawDistance) return;
+        var heading = Axis.YP.rotationDegrees(installation.heading());
+        boolean clasp = installation.isController() && worldControlVisible(event, installation, heading);
+        if (!clasp && !event.getFrustum().isVisible(installation.bounds())) return;
+        prepareMeshes();
+        double gameTick = level.getGameTime() + (double) event.getPartialTick();
         double ticks = level.getGameTime() - installation.startTick() + (double) event.getPartialTick();
+        var activity = StarLifterEffects.Activity.at(installation.visual(), gameTick);
         Vec3 eye = relative.scale(-1.0 / installation.radius());
         PoseStack pose = event.getPoseStack();
         pose.pushPose();
         try {
             pose.translate(relative.x, relative.y, relative.z);
             pose.scale(installation.radius(), installation.radius(), installation.radius());
-            var heading = Axis.YP.rotationDegrees(installation.heading());
-            drawStructure(pose, event, ticks, heading, StarLifterEffects.hasPlasma());
-            visible.add(new Effects(new Matrix4f(pose.last().pose()), heading, eye, ticks));
+            boolean plasma = plasmaEnabled();
+            Vec3 center = installation.center();
+            double extent = installation.radius() * StarLifterGeometry.STAR_RADIUS * (plasma ? 1.62 : 1.0);
+            boolean starVisible = event.getFrustum().isVisible(bounds(center, extent, extent, extent));
+            int rings = drawStructure(pose, event, installation, ticks, heading, starVisible && !plasma, activity);
+            if (plasma && starVisible || rings != 0 && StarLifterVisual.WORLD_COLLECTORS.enabled() || clasp) {
+                visible.add(new Effects(new Matrix4f(pose.last().pose()), heading, eye, ticks, plasma && starVisible,
+                        clasp, rings, activity));
+            }
         } finally {
             pose.popPose();
         }
+    }
+
+    private static boolean worldControlVisible(RenderLevelStageEvent event, StarLifterInstallation installation, Quaternionf heading) {
+        var anchor = StarLifterStructure.controlAnchor();
+        var world = heading.transform(RING_NORMAL.set((float) anchor.x, (float) anchor.y, (float) anchor.z))
+                .mul(installation.radius());
+        double extent = .31 * installation.radius();
+        return event.getFrustum().isVisible(bounds(installation.center().add(world.x, world.y, world.z), extent, extent, extent));
     }
 
     private static void finishEffects() {
@@ -177,7 +231,8 @@ public final class StarLifterRenderer {
         var modelView = RenderSystem.getModelViewStack();
         modelView.pushPose();
         RenderSystem.backupProjectionMatrix();
-        try {
+        try (var profile = StarLifterProfile.begin("Composite", true)) {
+            StarLifterProfile.framebuffer(profile);
             modelView.last().pose().set(frame.modelView());
             RenderSystem.applyModelViewMatrix();
             RenderSystem.setProjectionMatrix(frame.projection(), frame.sorting());
@@ -190,28 +245,138 @@ public final class StarLifterRenderer {
     }
 
     private static void drawEffects(List<Effects> instances, Matrix4f projection, Vec3 cameraUp) {
+        boolean collectors = StarLifterVisual.WORLD_COLLECTORS.enabled();
+        boolean detail = StarLifterVisual.WORLD_DETAIL.enabled();
         for (Effects effects : instances) {
-            if (StarLifterEffects.hasPlasma()) {
-                StarLifterEffects.drawPlasma(meshes.plasma(), effects.pose(), projection, effects.eye(), cameraUp, effects.ticks());
+            if (effects.plasma()) {
+                StarLifterEffects.drawPlasma(meshes.plasma(), effects.pose(), projection, effects.eye(), cameraUp,
+                        effects.heading(), effects.ticks(), collectors ? effects.activity() : effects.activity().withoutOperations());
             }
-            StarLifterEffects.drawCollectors(effects.pose(), effects.heading(), effects.ticks());
+            double distanceSqr = effects.eye().lengthSqr();
+            double inner = instances.size() > 4 ? 1.36 : 1.9;
+            var quality = distanceSqr > 3.6 * 3.6 ? StarLifterStreams.Quality.FAR
+                    : detail && distanceSqr <= inner * inner ? StarLifterStreams.Quality.NEAR : StarLifterStreams.Quality.MEDIUM;
+            StarLifterEffects.drawCollectors(effects.pose(), projection, effects.heading(), effects.ticks(), effects.activity(),
+                    quality, effects.ringMask(), effects.plasma(), effects.clasp(), collectors);
         }
     }
 
-    private static void drawStructure(PoseStack pose, RenderLevelStageEvent event, double ticks,
-                                      Quaternionf heading, boolean lit) {
+    private static boolean plasmaEnabled() {
+        return StarLifterVisual.WORLD_STELLAR_EFFECT.enabled() && StarLifterEffects.hasPlasma();
+    }
+
+    static void drawTerminal(Matrix4f view, Matrix4f projection, StarLifterTerminalPreview.View scene, int hovered,
+                             StarLifterStreams.Quality quality, VertexBuffer fixed, StarLifterProfile profile,
+                             StarLifterEffects.Activity activity, ShaderInstance observation, StarLifterPreviewSamples samples) {
+        prepareMeshes();
+        boolean plasma = StarLifterEffects.hasPlasma();
+        boolean starOnly = scene.starOnly(), wholeStructure = !starOnly && !scene.isolate();
+        float bootMs = StarLifterBootTimeline.cueTime(scene.bootScan());
+        float starLight = .06f + .94f * StarLifterBootTimeline.starLight(bootMs);
+        int ring = scene.ring();
+        var orientation = Axis.YP.rotationDegrees(scene.heading());
+        int draws = 0, vertices = 0;
+        SURFACE.setupRenderState();
+        int previousSampler = -1;
+        try {
+            var shader = RenderSystem.getShader();
+            if (!plasma) {
+                RenderSystem.setShaderColor(starLight, starLight, starLight, 1);
+                drawFallback(view, projection, shader, activity);
+                RenderSystem.setShaderColor(1, 1, 1, 1);
+                draws++;
+                vertices += meshes.star().vertices();
+            }
+            if (!starOnly) {
+                if (observation != null) {
+                    shader = observation;
+                    previousSampler = samples.bindAtlas(RenderSystem.getShaderTexture(0));
+                    observation.safeGetUniform("ObservationLight").set(scene.light());
+                    observation.safeGetUniform("Engineering").set(scene.engineering());
+                }
+                var structure = new Matrix4f(view).rotate(orientation);
+                float fixture = StarLifterBootTimeline.ringMaterial(bootMs, 0);
+                if (wholeStructure && fixture > 0) {
+                    float shade = (1 - .45f * scene.stellar() - .18f * scene.transport()) * (1 - .18f * scene.selection());
+                    RenderSystem.setShaderColor(shade, shade, shade, 1);
+                    if (observation != null) {
+                        observation.safeGetUniform("RingSweep").set(1f);
+                        observation.safeGetUniform("MaterialSweep").set(fixture);
+                        observation.safeGetUniform("SelectionSweep").set(1f);
+                    }
+                    fixed.bind();
+                    fixed.drawWithShader(structure, projection, shader);
+                    draws++;
+                }
+                for (int i = 0; i < meshes.rings().length; i++) {
+                    if (scene.isolate() && i != ring) continue;
+                    float sweep = StarLifterBootTimeline.ringSweep(bootMs, i);
+                    if (sweep <= 0) continue;
+                    if (observation != null) {
+                        observation.safeGetUniform("RingSweep").set(sweep);
+                        observation.safeGetUniform("MaterialSweep").set(StarLifterBootTimeline.ringMaterial(bootMs, i));
+                        observation.safeGetUniform("SelectionSweep").set(i == ring && scene.selection() > .01f ? scene.selectionSweep() : 1);
+                    }
+                    float weight = i == ring ? scene.selection() : -scene.selection();
+                    float shade = (1 - .52f * scene.stellar() - .20f * scene.transport()) * (1 + .22f * weight);
+                    float highlight = i == hovered ? .20f : i == ring ? .12f * scene.selection() : 0;
+                    RenderSystem.setShaderColor(shade * (1 + highlight), shade * (1 + highlight * .5f), shade, 1);
+                    var mesh = meshes.rings()[i];
+                    mesh.buffer().bind();
+                    mesh.buffer().drawWithShader(new Matrix4f(structure)
+                            .rotate(StarLifterGeometry.RINGS.get(i).orientation(scene.ticks())), projection, shader);
+                    draws++;
+                    vertices += mesh.vertices();
+                }
+            }
+        } finally {
+            if (previousSampler >= 0) GL33.glBindSampler(0, previousSampler);
+            RenderSystem.setShaderColor(1, 1, 1, 1);
+            VertexBuffer.unbind();
+            SURFACE.clearRenderState();
+        }
+        StarLifterProfile.draw(profile, draws, vertices, 0);
+        if (plasma) {
+            // Panning an orthographic view shifts the image without changing the sight direction.
+            var eye = new Vec3(scene.perspective()
+                    ? view.originAffine(new Vector3f()) : view.positiveZ(new Vector3f()).mul(-view.m32()));
+            var up = new Vec3(view.positiveY(new Vector3f()));
+            StarLifterEffects.drawPlasma(meshes.plasma(), view, projection, eye, up, orientation, scene.ticks(), activity, starLight);
+        }
+        // Keep the terminal's light contribution separate from the geometry coverage mask.
+        RenderSystem.colorMask(true, true, true, false);
+        int ringMask = starOnly ? 0 : wholeStructure ? ALL_RINGS : 1 << ring;
+        boolean initialized = bootMs >= StarLifterBootTimeline.HANDOFF;
+        StarLifterEffects.drawCollectors(view, projection, orientation, scene.ticks(),
+                initialized ? activity : activity.withoutOperations(), quality, initialized ? ringMask : 0,
+                plasma && bootMs >= 2260, wholeStructure && initialized, !starOnly && initialized);
+    }
+
+    private static int drawStructure(PoseStack pose, RenderLevelStageEvent event, StarLifterInstallation installation,
+                                     double ticks, Quaternionf heading, boolean drawStar, StarLifterEffects.Activity activity) {
+        int rings = 0;
         pose.pushPose();
         SURFACE.setupRenderState();
-        try {
+        try (var profile = StarLifterProfile.begin("DynamicRings", true)) {
             ShaderInstance shader = RenderSystem.getShader();
-            if (shader == null) return;
-            if (!lit) draw(meshes.star(), pose, event, shader);
+            if (shader == null) return 0;
+            if (drawStar) {
+                try (var star = StarLifterProfile.begin("StellarFallback", true)) {
+                    drawFallback(pose.last().pose(), event.getProjectionMatrix(), shader, activity);
+                    StarLifterProfile.draw(star, 1, meshes.star().vertices(), 0);
+                }
+            }
             pose.mulPose(heading);
             for (int i = 0; i < meshes.rings().length; i++) {
+                var mesh = meshes.rings()[i];
+                var orientation = StarLifterGeometry.RINGS.get(i).orientation(ticks);
+                if (!ringVisible(event, installation, mesh, heading, orientation)) continue;
+                rings |= 1 << i;
                 pose.pushPose();
                 try {
-                    pose.mulPose(StarLifterGeometry.RINGS.get(i).orientation(ticks));
-                    draw(meshes.rings()[i], pose, event, shader);
+                    pose.mulPose(orientation);
+                    draw(mesh, pose, event, shader);
+                    StarLifterProfile.draw(profile, 1, mesh.vertices(), 0);
                 } finally {
                     pose.popPose();
                 }
@@ -221,11 +386,54 @@ public final class StarLifterRenderer {
             SURFACE.clearRenderState();
             pose.popPose();
         }
+        return rings;
     }
 
-    private static void draw(VertexBuffer buffer, PoseStack pose, RenderLevelStageEvent event, ShaderInstance shader) {
-        buffer.bind();
-        buffer.drawWithShader(pose.last().pose(), event.getProjectionMatrix(), shader);
+    private static void drawFallback(Matrix4f pose, Matrix4f projection, ShaderInstance shader,
+                                     StarLifterEffects.Activity activity) {
+        var color = RenderSystem.getShaderColor();
+        float r = color[0], g = color[1], b = color[2], a = color[3];
+        float spent = 1f - activity.reserveFraction();
+        RenderSystem.setShaderColor(r * (1f - .08f * spent), g * (1f - .34f * spent), b * (1f - .06f * spent), a);
+        try {
+            var surface = meshes.star().buffer();
+            surface.bind();
+            surface.drawWithShader(FALLBACK_POSE.set(pose).scale(activity.stellarScale()), projection, shader);
+        } finally {
+            RenderSystem.setShaderColor(r, g, b, a);
+        }
+    }
+
+    private static boolean ringVisible(RenderLevelStageEvent event, StarLifterInstallation installation, SurfaceMesh mesh,
+                                       Quaternionf heading, Quaternionf orientation) {
+        WORLD_ROTATION.set(heading).mul(orientation).transform(RING_NORMAL.set(0, 1, 0));
+        double radius = mesh.radius() * installation.radius(), height = mesh.halfHeight() * installation.radius();
+        return event.getFrustum().isVisible(bounds(installation.center(), extent(radius, height, RING_NORMAL.x),
+                extent(radius, height, RING_NORMAL.y), extent(radius, height, RING_NORMAL.z)));
+    }
+
+    private static double extent(double radius, double height, float normal) {
+        return radius * Math.sqrt(Math.max(0.0, 1.0 - (double) normal * normal)) + height * Math.abs(normal) + .01;
+    }
+
+    private static AABB bounds(Vec3 center, double x, double y, double z) {
+        return new AABB(center.x - x, center.y - y, center.z - z, center.x + x, center.y + y, center.z + z);
+    }
+
+    private static void draw(SurfaceMesh mesh, PoseStack pose, RenderLevelStageEvent event, ShaderInstance shader) {
+        mesh.buffer().bind();
+        mesh.buffer().drawWithShader(pose.last().pose(), event.getProjectionMatrix(), shader);
+    }
+
+    private static void prepareMeshes() {
+        if (meshes != null) return;
+        try (var profile = StarLifterProfile.begin("ResourceUpdate", true)) {
+            meshes = bake();
+            int vertices = meshes.star().vertices();
+            for (var ring : meshes.rings()) vertices += ring.vertices();
+            StarLifterProfile.draw(profile, 0, 0, vertices * DefaultVertexFormat.NEW_ENTITY.getVertexSize()
+                    + meshes.star().vertices() * DefaultVertexFormat.POSITION_TEX_COLOR.getVertexSize());
+        }
     }
 
     private static Buffers bake() {
@@ -237,8 +445,8 @@ public final class StarLifterRenderer {
                     "block/star_lifter/" + surface.name().toLowerCase(Locale.ROOT));
             sprites[surface.ordinal()] = atlas.apply(id);
         }
-        VertexBuffer[] rings = new VertexBuffer[StarLifterGeometry.RINGS.size()];
-        VertexBuffer star = bakeMesh(StarLifterGeometry::star, sprites);
+        SurfaceMesh[] rings = new SurfaceMesh[StarLifterGeometry.RINGS.size()];
+        SurfaceMesh star = bakeMesh(StarLifterGeometry::star, sprites);
         VertexBuffer plasma = null;
         try {
             plasma = StarLifterEffects.bakeSurface();
@@ -248,18 +456,21 @@ public final class StarLifterRenderer {
             }
             return new Buffers(star, plasma, rings);
         } catch (RuntimeException exception) {
-            star.close();
+            star.buffer().close();
             if (plasma != null) plasma.close();
-            for (VertexBuffer ring : rings) if (ring != null) ring.close();
+            for (SurfaceMesh ring : rings) if (ring != null) ring.buffer().close();
             throw exception;
         }
     }
 
-    private static VertexBuffer bakeMesh(Consumer<StarLifterGeometry.Mesh> geometry,
+    private static SurfaceMesh bakeMesh(Consumer<StarLifterGeometry.Mesh> geometry,
                                          TextureAtlasSprite[] sprites) {
-        var builder = new BufferBuilder(1 << 18);
-        builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.NEW_ENTITY);
-        geometry.accept((surface, a, b, c, d) -> {
+        var bounds = new MeshBounds();
+        var buffer = uploadMesh(DefaultVertexFormat.NEW_ENTITY, builder -> geometry.accept((surface, a, b, c, d) -> {
+            bounds.include(a);
+            bounds.include(b);
+            bounds.include(c);
+            bounds.include(d);
             TextureAtlasSprite sprite = sprites[surface.ordinal()];
             Vec3 side = new Vec3(b.x() - a.x(), b.y() - a.y(), b.z() - a.z());
             Vec3 diagonal = new Vec3(c.x() - a.x(), c.y() - a.y(), c.z() - a.z());
@@ -270,25 +481,26 @@ public final class StarLifterRenderer {
             vertex(builder, b, sprite.getU1(), sprite.getV1(), normal, tone);
             vertex(builder, c, sprite.getU1(), sprite.getV0(), normal, tone);
             vertex(builder, d, sprite.getU0(), sprite.getV0(), normal, tone);
-        });
-        return upload(builder);
+        }));
+        return new SurfaceMesh(buffer, bounds.vertices, Math.sqrt(bounds.radiusSquared), bounds.halfHeight);
     }
 
-    static VertexBuffer upload(BufferBuilder builder) {
-        var buffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
-        buffer.bind();
-        try {
-            buffer.upload(builder.end());
-            return buffer;
-        } catch (RuntimeException exception) {
-            buffer.close();
-            throw exception;
-        } finally {
-            VertexBuffer.unbind();
+    private static final class MeshBounds {
+        private int vertices;
+        private double radiusSquared, halfHeight;
+
+        private void include(StarLifterGeometry.Point point) {
+            vertices++;
+            radiusSquared = Math.max(radiusSquared, point.x() * point.x() + point.z() * point.z());
+            halfHeight = Math.max(halfHeight, Math.abs(point.y()));
         }
     }
 
-    private static void vertex(BufferBuilder builder, StarLifterGeometry.Point position,
+    static VertexBuffer uploadMesh(VertexFormat format, Consumer<BufferBuilder> emit) {
+        return StarLifterMeshUpload.upload(format, emit);
+    }
+
+    static void vertex(BufferBuilder builder, StarLifterGeometry.Point position,
                                float u, float v, Vec3 normal, int tone) {
         builder.vertex(position.x(), position.y(), position.z()).color(tone, tone, tone, 255)
                 .uv(u, v).overlayCoords(OverlayTexture.NO_OVERLAY).uv2(LightTexture.FULL_BRIGHT)
@@ -302,6 +514,9 @@ public final class StarLifterRenderer {
         @SubscribeEvent
         public static void registerShader(RegisterShadersEvent event) {
             StarLifterEffects.registerShader(event);
+            StarLifterStreams.register(event);
+            StarLifterTerminalPreview.register(event);
+            StarLifterTerminalSky.register(event);
         }
 
         @SubscribeEvent
@@ -317,6 +532,9 @@ public final class StarLifterRenderer {
     }
 
     private static void release() {
+        StarLifterTerminalPreview.release();
+        StarLifterStreams.release();
+        StarLifterEffects.release();
         if (meshes != null) {
             meshes.close();
             meshes = null;

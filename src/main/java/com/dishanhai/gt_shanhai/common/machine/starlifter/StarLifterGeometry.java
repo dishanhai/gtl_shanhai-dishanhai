@@ -8,6 +8,7 @@ import java.util.List;
 public final class StarLifterGeometry {
     public static final float DEFAULT_RADIUS = 68.0f;
     public static final double STAR_RADIUS = 0.435;
+    public static final float MIN_PHOTOSPHERE_SCALE = .80f;
     public static final List<Ring> RINGS = List.of(
             new Ring(0.605, 0.104, 0.098, 39.0, 0.0, 1520, 0),
             new Ring(0.785, 0.130, 0.110, -43.0, 90.0, -2120, 0),
@@ -21,6 +22,9 @@ public final class StarLifterGeometry {
     public static final int COLLECTOR_COUNT = 12;
     private static final int SEGMENTS_PER_BAY = 10;
     private static final int EQUIPMENT_SEGMENT = 7;
+    private static final double SERVICE_MAGNET_START = .32;
+    private static final double SERVICE_MAGNET_END = .60;
+    private static final double SERVICE_MAGNET_RADIUS = .74;
     private static final double COLLECTOR_FACE_OFFSET = 0.585;
     private static final double WINDOW_START = 0.25;
     private static final double WINDOW_END = 0.73;
@@ -77,6 +81,10 @@ public final class StarLifterGeometry {
 
     private StarLifterGeometry() {}
 
+    public static float photosphereScale(float reserveFraction) {
+        return MIN_PHOTOSPHERE_SCALE + (1f - MIN_PHOTOSPHERE_SCALE) * reserveFraction;
+    }
+
     static int segmentCount(int index) {
         return index == OUTER_RING ? 150 : COLLECTOR_COUNT * SEGMENTS_PER_BAY;
     }
@@ -127,8 +135,18 @@ public final class StarLifterGeometry {
                 r + w * 0.52, r + w * 0.686, -h * 0.25, h * 0.25, true);
         band(mesh, Surface.CERAMIC, a + step * 0.23, a + step * 0.69,
                 r + w * 0.686, r + w * 0.729, -h * 0.18, h * 0.18, true);
-        band(mesh, Surface.MAGNET, a + step * 0.32, a + step * 0.60,
-                r + w * 0.729, r + w * 0.74, -h * 0.12, h * 0.12, true);
+        band(mesh, Surface.MAGNET, a + step * SERVICE_MAGNET_START, a + step * SERVICE_MAGNET_END,
+                r + w * 0.729, r + w * SERVICE_MAGNET_RADIUS, -h * 0.12, h * 0.12, true);
+    }
+
+    /** Progress of the nearest outer service magnet through the fixed clasp's transmission window. */
+    public static double claspProgress(double lateral, double rimDegrees) {
+        Ring rim = RINGS.get(OUTER_RING);
+        double step = TAU / segmentCount(OUTER_RING);
+        double center = (SERVICE_MAGNET_START + SERVICE_MAGNET_END) * .5 * step;
+        double mount = Math.asin(lateral / ((rim.radius() + rim.width() * SERVICE_MAGNET_RADIUS) * DEFAULT_RADIUS));
+        double gap = Math.IEEEremainder(mount + Math.toRadians(rimDegrees) - center, SEGMENTS_PER_BAY * step);
+        return .5 - gap / .114;
     }
 
     private static void ribs(Mesh mesh, double r, double w, double h, double a, double b, boolean reinforced) {

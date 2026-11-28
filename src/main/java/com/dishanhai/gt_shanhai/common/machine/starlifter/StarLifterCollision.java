@@ -63,10 +63,13 @@ final class StarLifterCollision {
         private final StarLifterInstallation installation;
         private final long gameTime;
         private final Matrix3d[] inverse;
+        private final double starRadius;
 
         Frame(StarLifterInstallation installation, long gameTime) {
             this.installation = installation;
             this.gameTime = gameTime;
+            starRadius = StarLifterGeometry.STAR_RADIUS * StarLifterGeometry.photosphereScale(
+                    installation.visual().reserveFraction(gameTime));
             double ticks = gameTime - installation.startTick();
             var heading = new Quaternionf().rotationY((float) Math.toRadians(installation.heading()));
             inverse = StarLifterGeometry.RINGS.stream()
@@ -115,7 +118,7 @@ final class StarLifterCollision {
         }
 
         private boolean intersects(Vector3d local, double x, double y, double z, double pad, boolean leaf) {
-            double star = StarLifterGeometry.STAR_RADIUS + pad;
+            double star = starRadius + pad;
             if (x * x + y * y + z * z <= star * star) return true;
             for (int i = 0; i < inverse.length; i++) {
                 local.set(x, y, z).mul(inverse[i]);

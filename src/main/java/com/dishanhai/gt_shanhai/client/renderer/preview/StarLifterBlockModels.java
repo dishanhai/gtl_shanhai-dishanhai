@@ -47,6 +47,7 @@ public final class StarLifterBlockModels {
         var previous = StarLifterWorld.acceptSnapshot(dimension, installations);
         var game = Minecraft.getInstance();
         if (game.level == null || !dimension.equals(game.level.dimension().location())) return;
+        StarLifterAudio.onSnapshot(game, previous, installations);
         if (previous == null) previous = List.of();
         refreshRemoved(previous, installations, game);
         refreshRemoved(installations, previous, game);

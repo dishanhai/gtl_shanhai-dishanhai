@@ -1,6 +1,8 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial.guixu;
 
 // Author: dishanhai
+import com.dishanhai.gt_shanhai.common.block.DShanhaiBlocks;
+import com.dishanhai.gt_shanhai.common.machine.starlifter.StarLifterGeometry.Surface;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 import com.gregtechceu.gtceu.api.pattern.BlockPattern;
@@ -46,9 +48,31 @@ public final class GuixuPenroseContainmentStructure {
         return createPattern(definition, true);
     }
 
-    private static BlockPattern createPattern(MultiblockMachineDefinition definition, boolean kerr) {
-        FactoryBlockPattern pattern = StructureResourceLoader.INSTANCE.loadFactoryPattern(
+    public static BlockPattern createStarLiftingPattern(MultiblockMachineDefinition definition) {
+        var stellarParts = DShanhaiBlocks.STAR_LIFTER_SHELL;
+        var bootstrapCasing = appearanceBlock();
+        return loadModulePattern()
+                .where('B', Predicates.blocks(bootstrapCasing)
+                        .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
+                        .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
+                        .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
+                        .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1)))
+                // The module produces these parts, so its first build can use the base casing.
+                .where('D', Predicates.blocks(stellarParts.get(Surface.EXTRACTOR).get(), bootstrapCasing))
+                .where('E', Predicates.blocks(stellarParts.get(Surface.CONDUIT).get(), bootstrapCasing))
+                .where('F', Predicates.blocks(stellarParts.get(Surface.STELLAR).get(), bootstrapCasing))
+                .where('G', Predicates.blocks(stellarParts.get(Surface.MAGNET).get(), bootstrapCasing))
+                .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))
+                .build();
+    }
+
+    private static FactoryBlockPattern loadModulePattern() {
+        return StructureResourceLoader.INSTANCE.loadFactoryPattern(
                 RESOURCE_PATH, RESOURCE_ID, new RelativeDirection[0]);
+    }
+
+    private static BlockPattern createPattern(MultiblockMachineDefinition definition, boolean kerr) {
+        FactoryBlockPattern pattern = loadModulePattern();
         var generator = Predicates.blocks(requireBlock(FIELD_GENERATOR));
         var beamPipe = Predicates.blocks(requireBlock(BEAM_PIPE));
         var shell = Predicates.blocks(appearanceBlock())

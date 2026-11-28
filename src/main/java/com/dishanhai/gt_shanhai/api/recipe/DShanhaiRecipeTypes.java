@@ -20,6 +20,8 @@ public class DShanhaiRecipeTypes {
 
     public static GTRecipeType STEAM_GENERATION;
     public static GTRecipeType AETHEROPHASIC_TRANSITION;
+    public static GTRecipeType STELLAR_DECONSTRUCTION;
+    public static GTRecipeType STAR_LIFTING;
 
     public static GTRecipeType SPACETIME_DISTORTION;
     public static GTRecipeType GUIXU_MATTER_DECOMPRESSION;
@@ -90,6 +92,16 @@ public class DShanhaiRecipeTypes {
                 .addDataInfo(data -> data.contains("stage")
                         ? Component.translatable("gt_shanhai.aetherophasic_transition." + data.getString("stage")).getString()
                         : "");
+        STELLAR_DECONSTRUCTION = register("stellar_deconstruction", "multiblock")
+                .setMaxIOSize(2, 120, 2, 24).setEUIO(IO.IN)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .addDataInfo(data -> data.contains("channel")
+                        ? Component.translatable(data.getString("channel")).getString()
+                        : "");
+        STAR_LIFTING = register("star_lifting", "multiblock")
+                .setMaxIOSize(16, 1, 4, 0).setEUIO(IO.IN)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .setMaxTooltips(4);
         // 山海：歸墟三種專屬模式；具體配方與倍率消耗另行定義。
         GUIXU_MATTER_DECOMPRESSION = register("guixu_matter_decompression", "multiblock")
                 .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.IN)

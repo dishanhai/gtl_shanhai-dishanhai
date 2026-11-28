@@ -1,0 +1,21 @@
+{
+  "textures": {
+    "particle": "gt_shanhai:block/star_lifter/beam",
+    "beam": "gt_shanhai:block/star_lifter/beam",
+    "armor": "gt_shanhai:block/star_lifter/armor"
+  },
+  "elements": [
+    {
+      "from": [3, 0, 3],
+      "to": [13, 16, 13],
+      "faces": {
+        "north": {"uv": [3, 0, 13, 16], "texture": "#beam"},
+        "south": {"uv": [3, 0, 13, 16], "texture": "#beam"},
+        "east": {"uv": [3, 0, 13, 16], "texture": "#beam"},
+        "west": {"uv": [3, 0, 13, 16], "texture": "#beam"},
+        "up": {"uv": [3, 3, 13, 13], "texture": "#armor", "cullface": "up"},
+        "down": {"uv": [3, 3, 13, 13], "texture": "#armor", "cullface": "down"}
+      }
+    }
+  ]
+}

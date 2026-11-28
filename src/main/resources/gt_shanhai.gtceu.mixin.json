@@ -54,6 +54,8 @@
   "client": [
     "AdaptiveRecipeWidgetMixin",
     "ShanhaiLoadingDataPackMixin",
-    "GTLCoreMultiblockInfoRegistrationMixin"
+    "GTLCoreMultiblockInfoRegistrationMixin",
+    "StarLifterPageTabIconMixin",
+    "StarLifterConfiguratorIconMixin"
   ]
 }

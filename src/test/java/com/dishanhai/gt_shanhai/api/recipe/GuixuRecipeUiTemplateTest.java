@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -30,6 +31,28 @@ class GuixuRecipeUiTemplateTest {
     @Test
     void paradigmSimplificationExposesEveryMasterSlot() throws Exception {
         checkTemplate("guixu_paradigm_simplification");
+    }
+
+    @Test
+    void starLiftingUsesTheAssemblyLineLayoutWithoutTheResearchSlot() throws Exception {
+        Path path = Path.of("src/main/resources/assets/gtceu/ui/recipe_type/star_lifting.rtui");
+        CompoundTag starLifting;
+        try (var input = new DataInputStream(Files.newInputStream(path))) {
+            starLifting = NbtIo.read(input);
+            assertEquals(-1, input.read());
+        }
+        assertEquals("gtceu:star_lifting", starLifting.getString("recipe_type"));
+        starLifting.putString("recipe_type", "gtceu:assembly_line");
+        try (var jar = new ZipFile("libs/gtceu-1.20.1-1.4.4.jar");
+             var input = new DataInputStream(jar.getInputStream(
+                     jar.getEntry("assets/gtceu/ui/recipe_type/assembly_line.rtui")))) {
+            CompoundTag assemblyLine = NbtIo.read(input);
+            var widgets = assemblyLine.getCompound("root").getList("children", Tag.TAG_COMPOUND);
+            int size = widgets.size();
+            widgets.removeIf(widget -> ((CompoundTag) widget).getCompound("data").getString("id").equals("item_in_16"));
+            assertEquals(size - 1, widgets.size());
+            assertEquals(assemblyLine, starLifting);
+        }
     }
 
     private void checkTemplate(String type) throws Exception {

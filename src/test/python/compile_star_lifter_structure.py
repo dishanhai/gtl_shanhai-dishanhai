@@ -26,6 +26,8 @@ AIR = "minecraft:air"
 HOST = f"gt_shanhai:{ID}"
 NODE = "gt_shanhai:star_lifter_terminal"
 PORT = "gt_shanhai:star_lifter_interface"
+MANIFOLD = "gt_shanhai:star_lifter_manifold"
+INNER_LATCH = "gt_shanhai:star_lifter_inner_latch"
 MATERIALS = {surface: f"gt_shanhai:star_lifter_{surface.lower()}" for surface in
              ("BEAM", "ARMOR", "CERAMIC", "SOCKET", "CONDUIT", "MAGNET", "EXTRACTOR", "STELLAR")}
 # Functional faces win where a narrow band shares a cube with a support.
@@ -34,6 +36,113 @@ SURFACES = tuple(MATERIALS)
 FACE_INDICES = ((0, 1, 2), (0, 3, 4), (0, 1, 4), (2, 3, 6), (1, 2, 5), (0, 3, 7))
 EDGE_INDICES = ((0, 1), (1, 2), (2, 3), (3, 0), (0, 4))
 WORLD_AXES = np.eye(3)
+
+
+def service_cabin(controller):
+    """Fixed operations deck, split transfer spine and the non-contact outer-ring pickups."""
+    x0, y0, z0 = map(int, controller)
+    cabin = {}
+
+    def put(x, y, z, material):
+        cabin[x0 + x, y0 + y, z0 + z] = MATERIALS.get(material, material)
+
+    for side in (-1, 1):
+        # Extend the central cross into one contiguous equipment panel.
+        put(0, 0, side * 2, PORT)
+        put(0, 0, side * 5, "SOCKET")
+        put(0, 0, side * 6, "SOCKET")
+        put(0, 0, side * 7, "MAGNET")
+        put(0, 0, side * 8, "CERAMIC")
+        for z in (3, 4):
+            put(0, 0, side * z, "BEAM")
+        for y in (-1, 1):
+            for z, material in enumerate(("ARMOR", MANIFOLD, MANIFOLD, "BEAM", "EXTRACTOR", "SOCKET"), 2):
+                put(0, y, side * z, material)
+            put(0, y, side * 8, "ARMOR")
+            put(0, y, side * 9, "BEAM")
+        put(0, 0, side * 9, "MAGNET")
+        put(0, 0, side * 10, "CERAMIC")
+
+    for side in (-1, 1):
+        # Both spines turn inward above and below the full swept service-node profile.
+        for z in range(-7, 8):
+            put(0, side * 2, z, "ARMOR" if z % 3 == 0 else "BEAM")
+            if abs(z) <= 6:
+                put(0, side * 3, z, "EXTRACTOR" if z in (-4, 0, 4) else MANIFOLD)
+                put(-1, side * 4, z, "ARMOR" if z % 3 == 0 else "BEAM")
+                if z % 3 == 0:
+                    put(0, side * 4, z, "SOCKET")
+        for z in range(-6, 7):
+            put(-1, side * 5, z, MANIFOLD if abs(z) <= 4 else "ARMOR")
+        for z in (-6, -3, 0, 3, 6):
+            put(-2, side * 5, z, "SOCKET" if z == 0 else "BEAM")
+        for z in (-6, 0, 6):
+            put(-2, side * 6, z, "MAGNET" if z == 0 else "CERAMIC")
+        for z, inner in ((-8, -7), (8, 7)):
+            put(0, side * 2, z, "BEAM")
+            put(0, side * 3, z, "SOCKET")
+            put(0, side, z, "EXTRACTOR")
+            put(-1, side * 4, z, "CERAMIC")
+            put(-1, side * 4, inner, MANIFOLD)
+
+    # Both cuffs follow the centerline of the control face, including their inner latch columns.
+    for side in (-1, 1):
+        first = side * 9
+        second = side * 10
+        for up in (-1, 1):
+            for z in range(side * 8, second + side, side):
+                put(0, up * 2, z, "BEAM" if z % 2 else "ARMOR")
+                put(0, up, z, "ARMOR" if z in (first, second) else "BEAM")
+            for z in (first, second):
+                for x, y, surface in ((0, 3, "ARMOR"), (-1, 3, "SOCKET"), (-1, 4, "ARMOR"),
+                                      (-2, 4, "BEAM"), (-2, 5, "ARMOR"), (-2, 6, "BEAM"), (-3, 6, "SOCKET")):
+                    put(x, up * y, z, surface)
+                for x in range(-18, -2):
+                    put(x, up * 7, z, "ARMOR" if x in (-18, -14, -10, -6) else "BEAM")
+        for z in (first, second):
+            put(0, 0, z, "MAGNET")
+            for y in range(-6, 7):
+                put(-18, y, z, INNER_LATCH)
+    return cabin
+
+
+def verify_fixed_clearance(fixed, scale, rings):
+    """Conservative clearance over every pose, including the inset inner latch's real box."""
+    points = np.asarray(list(fixed), dtype=float)
+    bounds = np.array([(.3125, .5, .3125) if material == INNER_LATCH else (.5, .5, .5)
+                       for material in fixed.values()])
+    near = np.maximum(np.abs(points) - bounds, 0)
+    far = np.abs(points) + bounds
+    clearance = []
+    for parameters, bands in rings:
+        limits = np.asarray([band for _, band in bands]) * scale
+        if parameters[5]:
+            # Rotation keeps axial projection and distance to the axis constant. Bound each
+            # prism by those coordinates instead of treating the entire sweep as a sphere.
+            azimuth = math.radians(parameters[4])
+            axis = np.array([math.cos(azimuth), 0, math.sin(azimuth)])
+            tangent = np.array([-axis[2], 0, axis[0]])
+            rotation = Rotation.from_quat(parameters[-4:])
+            vertices = np.array([mesh_wedge(rotation, scale, band) for _, band in bands])
+            axial = vertices @ axis
+            radius = np.hypot(vertices @ tangent, vertices[:, :, 1]).max(axis=1)
+            center = (points @ axis)[:, None]
+            half_width = (bounds @ np.abs(axis))[:, None]
+            axial_gap = np.maximum(center - half_width - axial.max(axis=1), axial.min(axis=1) - center - half_width)
+            radial_near = np.hypot(np.maximum(np.abs(points @ tangent) - bounds @ np.abs(tangent), 0), near[:, 1])
+            radial_gap = radial_near[:, None] - radius
+            clearance.append(float(np.hypot(np.maximum(axial_gap, 0), np.maximum(radial_gap, 0)).min()))
+        else:
+            # Outer ring rotates around Y. Each chordal prism stays inside this radial/height interval.
+            inner = limits[:, 2] * np.cos((limits[:, 1] - limits[:, 0]) / (2 * scale))
+            radial = np.maximum(np.hypot(near[:, 0], near[:, 2])[:, None] - limits[:, 3],
+                                inner - np.hypot(far[:, 0], far[:, 2])[:, None])
+            vertical = np.maximum(points[:, 1, None] - .5 - limits[:, 5],
+                                  limits[:, 4] - points[:, 1, None] - .5)
+            clearance.append(float(np.maximum(radial, vertical).min()))
+    if min(clearance) < .25:  # Covers the existing eighth-block collision raster and its tolerance.
+        raise ValueError(f"Fixed control cabin enters the ring clearance margin: {clearance}")
+    return clearance
 
 
 def read_mesh(path):
@@ -170,8 +279,29 @@ def mesh_stage(source, output):
     controller = (shell, 0, z)
     port_cells = [(shell, y, z + offset) for y, offset in ((0, -1), (0, 1), (-1, 0), (1, 0))]
     shell_cells = [(shell, y, z + offset) for y in (-1, 1) for offset in (-1, 1)]
-    # Reserve front interaction faces. No air predicate spans the central cavity.
-    air_cells = [(shell + 1, y, pz) for _, y, pz in [controller, *port_cells]]
+    cabin = service_cabin(controller)
+    port_cells.extend(point for point, material in cabin.items() if material == PORT)
+    fixed = dict.fromkeys([*shell_cells, *port_cells, controller])
+    fixed.update(cabin)
+    if components(fixed) != [len(fixed)]:
+        raise ValueError("Fixed control cabin contains disconnected parts")
+    clearance = verify_fixed_clearance(fixed, scale, rings)
+    if set(cabin) & cells.keys():
+        raise ValueError("Fixed control cabin overlaps the static ring mesh")
+    if any(p[0] > controller[0] for p in cabin):
+        raise ValueError("Fixed control cabin extends beyond the original face of the controller")
+    # Shell models cull common faces. Use ordinary terminal frames where a fixed block
+    # directly borders a voxel of the resting ring. Keep the matching side in the same material.
+    for x, y, pz in cabin:
+        neighbors = ((x + dx, y + dy, plane + dz) for plane in (pz, 2 * z - pz)
+                     for dx, dy, dz in ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)))
+        if cabin[x, y, pz] in MATERIALS.values() and any(p in cells for p in neighbors):
+            cabin[x, y, pz] = NODE
+    if any(cabin.get((x, y, 2 * z - pz)) != material for (x, y, pz), material in cabin.items()):
+        raise ValueError("Fixed control cabin is not mirrored across the controller")
+    # Ports retain a face for interaction and automation; those cells can contain pipes.
+    access = [(shell + 1, y, pz) for _, y, pz in port_cells]
+    air_cells = [(shell + 1, 0, z)]
     low, high = coordinate_bounds([*cells, *shell_cells, *air_cells])
     shift = lambda p: tuple(int(c) for c in np.asarray(p) - low)
     palette = [block_tag(MATERIALS[s]) for s in SURFACES]
@@ -185,12 +315,14 @@ def mesh_stage(source, output):
     np.savez_compressed(output / "star-lifter-ring-cells.npz", points=np.array(list(owners)),
                         masks=np.array(list(owners.values()), dtype=np.uint8))
     plan = [{"pos": shift(controller), "state": {"name": HOST, "properties": {"facing": "east"}}}]
-    plan.extend({"pos": shift(p), "state": PORT} for p in port_cells)
+    plan.extend({"pos": shift(p), "state": PORT} for p in port_cells if p not in cabin)
     plan.extend({"pos": shift(p), "state": NODE} for p in shell_cells)
+    plan.extend({"pos": shift(p), "state": block} for p, block in sorted(cabin.items()))
     section = {
         "scale": scale, "star_radius": radius, "center": shift((0, 0, 0)),
         "controller": shift(controller), "interfaces": [shift(p) for p in port_cells],
-        "air": [shift(p) for p in air_cells], "builder_plan": plan, "rings": ring_report,
+        "air": [shift(p) for p in air_cells], "access": [shift(p) for p in access],
+        "builder_plan": plan, "fixed_clearance": clearance, "rings": ring_report,
         "size": (high - low + 1).tolist(), "ring_overlap": dict(Counter(
             str(mask) for mask in owners.values() if mask.bit_count() > 1)),
     }
@@ -218,11 +350,13 @@ def compile_resources(builder_export, geometry_path, assets):
     doc = nbt.load(builder_export)
     width, height, depth = geometry["size"]
     aliases = dict(zip(MATERIALS.values(), "BCDEFGHI"))
-    aliases.update({NODE: "J", PORT: "K", HOST: "~", AIR: "."})
+    aliases.update({NODE: "J", PORT: "K", MANIFOLD: "L", INNER_LATCH: "M", HOST: "~", AIR: "."})
     cells = [[bytearray(b" " * width) for _ in range(height)] for _ in range(depth)]
     counts = Counter()
     palette = {}
     shell = {}
+    expected = {tuple(entry["pos"]): entry["state"]["name"] if isinstance(entry["state"], dict) else entry["state"]
+                for entry in geometry["builder_plan"]}
     low = (min(b["pos"][i] for b in doc["blocks"]) for i in range(3))
     if tuple(low) != (0, 0, 0):
         raise ValueError("Builder export must start at [0,0,0]")
@@ -231,6 +365,8 @@ def compile_resources(builder_export, geometry_path, assets):
         x, y, z = map(int, block["pos"])
         ident, props = with_state(doc["palette"][int(block["state"])])
         symbol = aliases[ident]
+        if (x, y, z) in expected and "B" <= symbol <= "H":
+            symbol = symbol.lower()
         if cells[z][y][x] != 32 or symbol == ".":
             raise ValueError(f"Unexpected duplicate or air block at {(x, y, z)}")
         counts[ident] += 1
@@ -241,12 +377,10 @@ def compile_resources(builder_export, geometry_path, assets):
         previous = palette.setdefault(symbol, state)
         if previous != state:
             raise ValueError(f"Multiple states for {symbol}: {previous} and {state}")
-        if symbol in {"~", "J", "K"}:
+        if symbol in {"~", "J", "K", "L", "M"} or symbol.islower():
             difference[x, y, z] = ident
         else:
             shell[x, y, z] = ident, props
-    expected = {tuple(entry["pos"]): entry["state"]["name"] if isinstance(entry["state"], dict) else entry["state"]
-                for entry in geometry["builder_plan"]}
     if difference != expected or palette["~"].get("Properties", {}).get("facing") != "east":
         raise ValueError("Builder node does not match the planned controller, orientation and interface positions")
     source = nbt.load(geometry_path.with_name("star-lifter-mesh-import.nbt"))
@@ -254,6 +388,9 @@ def compile_resources(builder_export, geometry_path, assets):
                   for row in source["blocks"]}
     if shell != mesh_shell:
         raise ValueError("Builder export changed blocks outside the service node")
+    for x, y, z in geometry["access"]:
+        if cells[z][y][x] != 32:
+            raise ValueError(f"Hatch face was obstructed at {(x, y, z)}")
     # Builder omits empty cells by design. Only the listed machine access cells require air.
     for x, y, z in geometry["air"]:
         if cells[z][y][x] != 32:
@@ -263,7 +400,8 @@ def compile_resources(builder_export, geometry_path, assets):
     data = {"format_version": 1, "id": ID, "source_sha256": hashlib.sha256(builder_export.read_bytes()).hexdigest(),
             "size": geometry["size"], "direction": ["front", "up", "right"], "front": "east",
             "center": geometry["center"], "controller": geometry["controller"], "interfaces": geometry["interfaces"],
-            "air": geometry["air"], "palette": palette | {".": {"Name": AIR}},
+            "air": geometry["air"], "interface_access": geometry["access"],
+            "palette": palette | {".": {"Name": AIR}},
             "counts": dict(sorted(counts.items())), "aisles": aisles}
     json_path = assets / "gt_shanhai/multiblock/star_lifter.json"
     bin_path = assets / "gtladditions/structures/multiblock/star_lifter.bin"

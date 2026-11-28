@@ -69,6 +69,9 @@ repositories {
 
 dependencies {
     if (shBetterUiJar != null) implementation files(shBetterUiJar)
+    // SH-Better-UI supplies JSVG at runtime through its Forge Jar-in-Jar dependency.
+    compileOnly 'com.github.weisj:jsvg:2.2.0'
+    testRuntimeOnly 'com.github.weisj:jsvg:2.2.0'
     if (shCommonLib) implementation fg.deobf("${shCommonLibGroup}:${shCommonLibName}:${shCommonLib.version}")
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
@@ -339,6 +342,14 @@ tasks.register('whiteHoleBloomGpuProbe', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.WhiteHoleBloomGpuProbe'
+}
+
+tasks.register('starLifterStagingGpuProbe', JavaExec) {
+    group = 'verification'
+    description = 'Checks Star Lifter mesh staging reuse across rebuilds in a hidden GL context.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.dishanhai.gt_shanhai.client.renderer.preview.StarLifterStagingGpuProbe'
 }
 
 // .rtui 配方 UI 克隆

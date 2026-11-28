@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "ingredients": [
+    {
+      "item": "gt_shanhai:star_lifter_conduit"
+    }
+  ],
+  "result": {
+    "item": "gt_shanhai:star_lifter_manifold"
+  }
+}

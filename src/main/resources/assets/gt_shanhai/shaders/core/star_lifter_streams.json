@@ -1,0 +1,30 @@
+{
+  "blend": {"func": "add", "srcrgb": "one", "dstrgb": "1-srcalpha"},
+  "vertex": "gt_shanhai:star_lifter_streams",
+  "fragment": "gt_shanhai:star_lifter_streams",
+  "attributes": ["Position", "UV0", "Color"],
+  "samplers": [],
+  "uniforms": [
+    {"name": "ModelViewMat", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "ProjMat", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "Ring0", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "Ring1", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "Ring2", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "Ring3", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "Heading", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "ColorModulator", "type": "float", "count": 4, "values": [1,1,1,1]},
+    {"name": "RingRadius", "type": "float", "count": 4, "values": [0,0,0,0]},
+    {"name": "RingWidth", "type": "float", "count": 4, "values": [0,0,0,0]},
+    {"name": "RingHeight", "type": "float", "count": 4, "values": [0,0,0,0]},
+    {"name": "ControlAnchor", "type": "float", "count": 4, "values": [0,0,0,0]},
+    {"name": "Activity", "type": "float", "count": 4, "values": [0,0,0,0]},
+    {"name": "Visibility", "type": "float", "count": 4, "values": [0,0,0,0]},
+    {"name": "StarRadius", "type": "float", "count": 1, "values": [0]},
+    {"name": "CollectorRadius", "type": "float", "count": 1, "values": [0]},
+    {"name": "CollectorAngle", "type": "float", "count": 2, "values": [0,0]},
+    {"name": "PlasmaPhase", "type": "float", "count": 1, "values": [0]},
+    {"name": "FogStart", "type": "float", "count": 1, "values": [0]},
+    {"name": "FogEnd", "type": "float", "count": 1, "values": [1]},
+    {"name": "FogShape", "type": "int", "count": 1, "values": [0]}
+  ]
+}

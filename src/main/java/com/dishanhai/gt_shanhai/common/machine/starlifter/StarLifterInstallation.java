@@ -19,6 +19,7 @@ public final class StarLifterInstallation {
     private final AABB bounds;
     private final BlockPos centerBlock;
     private StarLifterCollision.Frame collision;
+    private volatile StarLifterVisualState visual;
 
     public StarLifterInstallation(String name, Vec3 center, float radius, float heading, long startTick) {
         if (name.isEmpty() || name.length() > 64 || !Double.isFinite(center.x) || !Double.isFinite(center.y)
@@ -32,6 +33,8 @@ public final class StarLifterInstallation {
         this.radius = radius;
         this.heading = heading;
         this.startTick = startTick;
+        this.visual = isController() ? StarLifterVisualState.IDLE
+                : new StarLifterVisualState(StarLifterVisualState.Mode.RUNNING, startTick, false);
         double extent = radius * (StarLifterGeometry.OUTER_RADIUS + .04);
         this.bounds = new AABB(center.subtract(extent, extent, extent), center.add(extent, extent, extent));
     }
@@ -42,6 +45,9 @@ public final class StarLifterInstallation {
     public float heading() { return heading; }
     public long startTick() { return startTick; }
     public AABB bounds() { return bounds; }
+    public StarLifterVisualState visual() { return visual; }
+
+    public void setVisual(StarLifterVisualState visual) { this.visual = visual; }
 
     public boolean isController() { return name.startsWith("controller:"); }
 
