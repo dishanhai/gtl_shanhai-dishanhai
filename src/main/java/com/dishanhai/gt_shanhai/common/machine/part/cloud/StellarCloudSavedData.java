@@ -55,6 +55,41 @@ public final class StellarCloudSavedData extends SavedData {
         return true;
     }
 
+    public boolean releaseDetached(String source, UUID executor, Object token, Collection<UUID> entries) {
+        UUID libraryId = libraryId(source);
+        Library library = libraryId == null ? null : library(libraryId);
+        if (library == null) return false;
+        clearStaleEndpoints();
+        ExecutorReference current = endpointTokens.get(executor);
+        Object active = current == null ? null : current.get();
+        // Called for a removing or explicitly draining machine, not for an unloaded chunk.
+        if (active != token && liveToken(active)) return false;
+        var catalog = library.catalog();
+        long before = catalog.leaseRevision();
+        for (UUID entry : entries) catalog.release(executor, entry);
+        if (catalog.leaseRevision() != before) setDirty();
+        return true;
+    }
+
+    /** A real replacement permits draining the old library; a temporary disconnect does not. */
+    public boolean drainRetiredSlot(boolean enabled, String boundSource, String replacementSource,
+                                    String oldSource, UUID executor, Object token, UUID entry, boolean lastSlot) {
+        boolean relocating = replacementSource != null && !oldSource.equals(replacementSource);
+        if (enabled && !oldSource.equals(boundSource) && !relocating) return false;
+        return !lastSlot || releaseDetached(oldSource, executor, token, Set.of(entry));
+    }
+
+    private static UUID libraryId(String source) {
+        if (!source.startsWith("gt_shanhai:")) return null;
+        String id = source.substring("gt_shanhai:".length());
+        try {
+            UUID parsed = UUID.fromString(id);
+            return parsed.toString().equals(id) ? parsed : null;
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
+    }
+
     public boolean executorActive(UUID executor, Object token) {
         clearStaleEndpoints();
         ExecutorReference reference = endpointTokens.get(executor);

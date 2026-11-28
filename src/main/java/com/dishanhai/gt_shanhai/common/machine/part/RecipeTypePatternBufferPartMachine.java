@@ -44,6 +44,7 @@ import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.patternmover.HostPatternMoverBatch;
 import com.dishanhai.gt_shanhai.api.machine.IRecipeThreadDisplay;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudSource;
+import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudSavedData;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudAEIdentity;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudSlotIndex;
 import com.dishanhai.gt_shanhai.common.machine.part.cloud.StellarCloudPatterns;
@@ -1063,6 +1064,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private void gtShanhai$handoffRemovedMachine() {
         boolean hadCloudData = cloudRestorePending || !cloudSlots.isEmpty();
         if (cloudRestorePending) restoreCloudSlots();
+        boolean runningCloudTask = cloudSlots.values().stream().anyMatch(this::cloudSlotHasRunningTask);
         // 本類並非 IDropSaveMachine：拆除時必須實際交網或交付獨立的 SDA 退料載體。
         for (CloudSlot cloud : cloudSlots.values()) {
             cloud.published = false;
@@ -1073,28 +1075,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         rebuildingWildcardPatterns = true;
         refundWildcardSlots();
-        CompoundTag handoff = cloudRestorePending || cloudSource == null ? snapshotCloudState() : null;
-        boolean handoffDelivered = false;
-        if (hadCloudData && !buffer.isEmpty()) {
-            boolean delivered = StellarCloudMaterials.deliverRefund(buffer, amounts -> dropCloudRecovery(handoff, amounts));
-            handoffDelivered = delivered && handoff != null;
-        }
-        if (!cloudRestorePending && cloudSource != null && buffer.isEmpty()
-                && cloudSlots.values().stream().noneMatch(this::cloudHasMaterial)) {
-            try {
-            for (CloudSlot cloud : cloudSlots.values()) cloudSource.release(cloudExecutorId, cloud.entry);
-            cloudSource.removed();
+        boolean refunded = !hadCloudData || buffer.isEmpty()
+                || StellarCloudMaterials.deliverRefund(buffer, amounts -> dropCloudRecovery(null, amounts));
+        if (!cloudRestorePending && !runningCloudTask && refunded && buffer.isEmpty()
+                && cloudSlots.values().stream().noneMatch(this::cloudHasMaterial) && releaseRemovedCloudSlots()) {
+            if (cloudSource != null) cloudSource.removed();
             for (CloudSlot cloud : cloudSlots.values()) {
                 configuredPatternSlots.clear(cloud.slot);
                 extendedSlotIndex.release("cloud/" + cloud.key, false);
             }
             cloudSlots.clear(); cloudBySlot.clear(); cloudSource = null;
-            pendingCloudState = new CompoundTag(); cloudRestorePending = false;
-            } catch (RuntimeException failure) {
-                com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.warn("Stellar cloud lease cleanup deferred at {}",getPos(),failure);
-            }
+            pendingCloudState = new CompoundTag();
         }
-        if (hadCloudData && !handoffDelivered && (cloudRestorePending || !cloudSlots.isEmpty())) {
+        if (hadCloudData && (cloudRestorePending || !cloudSlots.isEmpty())) {
             dropCloudRecovery(snapshotCloudState(), Map.of());
         }
         updateCloudPublication();
@@ -1112,6 +1105,21 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             StellarRecoverySavedData.get(level.getServer()).enqueue(level, getPos(), recovery);
             stellarOutputOverflow.clear();
         }
+    }
+
+    private boolean releaseRemovedCloudSlots() {
+        if (cloudSlots.isEmpty()) return true;
+        if (!(getLevel() instanceof ServerLevel level)) return false;
+        Map<String, Set<UUID>> entriesBySource = new HashMap<>();
+        for (CloudSlot slot : cloudSlots.values()) {
+            entriesBySource.computeIfAbsent(slot.source, ignored -> new HashSet<>()).add(slot.entry);
+        }
+        var data = StellarCloudSavedData.get(level);
+        boolean complete = true;
+        for (var entry : entriesBySource.entrySet()) {
+            complete &= data.releaseDetached(entry.getKey(), cloudExecutorId, this, entry.getValue());
+        }
+        return complete;
     }
 
     private CompoundTag snapshotCloudState() {
@@ -3369,7 +3377,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
-    private void drainRetiredCloudSlots() {
+    private void drainRetiredCloudSlots(@Nullable String replacementSource) {
+        if (!(getLevel() instanceof ServerLevel level)) return;
+        var data = StellarCloudSavedData.get(level);
+        String boundSource = cloudSource == null ? null : cloudSource.sourceId();
         var iterator = cloudSlots.values().iterator();
         while (iterator.hasNext()) {
             CloudSlot slot = iterator.next();
@@ -3388,10 +3399,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             refundSlot(internal.getItemInventory(), internal.getFluidInventory());
             // 同時清掉非實料的常駐鏡像；退款暫存尚未交付 AE 時不得釋租。
             if (cloudHasMaterial(slot) || !buffer.isEmpty()) continue;
-            if (cloudSource == null || !cloudSource.sourceId().equals(slot.source)) continue;
             boolean sameEntryRemaining = cloudSlots.values().stream().anyMatch(other -> other != slot
                     && other.entry.equals(slot.entry) && other.source.equals(slot.source));
-            if (!sameEntryRemaining) cloudSource.release(cloudExecutorId, slot.entry);
+            if (!data.drainRetiredSlot(cloudEnabled, boundSource, replacementSource,
+                    slot.source, cloudExecutorId, this, slot.entry, !sameEntryRemaining)) continue;
             if (wildcardRemoveSlotFromMap != null) wildcardRemoveSlotFromMap.accept(slot.slot);
             notifyProxySlotRemoved(slot.slot);
             configuredPatternSlots.clear(slot.slot);
@@ -3445,17 +3456,22 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private void tickCloudPatternsChecked() {
         if (cloudRestorePending) return;
+        String replacementSource = null;
         if (cloudSource == null && (cloudEnabled || !cloudSlots.isEmpty())) {
             StellarCloudSource resolved = retiredCloudSource ? null : StellarCloudLibraryMachine.resolve(this);
             if (resolved != null) {
                 String previous = pendingCloudState.getString("source");
-                if (!cloudSlots.isEmpty() && !resolved.sourceId().equals(previous)) {
-                    cloudStatus = "gui.gt_shanhai.stellar_cloud.draining";
-                    return;
+                if (cloudSlots.isEmpty() || resolved.sourceId().equals(previous)) {
+                    if (resolved.sourceId().equals(previous)) {
+                        resolved.loadBinding(pendingCloudState.getCompound("binding"));
+                    } else {
+                        pendingCloudState = new CompoundTag();
+                    }
+                    cloudSource = resolved;
+                    cloudScannedRevision = Long.MIN_VALUE;
+                } else {
+                    replacementSource = resolved.sourceId();
                 }
-                resolved.loadBinding(pendingCloudState.getCompound("binding"));
-                cloudSource = resolved;
-                cloudScannedRevision = Long.MIN_VALUE;
             }
         }
         Set<String> types = currentCloudHostTypes();
@@ -3463,7 +3479,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 && cloudSource != null && getMainNode().isActive() && cloudSource.available();
         if (!available) {
             for (CloudSlot slot : cloudSlots.values()) { slot.published = false; slot.retiring = true; }
-            drainRetiredCloudSlots();
+            drainRetiredCloudSlots(replacementSource);
             updateCloudPublication();
             cloudStatus = !cloudSlots.isEmpty() ? "gui.gt_shanhai.stellar_cloud.draining"
                     : cloudEnabled ? cloudUnavailableStatus() : "gui.gt_shanhai.stellar_cloud.disabled";
@@ -3545,7 +3561,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 slot.published = false; slot.retiring = true;
             }
         }
-        drainRetiredCloudSlots();
+        drainRetiredCloudSlots(null);
         updateCloudPublication();
         if (cloudScanCursor >= cloudCandidates.size() && cloudScanFinishedTick == 0) cloudScanFinishedTick = getOffsetTimer();
         cloudStatus = "gui.gt_shanhai.stellar_cloud.connected";
