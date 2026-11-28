@@ -16,6 +16,7 @@ import com.dishanhai.gt_shanhai.integration.jade.provider.PrimordialOmegaEngineI
 import com.dishanhai.gt_shanhai.integration.jade.provider.PrimordialVoidInductionArmatureInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.PrimordialRecipeThreadsProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.PrimordialRecipeThreadsOverlay;
+import com.dishanhai.gt_shanhai.integration.jade.provider.StellarJadeProvider;
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
 import com.gregtechceu.gtceu.api.blockentity.MetaMachineBlockEntity;
 
@@ -48,6 +49,7 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
 
     @Override
     public void registerClient(IWailaClientRegistration reg) {
+        StellarJadeProvider.register(reg);
         reg.registerBlockComponent(GuixuEnergyTelemetryProvider.INSTANCE, MetaMachineBlock.class);
         reg.addTooltipCollectedCallback(PrimordialRecipeThreadsOverlay.INSTANCE);
         reg.addAfterRenderCallback(PrimordialRecipeThreadsOverlay.INSTANCE);

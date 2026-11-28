@@ -643,6 +643,7 @@ public class ShanhaiNetwork {
                 StarLifterSyncPacket::encode, StarLifterSyncPacket::new,
                 StarLifterSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         RecipeSyncPacket.init();
+        StarLifterHudNetwork.init();
     }
 
     private static void handleHideRing(SHideRingPacket packet, Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
