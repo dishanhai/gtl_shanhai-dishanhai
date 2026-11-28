@@ -6,6 +6,7 @@
   "mixins": [
     "EnhancedCoreIntegratedFactoryStructureMixin",
     "EnhancedCoreNativeHatchesMixin",
-    "EnhancedCoreRetryableVirtualMixin"
+    "EnhancedCoreRetryableVirtualMixin",
+    "EnhancedCoreGridBalanceMixin"
   ]
 }
