@@ -6,6 +6,7 @@
   "client": [
     "accessor.StellarSwitchWidgetAccessor",
     "RecipeEditorJeiMarginMixin",
-    "TankWidgetShopJumpMixin"
+    "TankWidgetShopJumpMixin",
+    "AdaptiveRecipeCountMixin"
   ]
 }

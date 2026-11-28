@@ -29,6 +29,7 @@
     "JeiCheatInputHandlerAccessor",
     "JeiRecipeLayoutHandlerAccessor",
     "JEISdaElementDedupMixin",
-    "RecipeSlotTooltipMixin"
+    "RecipeSlotTooltipMixin",
+    "AdaptiveRecipeJeiLayoutMixin"
   ]
 }

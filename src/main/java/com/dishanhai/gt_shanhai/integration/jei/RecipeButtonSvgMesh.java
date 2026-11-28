@@ -12,24 +12,27 @@ import org.w3c.dom.Element;
 import org.xml.sax.SAXException;
 
 /** Tessellates the small, trusted set of bundled JEI outline icons once at registration. */
-final class RecipeButtonSvgMesh {
-    static final int VIEW_SIZE = 16;
+public final class RecipeButtonSvgMesh {
+    public static final int VIEW_SIZE = 16;
     private static final int JOIN_SEGMENTS = 12;
     private static final String SVG_NS = "http://www.w3.org/2000/svg";
 
-    record IconMesh(int rgb, List<Quad> quads) {}
-    record Point(float x, float y) {}
+    public record IconMesh(int rgb, List<Quad> quads) {}
+    public record Point(float x, float y) {}
     // Matches the winding of GuiGraphics.fill. A triangle repeats its first vertex as d.
-    record Quad(Point a, Point b, Point c, Point d) {}
+    public record Quad(Point a, Point b, Point c, Point d) {}
 
     private RecipeButtonSvgMesh() {}
 
     static IconMesh load(String name) {
-        String path = "/assets/gt_shanhai/textures/gui/jei/" + name + ".svg";
+        return loadResource("/assets/gt_shanhai/textures/gui/jei/" + name + ".svg");
+    }
+
+    public static IconMesh loadResource(String path) {
         try (InputStream svg = Objects.requireNonNull(RecipeButtonSvgMesh.class.getResourceAsStream(path), path)) {
             return parse(svg);
         } catch (IOException | SAXException | ParserConfigurationException e) {
-            throw new IllegalStateException("Invalid built-in JEI icon: " + path, e);
+            throw new IllegalStateException("Invalid built-in SVG icon: " + path, e);
         }
     }
 
@@ -63,7 +66,7 @@ final class RecipeButtonSvgMesh {
             if (!(child instanceof Element line)) continue;
             if (!SVG_NS.equals(line.getNamespaceURI()) || !"polyline".equals(line.getLocalName())
                     || line.getAttributes().getLength() != 1 || !line.hasAttribute("points")) {
-                throw new IOException("JEI icons support only direct outlined polylines");
+                throw new IOException("Expected direct outlined polylines");
             }
             String[] values = line.getAttribute("points").trim().split("[,\\s]+");
             if (values.length < 4 || values.length % 2 != 0) {

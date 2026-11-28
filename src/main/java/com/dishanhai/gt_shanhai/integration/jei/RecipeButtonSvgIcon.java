@@ -14,7 +14,11 @@ final class RecipeButtonSvgIcon implements IDrawable {
     private final RecipeButtonSvgMesh.IconMesh mesh;
 
     RecipeButtonSvgIcon(String name) {
-        this.mesh = RecipeButtonSvgMesh.load(name);
+        this(RecipeButtonSvgMesh.load(name));
+    }
+
+    RecipeButtonSvgIcon(RecipeButtonSvgMesh.IconMesh mesh) {
+        this.mesh = mesh;
     }
 
     @Override public int getWidth() { return SIZE; }

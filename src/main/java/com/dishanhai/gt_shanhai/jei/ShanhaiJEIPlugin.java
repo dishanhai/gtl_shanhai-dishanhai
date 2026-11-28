@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopJeiMode;
 import com.dishanhai.gt_shanhai.client.gui.shop.JeiItemOrderHolder;
 import com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines;
+import com.dishanhai.gt_shanhai.integration.jei.AdaptiveRecipePreview;
 import com.dishanhai.gt_shanhai.integration.jei.JeiPatternQuickEncodeButtons;
 import com.dishanhai.gt_shanhai.integration.jei.JeiRecipeEditButton;
 import com.lowdragmc.lowdraglib.LDLib;
@@ -54,6 +55,7 @@ public class ShanhaiJEIPlugin implements IModPlugin {
                 guiHelper.createDrawableItemStack(new ItemStack(net.minecraft.world.item.Items.CHEST)));
         JeiPatternQuickEncodeButtons.register(registration);
         JeiRecipeEditButton.register(registration);
+        AdaptiveRecipePreview.register(registration);
     }
 
     @Override
