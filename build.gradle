@@ -307,6 +307,8 @@ tasks.register('kerrGpuProbe', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.dishanhai.gt_shanhai.client.renderer.blackhole.GuixuKerrGpuProbe'
     systemProperty 'kerr.stabilityFrames', providers.gradleProperty('kerrStabilityFrames').getOrElse('0')
+    systemProperty 'kerr.loadFrames', providers.gradleProperty('kerrLoadFrames').getOrElse('600')
+    systemProperty 'kerr.loadBudgetMs', providers.gradleProperty('kerrLoadBudgetMs').getOrElse('0')
     systemProperty 'kerr.width', providers.gradleProperty('kerrWidth').getOrElse('800')
     systemProperty 'kerr.height', providers.gradleProperty('kerrHeight').getOrElse('560')
     def shaderRoot = providers.gradleProperty('kerrShaderRoot').orNull

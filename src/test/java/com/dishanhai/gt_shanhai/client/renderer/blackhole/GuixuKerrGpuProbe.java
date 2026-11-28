@@ -4,10 +4,13 @@ import com.dishanhai.gt_shanhai.config.KerrRenderConfig.Quality;
 import com.mojang.blaze3d.systems.RenderSystem;
 
 import java.awt.image.BufferedImage;
+import java.io.BufferedWriter;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Locale;
 import javax.imageio.ImageIO;
 
@@ -58,9 +61,17 @@ class GuixuKerrGpuProbe {
             RenderSystem.initRenderThread();
             hdr = post;
             System.out.printf("%s / %s / %s%n", glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_VERSION));
-            initializePipeline();
+            initializePipeline("guixu_kerr_black_trace");
             Path output = Path.of(args.length == 0 ? "build/reports/kerr-gl" : args[0]);
             Files.createDirectories(output);
+            if (args.length == 2 && args[1].equals("close-load")) {
+                runCloseLoad(output);
+                return;
+            }
+            if (args.length == 2 && args[1].equals("trace-parity")) {
+                verifyBlackTraceParity();
+                return;
+            }
             if (args.length == 2 && args[1].equals("disk-edge")) {
                 verifyDiskEdge(output);
                 return;
@@ -1528,6 +1539,167 @@ class GuixuKerrGpuProbe {
         }
     }
 
+    private static void verifyBlackTraceParity() throws Exception {
+        int blackTrace = trace;
+        int mixedTrace = program("guixu_kerr_trace");
+        perspective(70);
+        try {
+            for (float[] camera : new float[][]{{14, 42, 0}, {11, 53, -.7f}, {9, 61, -1.2f},
+                    {6, 73, -1.8f}, {4.7f, 87, 2}, {3.7f, 82, -2.4f}}) {
+                trace = mixedTrace;
+                rayTarget(.24);
+                trace(.65f, camera[1], camera[2], camera[0], .00016f, 384, .62f, 14);
+                FloatBuffer expectedExit = readExit(), expectedLight = readRayBuffer("rayLight");
+                trace = blackTrace;
+                rayTarget(.24);
+                trace(.65f, camera[1], camera[2], camera[0], .00016f, 384, .62f, 14);
+                FloatBuffer actualExit = readExit(), actualLight = readRayBuffer("rayLight");
+                float exitError = 0, lightError = 0;
+                for (int i = 0; i < expectedExit.capacity(); ++i) {
+                    if (i % 4 == 3 && actualExit.get(i) != expectedExit.get(i))
+                        throw new AssertionError("Specialized trace changed capture/escape at z=" + camera[0]);
+                    exitError = Math.max(exitError, Math.abs(actualExit.get(i) - expectedExit.get(i)));
+                    lightError = Math.max(lightError, Math.abs(actualLight.get(i) - expectedLight.get(i))
+                            / Math.max(1, Math.abs(expectedLight.get(i))));
+                }
+                if (!(exitError <= .00001f && lightError <= .002f))
+                    throw new AssertionError("Specialized trace differs at z=" + camera[0]
+                            + ": exit error " + exitError + ", relative HDR error " + lightError);
+                System.out.printf(Locale.ROOT, "Trace parity z=%.1f M: exit error %.7g, relative HDR error %.7g%n",
+                        camera[0], exitError, lightError);
+            }
+        } finally {
+            trace = blackTrace;
+            glDeleteProgram(mixedTrace);
+        }
+    }
+
+    private enum CloseRoute {
+        STEADY, APPROACH, GRAZING
+    }
+
+    private static final String[] CLOSE_PASSES = {
+            "pilot rays", "HDR bloom and setup", "extended critical strip", "transfer bake", "final composite"
+    };
+
+    private static void runCloseLoad(Path output) throws Exception {
+        int frames = Integer.parseInt(System.getProperty("kerr.loadFrames", "600"));
+        double budget = Double.parseDouble(System.getProperty("kerr.loadBudgetMs", "0"));
+        if (frames < 32 || frames > 100_000 || !Double.isFinite(budget) || budget < 0) {
+            throw new IllegalArgumentException("Close load requires 32 to 100000 frames per route and a nonnegative finite P95 budget");
+        }
+        perspective(70);
+        int background = constantTexture(.48f, .63f, .84f, 1);
+        int[][] ring = new int[8][CLOSE_PASSES.length + 1];
+        for (int[] slot : ring)
+            for (int i = 0; i < slot.length; ++i) slot[i] = glGenQueries();
+
+        boolean exceeded = false;
+        String capturePath = System.getenv("SH_RENDER_GPU_CSV");
+        Path gpuCsv = capturePath == null ? output.resolve("gpu.csv") : Path.of(capturePath);
+        try (var csv = Files.newBufferedWriter(gpuCsv)) {
+            csv.write("scene,metric,kind,ms\n");
+            for (CloseRoute route : CloseRoute.values()) {
+                String scene = "kerr-close-" + route.name().toLowerCase(Locale.ROOT);
+                for (int i = 0; i < 32; ++i) drawCloseLoad(route, i, 32, background, null);
+                glFinish();
+                double[] frameMs = new double[frames];
+                long started = System.nanoTime();
+                for (int i = 0; i < frames; ++i) {
+                    int[] slot = ring[i % ring.length];
+                    if (i >= ring.length)
+                        frameMs[i - ring.length] = readCloseTiming(csv, scene, slot);
+                    drawCloseLoad(route, i, frames, background, slot);
+                }
+                for (int i = frames - ring.length; i < frames; ++i)
+                    frameMs[i] = readCloseTiming(csv, scene, ring[i % ring.length]);
+                double throughput = frames * 1e9 / (System.nanoTime() - started);
+                glBindFramebuffer(GL_FRAMEBUFFER, rayFbo);
+                FloatBuffer rays = readExit();
+                int glError = glGetError();
+                if (glError != GL_NO_ERROR)
+                    throw new AssertionError(scene + ": OpenGL error 0x" + Integer.toHexString(glError));
+                int[] rayCounts = counts(rays);
+                // A close route can fill the entire field of view with the shadow.
+                if ((route == CloseRoute.STEADY && (rayCounts[1] == 0 || rayCounts[2] == 0))
+                        || rayCounts[0] > rayW * rayH / 400)
+                    throw new AssertionError(scene + ": invalid ray field " + Arrays.toString(rayCounts));
+                Arrays.sort(frameMs);
+                double p95 = frameMs[(int) Math.ceil(frames * .95) - 1];
+                long over60 = Arrays.stream(frameMs).filter(ms -> ms > 1000.0 / 60).count();
+                System.out.printf(Locale.ROOT,
+                        "%s %dx%d: %d frames, GPU P50 %.3f ms, P95 %.3f ms, P99 %.3f ms, max %.3f ms, over 16.67 ms %d/%d, %.1f offscreen frames/s%n",
+                        scene, W, H, frames, frameMs[(frames - 1) / 2], p95,
+                        frameMs[(int) Math.ceil(frames * .99) - 1], frameMs[frames - 1], over60, frames, throughput);
+                exceeded |= budget > 0 && p95 > budget;
+                glBindFramebuffer(GL_FRAMEBUFFER, imageFbo);
+                ImageIO.write(readImage(), "PNG", output.resolve(scene + ".png").toFile());
+            }
+        } finally {
+            for (int[] slot : ring) glDeleteQueries(slot);
+            glDeleteTextures(background);
+        }
+        if (exceeded) throw new AssertionError("Close load exceeded the configured GPU P95 budget: " + budget + " ms");
+    }
+
+    private static void drawCloseLoad(CloseRoute route, int frame, int frames, int background, int[] markers) {
+        float progress = frame / (float) (frames - 1);
+        double angle = 2 * Math.PI * progress;
+        float distance = switch (route) {
+            case STEADY -> 11;
+            case APPROACH -> 14 - 10.3f * progress;
+            case GRAZING -> 4.7f + .35f * (float) Math.sin(angle);
+        };
+        float inclination = switch (route) {
+            case STEADY -> 80;
+            case APPROACH -> 42 + 40 * progress;
+            case GRAZING -> 87 + 2 * (float) Math.sin(angle);
+        };
+        float offset = switch (route) {
+            case STEADY -> 0;
+            case APPROACH -> -2.4f * progress;
+            case GRAZING -> 2 * (float) Math.cos(angle);
+        };
+        var quality = Quality.ADAPTIVE;
+        var plan = KerrSampling.plan(quality, quality.scale, quality.scale, W * (double) H,
+                1, Math.hypot(distance, offset), H * .2);
+        if (markers != null) glQueryCounter(markers[0], GL_TIMESTAMP);
+        // Use the game's extent hysteresis. Recreating an unchanged FBO each
+        // frame would measure texture allocation as part of pilot integration.
+        var extent = KerrTraceBudget.extent(plan.traceScale(), W, H, rayW, rayH, 8);
+        if (rayFbo == 0 || rayW != extent.width() || rayH != extent.height())
+            rayTarget(extent.width(), extent.height());
+        trace(.65f, inclination, offset, distance, (float) quality.tolerance, quality.steps, .62f, frame / 60f);
+        if (markers != null) glQueryCounter(markers[1], GL_TIMESTAMP);
+        prepareComposite(inclination, 1, .18f);
+        sampler("SceneColor", 0, background);
+        set(composite, "uBgRect", 0, 0, W, H);
+        set(composite, "uBgTexel", 1f / W, 1f / H);
+        set(composite, "uRefine", plan.subpixels());
+        if (markers != null) glQueryCounter(markers[2], GL_TIMESTAMP);
+        drawCriticalStrip(plan.transferScale(), false, false, true);
+        if (markers != null) glQueryCounter(markers[3], GL_TIMESTAMP);
+        if (plan.transferScale() > 0) bakeFootprintsAtScale(plan.transferScale());
+        if (markers != null) glQueryCounter(markers[4], GL_TIMESTAMP);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        if (markers != null) glQueryCounter(markers[5], GL_TIMESTAMP);
+    }
+
+    private static double readCloseTiming(BufferedWriter csv, String scene, int[] markers) throws IOException {
+        long first = glGetQueryObjectui64(markers[0], GL_QUERY_RESULT);
+        long previous = first;
+        for (int i = 0; i < CLOSE_PASSES.length; ++i) {
+            long next = glGetQueryObjectui64(markers[i + 1], GL_QUERY_RESULT);
+            if (next < previous) throw new AssertionError(scene + ": GPU timestamps went backwards");
+            csv.write(scene + "," + CLOSE_PASSES[i] + ",pass," + (next - previous) * 1e-6 + "\n");
+            previous = next;
+        }
+        double total = (previous - first) * 1e-6;
+        if (total <= 0) throw new AssertionError(scene + ": missing GPU frame time");
+        csv.write(scene + ",Kerr rendering,frame," + total + "\n");
+        return total;
+    }
+
     private static void benchmarkCloseBudget() {
         double area = (double) W * H;
         for (float[] camera : new float[][]{{14, 42, 0}, {4.7f, 80, 2}, {-2.2f, 86, .10f}}) {
@@ -1584,7 +1756,11 @@ class GuixuKerrGpuProbe {
     }
 
     static void initializePipeline() throws Exception {
-        trace = program("guixu_kerr_trace");
+        initializePipeline("guixu_kerr_trace");
+    }
+
+    private static void initializePipeline(String traceProgram) throws Exception {
+        trace = program(traceProgram);
         composite = program("guixu_blackhole");
         int vao = glGenVertexArrays();
         glBindVertexArray(vao);
@@ -1920,7 +2096,7 @@ class GuixuKerrGpuProbe {
     private static int shader(int type, String file, boolean diagnostic) throws Exception {
         int id = glCreateShader(type);
         String source = Files.readString(SHADERS.resolve(file));
-        for (String include : new String[]{"guixu_kerr.glsl", "guixu_kerr_exterior.glsl",
+        for (String include : new String[]{"guixu_kerr.glsl", "guixu_kerr_trace_pass.glsl", "guixu_kerr_exterior.glsl",
                 "guixu_white_primary.glsl", "guixu_white_world.glsl"}) {
             source = source.replace("#moj_import <gt_shanhai:" + include + ">",
                     Files.readString(SHADERS.resolve("../include").resolve(include)));

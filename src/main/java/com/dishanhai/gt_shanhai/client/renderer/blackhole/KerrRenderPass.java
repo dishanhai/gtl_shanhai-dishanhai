@@ -40,6 +40,7 @@ final class KerrRenderPass implements AutoCloseable {
     private final WhiteHoleParticleGrid particles = new WhiteHoleParticleGrid();
     private final CompactHdrPostProcessing hdr = new CompactHdrPostProcessing();
     private ShaderInstance shader;
+    private TraceProgram blackTrace, mixedTrace;
     private ShaderInstance whiteCacheShader;
     private VertexBuffer triangle;
     private int directLightAttachment, directDepthAttachment;
@@ -442,16 +443,29 @@ final class KerrRenderPass implements AutoCloseable {
         composite.safeGetUniform("uCriticalBounds").set(x, y, span, enabled ? (skyRays ? 2f : 1f) : 0f);
     }
 
-    private void loadShader() throws IOException {
+    private record TraceProgram(ShaderInstance shader, int light, int exit) {}
+
+    private static TraceProgram loadTrace(String name) throws IOException {
         ShaderInstance candidate = new ShaderInstance(Minecraft.getInstance().getResourceManager(),
-                new ResourceLocation("gt_shanhai", "guixu_kerr_trace"), DefaultVertexFormat.POSITION);
-        attachmentLight = glGetFragDataLocation(candidate.getId(), "rayLight");
-        attachmentExit = glGetFragDataLocation(candidate.getId(), "rayExit");
-        if (attachmentLight < 0 || attachmentExit < 0 || attachmentLight == attachmentExit) {
+                new ResourceLocation("gt_shanhai", name), DefaultVertexFormat.POSITION);
+        int light = glGetFragDataLocation(candidate.getId(), "rayLight");
+        int exit = glGetFragDataLocation(candidate.getId(), "rayExit");
+        if (light < 0 || exit < 0 || light == exit) {
             candidate.close();
-            throw new IOException("Kerr trace shader did not link both color outputs");
+            throw new IOException(name + " did not link both color outputs");
         }
-        shader = candidate;
+        return new TraceProgram(candidate, light, exit);
+    }
+
+    private void selectTrace(boolean black) throws IOException {
+        if (black && blackTrace == null) blackTrace = loadTrace("guixu_kerr_black_trace");
+        if (!black && mixedTrace == null) mixedTrace = loadTrace("guixu_kerr_trace");
+        TraceProgram selected = black ? blackTrace : mixedTrace;
+        if (shader == selected.shader()) return;
+        invalidateHistory();
+        shader = selected.shader();
+        attachmentLight = selected.light();
+        attachmentExit = selected.exit();
     }
 
     void resolveFootprints(RenderTarget main, BlackHoleLensRenderer.ExteriorShader composite,
@@ -527,7 +541,7 @@ final class KerrRenderPass implements AutoCloseable {
         KerrControls.Frame settings = frame.kerr;
         double distance = 2 * frame.dist / frame.rsBlocks;
         exteriorWeight = frame.whiteDemo ? 0f : KerrSampling.exteriorWeight(settings.quality(), frame.white.mix());
-        if (exteriorWeight < 1f && shader == null) loadShader();
+        if (exteriorWeight < 1f) selectTrace(frame.white.mix() == 0);
         if (timer == 0 && (GL.getCapabilities().OpenGL33 || GL.getCapabilities().GL_ARB_timer_query)) timer = glGenQueries();
         boolean adaptive = settings.quality() == Quality.ADAPTIVE && exteriorWeight < 1f;
         double shadowFraction = KerrSampling.shadowFraction(distance, frame.tanHalfFov);
@@ -621,7 +635,9 @@ final class KerrRenderPass implements AutoCloseable {
 
     @Override
     public void close() {
-        if (shader != null) shader.close();
+        if (blackTrace != null) blackTrace.shader().close();
+        if (mixedTrace != null) mixedTrace.shader().close();
+        blackTrace = mixedTrace = null;
         shader = null;
         if (whiteCacheShader != null) whiteCacheShader.close();
         whiteCacheShader = null;
@@ -745,6 +761,7 @@ final class KerrRenderPass implements AutoCloseable {
         private final boolean circular;
         private final int exitFormat, lightFormat;
         int framebuffer, light, exit, width, height;
+        private int lightLocation, exitLocation;
 
         Target() { this(false); }
 
@@ -759,13 +776,16 @@ final class KerrRenderPass implements AutoCloseable {
         }
 
         void bind(int newWidth, int newHeight, int lightLocation, int exitLocation) {
-            if (framebuffer != 0 && width == newWidth && height == newHeight && (exitLocation >= 0) == (exit != 0)) {
+            if (framebuffer != 0 && width == newWidth && height == newHeight
+                    && this.lightLocation == lightLocation && this.exitLocation == exitLocation) {
                 glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
                 return;
             }
             close();
             width = newWidth;
             height = newHeight;
+            this.lightLocation = lightLocation;
+            this.exitLocation = exitLocation;
             framebuffer = glGenFramebuffers();
             glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
             light = texture(GL_LINEAR, lightLocation, lightFormat);

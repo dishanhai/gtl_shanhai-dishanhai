@@ -203,8 +203,10 @@ float emissivityPattern(float phase, float logRadius, float epoch, float filamen
     float seed = fract(sin(0.917 * epoch + 4.12) * 15487.317) * 6.2831853;
     float eddy = sin(3.0 * phase - 5.4 * logRadius + seed);
     float lane = sin(2.0 * phase + 10.1 * logRadius + seed + 1.1 * eddy);
-    float filament = .5 + .5 * sin(5.0 * phase + 24.0 * logRadius - 1.7 * seed + 1.6 * eddy);
     float plasma = diskNoise(phase, 8.0 * logRadius + eddy, 10.0, seed);
+    // Broad samples already suppress these frequencies entirely.
+    if (filamentDetail <= 0.0) return 1.0 + .19 * lane + .09 * eddy + .52 * plasma;
+    float filament = .5 + .5 * sin(5.0 * phase + 24.0 * logRadius - 1.7 * seed + 1.6 * eddy);
     float threads = diskNoise(phase + .09 * eddy, 26.0 * logRadius + 2.4 * plasma, 22.0, seed + .39);
     return 1.0 + .19 * lane + .09 * eddy + .52 * plasma
         + filamentDetail * (.24 * threads + (.11 + .06 * lane) * (2.0 * filament * filament - .75));
@@ -618,7 +620,12 @@ vec4 trace(vec3 position, vec3 direction, vec3 velocity, bool transferOnly, floa
     State y = observerRay(position, direction, velocity, m, pt);
     State k1 = flow(y, m, pt);
     light = vec4(0.0, 0.0, 0.0, 1.0);
+#ifdef KERR_BLACK_ONLY
+    // Pure Kerr traces can compile out white-hole emission and its ray state.
+    const float white = 0.0;
+#else
     float white = clamp(uWhiteHole.x, 0.0, 1.0);
+#endif
     // The white-hole scene uses exterior observers only.
     if (white > 0.0 && m.r <= HORIZON) return vec4(direction, 1.0);
     WhiteEmission emission;

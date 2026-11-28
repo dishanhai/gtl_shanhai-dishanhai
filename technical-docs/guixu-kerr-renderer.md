@@ -55,6 +55,7 @@ Forge 47.4.16 隔离存档的成型归墟以 2560×1601 运行。距洞心 90 �
 .\gradle-install\gradle-8.8\bin\gradle.bat --offline kerrGpuProbe -PkerrWidth=1024 -PkerrHeight=640 '--args=build/reports/kerr-edge/after disk-edge'
 .\gradle-install\gradle-8.8\bin\gradle.bat --offline kerrGpuProbe -PkerrStabilityFrames=125000
 .\gradle-install\gradle-8.8\bin\gradle.bat --offline kerrGpuProbe -PkerrWidth=2560 -PkerrHeight=1600 '--args=build/reports/kerr-exterior-aligned exterior'
+.\gradle-install\gradle-8.8\bin\gradle.bat --offline kerrGpuProbe -PkerrWidth=2560 -PkerrHeight=1600 -PkerrLoadFrames=900 '--args=build/reports/kerr-close-load close-load'
 ```
 
 解析路径在 RTX 4060 Laptop GPU 上按 2560×1600 离屏测量。11.5 M、29.3 M 和 180 M 机位分别用 3.08、2.02 和 1.37 毫秒。近景中心轴上的裸阴影过渡占 1 个原生像素。探针把辐射和逃逸纹理替换为明显的假值，输出保持逐像素一致。输出图覆盖白天、深空 65°、侧视 86°和亚像素特效。计时只含离屏合成。
@@ -93,3 +94,15 @@ Forge 47.4.16 隔离客户端以 1600×1000、世界透镜、12 格、冻结盘�
 - 近视界算法按步数上限终止。未决光线保留已积分的前景辐射并使用本视线背景。子像素高阶子环仍受分辨率和步数限制。视界外观察者使用 Eulerian 标架，玩家的移动速度不叠加为额外的洛伦兹变换。内视界供数学计算，洞内的旧调试效果独立且默认关闭。
 - 时域历史含上一帧测地线方向和辐射，支持近似固定位置下的相机旋转重投影。像素按透射率、捕获分类和辐射差异剔除失效历史。Adaptive 和 Low 在观察射线网格、自旋、质量尺度和积分参数吻合时复用逃逸方向纹理。有像素抖动时隔帧更新光线相位。命中光线仍积分盘面辐射，抵达发光区外即结束。动态机位继续实时积分，离线多视角 LUT 尚未实现。
 - 游戏内预览使用生产映射和安装了 Oculus 的整合包，测试期间关闭光影包。整机帧率仍需结合原存档和具体光影包测量。
+
+### 克尔黑洞近距离 GPU 负载测试
+
+`close-load` 使用隐藏 OpenGL 窗口、生产 GLSL 和 Adaptive 档的采样计划（不运行游戏内逐帧自动降档控制）。三条确定性路线分别为 11M 定点、轴向位置 14M → 3.7M 的接近，以及约 4.7M、85°–89° 的近侧视掠过；轴向位置之外还包含横向偏移。探针复用与游戏相同的 pilot 目标尺寸滞回，避免把每帧重复建纹理算成积分耗时。每条路线预热 32 帧，默认测 600 帧。用 `-PkerrLoadFrames` 调整每条路线的帧数。测完后检查 OpenGL 错误、末帧捕获和逃逸光线，并保存末帧图像。
+
+`gpu.csv` 记录逐帧 GPU 时间和 pilot 光线积分、HDR 泛光及合成准备、扩展临界带、传输场烘焙、最终合成五段各自耗时，可用 SH-Dev-Tools 的 `sh-render-profiler report --gpu <gpu.csv>` 分析；配合 `profile` 时，探针尊重 `SH_RENDER_GPU_CSV`。终端打印 GPU P50/P95/P99、超过 16.67 ms 的帧数和离屏吞吐。用 `-PkerrLoadBudgetMs=16.67` 可让任一路线 P95 超预算时测试失败；默认只记录，避免在不同 GPU 上使用同一个性能门槛。离屏吞吐不等于游戏或屏幕显示帧率；截图和光线读回在计时区间之外。
+
+### 黑洞专用光线积分
+
+纯黑洞的 pilot、临界带和局部高精度追踪共用 `guixu_kerr_black_trace`，编译时移除不会执行的白洞介质分支。混合和白洞仍走 `guixu_kerr_trace`，两套程序共用积分器和通道实现；切换时清掉历史，不复用另一模式的光线场。两套路径的采样数、积分容差和步数限制相同。
+
+用 `kerrGpuProbe -PkerrWidth=2560 -PkerrHeight=1600 '--args=build/reports/kerr-parity trace-parity'` 对比纯黑洞输入下两个程序的捕获分类、出射方向和浮点 HDR 光场。

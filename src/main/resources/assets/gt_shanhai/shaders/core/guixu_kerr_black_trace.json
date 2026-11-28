@@ -1,0 +1,32 @@
+{
+    "vertex": "gt_shanhai:guixu_blackhole",
+    "fragment": "gt_shanhai:guixu_kerr_black_trace",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [{"name": "CachedRayExit"}, {"name": "CriticalRadii"}],
+    "uniforms": [
+        {"name": "uBhView", "type": "float", "count": 3, "values": [0, 0, -10]},
+        {"name": "uDiskNormal", "type": "float", "count": 3, "values": [0, 0.31, -0.95]},
+        {"name": "uScreenSize", "type": "float", "count": 2, "values": [1920, 1080]},
+        {"name": "uRs", "type": "float", "count": 1, "values": [1]},
+        {"name": "uTime", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uDiskGain", "type": "float", "count": 1, "values": [1]},
+        {"name": "uDiskHeat", "type": "float", "count": 1, "values": [0]},
+        {"name": "uInvProj", "type": "matrix4x4", "count": 16, "values": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
+        {"name": "uEquatorialX", "type": "float", "count": 3, "values": [1, 0, 0]},
+        {"name": "uRayJitter", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uReuseRayExit", "type": "float", "count": 1, "values": [0]},
+        {"name": "uTransferOnly", "type": "float", "count": 1, "values": [0]},
+        {"name": "uCriticalBounds", "type": "float", "count": 4, "values": [0, 0, 0, 0]},
+        {"name": "uCriticalArc", "type": "float", "count": 2, "values": [0, 0]},
+        {"name": "uTraceRect", "type": "float", "count": 4, "values": [0, 0, 1920, 1080]},
+        {"name": "uTraceSize", "type": "float", "count": 2, "values": [1920, 1080]},
+        {"name": "uKerrParameters", "type": "float", "count": 4, "values": [0.65, 1.7599342, 3.6159372, 1]},
+        {"name": "uOuterDisk", "type": "float", "count": 1, "values": [40]},
+        {"name": "uDiskSqrtFlux", "type": "float", "count": 128, "values": [0]},
+        {"name": "uDiskPhysics", "type": "float", "count": 4, "values": [1, 0.055, 9400, 0.38]},
+        {"name": "uIntegration", "type": "float", "count": 2, "values": [0.00016, 384]},
+        {"name": "uWhiteObserverBeta", "type": "float", "count": 1, "values": [0]}
+    ]
+}

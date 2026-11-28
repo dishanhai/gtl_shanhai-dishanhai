@@ -402,12 +402,12 @@ vec4 integrateCriticalTransfer(vec2 px, vec2 center, out bool valid) {
     vec2 extent = criticalParam(criticalExtent(uCriticalBounds.z));
     float offsetFromRim = radialDistance - head.x - head.y;
     int grid = uCriticalArc.y > 0.0 && abs(offsetFromRim) > 4.0 ? 2 : (uRefine >= 4.0 ? 4 : 3);
-    int count = grid * grid;
-    for (int i = 0; i < 16; ++i) {
-        if (i >= count) break;
-        vec2 cell = vec2(i % grid, i / grid);
-        vec2 offset = (cell + .5) / float(grid) - .5;
-        float t = azimuth + dot(tangent, offset) / max(radialDistance * tau, .001);
+    // Keep the same row-major sample centres without per-sample division or modulo.
+    float cellScale = 1.0 / float(grid);
+    float azimuthScale = 1.0 / max(radialDistance * tau, .001);
+    for (int y = 0; y < grid; ++y) for (int x = 0; x < grid; ++x) {
+        vec2 offset = (vec2(x, y) + .5) * cellScale - .5;
+        float t = azimuth + dot(tangent, offset) * azimuthScale;
         vec3 sampleHead = textureLod(CriticalRadii, vec2(t, .5), 0.0).rgb;
         if (sampleHead.z < .999) continue;
         samples += 1.0;
